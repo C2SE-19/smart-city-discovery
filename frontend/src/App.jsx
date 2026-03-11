@@ -4,7 +4,7 @@ import OverviewPage from './pages/overview/OverviewPage';
 import DiscoveryPage from './pages/discovery/DiscoveryPage';
 import AdminBoundaryPage from './pages/admin/AdminBoundaryPage';
 import MerchantWorkbenchPage from './pages/merchant/MerchantWorkbenchPage';
-import AiLabPage from './pages/ai/AiLabPage';
+
 
 function App() {
   return (

@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { navigationGroups } from '../data/navigation';
+
 
 function WorkspaceLayout() {
   const location = useLocation();
