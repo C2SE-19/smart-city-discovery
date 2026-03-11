@@ -8,3 +8,10 @@ node server.js
 
 cd frontend
 npm run dev
+
+
+git checkout VoVanAnhKhoa
+git pull origin VoVanAnhKhoa
+git add .
+git commit -m "update something"
+git push origin VoVanAnhKhoa
