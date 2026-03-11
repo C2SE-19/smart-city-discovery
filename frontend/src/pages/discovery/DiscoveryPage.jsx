@@ -1,5 +1,5 @@
 import { useDeferredValue, useState } from 'react';
-import InteractiveWardMap from '../../map/components/InteractiveWardMap';
+
 import SectionCard from '../../components/common/SectionCard';
 import TagPill from '../../components/common/TagPill';
 import useWardMapData from '../../hooks/useWardMapData';
