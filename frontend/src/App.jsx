@@ -15,9 +15,11 @@ let DefaultIcon = L.icon({
 });
 L.Marker.prototype.options.icon = DefaultIcon;
 
+// Thành phần phụ: Bắt sự kiện Click chuột trên bản đồ
 function MapClickHandler({ onMapClick }) {
   useMapEvents({
-
+    click(e) {
+      onMapClick(e.latlng);
     },
   });
   return null;
