@@ -17,8 +17,7 @@ L.Marker.prototype.options.icon = DefaultIcon;
 
 function MapClickHandler({ onMapClick }) {
   useMapEvents({
-    click(e) {
-      onMapClick(e.latlng);
+
     },
   });
   return null;
