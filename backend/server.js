@@ -90,9 +90,6 @@ app.post('/api/venues', async (req, res) => {
         res.status(500).json({ error: 'Lỗi máy chủ rùi' });
     }
 });
-
-// ==========================================
-// Mở cửa cho server chạy
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
     console.log(`🚀 Backend Server đã mở cửa tại http://localhost:${PORT}`);
