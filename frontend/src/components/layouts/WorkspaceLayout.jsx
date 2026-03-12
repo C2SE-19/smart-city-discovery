@@ -1,5 +1,36 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 
+const navigationGroups = [
+  {
+    title: "Workspace",
+    items: [
+      {
+        code: "OVR",
+        label: "Overview",
+        description: "Project command center",
+        path: "/"
+      },
+      {
+        code: "DSC",
+        label: "Discovery",
+        description: "Explore venues",
+        path: "/discovery"
+      },
+      {
+        code: "ADM",
+        label: "Admin Boundaries",
+        description: "Manage GIS wards",
+        path: "/admin/boundaries"
+      },
+      {
+        code: "MER",
+        label: "Merchant Workbench",
+        description: "Merchant venue tools",
+        path: "/merchant/workbench"
+      }
+    ]
+  }
+];
 
 function WorkspaceLayout() {
   const location = useLocation();
@@ -19,7 +50,7 @@ function WorkspaceLayout() {
           <p className="brand-kicker">Smart City Discovery</p>
           <h1 className="brand-title">Delivery Cockpit</h1>
           <p className="brand-copy">
-            Bộ sườn chia theo role và feature để cả team code song song mà vẫn bám đúng đồ án.
+            Bo suon chia theo role va feature de ca team code song song ma van bam dung do an.
           </p>
         </div>
 
@@ -57,7 +88,9 @@ function WorkspaceLayout() {
           <div>
             <p className="topbar-kicker">Current workspace</p>
             <h2 className="topbar-title">{activeItem?.label ?? 'Overview'}</h2>
-            <p className="topbar-copy">{activeItem?.description ?? 'Project command center and delivery split.'}</p>
+            <p className="topbar-copy">
+              {activeItem?.description ?? 'Project command center and delivery split.'}
+            </p>
           </div>
 
           <div className="topbar-chip">GIS-first scaffold</div>
