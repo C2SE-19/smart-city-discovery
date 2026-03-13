@@ -106,6 +106,25 @@ begin
   end if;
 end $$;
 
+CREATE TABLE wards (
+    id SERIAL PRIMARY KEY,
+    ward_id VARCHAR(50) UNIQUE NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    boundary JSONB NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 2. XÂY DỰNG BẢNG QUÁN ĂN
+CREATE TABLE venues (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    address TEXT,
+    latitude DOUBLE PRECISION NOT NULL,
+    longitude DOUBLE PRECISION NOT NULL,
+    ward_id VARCHAR(50) REFERENCES wards(ward_id),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 create table if not exists profiles (
   id uuid primary key references auth.users (id) on delete cascade,
   email text unique,
