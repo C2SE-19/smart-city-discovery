@@ -1,1 +1,13 @@
-// Scaffold placeholder
+export const APP_ROUTES = {
+  HOME: '/',
+  ABOUT: '/about',
+  ALL_CITY: '/all-city',
+  SERVICE: '/service',
+  DISCOVERY: '/discovery',
+  ADMIN_DASHBOARD: '/admin',
+  ADMIN_BOUNDARIES: '/admin/boundaries',
+  ADMIN_USERS: '/admin/users',
+  ADMIN_REPORTS: '/admin/reports',
+  ADMIN_APPROVALS: '/admin/approvals',
+  MERCHANT_WORKBENCH: '/merchant/workbench',
+};
