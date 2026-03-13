@@ -237,6 +237,13 @@ app.post('/api/auth/google', async (req, res) => {
         const userData = user.rows[0];
 
         // Generate JWT token
+        console.log('DEBUG: JWT_SECRET =', process.env.JWT_SECRET ? '✓ Set' : '✗ Not set');
+        console.log('DEBUG: userData =', userData);
+        
+        if (!process.env.JWT_SECRET) {
+            throw new Error('JWT_SECRET is not configured');
+        }
+
         const jwtToken = jwt.sign(
             { id: userData.id, email: userData.email },
             process.env.JWT_SECRET,
