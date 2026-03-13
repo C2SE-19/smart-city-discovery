@@ -1,11 +1,11 @@
 // Scaffold placeholder
 import { useState } from "react";
-import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import "./register.css";
 import logo from "../../assets/images/logo.png";
 import { useLanguage } from "../../contexts/LanguageContext";
 import translations from "../../constants/translations";
+import authService from "../../services/authService";
 
 export default function RegisterPage() {
 
@@ -32,18 +32,14 @@ export default function RegisterPage() {
     setLoading(true);
 
     try {
+      const res = await authService.register({
+        fullname: fullname.trim(),
+        username: username.trim(),
+        email: email.trim(),
+        password
+      });
 
-      const res = await axios.post(
-        "http://localhost:5000/api/register",
-        {
-          fullname,
-          username,
-          email,
-          password
-        }
-      );
-
-      alert(res.data.message || t.auth.registerSuccess);
+      alert(res.message || t.auth.registerSuccess);
 
       // Redirect to login page after successful registration
       navigate("/login");
