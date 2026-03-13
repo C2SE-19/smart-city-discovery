@@ -24,7 +24,8 @@ import { APP_ROUTES } from './constants/routes';
 import { ROLES } from './constants/roles';
 
 function App() {
-  return (
+  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+  const appContent = (
     <AuthProvider>
       <ThemeProvider>
         <LanguageProvider>
@@ -100,10 +101,12 @@ function App() {
                 ]}
               />
             }
-          />          <Route path="/profile" element={<ProfilePage />} />        </Route>
+          />
+          <Route path="/profile" element={<ProfilePage />} />
+        </Route>
 
-        <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
-        <Route path="/register" element={<PublicRoute><RegisterPage /></PublicRoute>} />
+        <Route path={APP_ROUTES.LOGIN} element={<LoginPage />} />
+        <Route path={APP_ROUTES.REGISTER} element={<RegisterPage />} />
 
         <Route element={<WorkspaceLayout />}>
           <Route path={APP_ROUTES.DISCOVERY} element={<DiscoveryPage />} />
@@ -134,6 +137,16 @@ function App() {
         </LanguageProvider>
       </ThemeProvider>
     </AuthProvider>
+  );
+
+  if (!googleClientId) {
+    return appContent;
+  }
+
+  return (
+    <GoogleOAuthProvider clientId={googleClientId}>
+      {appContent}
+    </GoogleOAuthProvider>
   );
 }
 
