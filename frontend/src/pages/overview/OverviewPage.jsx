@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useLanguage } from '../../contexts/LanguageContext';
 import translations from '../../constants/translations';
 import './OverviewPage.css';
@@ -136,6 +137,7 @@ function PlaceCard({ item }) {
 }
 
 function OverviewPage() {
+  const navigate = useNavigate();
   const { language } = useLanguage();
   const t = translations[language];
   const [deliveryType, setDeliveryType] = useState('delivery');
@@ -228,10 +230,18 @@ function OverviewPage() {
           </p>
 
           <div className="overview-hero-actions">
-            <button type="button" className="overview-hero-button overview-hero-button-primary">
+            <button 
+              type="button" 
+              className="overview-hero-button overview-hero-button-primary"
+              onClick={() => navigate('/discovery')}
+            >
               {t.hero.findByPictures}
             </button>
-            <button type="button" className="overview-hero-button overview-hero-button-secondary">
+            <button 
+              type="button" 
+              className="overview-hero-button overview-hero-button-secondary"
+              onClick={() => navigate('/merchant/workbench')}
+            >
               {t.hero.merchant}
             </button>
           </div>
