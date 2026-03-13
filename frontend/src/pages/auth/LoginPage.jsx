@@ -7,14 +7,13 @@ import logo from "../../assets/images/logo.png";
 import { FaUser, FaLock, FaFacebookF, FaGoogle } from "react-icons/fa";
 import { IoEye, IoEyeOff } from "react-icons/io5";
 import { useNavigate } from "react-router-dom";
-import axios from "axios";
-import { useUser } from "../../contexts/UserContext";
 import { useLanguage } from "../../contexts/LanguageContext";
 import { useAuth } from "../../contexts/AuthContext";
 import translations from "../../constants/translations";
 import authService from "../../services/authService";
 
 export default function LoginPage() {
+  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -23,7 +22,6 @@ export default function LoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const navigate = useNavigate();
-  const { login: userLogin } = useUser();
   const { login: authLogin } = useAuth();
   const { language } = useLanguage();
   const t = translations[language];
@@ -81,15 +79,12 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      // Call login API
-      const response = await axios.post("http://localhost:5000/api/login", {
+      const response = await authService.login({
         username: username.trim(),
         password: password.trim()
       });
 
-      // Save user in both contexts
-      userLogin(response.data.user);
-      authLogin(response.data.user, 'token-' + response.data.user.id);
+      authLogin(response.user, response.token || `token-${response.user.id}`);
       
       // Redirect to overview
       navigate("/");
@@ -106,7 +101,6 @@ export default function LoginPage() {
     setOauthLoading(true);
     try {
       const result = await authService.loginWithGoogle(credentialResponse.credential);
-      userLogin(result.user);
       authLogin(result.user, result.token);
       navigate("/");
     } catch (err) {
@@ -149,7 +143,6 @@ export default function LoginPage() {
         authService.loginWithFacebook(accessToken)
           .then(result => {
             console.log('Facebook auth result:', result);
-            userLogin(result.user);
             authLogin(result.user, result.token);
             navigate("/");
           })
@@ -232,18 +225,20 @@ export default function LoginPage() {
               type="button"
               className="social-btn google-btn"
               onClick={handleGoogleIconClick}
-              disabled={oauthLoading}
+              disabled={oauthLoading || !googleClientId}
               title="Login with Google"
             >
               <FaGoogle />
             </button>
 
-            <div className="google-login-hidden" ref={googleButtonRef} style={{ display: 'none', width: 0, height: 0, overflow: 'hidden' }}>
-              <GoogleLogin
-                onSuccess={handleGoogleSuccess}
-                onError={handleGoogleError}
-              />
-            </div>
+            {googleClientId ? (
+              <div className="google-login-hidden" ref={googleButtonRef} style={{ display: 'none', width: 0, height: 0, overflow: 'hidden' }}>
+                <GoogleLogin
+                  onSuccess={handleGoogleSuccess}
+                  onError={handleGoogleError}
+                />
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
