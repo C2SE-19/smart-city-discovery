@@ -12,8 +12,8 @@ const translations = {
       kicker: 'Taste Da Nang your way',
       title: 'Happy With <span>Delicious Food</span> And Landscape & Entertainment',
       description: 'Exploring new food, Landscape & Entertainment with different transition lets you carry that place and get a good price for us as well as you make a great impact for customers.',
-      findByPictures: 'FindByPictures',
-      merchant: 'Merchant'
+      findByPictures: 'Find By Pictures',
+      merchant: 'For Merchants'
     },
     search: {
       food: 'Food',
@@ -36,6 +36,36 @@ const translations = {
     delivery: {
       delivery: 'Delivery',
       pickup: 'Pickup'
+    },
+    profile: {
+      accountInfo: '👤 Account Information',
+      managePost: '🏪 Manage Posts',
+      feedback: '🗺️ Feedback & Support',
+      terms: 'ℹ️ Terms of Use',
+      logout: 'Logout',
+      hello: 'Hello'
+    },
+    auth: {
+      fullname: 'Full name:',
+      username: 'Username:',
+      email: 'Email:',
+      password: 'Password:',
+      confirmPassword: 'Confirm Password:',
+      createAccount: 'Create account',
+      signIn: 'Sign in',
+      register: 'Please Fill out form to Register!',
+      passwordMismatch: 'Passwords do not match',
+      registerSuccess: 'Registered successfully!',
+      registerFailed: 'Register failed',
+      loginFailed: 'Login failed',
+      signingUp: 'Signing up...',
+      signingIn: 'Signing in...',
+      haveAccount: 'Yes, I have an account?',
+      dontHaveAccount: "Don't have an account?",
+      signUp: 'Sign Up',
+      orContinueWith: 'Or continue with',
+      loginWithGoogle: 'Login with Google',
+      loginWithFacebook: 'Login with Facebook'
     }
   },
   vi: {
@@ -72,6 +102,36 @@ const translations = {
       landscape: 'Danh lam thắng cảnh & Giải trí',
       maps: 'Bản đồ'
     },
+    profile: {
+      accountInfo: '👤 Thông tin tài khoản',
+      managePost: '🏪 Quản lý bài đăng',
+      feedback: '🗺️ Góp ý & hỗ trợ',
+      terms: 'ℹ️ Điều khoản sử dụng',
+      logout: 'Đăng xuất',
+      hello: 'Xin chào'
+    },
+    auth: {
+      fullname: 'Họ tên:',
+      username: 'Tên đăng nhập:',
+      email: 'Email:',
+      password: 'Mật khẩu:',
+      confirmPassword: 'Xác nhận mật khẩu:',
+      createAccount: 'Tạo tài khoản',
+      signIn: 'Đăng nhập',
+      register: 'Vui lòng điền đầy đủ form để đăng ký!',
+      passwordMismatch: 'Mật khẩu không khớp',
+      registerSuccess: 'Đăng ký thành công!',
+      registerFailed: 'Đăng ký thất bại',
+      loginFailed: 'Đăng nhập thất bại',
+      signingUp: 'Đang đăng ký...',
+      signingIn: 'Đang đăng nhập...',
+      haveAccount: 'Bạn đã có tài khoản?',
+      dontHaveAccount: 'Bạn chưa có tài khoản?',
+      signUp: 'Đăng ký',
+      orContinueWith: 'Hoặc tiếp tục với',
+      loginWithGoogle: 'Đăng nhập bằng Google',
+      loginWithFacebook: 'Đăng nhập bằng Facebook'
+    }
   }
 };
 

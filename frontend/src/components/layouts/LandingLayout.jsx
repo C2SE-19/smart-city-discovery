@@ -1,16 +1,28 @@
-import { Link, NavLink, Outlet } from 'react-router-dom';
+import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { useState } from 'react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useTheme } from '../../contexts/ThemeContext';
+import { useAuth } from '../../contexts/AuthContext';
 import translations from '../../constants/translations';
 import logo from '../../assets/images/logo.png';
 import './LandingLayout.css';
+import { MdExpandMore } from 'react-icons/md';
 
 const paymentMethods = ['VISA', 'KHEO', 'PayPal'];
 
 function LandingLayout() {
   const { language, changeLanguage } = useLanguage();
   const { theme, toggleTheme } = useTheme();
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
   const t = translations[language];
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+
+  const handleLogout = () => {
+    logout();
+    navigate('/');
+    setShowProfileMenu(false);
+  };
   return (
     <div className="landing-shell">
       <div className="landing-page">
@@ -60,9 +72,81 @@ function LandingLayout() {
               <option value="vi">Vietnamese</option>
             </select>
             <button type="button" className="landing-icon-button" aria-label={t.header.search} />
-            <Link to="/discovery" className="landing-login">
-              {t.header.login}
-            </Link>
+            
+            {!user ? (
+              <Link to="/login" className="landing-login">
+                {t.header.login}
+              </Link>
+            ) : (
+              <div className="landing-profile-menu">
+                <button 
+                  type="button" 
+                  className="landing-profile-button"
+                  onClick={() => setShowProfileMenu(!showProfileMenu)}
+                  aria-label="Profile menu"
+                >
+                  <div className="landing-profile-avatar">
+                    <div className="landing-avatar-initial">
+                      {user.fullname?.charAt(0).toUpperCase() || user.username?.charAt(0).toUpperCase()}
+                    </div>
+                  </div>
+                  <MdExpandMore className="landing-profile-arrow" />
+                </button>
+
+                {showProfileMenu && (
+                  <div className="landing-profile-dropdown">
+                    <div className="landing-dropdown-header">
+                      {t.profile.hello}, {user.fullname || user.username}
+                    </div>
+                    <button 
+                      type="button" 
+                      className="landing-dropdown-item"
+                      onClick={() => {
+                        navigate('/profile');
+                        setShowProfileMenu(false);
+                      }}
+                    >
+                      {t.profile.accountInfo}
+                    </button>
+                    <button 
+                      type="button" 
+                      className="landing-dropdown-item"
+                      onClick={() => {
+                        navigate('/merchant/workbench');
+                        setShowProfileMenu(false);
+                      }}
+                    >
+                      {t.profile.managePost}
+                    </button>
+                    <button 
+                      type="button" 
+                      className="landing-dropdown-item"
+                      onClick={() => {
+                        navigate('/discovery');
+                        setShowProfileMenu(false);
+                      }}
+                    >
+                      {t.profile.feedback}
+                    </button>
+                    <button 
+                      type="button" 
+                      className="landing-dropdown-item"
+                      onClick={() => setShowProfileMenu(false)}
+                    >
+                      {t.profile.terms}
+                    </button>
+                    <button 
+                      type="button" 
+                      className="landing-dropdown-logout"
+                      onClick={handleLogout}
+                    >
+                      {t.profile.logout}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
             <button
               type="button"
               className={`landing-theme-toggle ${theme}`}
