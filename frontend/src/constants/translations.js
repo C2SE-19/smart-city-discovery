@@ -41,6 +41,26 @@ const translations = {
       logout: 'Logout',
       hello: 'Hello'
     },
+    merchant: {
+      overview: 'Overview',
+      posts: 'Manage Posts',
+      transactions: 'Transaction History',
+      support: 'Feedback & Support',
+      logout: 'Logout',
+      publish: 'Post',
+      hello: 'Hello, Merchant',
+      selectFromMenu: 'Please select an item from the menu on the left to start.',
+      contentHere: 'Content will be displayed here',
+      activeAll: 'Active (All)',
+      pending: 'Pending',
+      rejected: 'Rejected',
+      searchPlaceholder: 'Search posts...',
+      edit: 'Edit',
+      delete: 'Delete',
+      confirmDelete: 'Are you sure you want to delete this post?',
+      noPostsFound: 'No posts found',
+      reviews: 'reviews'
+    },
     auth: {
       fullname: 'Full name:',
       username: 'Username:',
@@ -61,7 +81,11 @@ const translations = {
       signUp: 'Sign Up',
       orContinueWith: 'Or continue with',
       loginWithGoogle: 'Login with Google',
-      loginWithFacebook: 'Login with Facebook'
+      loginWithFacebook: 'Login with Facebook',
+      passwordRequirements: 'Password Requirements:',
+      minLength: 'At least 8 characters',
+      hasUpperCase: 'At least 1 uppercase letter (A-Z)',
+      hasSpecialChar: 'At least 1 special character (!@#$%^&*...)'
     }
   },
   vi: {
@@ -106,6 +130,26 @@ const translations = {
       logout: 'Đăng xuất',
       hello: 'Xin chào'
     },
+    merchant: {
+      overview: 'Tổng Quan',
+      posts: 'Quản lý bài đăng',
+      transactions: 'Lịch sử giao dịch',
+      support: 'Góp ý & hỗ trợ',
+      logout: 'Đăng xuất',
+      publish: 'Đăng bài',
+      hello: 'Xin chào, Merchant',
+      selectFromMenu: 'Hãy chọn một mục từ menu bên trái để bắt đầu.',
+      contentHere: 'Nội dung sẽ được hiển thị tại đây',
+      activeAll: 'Đang hoạt động (Tất cả)',
+      pending: 'Chờ duyệt',
+      rejected: 'Bị từ chối',
+      searchPlaceholder: 'Tìm kiếm bài đăng...',
+      edit: 'Chỉnh sửa',
+      delete: 'Xóa',
+      confirmDelete: 'Bạn có chắc muốn xóa bài đăng này?',
+      noPostsFound: 'Không có bài đăng nào',
+      reviews: 'đánh giá'
+    },
     auth: {
       fullname: 'Họ tên:',
       username: 'Tên đăng nhập:',
@@ -126,7 +170,11 @@ const translations = {
       signUp: 'Đăng ký',
       orContinueWith: 'Hoặc tiếp tục với',
       loginWithGoogle: 'Đăng nhập bằng Google',
-      loginWithFacebook: 'Đăng nhập bằng Facebook'
+      loginWithFacebook: 'Đăng nhập bằng Facebook',
+      passwordRequirements: 'Yêu cầu mật khẩu:',
+      minLength: 'Ít nhất 8 ký tự',
+      hasUpperCase: 'Ít nhất 1 chữ cái viết hoa (A-Z)',
+      hasSpecialChar: 'Ít nhất 1 ký tự đặc biệt (!@#$%^&*...)'
     }
   }
 };
