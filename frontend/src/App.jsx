@@ -1,24 +1,35 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { LanguageProvider } from './contexts/LanguageContext';
 import { ThemeProvider } from './contexts/ThemeContext';
+import { AuthProvider } from './contexts/AuthContext';
 import LandingLayout from './components/layouts/LandingLayout';
 import WorkspaceLayout from './components/layouts/WorkspaceLayout';
+import MerchantLayout from './components/layouts/MerchantLayout';
+import AdminLayout from './components/layouts/AdminLayout';
+import RoleGuard from './components/auth/RoleGuard';
 import OverviewPage from './pages/overview/OverviewPage';
 import LandingInfoPage from './LandingInfoPage';
 import DiscoveryPage from './pages/discovery/DiscoveryPage';
+import AdminDashboardPage from './pages/admin/AdminDashboardPage';
 import AdminBoundaryPage from './pages/admin/AdminBoundaryPage';
+import AdminUserManagementPage from './pages/admin/AdminUserManagementPage';
+import AdminReportsPage from './pages/admin/AdminReportsPage';
+import AdminVenueApprovalPage from './pages/admin/AdminVenueApprovalPage';
 import MerchantWorkbenchPage from './pages/merchant/MerchantWorkbenchPage';
+import { APP_ROUTES } from './constants/routes';
+import { ROLES } from './constants/roles';
 
 function App() {
   return (
-    <ThemeProvider>
-      <LanguageProvider>
-        <BrowserRouter>
-          <Routes>
+    <AuthProvider>
+      <ThemeProvider>
+        <LanguageProvider>
+          <BrowserRouter>
+            <Routes>
           <Route element={<LandingLayout />}>
-          <Route path="/" element={<OverviewPage />} />
+          <Route path={APP_ROUTES.HOME} element={<OverviewPage />} />
           <Route
-            path="/about"
+            path={APP_ROUTES.ABOUT}
             element={
               <LandingInfoPage
                 title="About Smart City Discovery"
@@ -41,7 +52,7 @@ function App() {
             }
           />
           <Route
-            path="/all-city"
+            path={APP_ROUTES.ALL_CITY}
             element={
               <LandingInfoPage
                 title="All City Highlights"
@@ -64,7 +75,7 @@ function App() {
             }
           />
           <Route
-            path="/service"
+            path={APP_ROUTES.SERVICE}
             element={
               <LandingInfoPage
                 title="Service"
@@ -89,15 +100,34 @@ function App() {
         </Route>
 
         <Route element={<WorkspaceLayout />}>
-          <Route path="/discovery" element={<DiscoveryPage />} />
-          <Route path="/admin/boundaries" element={<AdminBoundaryPage />} />
-          <Route path="/merchant/workbench" element={<MerchantWorkbenchPage />} />
-          <Route path="*" element={<Navigate replace to="/" />} />
+          <Route path={APP_ROUTES.DISCOVERY} element={<DiscoveryPage />} />
         </Route>
+
+        <Route element={<MerchantLayout />}>
+          <Route path={APP_ROUTES.MERCHANT_WORKBENCH} element={<MerchantWorkbenchPage />} />
+        </Route>
+
+        <Route
+          path="/admin"
+          element={
+            <RoleGuard allowedRoles={[ROLES.ADMIN]}>
+              <AdminLayout />
+            </RoleGuard>
+          }
+        >
+          <Route index element={<AdminDashboardPage />} />
+          <Route path="boundaries" element={<AdminBoundaryPage />} />
+          <Route path="users" element={<AdminUserManagementPage />} />
+          <Route path="reports" element={<AdminReportsPage />} />
+          <Route path="approvals" element={<AdminVenueApprovalPage />} />
+        </Route>
+
+        <Route path="*" element={<Navigate replace to={APP_ROUTES.HOME} />} />
       </Routes>
-        </BrowserRouter>
-      </LanguageProvider>
-    </ThemeProvider>
+          </BrowserRouter>
+        </LanguageProvider>
+      </ThemeProvider>
+    </AuthProvider>
   );
 }
 
