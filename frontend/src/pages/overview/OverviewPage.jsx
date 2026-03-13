@@ -240,7 +240,7 @@ function OverviewPage() {
             <button 
               type="button" 
               className="overview-hero-button overview-hero-button-secondary"
-              onClick={() => navigate('/merchant/workbench')}
+              onClick={() => navigate('/merchant')}
             >
               {t.hero.merchant}
             </button>

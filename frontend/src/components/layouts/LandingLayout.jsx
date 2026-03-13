@@ -112,7 +112,7 @@ function LandingLayout() {
                       type="button" 
                       className="landing-dropdown-item"
                       onClick={() => {
-                        navigate('/merchant/workbench');
+                        navigate('/merchant/posts');
                         setShowProfileMenu(false);
                       }}
                     >

@@ -1,15 +1,32 @@
-import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { Link, NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
+import { useState } from 'react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useTheme } from '../../contexts/ThemeContext';
+import { useAuth } from '../../contexts/AuthContext';
 import translations from '../../constants/translations';
 import logo from '../../assets/images/logo.png';
 import '../layouts/LandingLayout.css';
 
 function MerchantLayout() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { language, changeLanguage } = useLanguage();
   const { theme, toggleTheme } = useTheme();
+  const { user, logout } = useAuth();
   const t = translations[language];
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+  };
+
+  const getUserInitial = () => {
+    if (user?.fullname) {
+      return user.fullname.charAt(0).toUpperCase();
+    }
+    return 'U';
+  };
 
   return (
     <div className="landing-shell">
@@ -60,13 +77,64 @@ function MerchantLayout() {
               <option value="vi">Vietnamese</option>
             </select>
             <button type="button" className="landing-icon-button" aria-label={t.header.search} />
-            <button 
-              type="button"
-              className="landing-login"
-              onClick={() => navigate('/discovery')}
-            >
-              {t.header.login}
-            </button>
+            
+            {/* User Profile Dropdown */}
+            <div className="landing-profile-menu">
+              <button
+                type="button"
+                className="landing-profile-button"
+                onClick={() => setShowProfileMenu(!showProfileMenu)}
+              >
+                <div className="landing-avatar-initial">{getUserInitial()}</div>
+                <span className="landing-profile-dropdown-icon">▼</span>
+              </button>
+
+              {showProfileMenu && (
+                <div className="landing-profile-dropdown">
+                  <div className="landing-dropdown-header">
+                    {t.profile.hello}, {user?.fullname || 'User'}
+                  </div>
+                  <button
+                    type="button"
+                    className="landing-dropdown-item"
+                    onClick={() => {
+                      navigate('/profile');
+                      setShowProfileMenu(false);
+                    }}
+                  >
+                    {t.profile.accountInfo}
+                  </button>
+                  <button
+                    type="button"
+                    className="landing-dropdown-item"
+                    onClick={() => {
+                      navigate('/merchant/posts');
+                      setShowProfileMenu(false);
+                    }}
+                  >
+                    {t.profile.managePost}
+                  </button>
+                  <button
+                    type="button"
+                    className="landing-dropdown-item"
+                    onClick={() => {
+                      navigate('/merchant');
+                      setShowProfileMenu(false);
+                    }}
+                  >
+                    👨‍💼 {t.merchant ? t.merchant.overview : (language === 'vi' ? 'Bảng điều khiển merchant' : 'Merchant Dashboard')}
+                  </button>
+                  <button
+                    type="button"
+                    className="landing-dropdown-logout"
+                    onClick={handleLogout}
+                  >
+                    {t.profile.logout}
+                  </button>
+                </div>
+              )}
+            </div>
+
             <button
               type="button"
               className={`landing-theme-toggle ${theme}`}

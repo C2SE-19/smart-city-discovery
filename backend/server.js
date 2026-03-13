@@ -118,6 +118,23 @@ app.post('/api/register', async (req, res) => {
             return res.status(400).json({ message: 'Please provide all required information' });
         }
 
+        // Validate password: 8+ characters with uppercase letter and special character
+        const minLength = 8;
+        const hasUpperCase = /[A-Z]/.test(password);
+        const hasSpecialChar = /[!@#$%^&*()_+\-=\[\]{};:'",.<>?\/\\|`~]/.test(password);
+        
+        if (password.length < minLength) {
+            return res.status(400).json({ message: `Password must be at least ${minLength} characters long` });
+        }
+        
+        if (!hasUpperCase) {
+            return res.status(400).json({ message: 'Password must contain at least 1 uppercase letter (A-Z)' });
+        }
+        
+        if (!hasSpecialChar) {
+            return res.status(400).json({ message: 'Password must contain at least 1 special character (!@#$%^&*)' });
+        }
+
         // Check if email already exists
         const emailCheck = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
         if (emailCheck.rows.length > 0) {
