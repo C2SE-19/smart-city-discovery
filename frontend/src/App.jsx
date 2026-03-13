@@ -1,6 +1,11 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { GoogleOAuthProvider } from '@react-oauth/google';
 import { LanguageProvider } from './contexts/LanguageContext';
 import { ThemeProvider } from './contexts/ThemeContext';
+import { UserProvider } from './contexts/UserContext';
+import { AuthProvider } from './contexts/AuthContext';
+import ProtectedRoute from './pages/overview/ProtectedRoute';
+import PublicRoute from './pages/overview/PublicRoute';
 import LandingLayout from './components/layouts/LandingLayout';
 import WorkspaceLayout from './components/layouts/WorkspaceLayout';
 import OverviewPage from './pages/overview/OverviewPage';
@@ -8,12 +13,17 @@ import LandingInfoPage from './LandingInfoPage';
 import DiscoveryPage from './pages/discovery/DiscoveryPage';
 import AdminBoundaryPage from './pages/admin/AdminBoundaryPage';
 import MerchantWorkbenchPage from './pages/merchant/MerchantWorkbenchPage';
+import LoginPage from './pages/auth/LoginPage';
+import RegisterPage from './pages/auth/RegisterPage';
 
 function App() {
   return (
-    <ThemeProvider>
-      <LanguageProvider>
-        <BrowserRouter>
+    <GoogleOAuthProvider clientId={import.meta.env.VITE_GOOGLE_CLIENT_ID || 'YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com'}>
+      <ThemeProvider>
+        <LanguageProvider>
+          <AuthProvider>
+            <UserProvider>
+              <BrowserRouter>
           <Routes>
           <Route element={<LandingLayout />}>
           <Route path="/" element={<OverviewPage />} />
@@ -88,17 +98,23 @@ function App() {
           />
         </Route>
 
+        <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
+        <Route path="/register" element={<PublicRoute><RegisterPage /></PublicRoute>} />
+
         <Route element={<WorkspaceLayout />}>
-          <Route path="/discovery" element={<DiscoveryPage />} />
-          <Route path="/admin/boundaries" element={<AdminBoundaryPage />} />
-          <Route path="/merchant/workbench" element={<MerchantWorkbenchPage />} />
+          <Route path="/discovery" element={<ProtectedRoute><DiscoveryPage /></ProtectedRoute>} />
+          <Route path="/admin/boundaries" element={<ProtectedRoute><AdminBoundaryPage /></ProtectedRoute>} />
+          <Route path="/merchant/workbench" element={<ProtectedRoute><MerchantWorkbenchPage /></ProtectedRoute>} />
           <Route path="*" element={<Navigate replace to="/" />} />
         </Route>
       </Routes>
-        </BrowserRouter>
-      </LanguageProvider>
-    </ThemeProvider>
-  );
-}
-
-export default App;
+                </BrowserRouter>
+              </UserProvider>
+            </AuthProvider>
+          </LanguageProvider>
+        </ThemeProvider>
+      </GoogleOAuthProvider>
+    );
+  }
+  
+  export default App;
