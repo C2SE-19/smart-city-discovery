@@ -33,10 +33,6 @@ const translations = {
       landscape: 'Landscape & Entertainment',
       maps: 'Maps'
     },
-    delivery: {
-      delivery: 'Delivery',
-      pickup: 'Pickup'
-    },
     profile: {
       accountInfo: '👤 Account Information',
       managePost: '🏪 Manage Posts',
