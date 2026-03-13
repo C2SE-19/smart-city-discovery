@@ -17,6 +17,9 @@ import AdminUserManagementPage from './pages/admin/AdminUserManagementPage';
 import AdminReportsPage from './pages/admin/AdminReportsPage';
 import AdminVenueApprovalPage from './pages/admin/AdminVenueApprovalPage';
 import MerchantWorkbenchPage from './pages/merchant/MerchantWorkbenchPage';
+import LoginPage from './pages/auth/LoginPage';
+import RegisterPage from './pages/auth/RegisterPage';
+import ProfilePage from './pages/profile/ProfilePage';
 import { APP_ROUTES } from './constants/routes';
 import { ROLES } from './constants/roles';
 
@@ -97,8 +100,7 @@ function App() {
                 ]}
               />
             }
-          />
-        </Route>
+          />          <Route path="/profile" element={<ProfilePage />} />        </Route>
 
         <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
         <Route path="/register" element={<PublicRoute><RegisterPage /></PublicRoute>} />
