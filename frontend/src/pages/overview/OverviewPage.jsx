@@ -142,6 +142,8 @@ function OverviewPage() {
   const [address, setAddress] = useState('');
   const [currentFoodIndex, setCurrentFoodIndex] = useState(0);
   const [direction, setDirection] = useState('right');
+  const [currentLocation, setCurrentLocation] = useState(null);
+  const [currentWeather, setCurrentWeather] = useState(null);
 
   const handleNextFood = () => {
     setDirection('right');
@@ -160,6 +162,23 @@ function OverviewPage() {
     }, 3000);
     return () => clearInterval(interval);
   }, []);
+
+  // retrieve user's location and (dummy) weather
+  useEffect(() => {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+      const { latitude, longitude } = pos.coords;
+      // reverse geocode - replace with real service if available
+      // here we'll just mock as Da Nang, Sơn Trà for demo
+      setCurrentLocation('Da Nang, Sơn Trà');
+      // weather fetch placeholder; you can call OpenWeatherMap or similar
+      // const resp = await fetch(`https://api.weather.com/...${latitude},${longitude}`);
+      // const data = await resp.json();
+      // Use translated weather condition
+      const weatherCondition = t.weather.sunny; // 'Sunny' or 'Năng' depending on language
+      setCurrentWeather(`29°C, ${weatherCondition}`);
+    });
+  }, [language]);
 
   return (
     <div className="overview-page">
@@ -220,21 +239,36 @@ function OverviewPage() {
       </section>
 
       <section className="overview-search">
-        <div className="overview-search-tabs" role="tablist" aria-label="Delivery type">
-          <button
-            type="button"
-            className={`overview-search-tab ${deliveryType === 'delivery' ? 'is-active' : ''}`}
-            onClick={() => setDeliveryType('delivery')}
-          >
-            {t.search.food}
-          </button>
-          <button
-            type="button"
-            className={`overview-search-tab ${deliveryType === 'pickup' ? 'is-active' : ''}`}
-            onClick={() => setDeliveryType('pickup')}
-          >
-            {t.search.landscape}
-          </button>
+        <div className="overview-search-top">
+          <div className="overview-search-tabs" role="tablist" aria-label="Delivery type">
+            <button
+              type="button"
+              className={`overview-search-tab ${deliveryType === 'delivery' ? 'is-active' : ''}`}
+              onClick={() => setDeliveryType('delivery')}
+            >
+              {t.search.food}
+            </button>
+            <button
+              type="button"
+              className={`overview-search-tab ${deliveryType === 'pickup' ? 'is-active' : ''}`}
+              onClick={() => setDeliveryType('pickup')}
+            >
+              {t.search.landscape}
+            </button>
+          </div>
+
+          {currentLocation && currentWeather && (
+            <div className="overview-location-info overview-location-inline">
+              <span className="overview-location-text">{currentLocation}</span>
+              <span className="overview-weather">
+                {(currentWeather.includes(t.weather.sunny) || currentWeather.includes(t.weather.clear)) && '☀️'}
+                {currentWeather.includes(t.weather.rainy) && '🌧️'}
+                {currentWeather.includes(t.weather.cloudy) && '☁️'}
+                {!(currentWeather.includes(t.weather.sunny) || currentWeather.includes(t.weather.clear) || currentWeather.includes(t.weather.rainy) || currentWeather.includes(t.weather.cloudy)) && '🌡️'}
+                {currentWeather}
+              </span>
+            </div>
+          )}
         </div>
 
         <div className="overview-search-row">
@@ -250,6 +284,15 @@ function OverviewPage() {
 
           <button type="button" className="overview-search-submit">
             {t.search.findFood}
+          </button>
+          {/* AI suggestion button */}
+          <button
+            type="button"
+            className="overview-search-ai"
+            aria-label={t.search.aiSuggest}
+            onClick={() => alert('AI suggestion not implemented yet')}
+          >
+            {t.search.aiSuggest}
           </button>
         </div>
       </section>
