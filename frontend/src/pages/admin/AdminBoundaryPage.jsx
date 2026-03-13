@@ -2,6 +2,7 @@
 import SectionCard from '../../components/common/SectionCard';
 import TagPill from '../../components/common/TagPill';
 import useWardMapData from '../../hooks/useWardMapData';
+import InteractiveWardMap from '../../components/map/InteractiveWardMap';
 
 function AdminBoundaryPage() {
   const { wards, venues, loading, saving, error, lastCreatedVenue, createVenue } = useWardMapData();
