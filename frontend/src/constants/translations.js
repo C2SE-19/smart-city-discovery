@@ -19,7 +19,14 @@ const translations = {
       food: 'Food',
       landscape: 'Landscape & Entertainment',
       findFood: 'Find Food',
+      aiSuggest: 'AI Suggest',
       placeholder: 'Enter your address...'
+    },
+    weather: {
+      sunny: 'Sunny',
+      rainy: 'Rainy',
+      cloudy: 'Cloudy',
+      clear: 'Clear'
     },
     sections: {
       food: 'Food',
@@ -81,16 +88,19 @@ const translations = {
       food: 'Đồ ăn',
       landscape: 'Danh lam thắng cảnh & Giải trí',
       findFood: 'Tìm đồ ăn',
+      aiSuggest: 'Gợi ý AI',
       placeholder: 'Nhập địa chỉ của bạn...'
+    },
+    weather: {
+      sunny: 'Năng',
+      rainy: 'Mưa',
+      cloudy: 'Mây',
+      clear: 'Tháng'
     },
     sections: {
       food: 'Đồ ăn',
       landscape: 'Danh lam thắng cảnh & Giải trí',
       maps: 'Bản đồ'
-    },
-    delivery: {
-      delivery: 'Giao hàng',
-      pickup: 'Lấy tại chỗ'
     },
     profile: {
       accountInfo: '👤 Thông tin tài khoản',
