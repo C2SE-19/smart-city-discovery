@@ -245,20 +245,79 @@
   background: #ef7d41;
 }
 
+.overview-search-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
 .overview-search-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 174px;
-  gap: 10px;
+  grid-template-columns: minmax(0, 1.8fr) repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: center;
+}
+
+.overview-search-submit,
+.overview-search-ai {
+  width: 100%;
+  padding: 12px 24px;
+  font-size: 0.96rem;
+  font-weight: 600;
+  border-radius: 12px;
+  transition: all 0.2s ease;
+  border: none;
+  cursor: pointer;
+  max-width: none; /* let them flex naturally */
+  min-height: 44px;
+}
+
+.overview-search-ai {
+  margin-left: 0;
+}
+
+.overview-search-submit:hover,
+.overview-search-ai:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 28px rgba(0,0,0,0.15);
+}
+
+.overview-location-info.overview-location-inline {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  font-size: 0.88rem;
+  color: #7a6f56;
+  font-weight: 500;
+}
+
+.overview-location-text {
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: #6e6554;
+}
+
+.overview-weather {
+  margin-left: 0;
+  font-weight: 600;
+  color: #8a714a;
+  font-size: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .overview-address-field {
   position: relative;
   display: flex;
   align-items: center;
-  min-height: 54px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.6);
+  min-height: 44px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.7);
   padding: 0 14px 0 44px;
+  border: 1px solid rgba(232, 179, 62, 0.15);
 }
 
 .overview-address-field input {
@@ -307,6 +366,15 @@
   color: white;
   font-weight: 700;
   box-shadow: 0 12px 24px rgba(235, 121, 64, 0.25);
+}
+
+.overview-search-ai {
+  border: 0;
+  border-radius: 10px;
+  background: #4a90e2;
+  color: white;
+  font-weight: 700;
+  box-shadow: 0 10px 20px rgba(74, 144, 226, 0.25);
 }
 
 .overview-section {
@@ -848,6 +916,14 @@
 [data-theme='dark'] .overview-address-field {
   background: #2a2a32;
   border-color: rgba(240, 240, 242, 0.2);
+}
+
+[data-theme='dark'] .overview-location-text {
+  color: #d8d8dc;
+}
+
+[data-theme='dark'] .overview-weather {
+  color: #e8b33e;
 }
 
 [data-theme='dark'] .overview-address-field input {
