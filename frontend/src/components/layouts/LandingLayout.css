@@ -590,6 +590,16 @@
   transform: rotate(180deg);
 }
 
+.landing-profile-dropdown-icon {
+  font-size: 0.7rem;
+  color: #18140f;
+  transition: transform 0.3s ease;
+}
+
+.landing-profile-button:hover .landing-profile-dropdown-icon {
+  transform: rotate(180deg);
+}
+
 .landing-profile-dropdown {
   position: absolute;
   top: calc(100% + 12px);
@@ -675,6 +685,10 @@
 }
 
 [data-theme='dark'] .landing-profile-arrow {
+  color: #f0f0f2;
+}
+
+[data-theme='dark'] .landing-profile-dropdown-icon {
   color: #f0f0f2;
 }
 

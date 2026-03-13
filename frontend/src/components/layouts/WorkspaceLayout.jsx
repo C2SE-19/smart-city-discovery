@@ -26,7 +26,7 @@ const navigationGroups = [
         code: "MER",
         label: "Merchant Workbench",
         description: "Merchant venue tools",
-        path: "/merchant/workbench"
+        path: "/merchant"
       }
     ]
   }

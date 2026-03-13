@@ -6,6 +6,7 @@ import logo from "../../assets/images/logo.png";
 import { useLanguage } from "../../contexts/LanguageContext";
 import translations from "../../constants/translations";
 import authService from "../../services/authService";
+import { validatePassword } from "../../utils/validators/validators";
 
 export default function RegisterPage() {
 
@@ -19,13 +20,37 @@ export default function RegisterPage() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [passwordErrors, setPasswordErrors] = useState([]);
+  const [generalError, setGeneralError] = useState("");
+
+  const handlePasswordChange = (e) => {
+    const newPassword = e.target.value;
+    setPassword(newPassword);
+    
+    if (newPassword) {
+      const validation = validatePassword(newPassword, language);
+      setPasswordErrors(validation.errors);
+    } else {
+      setPasswordErrors([]);
+    }
+  };
 
   const handleRegister = async (e) => {
 
     e.preventDefault();
+    setGeneralError("");
+
+    // Validate password
+    const passwordValidation = validatePassword(password, language);
+    if (!passwordValidation.isValid) {
+      setPasswordErrors(passwordValidation.errors);
+      alert(passwordValidation.errors.join('\n'));
+      return;
+    }
 
     if (password !== confirmPassword) {
-      alert(t.auth.passwordMismatch);
+      setGeneralError(t.auth.passwordMismatch || "Mật khẩu không khớp");
+      alert(t.auth.passwordMismatch || "Mật khẩu không khớp");
       return;
     }
 
@@ -97,9 +122,33 @@ export default function RegisterPage() {
           <input
             type="password"
             value={password}
-            onChange={(e)=>setPassword(e.target.value)}
+            onChange={handlePasswordChange}
             required
+            style={{
+              borderColor: passwordErrors.length > 0 ? '#ff6b6b' : 'inherit',
+              backgroundColor: passwordErrors.length > 0 ? '#ffe0e0' : 'inherit'
+            }}
           />
+          
+          {passwordErrors.length > 0 && (
+            <div style={{
+              color: '#ff6b6b',
+              fontSize: '12px',
+              marginTop: '5px',
+              marginBottom: '10px',
+              padding: '8px',
+              backgroundColor: '#fff5f5',
+              borderRadius: '4px',
+              borderLeft: '3px solid #ff6b6b'
+            }}>
+              <strong>{t.auth.passwordRequirements}</strong>
+              <ul style={{ margin: '5px 0', paddingLeft: '20px' }}>
+                {passwordErrors.map((error, idx) => (
+                  <li key={idx}>{error}</li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           <label>{t.auth.confirmPassword}</label>
           <input
@@ -109,7 +158,20 @@ export default function RegisterPage() {
             required
           />
 
-          <button type="submit" className="register-btn" disabled={loading}>
+          {generalError && (
+            <div style={{
+              color: '#ff6b6b',
+              fontSize: '12px',
+              marginBottom: '10px',
+              padding: '8px',
+              backgroundColor: '#fff5f5',
+              borderRadius: '4px'
+            }}>
+              {generalError}
+            </div>
+          )}
+
+          <button type="submit" className="register-btn" disabled={loading || passwordErrors.length > 0}>
             {loading ? t.auth.signingUp : t.auth.createAccount}
           </button>
 
