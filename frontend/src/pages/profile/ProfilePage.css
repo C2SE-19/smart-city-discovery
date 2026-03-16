@@ -378,6 +378,66 @@
   color: #e8f0f6;
 }
 
+.password-section {
+  margin-top: 8px;
+}
+
+.btn-secondary {
+  background: #fff;
+  border: 1px solid #ddd;
+  color: #333;
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-secondary:hover {
+  border-color: #ff6b35;
+  color: #ff6b35;
+}
+
+.password-input {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.password-input input {
+  flex: 1;
+}
+
+.btn-eye {
+  background: #f3f3f3;
+  border: 1px solid #ddd;
+  color: #333;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.btn-eye:hover {
+  border-color: #ff6b35;
+  color: #ff6b35;
+}
+
+
+.form-group input:disabled {
+  background-color: #f3f3f3;
+  color: #8d8d8d;
+  cursor: not-allowed;
+}
+
+.helper-text {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  color: #8a8a8a;
+}
+
 .form-group input:focus,
 .form-group select:focus {
   outline: none;
@@ -600,4 +660,24 @@
     padding: 10px 12px;
     justify-content: center;
   }
+}
+
+.error-message,
+.success-message {
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  font-weight: 600;
+}
+
+.error-message {
+  background: #ffe7e7;
+  color: #b42318;
+  border: 1px solid #f5b5b5;
+}
+
+.success-message {
+  background: #ecfdf3;
+  color: #027a48;
+  border: 1px solid #abefc6;
 }

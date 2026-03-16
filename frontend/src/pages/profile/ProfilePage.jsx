@@ -8,6 +8,13 @@ import { APP_ROUTES } from '../../constants/routes';
 import axios from 'axios';
 import './ProfilePage.css';
 
+const MenuItems = [
+  { id: 'overview', label: 'Tổng Quan', icon: '🏠' },
+  { id: 'account-info', label: 'Thông tin tài khoản', icon: '👤' },
+  { id: 'favorites', label: 'Yêu Thích', icon: '❤️' },
+  { id: 'ratings', label: 'Đánh giá', icon: '⭐' },
+  { id: 'support', label: 'Góp ý & hỗ trợ', icon: '💬' }
+];
 const COPY = {
   vi: {
     menu: {
@@ -87,8 +94,10 @@ const COPY = {
   }
 };
 
+
 function ProfilePage() {
   const { language } = useLanguage();
+  const { user, token } = useAuth();
   const { user } = useAuth();
   const navigate = useNavigate();
   const { theme } = useTheme();
@@ -106,6 +115,7 @@ function ProfilePage() {
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [successMessage, setSuccessMessage] = useState('');
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -117,6 +127,17 @@ function ProfilePage() {
   });
 
   const [editData, setEditData] = useState(formData);
+  const [passwordData, setPasswordData] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: ''
+  });
+  const [showPasswordForm, setShowPasswordForm] = useState(false);
+  const [passwordVisibility, setPasswordVisibility] = useState({
+    current: false,
+    next: false,
+    confirm: false
+  });
 
   // Fetch user profile on mount
   useEffect(() => {
@@ -124,7 +145,10 @@ function ProfilePage() {
       try {
         setLoading(true);
         const apiUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
-        const response = await axios.get(`${apiUrl}/v1/users/profile`);
+        const response = await axios.get(`${apiUrl}/users/profile`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          params: { email: user?.email || editData.email || formData.email }
+        });
         
         const userData = response.data.user;
         const profileData = {
@@ -140,6 +164,10 @@ function ProfilePage() {
         setFormData(profileData);
         setEditData(profileData);
         setError(null);
+        setSuccessMessage('');
+        setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
+        setShowPasswordForm(false);
+        setPasswordVisibility({ current: false, next: false, confirm: false });
       } catch (err) {
         console.error('Failed to fetch profile:', err);
         // Use fallback data from auth context
@@ -154,47 +182,176 @@ function ProfilePage() {
         };
         setFormData(fallbackData);
         setEditData(fallbackData);
+        setSuccessMessage('');
+        setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
+        setShowPasswordForm(false);
+        setPasswordVisibility({ current: false, next: false, confirm: false });
       } finally {
         setLoading(false);
       }
     };
 
     fetchProfile();
-  }, [user]);
+  }, [user, token]);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
+    if (name === 'phone') {
+      const digitsOnly = value.replace(/\D/g, '');
+      setEditData({
+        ...editData,
+        phone: digitsOnly
+      });
+      return;
+    }
     setEditData({
       ...editData,
       [name]: value
     });
   };
 
+  const handlePasswordChange = (e) => {
+    const { name, value } = e.target;
+    setPasswordData({
+      ...passwordData,
+      [name]: value
+    });
+  };
+
+  const validateProfile = (data) => {
+    if (!data.name || !data.name.trim()) {
+      return 'Vui lòng nhập họ tên.';
+    }
+
+    const emailValue = (data.email || '').trim();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailValue || !emailRegex.test(emailValue)) {
+      return 'Email không đúng định dạng.';
+    }
+
+    const phoneValue = (data.phone || '').trim();
+    if (phoneValue && !/^\d+$/.test(phoneValue)) {
+      return 'Số điện thoại không đúng định dạng.';
+    }
+
+    if (phoneValue) {
+      if (phoneValue.length !== 10) {
+        return 'Số điện thoại không đúng định dạng.';
+      }
+    }
+
+    const birthDateValue = (data.birthDate || '').trim();
+    if (birthDateValue && !/^\d{2}\/\d{2}\/\d{4}$/.test(birthDateValue)) {
+      return 'Ngày sinh phải theo định dạng DD/MM/YYYY.';
+    }
+
+    return '';
+  };
+
+  const validatePasswordChange = (data) => {
+    const { currentPassword, newPassword, confirmPassword } = data;
+    const hasAny = currentPassword || newPassword || confirmPassword;
+    if (!hasAny) {
+      return '';
+    }
+
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      return 'Vui lòng nhập đầy đủ mật khẩu hiện tại, mật khẩu mới và xác nhận.';
+    }
+
+    if (newPassword.length < 8) {
+      return 'Mật khẩu mới phải có ít nhất 8 ký tự.';
+    }
+
+    if (!/[A-Z]/.test(newPassword)) {
+      return 'Mật khẩu mới phải có ít nhất 1 chữ in hoa (A-Z).';
+    }
+
+    if (!/[!@#$%^&*()_+\-=\[\]{};:\'",.<>?\/\\|`~]/.test(newPassword)) {
+      return 'Mật khẩu mới phải có ít nhất 1 ký tự đặc biệt.';
+    }
+
+    if (newPassword !== confirmPassword) {
+      return 'Xác nhận mật khẩu không khớp.';
+    }
+
+    return '';
+  };
+
   const handleSave = async () => {
     try {
+      const validationError = validateProfile(editData);
+      if (validationError) {
+        setError(validationError);
+        setSuccessMessage('');
+        setTimeout(() => setError(''), 1500);
+        return;
+      }
+
+      const passwordValidation = validatePasswordChange(passwordData);
+      if (passwordValidation) {
+        setError(passwordValidation);
+        setSuccessMessage('');
+        setTimeout(() => setError(''), 1500);
+        return;
+      }
+
       const apiUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
-      await axios.put(`${apiUrl}/v1/users/profile`, {
-        fullname: editData.name,
-        email: editData.email,
-        phone: editData.phone,
-        birthDate: editData.birthDate,
-        address: editData.address,
-        gender: editData.gender,
-        bio: editData.bio
-      });
+      await axios.put(
+        `${apiUrl}/users/profile`,
+        {
+          fullname: editData.name,
+          email: editData.email,
+          phone: editData.phone,
+          birthDate: editData.birthDate,
+          address: editData.address,
+          gender: editData.gender,
+          bio: editData.bio
+        },
+        {
+          headers: token ? { Authorization: `Bearer ${token}` } : {}
+        }
+      );
+
+      if (passwordData.currentPassword || passwordData.newPassword || passwordData.confirmPassword) {
+        await axios.put(
+          `${apiUrl}/users/password`,
+          {
+            currentPassword: passwordData.currentPassword,
+            newPassword: passwordData.newPassword
+          },
+          {
+            headers: token ? { Authorization: `Bearer ${token}` } : {}
+          }
+        );
+      }
       
       setFormData(editData);
-      setIsEditing(false);
       setError(null);
+      setSuccessMessage('Lưu thành công.');
+      setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
+      setShowPasswordForm(false);
+      setPasswordVisibility({ current: false, next: false, confirm: false });
+      setTimeout(() => {
+        setSuccessMessage('');
+      }, 1200);
     } catch (err) {
       console.error('Failed to update profile:', err);
-      setError('Failed to update profile. Please try again.');
+      const apiMessage = err.response?.data?.message;
+      setError(apiMessage || 'Cập nhật thất bại. Vui lòng thử lại.');
+      setSuccessMessage('');
+      setTimeout(() => setError(''), 1500);
     }
   };
 
   const handleCancel = () => {
     setEditData(formData);
     setIsEditing(false);
+    setSuccessMessage('');
+    setError('');
+    setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
+    setShowPasswordForm(false);
+    setPasswordVisibility({ current: false, next: false, confirm: false });
   };
 
   const maskedPhone = useMemo(() => {
@@ -213,14 +370,6 @@ function ProfilePage() {
       );
     }
 
-    if (error && activeMenu === 'account-info') {
-      return (
-        <div className="profile-content">
-          <div className="error-message">{error}</div>
-        </div>
-      );
-    }
-
     switch (activeMenu) {
       case 'account-info':
         return (
@@ -228,6 +377,15 @@ function ProfilePage() {
             <div className="profile-content-header">
               <h2>{copy.headings.personal}</h2>
               {!isEditing && (
+                <button
+                  className="btn-edit"
+                  onClick={() => {
+                    setIsEditing(true);
+                    setSuccessMessage('');
+                    setError('');
+                  }}
+                >
+                  ✎ Chỉnh sửa
                 <button className="btn-edit" onClick={() => setIsEditing(true)}>
                   {copy.edit}
                 </button>
@@ -288,7 +446,10 @@ function ProfilePage() {
                       name="email"
                       value={editData.email}
                       onChange={handleInputChange}
+                      readOnly
+                      disabled
                     />
+                    <small className="helper-text">Email đã khóa, không thể thay đổi.</small>
                   </div>
                 </div>
 
@@ -314,6 +475,9 @@ function ProfilePage() {
                       name="phone"
                       value={editData.phone}
                       onChange={handleInputChange}
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      placeholder="Nhập số điện thoại"
                     />
                   </div>
                 </div>
@@ -342,6 +506,104 @@ function ProfilePage() {
                   </div>
                 </div>
 
+                <div className="password-section">
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => setShowPasswordForm((prev) => !prev)}
+                  >
+                    {showPasswordForm ? 'Ẩn đổi mật khẩu' : 'Thay đổi mật khẩu'}
+                  </button>
+
+                  {showPasswordForm && (
+                    <>
+                <div className="form-row">
+                  <div className="form-group">
+                    <label htmlFor="currentPassword">Mật khẩu hiện tại</label>
+                    <div className="password-input">
+                      <input
+                        type={passwordVisibility.current ? 'text' : 'password'}
+                        id="currentPassword"
+                        name="currentPassword"
+                        value={passwordData.currentPassword}
+                        onChange={handlePasswordChange}
+                        placeholder="Nhập mật khẩu hiện tại"
+                      />
+                      <button
+                        type="button"
+                        className="btn-eye"
+                        onClick={() =>
+                          setPasswordVisibility((prev) => ({
+                            ...prev,
+                            current: !prev.current
+                          }))
+                        }
+                      >
+                        {passwordVisibility.current ? 'Ẩn' : 'Hiện'}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="form-group">
+                    <label htmlFor="newPassword">Mật khẩu mới</label>
+                    <div className="password-input">
+                      <input
+                        type={passwordVisibility.next ? 'text' : 'password'}
+                        id="newPassword"
+                        name="newPassword"
+                        value={passwordData.newPassword}
+                        onChange={handlePasswordChange}
+                        placeholder="Ít nhất 8 ký tự"
+                      />
+                      <button
+                        type="button"
+                        className="btn-eye"
+                        onClick={() =>
+                          setPasswordVisibility((prev) => ({
+                            ...prev,
+                            next: !prev.next
+                          }))
+                        }
+                      >
+                        {passwordVisibility.next ? 'Ẩn' : 'Hiện'}
+                      </button>
+                    </div>
+                    <small className="helper-text">
+                      (Mật khẩu phải từ 8 ký tự, có 1 chữ viết hoa và ký tự đặc biệt.)
+                    </small>
+                  </div>
+                </div>
+
+                <div className="form-row">
+                  <div className="form-group">
+                    <label htmlFor="confirmPassword">Xác nhận mật khẩu mới</label>
+                    <div className="password-input">
+                      <input
+                        type={passwordVisibility.confirm ? 'text' : 'password'}
+                        id="confirmPassword"
+                        name="confirmPassword"
+                        value={passwordData.confirmPassword}
+                        onChange={handlePasswordChange}
+                        placeholder="Nhập lại mật khẩu mới"
+                      />
+                      <button
+                        type="button"
+                        className="btn-eye"
+                        onClick={() =>
+                          setPasswordVisibility((prev) => ({
+                            ...prev,
+                            confirm: !prev.confirm
+                          }))
+                        }
+                      >
+                        {passwordVisibility.confirm ? 'Ẩn' : 'Hiện'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                    </>
+                  )}
+                </div>
+
                 <div className="form-actions">
                   <button
                     type="button"
@@ -358,6 +620,8 @@ function ProfilePage() {
                     {copy.cancel}
                   </button>
                 </div>
+                {successMessage && <div className="success-message">{successMessage}</div>}
+                {error && <div className="error-message">{error}</div>}
               </form>
             )}
           </div>
