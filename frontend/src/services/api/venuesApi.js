@@ -1,7 +1,10 @@
 import apiClient from './client';
 
-export async function fetchVenues() {
-  const response = await apiClient.get('/venues');
+export async function fetchVenues(params = {}) {
+  const response = await apiClient.get('/venues', {
+    params,
+  });
+
   return response.data;
 }
 

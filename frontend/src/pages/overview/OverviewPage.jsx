@@ -1,7 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef,useMemo} from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useLanguage } from '../../contexts/LanguageContext';
+import { useAuth } from '../../contexts/AuthContext';
 import translations from '../../constants/translations';
+import axios from 'axios';
 import './OverviewPage.css';
 
 const foodItems = [
@@ -95,10 +97,15 @@ const landscapeColumns = {
   ]
 };
 
-function FoodCard({ item, index }) {
+function FoodCard({ item, index, isFavorite, onToggleFavorite }) {
   return (
     <article className={`overview-food-card overview-food-card-animate overview-food-card-${index}`}>
-      <button type="button" className="overview-favorite" aria-label={`Save ${item.name}`} />
+      <button
+        type="button"
+        className={`overview-favorite ${isFavorite ? 'is-active' : ''}`}
+        aria-label={isFavorite ? `Unsave ${item.name}` : `Save ${item.name}`}
+        onClick={() => onToggleFavorite(item, 'food')}
+      />
 
       <div className="overview-food-media">
         <img src={item.image} alt={item.name} className="overview-food-image" />
@@ -117,13 +124,18 @@ function FoodCard({ item, index }) {
   );
 }
 
-function PlaceCard({ item }) {
+function PlaceCard({ item, isFavorite, onToggleFavorite }) {
   return (
     <article className="overview-place-card">
       <img src={item.image} alt={item.name} className="overview-place-image" />
 
       <div className="overview-place-body">
-        <button type="button" className="overview-favorite" aria-label={`Save ${item.name}`} />
+        <button
+          type="button"
+          className={`overview-favorite ${isFavorite ? 'is-active' : ''}`}
+          aria-label={isFavorite ? `Unsave ${item.name}` : `Save ${item.name}`}
+          onClick={() => onToggleFavorite(item, 'place')}
+        />
         <h3>{item.name}</h3>
         <p>{item.description}</p>
 
@@ -139,7 +151,9 @@ function PlaceCard({ item }) {
 function OverviewPage() {
   const navigate = useNavigate();
   const { language } = useLanguage();
+  const { token } = useAuth();
   const t = translations[language];
+  const [favoriteKeys, setFavoriteKeys] = useState(new Set());
   const [deliveryType, setDeliveryType] = useState('delivery');
   const [address, setAddress] = useState('');
   const [currentFoodIndex, setCurrentFoodIndex] = useState(0);
@@ -160,6 +174,74 @@ function OverviewPage() {
     setImageError('');
     if (libraryInputRef.current) libraryInputRef.current.value = '';
     if (cameraInputRef.current) cameraInputRef.current.value = '';
+  };
+
+  const apiUrl = useMemo(
+    () => import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api',
+    []
+  );
+
+  useEffect(() => {
+    const fetchFavorites = async () => {
+      if (!token) {
+        setFavoriteKeys(new Set());
+        return;
+      }
+      try {
+        const response = await axios.get(`${apiUrl}/users/favorites`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const nextKeys = new Set(
+          (response.data?.favorites || []).map(
+            (item) => `${item.itemType}:${item.itemId}`
+          )
+        );
+        setFavoriteKeys(nextKeys);
+      } catch (error) {
+        console.error('Failed to fetch favorites:', error);
+      }
+    };
+
+    fetchFavorites();
+  }, [apiUrl, token]);
+
+  const isFavorite = (itemType, itemId) => favoriteKeys.has(`${itemType}:${itemId}`);
+
+  const handleToggleFavorite = async (item, itemType) => {
+    if (!token) {
+      navigate('/login');
+      return;
+    }
+
+    try {
+      const response = await axios.post(
+        `${apiUrl}/users/favorites/toggle`,
+        {
+          itemId: item.id,
+          itemType,
+          name: item.name,
+          image: item.image,
+          price: item.price,
+          description: item.description
+        },
+        {
+          headers: { Authorization: `Bearer ${token}` }
+        }
+      );
+
+      const key = `${itemType}:${item.id}`;
+      setFavoriteKeys((prev) => {
+        const next = new Set(prev);
+        if (response.data?.favorited) {
+          next.add(key);
+        } else {
+          next.delete(key);
+        }
+        return next;
+      });
+    } catch (error) {
+      console.error('Failed to toggle favorite:', error);
+    }
   };
 
   const handleNextFood = () => {
@@ -435,7 +517,15 @@ function OverviewPage() {
           <div className={`overview-food-grid overview-food-grid-${direction}`}>
             {[0, 1, 2, 3].map((i) => {
               const itemIndex = (currentFoodIndex + i) % foodItems.length;
-              return <FoodCard key={i} item={foodItems[itemIndex]} index={i} />;
+              return (
+                <FoodCard
+                  key={i}
+                  item={foodItems[itemIndex]}
+                  index={i}
+                  isFavorite={isFavorite('food', foodItems[itemIndex].id)}
+                  onToggleFavorite={handleToggleFavorite}
+                />
+              );
             })}
           </div>
 
@@ -465,7 +555,12 @@ function OverviewPage() {
         <div className="overview-places-layout">
           <div className="overview-places-column">
             {landscapeColumns.left.map((item) => (
-              <PlaceCard key={item.id} item={item} />
+              <PlaceCard
+                key={item.id}
+                item={item}
+                isFavorite={isFavorite('place', item.id)}
+                onToggleFavorite={handleToggleFavorite}
+              />
             ))}
           </div>
 
@@ -474,8 +569,15 @@ function OverviewPage() {
 
             <button
               type="button"
-              className="overview-favorite"
-              aria-label={`Save ${landscapeColumns.featured.name}`}
+              className={`overview-favorite ${
+                isFavorite('place', landscapeColumns.featured.id) ? 'is-active' : ''
+              }`}
+              aria-label={
+                isFavorite('place', landscapeColumns.featured.id)
+                  ? `Unsave ${landscapeColumns.featured.name}`
+                  : `Save ${landscapeColumns.featured.name}`
+              }
+              onClick={() => handleToggleFavorite(landscapeColumns.featured, 'place')}
             />
 
             <img
@@ -501,7 +603,12 @@ function OverviewPage() {
 
           <div className="overview-places-column">
             {landscapeColumns.right.map((item) => (
-              <PlaceCard key={item.id} item={item} />
+              <PlaceCard
+                key={item.id}
+                item={item}
+                isFavorite={isFavorite('place', item.id)}
+                onToggleFavorite={handleToggleFavorite}
+              />
             ))}
           </div>
         </div>
