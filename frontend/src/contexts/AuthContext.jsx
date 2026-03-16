@@ -4,18 +4,46 @@ import { ROLES } from '../constants/roles';
 const AuthContext = createContext(null);
 const AUTH_STORAGE_KEY = 'auth';
 
+const ROLE_ALIASES = {
+  admin: ROLES.ADMIN,
+  administrator: ROLES.ADMIN,
+  'super-admin': ROLES.ADMIN,
+  super_admin: ROLES.ADMIN,
+  merchant: ROLES.MERCHANT,
+  seller: ROLES.MERCHANT,
+  vendor: ROLES.MERCHANT,
+  user: ROLES.USER,
+  customer: ROLES.USER,
+};
+
+function normalizeRole(user) {
+  if (user?.isAdmin === true) {
+    return ROLES.ADMIN;
+  }
+
+  const rawRole =
+    user?.role ?? user?.userRole ?? user?.user_role ?? user?.type ?? user?.accountType ?? '';
+
+  if (typeof rawRole !== 'string') {
+    return ROLES.USER;
+  }
+
+  const normalizedRole = rawRole.trim().toLowerCase();
+  return ROLE_ALIASES[normalizedRole] || ROLES.USER;
+}
+
 function normalizeUser(user) {
   if (!user) {
     return null;
   }
 
-  const displayName = user.fullname || user.fullName || user.username || 'User';
+  const displayName = user.fullname || user.fullName || user.name || user.username || 'User';
 
   return {
     ...user,
     fullname: user.fullname || displayName,
     fullName: user.fullName || displayName,
-    role: user.role || ROLES.USER,
+    role: normalizeRole(user),
     avatarUrl: user.avatarUrl || '',
   };
 }
@@ -31,8 +59,10 @@ export function AuthProvider({ children }) {
 
       if (savedAuth) {
         const parsedAuth = JSON.parse(savedAuth);
+        const savedToken =
+          parsedAuth.token || parsedAuth.accessToken || parsedAuth.access_token || '';
         setUser(normalizeUser(parsedAuth.user));
-        setToken(parsedAuth.token || '');
+        setToken(savedToken);
       }
     } catch (error) {
       console.error('Failed to restore auth state:', error);

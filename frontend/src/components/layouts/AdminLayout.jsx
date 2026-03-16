@@ -75,6 +75,10 @@ const adminNavigation = [
 
 function AdminLayout() {
   const { user, logout } = useAuth();
+  const displayName = user?.fullName || user?.fullname || 'Administrator';
+  const avatarUrl =
+    user?.avatarUrl ||
+    'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 120 120%22%3E%3Crect width=%22120%22 height=%22120%22 rx=%2230%22 fill=%22%2315233a%22/%3E%3Ccircle cx=%2260%22 cy=%2248%22 r=%2222%22 fill=%22%23d9e6ff%22/%3E%3Cpath d=%22M24 98c8-18 24-26 36-26s28 8 36 26%22 fill=%22%23d9e6ff%22/%3E%3C/svg%3E';
 
   return (
     <div className="admin-shell">
@@ -87,9 +91,9 @@ function AdminLayout() {
             </div>
 
             <div className="admin-sidebar-user">
-              <img src={user.avatarUrl} alt={user.fullName} className="admin-sidebar-user-avatar" />
+              <img src={avatarUrl} alt={displayName} className="admin-sidebar-user-avatar" />
               <div>
-                <strong>{user.fullName}</strong>
+                <strong>{displayName}</strong>
                 <span>Administrator</span>
               </div>
             </div>
@@ -131,7 +135,7 @@ function AdminLayout() {
             </button>
 
             <div className="admin-avatar-block">
-              <img src={user.avatarUrl} alt={user.fullName} className="admin-avatar" />
+              <img src={avatarUrl} alt={displayName} className="admin-avatar" />
             </div>
           </div>
         </header>
