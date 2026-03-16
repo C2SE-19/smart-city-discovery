@@ -4,6 +4,7 @@ import { useLanguage } from '../../contexts/LanguageContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useAuth } from '../../contexts/AuthContext';
 import translations from '../../constants/translations';
+import { APP_ROUTES } from '../../constants/routes';
 import logo from '../../assets/images/logo.png';
 import './LandingLayout.css';
 import { MdExpandMore } from 'react-icons/md';
@@ -122,7 +123,7 @@ function LandingLayout() {
                       type="button" 
                       className="landing-dropdown-item"
                       onClick={() => {
-                        navigate('/discovery');
+                        navigate(APP_ROUTES.FEEDBACK);
                         setShowProfileMenu(false);
                       }}
                     >
@@ -131,7 +132,10 @@ function LandingLayout() {
                     <button 
                       type="button" 
                       className="landing-dropdown-item"
-                      onClick={() => setShowProfileMenu(false)}
+                      onClick={() => {
+                        navigate(APP_ROUTES.TERMS);
+                        setShowProfileMenu(false);
+                      }}
                     >
                       {t.profile.terms}
                     </button>

@@ -86,6 +86,14 @@ const translations = {
       minLength: 'At least 8 characters',
       hasUpperCase: 'At least 1 uppercase letter (A-Z)',
       hasSpecialChar: 'At least 1 special character (!@#$%^&*...)'
+    },
+    termsPage: {
+      title: 'Terms of Use',
+      intro: 'Please review these rules to use the platform responsibly.',
+      lastUpdated: 'Last updated',
+      common: 'General rules',
+      poster: 'Rules for place/content owners',
+      user: 'Rules for users'
     }
   },
   vi: {
@@ -175,6 +183,14 @@ const translations = {
       minLength: 'Ít nhất 8 ký tự',
       hasUpperCase: 'Ít nhất 1 chữ cái viết hoa (A-Z)',
       hasSpecialChar: 'Ít nhất 1 ký tự đặc biệt (!@#$%^&*...)'
+    },
+    termsPage: {
+      title: 'Điều khoản sử dụng',
+      intro: 'Vui lòng đọc kỹ các quy định sau trước khi sử dụng nền tảng.',
+      lastUpdated: 'Cập nhật',
+      common: 'Quy định chung',
+      poster: 'Quy định cho người đăng địa điểm / nội dung',
+      user: 'Quy định cho người sử dụng nền tảng'
     }
   }
 };
