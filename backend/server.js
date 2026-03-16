@@ -468,6 +468,36 @@ app.put('/api/users/profile', authenticateOptional, requireAuth, async (req, res
             return res.status(400).json({ message: 'Ngày sinh phải theo định dạng DD/MM/YYYY.' });
         }
 
+        if (email) {
+            const emailCheck = await pool.query(
+                'SELECT 1 FROM users WHERE email = $1 AND id <> $2 LIMIT 1',
+                [email, userId]
+            );
+            if (emailCheck.rows.length > 0) {
+                return res.status(409).json({ message: 'Email đã tồn tại.' });
+            }
+        }
+
+        if (phone) {
+            const phoneCheck = await pool.query(
+                'SELECT 1 FROM users WHERE phone = $1 AND id <> $2 LIMIT 1',
+                [phone, userId]
+            );
+            if (phoneCheck.rows.length > 0) {
+                return res.status(409).json({ message: 'Số điện thoại đã tồn tại.' });
+            }
+        }
+
+        if (address) {
+            const addressCheck = await pool.query(
+                'SELECT 1 FROM users WHERE address = $1 AND id <> $2 LIMIT 1',
+                [address, userId]
+            );
+            if (addressCheck.rows.length > 0) {
+                return res.status(409).json({ message: 'Địa chỉ đã tồn tại.' });
+            }
+        }
+
         const result = await pool.query(
             `UPDATE users
              SET fullname = $1,

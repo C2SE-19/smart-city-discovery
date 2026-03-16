@@ -102,6 +102,85 @@ function ProfilePage() {
   const { theme } = useTheme();
   const t = translations[language];
   const copy = COPY[language] || COPY.vi;
+  const ui =
+    language === 'vi'
+      ? {
+          labels: {
+            currentPassword: 'Mật khẩu hiện tại',
+            newPassword: 'Mật khẩu mới',
+            confirmPassword: 'Xác nhận mật khẩu mới'
+          },
+          helpers: {
+            emailLocked: 'Email đã khóa, không thể thay đổi.',
+            passwordRule:
+              '(Mật khẩu phải từ 8 ký tự, có 1 chữ viết hoa và ký tự đặc biệt.)'
+          },
+          placeholders: {
+            phone: 'Nhập số điện thoại',
+            birthDate: 'DD/MM/YYYY',
+            currentPassword: 'Nhập mật khẩu hiện tại',
+            newPassword: 'Ít nhất 8 ký tự',
+            confirmPassword: 'Nhập lại mật khẩu mới'
+          },
+          actions: {
+            show: 'Hiện',
+            hide: 'Ẩn',
+            showPasswordForm: 'Thay đổi mật khẩu',
+            hidePasswordForm: 'Ẩn đổi mật khẩu'
+          },
+          messages: {
+            nameRequired: 'Vui lòng nhập họ tên.',
+            emailInvalid: 'Email không đúng định dạng.',
+            phoneInvalid: 'Số điện thoại không đúng định dạng.',
+            birthInvalid: 'Ngày sinh phải theo định dạng DD/MM/YYYY.',
+            passwordRequired:
+              'Vui lòng nhập đầy đủ mật khẩu hiện tại, mật khẩu mới và xác nhận.',
+            passwordLength: 'Mật khẩu mới phải có ít nhất 8 ký tự.',
+            passwordUpper: 'Mật khẩu mới phải có ít nhất 1 chữ in hoa (A-Z).',
+            passwordSpecial: 'Mật khẩu mới phải có ít nhất 1 ký tự đặc biệt.',
+            passwordMismatch: 'Xác nhận mật khẩu không khớp.',
+            saveSuccess: 'Lưu thành công.',
+            saveFailed: 'Cập nhật thất bại. Vui lòng thử lại.'
+          }
+        }
+      : {
+          labels: {
+            currentPassword: 'Current password',
+            newPassword: 'New password',
+            confirmPassword: 'Confirm new password'
+          },
+          helpers: {
+            emailLocked: 'Email is locked and cannot be changed.',
+            passwordRule:
+              '(Password must be at least 8 characters, include 1 uppercase letter and 1 special character.)'
+          },
+          placeholders: {
+            phone: 'Enter phone number',
+            birthDate: 'DD/MM/YYYY',
+            currentPassword: 'Enter current password',
+            newPassword: 'At least 8 characters',
+            confirmPassword: 'Re-enter new password'
+          },
+          actions: {
+            show: 'Show',
+            hide: 'Hide',
+            showPasswordForm: 'Change password',
+            hidePasswordForm: 'Hide password form'
+          },
+          messages: {
+            nameRequired: 'Please enter your full name.',
+            emailInvalid: 'Invalid email format.',
+            phoneInvalid: 'Invalid phone format.',
+            birthInvalid: 'Date of birth must be DD/MM/YYYY.',
+            passwordRequired: 'Please enter current password, new password, and confirmation.',
+            passwordLength: 'New password must be at least 8 characters.',
+            passwordUpper: 'New password must include at least 1 uppercase letter (A-Z).',
+            passwordSpecial: 'New password must include at least 1 special character.',
+            passwordMismatch: 'Password confirmation does not match.',
+            saveSuccess: 'Saved successfully.',
+            saveFailed: 'Update failed. Please try again.'
+          }
+        };
   const MenuItems = [
     { id: 'overview', label: copy.menu.overview, icon: '🏠' },
     { id: 'account-info', label: copy.menu.account, icon: '👤' },
@@ -277,9 +356,63 @@ function ProfilePage() {
     return '';
   };
 
+  const validateProfileLocalized = (data) => {
+    if (!data.name || !data.name.trim()) {
+      return ui.messages.nameRequired;
+    }
+
+    const emailValue = (data.email || '').trim();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailValue || !emailRegex.test(emailValue)) {
+      return ui.messages.emailInvalid;
+    }
+
+    const phoneValue = (data.phone || '').trim();
+    if (phoneValue && (!/^\d+$/.test(phoneValue) || phoneValue.length !== 10)) {
+      return ui.messages.phoneInvalid;
+    }
+
+    const birthDateValue = (data.birthDate || '').trim();
+    if (birthDateValue && !/^\d{2}\/\d{2}\/\d{4}$/.test(birthDateValue)) {
+      return ui.messages.birthInvalid;
+    }
+
+    return '';
+  };
+
+  const validatePasswordChangeLocalized = (data) => {
+    const { currentPassword, newPassword, confirmPassword } = data;
+    const hasAny = currentPassword || newPassword || confirmPassword;
+    if (!hasAny) {
+      return '';
+    }
+
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      return ui.messages.passwordRequired;
+    }
+
+    if (newPassword.length < 8) {
+      return ui.messages.passwordLength;
+    }
+
+    if (!/[A-Z]/.test(newPassword)) {
+      return ui.messages.passwordUpper;
+    }
+
+    if (!/[!@#$%^&*()_+\-=\[\]{};:\'",.<>?\/\\|`~]/.test(newPassword)) {
+      return ui.messages.passwordSpecial;
+    }
+
+    if (newPassword !== confirmPassword) {
+      return ui.messages.passwordMismatch;
+    }
+
+    return '';
+  };
+
   const handleSave = async () => {
     try {
-      const validationError = validateProfile(editData);
+      const validationError = validateProfileLocalized(editData);
       if (validationError) {
         setError(validationError);
         setSuccessMessage('');
@@ -287,7 +420,7 @@ function ProfilePage() {
         return;
       }
 
-      const passwordValidation = validatePasswordChange(passwordData);
+      const passwordValidation = validatePasswordChangeLocalized(passwordData);
       if (passwordValidation) {
         setError(passwordValidation);
         setSuccessMessage('');
@@ -327,7 +460,7 @@ function ProfilePage() {
       
       setFormData(editData);
       setError(null);
-      setSuccessMessage('Lưu thành công.');
+      setSuccessMessage(ui.messages.saveSuccess);
       setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
       setShowPasswordForm(false);
       setPasswordVisibility({ current: false, next: false, confirm: false });
@@ -337,7 +470,7 @@ function ProfilePage() {
     } catch (err) {
       console.error('Failed to update profile:', err);
       const apiMessage = err.response?.data?.message;
-      setError(apiMessage || 'Cập nhật thất bại. Vui lòng thử lại.');
+      setError(apiMessage || ui.messages.saveFailed);
       setSuccessMessage('');
       setTimeout(() => setError(''), 1500);
     }
@@ -446,7 +579,7 @@ function ProfilePage() {
                       readOnly
                       disabled
                     />
-                    <small className="helper-text">Email đã khóa, không thể thay đổi.</small>
+                    <small className="helper-text">{ui.helpers.emailLocked}</small>
                   </div>
                 </div>
 
@@ -474,7 +607,7 @@ function ProfilePage() {
                       onChange={handleInputChange}
                       inputMode="numeric"
                       pattern="[0-9]*"
-                      placeholder="Nhập số điện thoại"
+                      placeholder={ui.placeholders.phone}
                     />
                   </div>
                 </div>
@@ -488,7 +621,7 @@ function ProfilePage() {
                       name="birthDate"
                       value={editData.birthDate}
                       onChange={handleInputChange}
-                      placeholder="DD/MM/YYYY"
+                      placeholder={ui.placeholders.birthDate}
                     />
                   </div>
                   <div className="form-group">
@@ -509,14 +642,14 @@ function ProfilePage() {
                     className="btn-secondary"
                     onClick={() => setShowPasswordForm((prev) => !prev)}
                   >
-                    {showPasswordForm ? 'Ẩn đổi mật khẩu' : 'Thay đổi mật khẩu'}
+                    {showPasswordForm ? ui.actions.hidePasswordForm : ui.actions.showPasswordForm}
                   </button>
 
                   {showPasswordForm && (
                     <>
                 <div className="form-row">
                   <div className="form-group">
-                    <label htmlFor="currentPassword">Mật khẩu hiện tại</label>
+                    <label htmlFor="currentPassword">{ui.labels.currentPassword}</label>
                     <div className="password-input">
                       <input
                         type={passwordVisibility.current ? 'text' : 'password'}
@@ -524,7 +657,7 @@ function ProfilePage() {
                         name="currentPassword"
                         value={passwordData.currentPassword}
                         onChange={handlePasswordChange}
-                        placeholder="Nhập mật khẩu hiện tại"
+                        placeholder={ui.placeholders.currentPassword}
                       />
                       <button
                         type="button"
@@ -536,12 +669,12 @@ function ProfilePage() {
                           }))
                         }
                       >
-                        {passwordVisibility.current ? 'Ẩn' : 'Hiện'}
+                        {passwordVisibility.current ? ui.actions.hide : ui.actions.show}
                       </button>
                     </div>
                   </div>
                   <div className="form-group">
-                    <label htmlFor="newPassword">Mật khẩu mới</label>
+                    <label htmlFor="newPassword">{ui.labels.newPassword}</label>
                     <div className="password-input">
                       <input
                         type={passwordVisibility.next ? 'text' : 'password'}
@@ -549,7 +682,7 @@ function ProfilePage() {
                         name="newPassword"
                         value={passwordData.newPassword}
                         onChange={handlePasswordChange}
-                        placeholder="Ít nhất 8 ký tự"
+                        placeholder={ui.placeholders.newPassword}
                       />
                       <button
                         type="button"
@@ -561,18 +694,18 @@ function ProfilePage() {
                           }))
                         }
                       >
-                        {passwordVisibility.next ? 'Ẩn' : 'Hiện'}
+                        {passwordVisibility.next ? ui.actions.hide : ui.actions.show}
                       </button>
                     </div>
                     <small className="helper-text">
-                      (Mật khẩu phải từ 8 ký tự, có 1 chữ viết hoa và ký tự đặc biệt.)
+                      {ui.helpers.passwordRule}
                     </small>
                   </div>
                 </div>
 
                 <div className="form-row">
                   <div className="form-group">
-                    <label htmlFor="confirmPassword">Xác nhận mật khẩu mới</label>
+                    <label htmlFor="confirmPassword">{ui.labels.confirmPassword}</label>
                     <div className="password-input">
                       <input
                         type={passwordVisibility.confirm ? 'text' : 'password'}
@@ -580,7 +713,7 @@ function ProfilePage() {
                         name="confirmPassword"
                         value={passwordData.confirmPassword}
                         onChange={handlePasswordChange}
-                        placeholder="Nhập lại mật khẩu mới"
+                        placeholder={ui.placeholders.confirmPassword}
                       />
                       <button
                         type="button"
@@ -592,7 +725,7 @@ function ProfilePage() {
                           }))
                         }
                       >
-                        {passwordVisibility.confirm ? 'Ẩn' : 'Hiện'}
+                        {passwordVisibility.confirm ? ui.actions.hide : ui.actions.show}
                       </button>
                     </div>
                   </div>
