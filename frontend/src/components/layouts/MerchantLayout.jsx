@@ -118,11 +118,21 @@ function MerchantLayout() {
                     type="button"
                     className="landing-dropdown-item"
                     onClick={() => {
-                      navigate('/merchant');
+                      navigate('/feedback');
                       setShowProfileMenu(false);
                     }}
                   >
-                    👨‍💼 {t.merchant ? t.merchant.overview : (language === 'vi' ? 'Bảng điều khiển merchant' : 'Merchant Dashboard')}
+                    {t.profile.feedback}
+                  </button>
+                  <button
+                    type="button"
+                    className="landing-dropdown-item"
+                    onClick={() => {
+                      navigate('/terms');
+                      setShowProfileMenu(false);
+                    }}
+                  >
+                    {t.profile.terms}
                   </button>
                   <button
                     type="button"
