@@ -12,8 +12,13 @@ const translations = {
       kicker: 'Taste Da Nang your way',
       title: 'Happy With <span>Delicious Food</span> And Landscape & Entertainment',
       description: 'Exploring new food, Landscape & Entertainment with different transition lets you carry that place and get a good price for us as well as you make a great impact for customers.',
-      findByPictures: 'Find By Pictures',
-      merchant: 'For Merchants'
+  findByPictures: 'Find By Pictures',
+  chooseFromLibrary: 'Choose from library',
+  takeNewPhoto: 'Take a new photo',
+  selectedImage: 'Selected image',
+  removeImage: 'Remove',
+  findAction: 'Find',
+  merchant: 'For Merchants'
     },
     search: {
       food: 'Food',
@@ -109,8 +114,13 @@ const translations = {
       kicker: 'Thưởng thức Đà Nẵng theo cách của bạn',
       title: 'Hạnh phúc với <span>Đồ ăn ngon</span> Và danh lam thắng cảnh & Giải trí',
       description: 'Khám phá đồ ăn mới, danh lam thắng cảnh & giải trí với những chuyển động khác nhau giúp bạn mang theo địa điểm đó và nhận được giá tốt cho chúng tôi cũng như tạo tác động lớn cho khách hàng.',
-      findByPictures: 'Tìm bằng hình ảnh',
-      merchant: 'Dành cho thương nhân'
+  findByPictures: 'Tìm bằng hình ảnh',
+  chooseFromLibrary: 'Chọn ảnh từ thư viện',
+  takeNewPhoto: 'Chụp ảnh mới',
+  selectedImage: 'Ảnh đã chọn',
+  removeImage: 'Xoá',
+  findAction: 'Tìm',
+  merchant: 'Dành cho thương nhân'
     },
     search: {
       food: 'Đồ ăn',

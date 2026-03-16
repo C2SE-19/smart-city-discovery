@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useLanguage } from '../../contexts/LanguageContext';
 import translations from '../../constants/translations';
@@ -146,6 +146,21 @@ function OverviewPage() {
   const [direction, setDirection] = useState('right');
   const [currentLocation, setCurrentLocation] = useState(null);
   const [currentWeather, setCurrentWeather] = useState(null);
+  const [showImageSearch, setShowImageSearch] = useState(false);
+  const [selectedImage, setSelectedImage] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState('');
+  const [imageError, setImageError] = useState('');
+  const libraryInputRef = useRef(null);
+  const cameraInputRef = useRef(null);
+
+  const closeImageModal = () => {
+    setShowImageSearch(false);
+    setSelectedImage(null);
+    setPreviewUrl('');
+    setImageError('');
+    if (libraryInputRef.current) libraryInputRef.current.value = '';
+    if (cameraInputRef.current) cameraInputRef.current.value = '';
+  };
 
   const handleNextFood = () => {
     setDirection('right');
@@ -168,19 +183,43 @@ function OverviewPage() {
   // retrieve user's location and (dummy) weather
   useEffect(() => {
     if (!navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition(async (pos) => {
-      const { latitude, longitude } = pos.coords;
-      // reverse geocode - replace with real service if available
-      // here we'll just mock as Da Nang, Sơn Trà for demo
+    const weatherLabel = translations[language]?.weather?.sunny || 'Sunny';
+    navigator.geolocation.getCurrentPosition(() => {
       setCurrentLocation('Da Nang, Sơn Trà');
-      // weather fetch placeholder; you can call OpenWeatherMap or similar
-      // const resp = await fetch(`https://api.weather.com/...${latitude},${longitude}`);
-      // const data = await resp.json();
-      // Use translated weather condition
-      const weatherCondition = t.weather.sunny; // 'Sunny' or 'Năng' depending on language
-      setCurrentWeather(`29°C, ${weatherCondition}`);
+      setCurrentWeather(`29°C, ${weatherLabel}`);
     });
   }, [language]);
+
+  const handlePickImage = (source) => {
+    setImageError('');
+    if (source === 'library') {
+      libraryInputRef.current?.click();
+    } else {
+      cameraInputRef.current?.click();
+    }
+  };
+
+  const handleImageSelected = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setImageError(language === 'en' ? 'Please choose an image file.' : 'Vui lòng chọn tệp hình ảnh.');
+      event.target.value = '';
+      return;
+    }
+    setSelectedImage(file);
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+    setShowImageSearch(true);
+  };
+
+  const clearSelectedImage = () => {
+    setSelectedImage(null);
+    setPreviewUrl('');
+    setImageError('');
+    if (libraryInputRef.current) libraryInputRef.current.value = '';
+    if (cameraInputRef.current) cameraInputRef.current.value = '';
+  };
 
   return (
     <div className="overview-page">
@@ -233,7 +272,7 @@ function OverviewPage() {
             <button 
               type="button" 
               className="overview-hero-button overview-hero-button-primary"
-              onClick={() => navigate('/discovery')}
+              onClick={() => setShowImageSearch(true)}
             >
               {t.hero.findByPictures}
             </button>
@@ -247,6 +286,76 @@ function OverviewPage() {
           </div>
         </div>
       </section>
+
+      {showImageSearch && (
+        <div className="overview-image-overlay" onClick={closeImageModal}>
+          <div className="overview-image-modal" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className="overview-image-close"
+              aria-label="Close image search"
+              onClick={closeImageModal}
+            >
+              ×
+            </button>
+            <div className="overview-image-search-panel">
+              <div className="overview-image-search-actions">
+                <button
+                  type="button"
+                  className="overview-image-button library"
+                  onClick={() => handlePickImage('library')}
+                >
+                  {t.hero.chooseFromLibrary}
+                </button>
+                <button
+                  type="button"
+                  className="overview-image-button camera"
+                  onClick={() => handlePickImage('camera')}
+                >
+                  {t.hero.takeNewPhoto}
+                </button>
+              </div>
+
+              <input
+                ref={libraryInputRef}
+                type="file"
+                accept="image/*"
+                className="overview-image-input"
+                onChange={handleImageSelected}
+              />
+              <input
+                ref={cameraInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="overview-image-input"
+                onChange={handleImageSelected}
+              />
+
+              {previewUrl && (
+                <div className="overview-image-preview">
+                  <div className="overview-image-thumb">
+                    <img src={previewUrl} alt={t.hero.selectedImage} />
+                    <button type="button" className="overview-image-remove" onClick={clearSelectedImage} aria-label={t.hero.removeImage}>
+                      −
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    className="overview-image-find"
+                    disabled={!selectedImage}
+                    onClick={() => {/* hook up real search later */}}
+                  >
+                    {t.hero.findAction}
+                  </button>
+                </div>
+              )}
+
+              {imageError && <div className="overview-image-error">{imageError}</div>}
+            </div>
+          </div>
+        </div>
+      )}
 
       <section className="overview-search">
         <div className="overview-search-top">
