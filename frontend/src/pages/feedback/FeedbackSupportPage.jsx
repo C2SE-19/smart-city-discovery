@@ -15,6 +15,8 @@ const CATEGORY_OPTIONS = [
   { value: 'other', label: 'Vấn đề khác', labelEn: 'Other issues' },
 ];
 
+const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15MB
+
 const COPY = {
   vi: {
     kicker: 'SMART CITY · TRUNG TÂM HỖ TRỢ',
@@ -27,8 +29,9 @@ const COPY = {
     placeholder: 'Câu trả lời của bạn...',
     email: 'Email liên hệ',
     phone: 'Số điện thoại',
-    attach: 'Đính kèm file',
-    hint: 'Hỗ trợ JPG, PNG, PDF · Tối đa 5MB',
+  attach: 'Đính kèm file',
+  hint: 'Hỗ trợ JPG, PNG, PDF · Tối đa 15MB',
+  fileTooLarge: 'Kích thước tệp vượt quá 15MB. Vui lòng chọn tệp nhỏ hơn.',
     upload: 'Thêm tệp',
     submit: 'Gửi góp ý',
     submitting: 'Đang gửi...',
@@ -47,8 +50,9 @@ const COPY = {
     placeholder: 'Your message...',
     email: 'Contact email',
     phone: 'Phone',
-    attach: 'Attach file',
-    hint: 'Supports JPG, PNG, PDF · Up to 5MB',
+  attach: 'Attach file',
+  hint: 'Supports JPG, PNG, PDF · Up to 15MB',
+  fileTooLarge: 'File size exceeds 15MB. Please choose a smaller file.',
     upload: 'Add file',
     submit: 'Send feedback',
     submitting: 'Sending...',
@@ -79,6 +83,12 @@ function FeedbackSupportPage() {
 
   const handleFileChange = (event) => {
     const file = event.target.files?.[0];
+    if (file && file.size > MAX_FILE_SIZE) {
+      setStatus({ type: 'error', message: t.fileTooLarge });
+      event.target.value = '';
+      setField('attachment', null);
+      return;
+    }
     setField('attachment', file || null);
   };
 
