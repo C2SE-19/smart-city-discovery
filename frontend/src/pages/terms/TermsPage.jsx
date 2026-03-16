@@ -110,6 +110,7 @@ function TermsPage() {
       : 'Vui lòng đọc kỹ các quy định sau trước khi sử dụng nền tảng.');
   const lastUpdatedLabel = t?.termsPage?.lastUpdated || (language === 'en' ? 'Last updated' : 'Cập nhật');
 
+  const intro = language === 'en' ? introFallback : (terms?.intro || introFallback);
   const localizedSections = language === 'en' ? EN_SECTIONS : terms?.sections;
 
   return (
@@ -119,7 +120,7 @@ function TermsPage() {
           <p className="terms-kicker">SMART CITY DISCOVERY</p>
           <h1 className="terms-title">{headline}</h1>
           <div className="terms-underline" />
-          <p className="terms-lead">{terms?.intro || introFallback}</p>
+          <p className="terms-lead">{intro}</p>
           <p className="terms-updated">{lastUpdatedLabel}: {terms?.lastUpdated || '—'}</p>
         </header>
 

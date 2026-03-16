@@ -15,8 +15,8 @@ function BusinessLicenseUploader({ onLicenseChange }) {
       return;
     }
 
-    if (file.size > 5 * 1024 * 1024) {
-      alert('File size must be less than 5MB');
+    if (file.size > 15 * 1024 * 1024) {
+      alert('File size must be less than 15MB');
       return;
     }
 
@@ -60,7 +60,7 @@ function BusinessLicenseUploader({ onLicenseChange }) {
         <label htmlFor="license-input" className="upload-label">
           <div className="upload-icon">📄</div>
           <p className="upload-text">Upload your business license</p>
-          <p className="upload-hint">PNG, JPG up to 5MB • This field is required</p>
+          <p className="upload-hint">PNG, JPG up to 15MB • This field is required</p>
         </label>
       </div>
 
