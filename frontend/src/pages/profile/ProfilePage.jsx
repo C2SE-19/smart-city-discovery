@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useLanguage } from '../../contexts/LanguageContext';
+import { useAuth } from '../../contexts/AuthContext';
 import translations from '../../constants/translations';
+import axios from 'axios';
 import './ProfilePage.css';
 
 const MenuItems = [
@@ -14,19 +16,67 @@ const MenuItems = [
 
 function ProfilePage() {
   const { language } = useLanguage();
+  const { user } = useAuth();
+  const t = translations[language];
   const [activeMenu, setActiveMenu] = useState('account-info');
   const [isEditing, setIsEditing] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [formData, setFormData] = useState({
-    name: 'Nguyễn Hữu Lộc',
-    email: ' ',
-    phone: ' ',
-    birthDate: ' ',
-    address: ' ',
+    name: '',
+    email: '',
+    phone: '',
+    birthDate: '',
+    address: '',
     gender: 'Nam',
     bio: ''
   });
 
   const [editData, setEditData] = useState(formData);
+
+  // Fetch user profile on mount
+  useEffect(() => {
+    const fetchProfile = async () => {
+      try {
+        setLoading(true);
+        const apiUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+        const response = await axios.get(`${apiUrl}/v1/users/profile`);
+        
+        const userData = response.data.user;
+        const profileData = {
+          name: userData.fullname || user?.fullname || '',
+          email: userData.email || user?.email || '',
+          phone: userData.phone || '',
+          birthDate: userData.birthDate || '',
+          address: userData.address || '',
+          gender: userData.gender || 'Nam',
+          bio: userData.bio || ''
+        };
+        
+        setFormData(profileData);
+        setEditData(profileData);
+        setError(null);
+      } catch (err) {
+        console.error('Failed to fetch profile:', err);
+        // Use fallback data from auth context
+        const fallbackData = {
+          name: user?.fullname || 'Nguyễn Hữu Lộc',
+          email: user?.email || '',
+          phone: '',
+          birthDate: '',
+          address: '',
+          gender: 'Nam',
+          bio: ''
+        };
+        setFormData(fallbackData);
+        setEditData(fallbackData);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchProfile();
+  }, [user]);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -36,9 +86,26 @@ function ProfilePage() {
     });
   };
 
-  const handleSave = () => {
-    setFormData(editData);
-    setIsEditing(false);
+  const handleSave = async () => {
+    try {
+      const apiUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+      await axios.put(`${apiUrl}/v1/users/profile`, {
+        fullname: editData.name,
+        email: editData.email,
+        phone: editData.phone,
+        birthDate: editData.birthDate,
+        address: editData.address,
+        gender: editData.gender,
+        bio: editData.bio
+      });
+      
+      setFormData(editData);
+      setIsEditing(false);
+      setError(null);
+    } catch (err) {
+      console.error('Failed to update profile:', err);
+      setError('Failed to update profile. Please try again.');
+    }
   };
 
   const handleCancel = () => {
@@ -47,6 +114,22 @@ function ProfilePage() {
   };
 
   const renderContent = () => {
+    if (loading) {
+      return (
+        <div className="profile-content">
+          <p>Đang tải thông tin...</p>
+        </div>
+      );
+    }
+
+    if (error && activeMenu === 'account-info') {
+      return (
+        <div className="profile-content">
+          <div className="error-message">{error}</div>
+        </div>
+      );
+    }
+
     switch (activeMenu) {
       case 'account-info':
         return (
