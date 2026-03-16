@@ -1,16 +1,20 @@
 require('dotenv').config();
 const express = require('express');
+const path = require('path');
+const fs = require('fs');
 const { Pool } = require('pg');
 const cors = require('cors');
 const bcryptjs = require('bcryptjs');
 const axios = require('axios');
 const jwt = require('jsonwebtoken');
 const turf = require('@turf/turf');
+const multer = require('multer');
 const { OAuth2Client } = require('google-auth-library');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Initialize Google OAuth2 Client
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
@@ -57,6 +61,111 @@ pool.query('SELECT NOW()', (err, res) => {
     console.log('✅ Database connected:', res.rows[0]);
   }
 });
+
+// ==========================================
+// FEEDBACK SUPPORT
+// ==========================================
+const feedbackUploadDir = path.join(__dirname, 'uploads', 'feedback');
+if (!fs.existsSync(feedbackUploadDir)) {
+    fs.mkdirSync(feedbackUploadDir, { recursive: true });
+}
+
+const feedbackStorage = multer.diskStorage({
+    destination: feedbackUploadDir,
+    filename: (_req, file, cb) => {
+        const safeName = file.originalname.replace(/\s+/g, '-');
+        cb(null, `${Date.now()}-${safeName}`);
+    }
+});
+
+const uploadFeedback = multer({
+    storage: feedbackStorage,
+    limits: { fileSize: 5 * 1024 * 1024 },
+    fileFilter: (_req, file, cb) => {
+        const allowed = ['image/png', 'image/jpeg', 'application/pdf'];
+        if (allowed.includes(file.mimetype)) {
+            cb(null, true);
+        } else {
+            cb(new Error('Unsupported file type'));
+        }
+    }
+});
+
+const FEEDBACK_CATEGORIES = ['bug', 'feature', 'ui', 'data', 'performance', 'payment', 'other'];
+
+const TERMS_OF_USE = {
+    title: 'Quy định chung của SMART CITY DISCOVERY',
+    intro: 'Bằng việc sử dụng nền tảng, bạn đồng ý tuân thủ các quy định dưới đây để đảm bảo trải nghiệm an toàn và minh bạch cho cộng đồng.',
+    sections: [
+        {
+            heading: 'Quy định chung của SMART CITY DISCOVERY',
+            items: [
+                {
+                    title: 'Nghiêm cấm đăng tải thông tin sai lệch.',
+                    description: 'Người dùng phải đảm bảo thông tin về địa điểm, dịch vụ hoặc nội dung đăng tải là chính xác và không gây hiểu nhầm cho người khác.'
+                },
+                {
+                    title: 'Nghiêm cấm hành vi quấy rối, xúc phạm.',
+                    description: 'Không sử dụng nền tảng để đăng tải nội dung xúc phạm, phân biệt đối xử hoặc gây ảnh hưởng tiêu cực đến người dùng khác.'
+                },
+                {
+                    title: 'Bảo mật thông tin cá nhân.',
+                    description: 'Người dùng không được chia sẻ thông tin cá nhân của người khác khi chưa có sự đồng ý.'
+                },
+                {
+                    title: 'Tôn trọng bản quyền nội dung.',
+                    description: 'Không đăng tải hình ảnh, video hoặc nội dung thuộc bản quyền của người khác khi chưa được cho phép.'
+                },
+                {
+                    title: 'Tuân thủ pháp luật hiện hành.',
+                    description: 'Mọi hoạt động trên nền tảng phải tuân thủ pháp luật Việt Nam và các quy định liên quan.'
+                }
+            ]
+        },
+        {
+            heading: 'Quy định của người đăng địa điểm / nội dung',
+            items: [
+                {
+                    title: 'Thông tin chính xác.',
+                    description: 'Người đăng địa điểm phải cung cấp thông tin chính xác về tên địa điểm, loại dịch vụ, vị trí và mô tả liên quan.'
+                },
+                {
+                    title: 'Hình ảnh rõ ràng.',
+                    description: 'Hình ảnh địa điểm hoặc dịch vụ phải là hình ảnh thực tế, không sử dụng hình ảnh không liên quan hoặc gây hiểu lầm.'
+                },
+                {
+                    title: 'Nội dung phù hợp.',
+                    description: 'Nội dung đăng tải phải phù hợp với mục đích của nền tảng, không chứa nội dung phản cảm, quảng cáo sai sự thật hoặc spam.'
+                },
+                {
+                    title: 'Hợp tác với quản trị viên.',
+                    description: 'Người đăng cần hợp tác với quản trị viên trong việc xác minh thông tin hoặc chỉnh sửa nội dung khi cần thiết.'
+                }
+            ]
+        },
+        {
+            heading: 'Quy định của người sử dụng nền tảng',
+            items: [
+                {
+                    title: 'Kiểm tra thông tin.',
+                    description: 'Người dùng nên kiểm tra thông tin địa điểm và đánh giá từ cộng đồng trước khi quyết định sử dụng dịch vụ.'
+                },
+                {
+                    title: 'Sử dụng nền tảng đúng mục đích.',
+                    description: 'Người dùng không được lợi dụng nền tảng để spam, quảng cáo trái phép hoặc gây ảnh hưởng đến trải nghiệm của người khác.'
+                },
+                {
+                    title: 'Phản hồi sau trải nghiệm.',
+                    description: 'Người dùng được khuyến khích đánh giá và phản hồi về trải nghiệm của mình để giúp cộng đồng có thêm thông tin tham khảo.'
+                },
+                {
+                    title: 'Báo cáo vi phạm.',
+                    description: 'Nếu phát hiện nội dung sai lệch, spam hoặc vi phạm quy định, người dùng cần báo cáo cho quản trị viên để xử lý kịp thời.'
+                }
+            ]
+        }
+    ]
+};
 
 // ==========================================
 // CORE SYSTEM APIs
@@ -325,6 +434,52 @@ app.post('/api/auth/google', async (req, res) => {
 // ==========================================
 // FACEBOOK OAUTH
 // ==========================================
+app.post('/api/v1/feedback', (req, res) => {
+    uploadFeedback.single('attachment')(req, res, async (uploadErr) => {
+        if (uploadErr) {
+            return res.status(400).json({ message: uploadErr.message || 'Upload failed' });
+        }
+
+        const { category, message, contactEmail, contactPhone } = req.body;
+
+        if (!category || !message || !message.trim()) {
+            return res.status(400).json({ message: 'Category and message are required' });
+        }
+
+        const normalizedCategory = FEEDBACK_CATEGORIES.includes(category) ? category : 'other';
+        const attachmentUrl = req.file ? `/uploads/feedback/${req.file.filename}` : null;
+
+        try {
+            const insertQuery = `
+                INSERT INTO feedbacks (category, issue_type, message, contact_email, contact_phone, attachment_url)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                RETURNING *;
+            `;
+
+            const { rows } = await pool.query(insertQuery, [
+                normalizedCategory,
+                normalizedCategory,
+                message.trim(),
+                contactEmail || null,
+                contactPhone || null,
+                attachmentUrl
+            ]);
+
+            res.status(201).json({ message: 'Feedback submitted', feedback: rows[0] });
+        } catch (err) {
+            console.error('Feedback submission error:', err);
+            res.status(500).json({ message: 'Unable to submit feedback' });
+        }
+    });
+});
+
+app.get('/api/v1/terms', (_req, res) => {
+    res.json({
+        lastUpdated: '2026-03-16',
+        ...TERMS_OF_USE
+    });
+});
+
 app.post('/api/auth/facebook', async (req, res) => {
     try {
         const { accessToken } = req.body;

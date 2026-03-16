@@ -22,6 +22,8 @@ import MerchantPostListPage from './pages/merchant/MerchantPostListPage';
 import LoginPage from './pages/auth/LoginPage';
 import RegisterPage from './pages/auth/RegisterPage';
 import ProfilePage from './pages/profile/ProfilePage';
+import FeedbackSupportPage from './pages/feedback/FeedbackSupportPage';
+import TermsPage from './pages/terms/TermsPage';
 import { APP_ROUTES } from './constants/routes';
 import { ROLES } from './constants/roles';
 
@@ -104,6 +106,8 @@ function App() {
               />
             }
           />
+          <Route path={APP_ROUTES.TERMS} element={<TermsPage />} />
+          <Route path={APP_ROUTES.FEEDBACK} element={<FeedbackSupportPage />} />
           <Route path="/profile" element={<ProfilePage />} />
         </Route>
 

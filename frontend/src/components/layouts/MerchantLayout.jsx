@@ -4,6 +4,7 @@ import { useLanguage } from '../../contexts/LanguageContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useAuth } from '../../contexts/AuthContext';
 import translations from '../../constants/translations';
+import { APP_ROUTES } from '../../constants/routes';
 import logo from '../../assets/images/logo.png';
 import '../layouts/LandingLayout.css';
 
@@ -108,7 +109,7 @@ function MerchantLayout() {
                     type="button"
                     className="landing-dropdown-item"
                     onClick={() => {
-                      navigate('/merchant/posts');
+                      navigate(APP_ROUTES.MERCHANT_POSTS);
                       setShowProfileMenu(false);
                     }}
                   >
@@ -118,7 +119,7 @@ function MerchantLayout() {
                     type="button"
                     className="landing-dropdown-item"
                     onClick={() => {
-                      navigate('/feedback');
+                      navigate(APP_ROUTES.FEEDBACK);
                       setShowProfileMenu(false);
                     }}
                   >
@@ -128,7 +129,7 @@ function MerchantLayout() {
                     type="button"
                     className="landing-dropdown-item"
                     onClick={() => {
-                      navigate('/terms');
+                      navigate(APP_ROUTES.TERMS);
                       setShowProfileMenu(false);
                     }}
                   >
