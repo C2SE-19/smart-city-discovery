@@ -6,6 +6,8 @@ export const APP_ROUTES = {
   ALL_CITY: '/all-city',
   SERVICE: '/service',
   DISCOVERY: '/discovery',
+  TERMS: '/terms',
+  FEEDBACK: '/feedback', // Restored FEEDBACK route constant
   ADMIN_DASHBOARD: '/admin',
   ADMIN_BOUNDARIES: '/admin/boundaries',
   ADMIN_USERS: '/admin/users',
