@@ -21,7 +21,8 @@ app.get('/', (req, res) => {
 });
 
 app.use('/api/v1', apiRoutes);
-app.use('/api', legacyRoutes);
+app.use('/api', apiRoutes);  // Also support /api for backward compatibility
+app.use('/legacy', legacyRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

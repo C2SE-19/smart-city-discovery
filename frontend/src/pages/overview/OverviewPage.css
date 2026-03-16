@@ -630,6 +630,11 @@
   line-height: 1;
 }
 
+.overview-favorite.is-active::before {
+  content: '\2665';
+  color: #ff6b35;
+}
+
 .overview-add-button {
   width: 24px;
   height: 24px;

@@ -71,6 +71,7 @@ const translations = {
       signIn: 'Sign in',
       register: 'Please Fill out form to Register!',
       passwordMismatch: 'Passwords do not match',
+      passwordNotMatch: 'Passwords do not match',
       registerSuccess: 'Registered successfully!',
       registerFailed: 'Register failed',
       loginFailed: 'Login failed',
@@ -85,7 +86,18 @@ const translations = {
       passwordRequirements: 'Password Requirements:',
       minLength: 'At least 8 characters',
       hasUpperCase: 'At least 1 uppercase letter (A-Z)',
-      hasSpecialChar: 'At least 1 special character (!@#$%^&*...)'
+      hasSpecialChar: 'At least 1 special character (!@#$%^&*...)',
+      usernameExists: 'Username already exists',
+      emailExists: 'Email already exists',
+      fixErrors: 'Please fix the errors before registering'
+    },
+    termsPage: {
+      title: 'Terms of Use',
+      intro: 'Please review these rules to use the platform responsibly.',
+      lastUpdated: 'Last updated',
+      common: 'General rules',
+      poster: 'Rules for place/content owners',
+      user: 'Rules for users'
     }
   },
   vi: {
@@ -160,6 +172,7 @@ const translations = {
       signIn: 'Đăng nhập',
       register: 'Vui lòng điền đầy đủ form để đăng ký!',
       passwordMismatch: 'Mật khẩu không khớp',
+      passwordNotMatch: 'Mật khẩu không khớp',
       registerSuccess: 'Đăng ký thành công!',
       registerFailed: 'Đăng ký thất bại',
       loginFailed: 'Đăng nhập thất bại',
@@ -174,7 +187,18 @@ const translations = {
       passwordRequirements: 'Yêu cầu mật khẩu:',
       minLength: 'Ít nhất 8 ký tự',
       hasUpperCase: 'Ít nhất 1 chữ cái viết hoa (A-Z)',
-      hasSpecialChar: 'Ít nhất 1 ký tự đặc biệt (!@#$%^&*...)'
+      hasSpecialChar: 'Ít nhất 1 ký tự đặc biệt (!@#$%^&*...)',
+      usernameExists: 'Tên đăng nhập đã tồn tại',
+      emailExists: 'Email đã tồn tại',
+      fixErrors: 'Vui lòng sửa lỗi trước khi đăng ký'
+    },
+    termsPage: {
+      title: 'Điều khoản sử dụng',
+      intro: 'Vui lòng đọc kỹ các quy định sau trước khi sử dụng nền tảng.',
+      lastUpdated: 'Cập nhật',
+      common: 'Quy định chung',
+      poster: 'Quy định cho người đăng địa điểm / nội dung',
+      user: 'Quy định cho người sử dụng nền tảng'
     }
   }
 };
