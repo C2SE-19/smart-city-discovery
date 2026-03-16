@@ -1,7 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTheme } from '../../contexts/ThemeContext';
 import translations from '../../constants/translations';
+import { APP_ROUTES } from '../../constants/routes';
 import axios from 'axios';
 import './ProfilePage.css';
 
@@ -12,12 +15,102 @@ const MenuItems = [
   { id: 'ratings', label: 'Đánh giá', icon: '⭐' },
   { id: 'support', label: 'Góp ý & hỗ trợ', icon: '💬' }
 ];
+const COPY = {
+  vi: {
+    menu: {
+      overview: 'Tổng Quan',
+      account: 'Thông tin tài khoản',
+      favorites: 'Yêu Thích',
+      ratings: 'Đánh giá',
+      posts: 'Bài viết của tôi',
+      support: 'Góp ý & hỗ trợ'
+    },
+    headings: {
+      personal: 'Thông tin cá nhân',
+      favorites: 'Yêu Thích',
+      ratings: 'Đánh giá của tôi',
+      posts: 'Bài viết của tôi',
+      support: 'Góp ý & Hỗ trợ'
+    },
+    placeholder: {
+      favorites: 'Các địa điểm yêu thích của bạn sẽ hiển thị ở đây',
+      ratings: 'Các đánh giá bạn đã gửi sẽ hiển thị ở đây',
+      posts: 'Các bài viết của bạn sẽ hiển thị ở đây',
+      support: 'Liên hệ với chúng tôi để được hỗ trợ tốt nhất'
+    },
+    labels: {
+      name: 'Họ và tên',
+      email: 'Email',
+      gender: 'Giới tính',
+      phone: 'Số điện thoại',
+      birthDate: 'Ngày sinh',
+      address: 'Địa chỉ'
+    },
+    genderOptions: ['Nam', 'Nữ', 'Khác'],
+    loading: 'Đang tải thông tin...',
+    edit: '✎ Chỉnh sửa',
+    save: 'Lưu',
+    cancel: 'Hủy',
+    ratingTitle: 'Đánh giá',
+    ratingCount: '4.7 (0 đánh giá)'
+  },
+  en: {
+    menu: {
+      overview: 'Overview',
+      account: 'Account Info',
+      favorites: 'Favorites',
+      ratings: 'My Ratings',
+      posts: 'My Posts',
+      support: 'Feedback & Support'
+    },
+    headings: {
+      personal: 'Personal Information',
+      favorites: 'Favorites',
+      ratings: 'My Ratings',
+      posts: 'My Posts',
+      support: 'Feedback & Support'
+    },
+    placeholder: {
+      favorites: 'Your favorite places will appear here',
+      ratings: 'Your submitted ratings will appear here',
+      posts: 'Your posts will appear here',
+      support: 'Contact us for the best support'
+    },
+    labels: {
+      name: 'Full name',
+      email: 'Email',
+      gender: 'Gender',
+      phone: 'Phone',
+      birthDate: 'Date of birth',
+      address: 'Address'
+    },
+    genderOptions: ['Male', 'Female', 'Other'],
+    loading: 'Loading profile...',
+    edit: '✎ Edit',
+    save: 'Save',
+    cancel: 'Cancel',
+    ratingTitle: 'Ratings',
+    ratingCount: '4.7 (0 reviews)'
+  }
+};
 
 
 function ProfilePage() {
   const { language } = useLanguage();
   const { user, token } = useAuth();
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const { theme } = useTheme();
   const t = translations[language];
+  const copy = COPY[language] || COPY.vi;
+  const MenuItems = [
+    { id: 'overview', label: copy.menu.overview, icon: '🏠' },
+    { id: 'account-info', label: copy.menu.account, icon: '👤' },
+    { id: 'favorites', label: copy.menu.favorites, icon: '❤️' },
+    { id: 'ratings', label: copy.menu.ratings, icon: '⭐' },
+    { id: 'posts', label: copy.menu.posts, icon: '📝' },
+    { id: 'support', label: copy.menu.support, icon: '💬' }
+  ];
   const [activeMenu, setActiveMenu] = useState('account-info');
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -261,11 +354,18 @@ function ProfilePage() {
     setPasswordVisibility({ current: false, next: false, confirm: false });
   };
 
+  const maskedPhone = useMemo(() => {
+    const phone = formData.phone || '';
+    if (phone.length <= 4) return phone;
+    const visible = phone.slice(0, 4);
+    return `${visible}${'*'.repeat(Math.max(phone.length - 4, 0))}`;
+  }, [formData.phone]);
+
   const renderContent = () => {
     if (loading) {
       return (
         <div className="profile-content">
-          <p>Đang tải thông tin...</p>
+          <p>{copy.loading}</p>
         </div>
       );
     }
@@ -275,7 +375,7 @@ function ProfilePage() {
         return (
           <div className="profile-content">
             <div className="profile-content-header">
-              <h2>Thông tin cá nhân</h2>
+              <h2>{copy.headings.personal}</h2>
               {!isEditing && (
                 <button
                   className="btn-edit"
@@ -286,6 +386,8 @@ function ProfilePage() {
                   }}
                 >
                   ✎ Chỉnh sửa
+                <button className="btn-edit" onClick={() => setIsEditing(true)}>
+                  {copy.edit}
                 </button>
               )}
             </div>
@@ -294,31 +396,31 @@ function ProfilePage() {
               <div className="info-display">
                 <div className="info-row">
                   <div className="info-group">
-                    <label>Họ và tên</label>
+                    <label>{copy.labels.name}</label>
                     <p>{formData.name}</p>
                   </div>
                   <div className="info-group">
-                    <label>Email</label>
+                    <label>{copy.labels.email}</label>
                     <p>{formData.email}</p>
                   </div>
                 </div>
                 <div className="info-row">
                   <div className="info-group">
-                    <label>Giới tính</label>
+                    <label>{copy.labels.gender}</label>
                     <p>{formData.gender}</p>
                   </div>
                   <div className="info-group">
-                    <label>Số điện thoại</label>
-                    <p>{formData.phone}</p>
+                    <label>{copy.labels.phone}</label>
+                    <p>{maskedPhone}</p>
                   </div>
                 </div>
                 <div className="info-row">
                   <div className="info-group">
-                    <label>Ngày sinh</label>
+                    <label>{copy.labels.birthDate}</label>
                     <p>{formData.birthDate}</p>
                   </div>
                   <div className="info-group">
-                    <label>Địa chỉ</label>
+                    <label>{copy.labels.address}</label>
                     <p>{formData.address}</p>
                   </div>
                 </div>
@@ -327,7 +429,7 @@ function ProfilePage() {
               <form className="info-form">
                 <div className="form-row">
                   <div className="form-group">
-                    <label htmlFor="name">Họ và tên</label>
+                    <label htmlFor="name">{copy.labels.name}</label>
                     <input
                       type="text"
                       id="name"
@@ -337,7 +439,7 @@ function ProfilePage() {
                     />
                   </div>
                   <div className="form-group">
-                    <label htmlFor="email">Email</label>
+                    <label htmlFor="email">{copy.labels.email}</label>
                     <input
                       type="email"
                       id="email"
@@ -353,20 +455,20 @@ function ProfilePage() {
 
                 <div className="form-row">
                   <div className="form-group">
-                    <label htmlFor="gender">Giới tính</label>
+                    <label htmlFor="gender">{copy.labels.gender}</label>
                     <select
                       id="gender"
                       name="gender"
                       value={editData.gender}
                       onChange={handleInputChange}
                     >
-                      <option value="Nam">Nam</option>
-                      <option value="Nữ">Nữ</option>
-                      <option value="Khác">Khác</option>
+                      {copy.genderOptions.map((g) => (
+                        <option key={g} value={g}>{g}</option>
+                      ))}
                     </select>
                   </div>
                   <div className="form-group">
-                    <label htmlFor="phone">Số điện thoại</label>
+                    <label htmlFor="phone">{copy.labels.phone}</label>
                     <input
                       type="tel"
                       id="phone"
@@ -382,7 +484,7 @@ function ProfilePage() {
 
                 <div className="form-row">
                   <div className="form-group">
-                    <label htmlFor="birthDate">Ngày sinh</label>
+                    <label htmlFor="birthDate">{copy.labels.birthDate}</label>
                     <input
                       type="text"
                       id="birthDate"
@@ -393,7 +495,7 @@ function ProfilePage() {
                     />
                   </div>
                   <div className="form-group">
-                    <label htmlFor="address">Địa chỉ</label>
+                    <label htmlFor="address">{copy.labels.address}</label>
                     <input
                       type="text"
                       id="address"
@@ -508,14 +610,14 @@ function ProfilePage() {
                     className="btn-save"
                     onClick={handleSave}
                   >
-                    Lưu
+                    {copy.save}
                   </button>
                   <button
                     type="button"
                     className="btn-cancel"
                     onClick={handleCancel}
                   >
-                    Hủy
+                    {copy.cancel}
                   </button>
                 </div>
                 {successMessage && <div className="success-message">{successMessage}</div>}
@@ -528,32 +630,32 @@ function ProfilePage() {
       case 'favorites':
         return (
           <div className="profile-content">
-            <h2>Yêu Thích</h2>
-            <p className="placeholder-text">Các địa điểm yêu thích của bạn sẽ hiển thị ở đây</p>
+            <h2>{copy.headings.favorites}</h2>
+            <p className="placeholder-text">{copy.placeholder.favorites}</p>
           </div>
         );
 
       case 'ratings':
         return (
           <div className="profile-content">
-            <h2>Đánh giá của tôi</h2>
-            <p className="placeholder-text">Các đánh giá bạn đã gửi sẽ hiển thị ở đây</p>
+            <h2>{copy.headings.ratings}</h2>
+            <p className="placeholder-text">{copy.placeholder.ratings}</p>
           </div>
         );
 
       case 'posts':
         return (
           <div className="profile-content">
-            <h2>Bài viết của tôi</h2>
-            <p className="placeholder-text">Các bài viết của bạn sẽ hiển thị ở đây</p>
+            <h2>{copy.headings.posts}</h2>
+            <p className="placeholder-text">{copy.placeholder.posts}</p>
           </div>
         );
 
       case 'support':
         return (
           <div className="profile-content">
-            <h2>Góp ý & Hỗ trợ</h2>
-            <p className="placeholder-text">Liên hệ với chúng tôi để được hỗ trợ tốt nhất</p>
+            <h2>{copy.headings.support}</h2>
+            <p className="placeholder-text">{copy.placeholder.support}</p>
           </div>
         );
 
@@ -563,7 +665,7 @@ function ProfilePage() {
   };
 
   return (
-    <div className="profile-page">
+    <div className={`profile-page theme-${theme}`}>
       {/* Header Section */}
       <div className="profile-header">
         <div className="user-card">
@@ -574,7 +676,7 @@ function ProfilePage() {
           </div>
           <div className="user-info">
             <h1 className="user-name">
-              Nguyễn Hữu Lộc
+              {user?.fullname || 'Nguyễn Hữu Lộc'}
               <span className="verify-badge">✓</span>
             </h1>
           </div>
@@ -582,13 +684,13 @@ function ProfilePage() {
 
         <div className="rating-card">
           <div className="rating-header">
-            <h3>Đánh giá</h3>
+            <h3>{copy.ratingTitle}</h3>
             <div className="rating-badge">👍</div>
           </div>
           <div className="rating-stars">
             ⭐⭐⭐⭐⭐
           </div>
-          <div className="rating-count">4.7 (0 đánh giá)</div>
+            <div className="rating-count">{copy.ratingCount}</div>
         </div>
       </div>
 
@@ -600,7 +702,13 @@ function ProfilePage() {
               <button
                 key={item.id}
                 className={`menu-item ${activeMenu === item.id ? 'active' : ''}`}
-                onClick={() => setActiveMenu(item.id)}
+                onClick={() => {
+                  if (item.id === 'support') {
+                    navigate(APP_ROUTES.FEEDBACK);
+                  } else {
+                    setActiveMenu(item.id);
+                  }
+                }}
               >
                 <span className="menu-icon">{item.icon}</span>
                 <span className="menu-label">{item.label}</span>
