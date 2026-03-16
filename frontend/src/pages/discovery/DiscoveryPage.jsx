@@ -1,21 +1,40 @@
-import { useDeferredValue, useState } from 'react';
+import { useDeferredValue, useEffect, useState } from 'react';
 
 import SectionCard from '../../components/common/SectionCard';
 import TagPill from '../../components/common/TagPill';
 import useWardMapData from '../../hooks/useWardMapData';
+import InteractiveWardMap from '../../components/map/InteractiveWardMap';
+import { fetchPlaceCategories } from '../../services/api/placeCategoriesApi';
 
 function DiscoveryPage() {
   const { wards, venues, loading, error } = useWardMapData();
   const [selectedWardName, setSelectedWardName] = useState('');
+  const [selectedCategoryId, setSelectedCategoryId] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+  const [placeCategories, setPlaceCategories] = useState([]);
   const deferredSearchTerm = useDeferredValue(searchTerm);
+
+  useEffect(() => {
+    async function loadPlaceCategories() {
+      try {
+        const categories = await fetchPlaceCategories();
+        setPlaceCategories(categories.filter((category) => category.is_active !== false));
+      } catch {
+        setPlaceCategories([]);
+      }
+    }
+
+    loadPlaceCategories();
+  }, []);
 
   const visibleVenues = venues.filter((venue) => {
     const wardName = venue.ward_name || venue.wardName || '';
+    const venueCategoryId = venue.category_id ?? venue.categoryId ?? null;
     const matchesWard = selectedWardName ? wardName === selectedWardName : true;
+    const matchesCategory = selectedCategoryId ? String(venueCategoryId) === selectedCategoryId : true;
     const haystack = `${venue.name || ''} ${venue.address || ''} ${wardName}`.toLowerCase();
 
-    return matchesWard && haystack.includes(deferredSearchTerm.trim().toLowerCase());
+    return matchesWard && matchesCategory && haystack.includes(deferredSearchTerm.trim().toLowerCase());
   });
 
   return (
@@ -23,7 +42,7 @@ function DiscoveryPage() {
       <SectionCard
         eyebrow="User flow"
         title="Discovery workspace"
-        description="Trang nay la khung cho user module: map, ward filter, search, venue list va khu vuc recommendation."
+        description="Explore wards, filter by place categories, and browse approved venues on the map."
       >
         <div className="filter-bar">
           <input
@@ -31,8 +50,21 @@ function DiscoveryPage() {
             type="text"
             value={searchTerm}
             onChange={(event) => setSearchTerm(event.target.value)}
-            placeholder="Tim theo ten quan, dia chi, ward"
+            placeholder="Search venue name, address, or ward"
           />
+
+          <select
+            className="search-input"
+            value={selectedCategoryId}
+            onChange={(event) => setSelectedCategoryId(event.target.value)}
+          >
+            <option value="">All categories</option>
+            {placeCategories.map((category) => (
+              <option key={category.id} value={String(category.id)}>
+                {category.name}
+              </option>
+            ))}
+          </select>
 
           <div className="filter-pills">
             <button
@@ -40,7 +72,7 @@ function DiscoveryPage() {
               onClick={() => setSelectedWardName('')}
               type="button"
             >
-              Tat ca phuong
+              All wards
             </button>
 
             {wards.map((ward) => (
@@ -61,7 +93,7 @@ function DiscoveryPage() {
           venues={visibleVenues}
           loading={loading}
           selectedWardName={selectedWardName}
-          emptyLabel="Can backend /api/v1/wards de hien polygon va /api/v1/venues de hien marker."
+          emptyLabel="Wards and approved venues will appear here once map data is available."
         />
       </SectionCard>
 
@@ -82,7 +114,7 @@ function DiscoveryPage() {
         <SectionCard
           eyebrow="Visible venue list"
           title={`${visibleVenues.length} venues in the current view`}
-          description={error || 'Danh sach nay dung de frontend user team tiep tuc boc details, bookmark, review va report.'}
+          description={error || 'This list is filtered by ward, category, and search keyword.'}
         >
           <div className="venue-list">
             {visibleVenues.slice(0, 8).map((venue) => (
@@ -91,11 +123,13 @@ function DiscoveryPage() {
                   <h3 className="venue-title">{venue.name}</h3>
                   <p className="venue-meta">{venue.address}</p>
                 </div>
-                <TagPill muted>{venue.ward_name || venue.wardName || 'Ward pending'}</TagPill>
+                <TagPill muted>
+                  {venue.category_name || venue.categoryName || venue.ward_name || venue.wardName || 'Uncategorized'}
+                </TagPill>
               </article>
             ))}
 
-            {!visibleVenues.length ? <p className="empty-copy">Khong co venue khop bo loc hien tai.</p> : null}
+            {!visibleVenues.length ? <p className="empty-copy">No venues match the current filters.</p> : null}
           </div>
         </SectionCard>
       </div>

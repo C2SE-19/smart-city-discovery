@@ -1,24 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import ImageUploader from './ImageUploader';
 import ServiceSelector from './ServiceSelector';
 import BusinessLicenseUploader from './BusinessLicenseUploader';
 import LocationPickerModal from '../../../shared/components/modals/LocationPickerModal';
+import { createVenueRequest } from '../../../services/api/venuesApi';
+import { fetchPlaceCategories } from '../../../services/api/placeCategoriesApi';
 import '../styles/MerchantVenueForm.css';
-
-// Venue categories
-const VENUE_CATEGORIES = [
-  { value: 'restaurant', label: 'Restaurant' },
-  { value: 'cafe', label: 'Coffee Shop' },
-  { value: 'bar', label: 'Bar/Lounge' },
-  { value: 'dessert', label: 'Dessert Shop' },
-  { value: 'fastfood', label: 'Fast Food' },
-  { value: 'bakery', label: 'Bakery' },
-  { value: 'seafood', label: 'Seafood' },
-  { value: 'bbq', label: 'BBQ' },
-  { value: 'pizza', label: 'Pizza' },
-  { value: 'noodles', label: 'Noodle Shop' },
-  { value: 'other', label: 'Other' }
-];
 
 function MerchantVenueForm() {
   const [formData, setFormData] = useState({
@@ -43,6 +30,48 @@ function MerchantVenueForm() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitStatus, setSubmitStatus] = useState(null);
   const [formErrors, setFormErrors] = useState({});
+  const [placeCategories, setPlaceCategories] = useState([]);
+  const [categoriesLoading, setCategoriesLoading] = useState(true);
+  const [categoryLoadError, setCategoryLoadError] = useState('');
+
+  useEffect(() => {
+    async function loadPlaceCategories() {
+      setCategoriesLoading(true);
+      setCategoryLoadError('');
+
+      try {
+        const categories = await fetchPlaceCategories();
+        const activeCategories = categories.filter((category) => category.is_active !== false);
+
+        activeCategories.sort((first, second) => {
+          const firstOrder = Number(first.sort_order ?? first.sortOrder ?? 0);
+          const secondOrder = Number(second.sort_order ?? second.sortOrder ?? 0);
+
+          if (firstOrder !== secondOrder) {
+            return firstOrder - secondOrder;
+          }
+
+          return String(first.name || '').localeCompare(String(second.name || ''));
+        });
+
+        setPlaceCategories(activeCategories);
+      } catch (error) {
+        setCategoryLoadError(error.response?.data?.message || 'Could not load categories. Please refresh this page.');
+      } finally {
+        setCategoriesLoading(false);
+      }
+    }
+
+    loadPlaceCategories();
+  }, []);
+
+  const toDataUrl = (file) =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error('Failed to read file'));
+      reader.readAsDataURL(file);
+    });
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -65,6 +94,12 @@ function MerchantVenueForm() {
     // Required fields
     if (!formData.venueName.trim()) errors.venueName = 'Venue name is required';
     if (!formData.category) errors.category = 'Category is required';
+    if (formData.category && !placeCategories.some((category) => String(category.id) === String(formData.category))) {
+      errors.category = 'Selected category is not available';
+    }
+    if (!categoriesLoading && !placeCategories.length) {
+      errors.category = 'No active categories found. Contact admin to add categories.';
+    }
     if (!formData.address.trim()) errors.address = 'Address is required';
     if (!formData.phone.trim()) errors.phone = 'Phone number is required';
     if (!formData.title.trim()) errors.title = 'Venue title is required';
@@ -146,12 +181,47 @@ function MerchantVenueForm() {
     setSubmitStatus(null);
 
     try {
-      // TODO: Submit the form data to the backend
-      console.log('Form data to submit:', formData);
+      let coverImageUrl = '';
+      let businessLicenseImageUrl = '';
+
+      if (formData.images.length > 0) {
+        coverImageUrl = await toDataUrl(formData.images[0]);
+      }
+
+      if (formData.businessLicense) {
+        businessLicenseImageUrl = await toDataUrl(formData.businessLicense);
+      }
+
+      const selectedCategory =
+        placeCategories.find((category) => String(category.id) === String(formData.category)) || null;
+
+      const response = await createVenueRequest({
+        name: formData.venueName,
+        title: formData.title,
+        address: formData.address,
+        categoryId: selectedCategory?.id || null,
+        category: selectedCategory?.name || '',
+        latitude: formData.latitude,
+        longitude: formData.longitude,
+        description: formData.description,
+        phone: formData.phone,
+        coverImageUrl,
+        businessLicenseImageUrl,
+        metadata: {
+          category: selectedCategory?.slug || '',
+          categoryName: selectedCategory?.name || '',
+          minPrice: formData.minPrice ? Number(formData.minPrice) : null,
+          maxPrice: formData.maxPrice ? Number(formData.maxPrice) : null,
+          startTime: formData.startTime || null,
+          endTime: formData.endTime || null,
+          selectedServices: formData.selectedServices,
+          imagesCount: formData.images.length
+        }
+      });
 
       setSubmitStatus({
         type: 'success',
-        message: 'Venue submitted successfully! Awaiting admin approval.'
+        message: `Venue submitted successfully. Assigned ward: ${response.detectedWard || 'Pending detection'} and awaiting admin approval.`
       });
 
       // Reset form
@@ -179,7 +249,7 @@ function MerchantVenueForm() {
     } catch (error) {
       setSubmitStatus({
         type: 'error',
-        message: 'Failed to submit venue. Please try again.'
+        message: error.response?.data?.message || 'Failed to submit venue. Please try again.'
       });
     } finally {
       setIsSubmitting(false);
@@ -246,15 +316,20 @@ function MerchantVenueForm() {
                 value={formData.category}
                 onChange={handleInputChange}
                 required
+                disabled={categoriesLoading}
                 className={`form-input ${formErrors.category ? 'input-error' : ''}`}
               >
-                <option value="">Select a category</option>
-                {VENUE_CATEGORIES.map((cat) => (
-                  <option key={cat.value} value={cat.value}>
-                    {cat.label}
+                <option value="">
+                  {categoriesLoading ? 'Loading categories...' : 'Select a category'}
+                </option>
+                {placeCategories.map((category) => (
+                  <option key={category.id} value={String(category.id)}>
+                    {category.name}
                   </option>
                 ))}
               </select>
+
+              {categoryLoadError ? <p className="error-text">{categoryLoadError}</p> : null}
             </div>
 
             <div className="form-group">

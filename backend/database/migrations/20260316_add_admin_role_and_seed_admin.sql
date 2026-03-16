@@ -7,6 +7,9 @@ alter table if exists users
   add column if not exists role varchar(20) not null default 'user';
 
 alter table if exists users
+  add column if not exists updated_at timestamp default current_timestamp;
+
+alter table if exists users
   drop constraint if exists users_role_check;
 
 alter table if exists users
@@ -21,7 +24,7 @@ do $$
 declare
   existing_user_id text;
 begin
-  select id
+  select id::text
   into existing_user_id
   from users
   where lower(username) = 'admin' or lower(email) = 'admin@smartcity.local'
