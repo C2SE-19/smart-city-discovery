@@ -155,10 +155,10 @@ function normalizeStatusList(statusInput) {
 }
 
 function normalizeCategoryId(value) {
-    return normalizeNullable(value);
+    return normalizeNullableNumber(value);
 }
 
-function normalizeNullable(value) {
+function normalizeNullableNumber(value) {
     if (value === undefined || value === null || value === '') {
         return null;
     }
@@ -171,6 +171,15 @@ function normalizeNullable(value) {
     return parsed;
 }
 
+function normalizeNullableText(value) {
+    if (value === undefined || value === null) {
+        return null;
+    }
+
+    const trimmed = String(value).trim();
+    return trimmed === '' ? null : trimmed;
+}
+
 function slugifyText(value) {
     return String(value || '')
         .normalize('NFD')
@@ -178,6 +187,19 @@ function slugifyText(value) {
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/(^-|-$)/g, '');
+}
+
+function sanitizeTextField(value) {
+    if (value === undefined || value === null) {
+        return null;
+    }
+
+    const text = String(value);
+    if (text.toLowerCase() === 'nan') {
+        return null;
+    }
+
+    return text;
 }
 async function generateWardIdFromName(name) {
                 const fallbackSeed = Date.now().toString().slice(-6);
@@ -1433,9 +1455,19 @@ async function generateWardIdFromName(name) {
                     return res.status(404).json({ message: 'User not found' });
                 }
 
+                const rawUser = result.rows[0];
+                const user = {
+                    ...rawUser,
+                    phone: sanitizeTextField(rawUser.phone),
+                    birthDate: sanitizeTextField(rawUser.birthDate),
+                    address: sanitizeTextField(rawUser.address),
+                    gender: sanitizeTextField(rawUser.gender),
+                    bio: sanitizeTextField(rawUser.bio)
+                };
+
                 res.json({
                     success: true,
-                    user: result.rows[0]
+                    user
                 });
             } catch (err) {
                 console.error('Profile fetch error:', err);
@@ -1504,11 +1536,11 @@ async function generateWardIdFromName(name) {
                        address, gender, bio, role`,
                     [
                         fullname,
-                        normalizeNullable(phone),
-                        normalizeNullable(birthDate),
-                        normalizeNullable(address),
-                        normalizeNullable(gender),
-                        normalizeNullable(bio),
+                        normalizeNullableText(phone),
+                        normalizeNullableText(birthDate),
+                        normalizeNullableText(address),
+                        normalizeNullableText(gender),
+                        normalizeNullableText(bio),
                         userId
                     ]
                 );
@@ -1517,10 +1549,20 @@ async function generateWardIdFromName(name) {
                     return res.status(404).json({ message: 'User not found' });
                 }
 
+                const updatedRawUser = result.rows[0];
+                const updatedUser = {
+                    ...updatedRawUser,
+                    phone: sanitizeTextField(updatedRawUser.phone),
+                    birthDate: sanitizeTextField(updatedRawUser.birthDate),
+                    address: sanitizeTextField(updatedRawUser.address),
+                    gender: sanitizeTextField(updatedRawUser.gender),
+                    bio: sanitizeTextField(updatedRawUser.bio)
+                };
+
                 res.json({
                     success: true,
                     message: 'Profile updated successfully',
-                    user: result.rows[0]
+                    user: updatedUser
                 });
             } catch (err) {
                 console.error('Profile update error:', err);
