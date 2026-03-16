@@ -1,4 +1,3 @@
-// Scaffold placeholder
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import "./register.css";
@@ -21,7 +20,11 @@ export default function RegisterPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [passwordErrors, setPasswordErrors] = useState([]);
+  const [confirmPasswordError, setConfirmPasswordError] = useState("");
   const [generalError, setGeneralError] = useState("");
+  const [generalErrorDetails, setGeneralErrorDetails] = useState([]);
+  const [usernameError, setUsernameError] = useState("");
+  const [emailError, setEmailError] = useState("");
 
   const handlePasswordChange = (e) => {
     const newPassword = e.target.value;
@@ -35,22 +38,72 @@ export default function RegisterPage() {
     }
   };
 
+  const handleUsernameChange = async (e) => {
+    const newUsername = e.target.value;
+    setUsername(newUsername);
+    setUsernameError("");
+
+    // Kiểm tra username đã tồn tại
+    if (newUsername.trim().length > 0) {
+      try {
+        await authService.checkUsernameExists(newUsername.trim());
+      } catch (err) {
+        if (err && (err.exists === true || err.message?.includes("already exists"))) {
+          setUsernameError(t.auth.usernameExists);
+        }
+      }
+    }
+  };
+
+  const handleEmailChange = async (e) => {
+    const newEmail = e.target.value;
+    setEmail(newEmail);
+    setEmailError("");
+
+    // Kiểm tra email đã tồn tại
+    if (newEmail.trim().length > 0) {
+      try {
+        await authService.checkEmailExists(newEmail.trim());
+      } catch (err) {
+        if (err && (err.exists === true || err.message?.includes("already exists"))) {
+          setEmailError(t.auth.emailExists);
+        }
+      }
+    }
+  };
+
+  const handleConfirmPasswordChange = (e) => {
+    const newConfirmPassword = e.target.value;
+    setConfirmPassword(newConfirmPassword);
+    
+    if (password && newConfirmPassword && password !== newConfirmPassword) {
+      setConfirmPasswordError(t.auth.passwordNotMatch);
+    } else {
+      setConfirmPasswordError("");
+    }
+  };
+
   const handleRegister = async (e) => {
 
     e.preventDefault();
     setGeneralError("");
+    setConfirmPasswordError("");
+
+    // Kiểm tra lỗi tồn tại
+    if (usernameError || emailError) {
+      setGeneralError(t.auth.fixErrors);
+      return;
+    }
 
     // Validate password
     const passwordValidation = validatePassword(password, language);
     if (!passwordValidation.isValid) {
       setPasswordErrors(passwordValidation.errors);
-      alert(passwordValidation.errors.join('\n'));
       return;
     }
 
     if (password !== confirmPassword) {
-      setGeneralError(t.auth.passwordMismatch || "Mật khẩu không khớp");
-      alert(t.auth.passwordMismatch || "Mật khẩu không khớp");
+      setConfirmPasswordError(t.auth.passwordNotMatch);
       return;
     }
 
@@ -70,8 +123,20 @@ export default function RegisterPage() {
       navigate("/login");
 
     } catch (err) {
+      // Lỗi từ authService đã được extract từ response
+      let errorMessage = t.auth.registerFailed;
+      let errorDetails = [];
 
-      alert(err.response?.data?.message || t.auth.registerFailed);
+      if (typeof err === 'object') {
+        // err là object { message, details, success } từ authService
+        errorMessage = err.message || errorMessage;
+        errorDetails = err.details || [];
+      } else {
+        errorMessage = String(err);
+      }
+
+      setGeneralError(errorMessage);
+      setGeneralErrorDetails(Array.isArray(errorDetails) ? errorDetails : (errorMessage ? [errorMessage] : []));
 
     } finally {
       setLoading(false);
@@ -106,17 +171,53 @@ export default function RegisterPage() {
           <input
             type="text"
             value={username}
-            onChange={(e)=>setUsername(e.target.value)}
+            onChange={handleUsernameChange}
             required
+            style={{
+              borderColor: usernameError ? '#ff6b6b' : '#ccc',
+              borderWidth: usernameError ? '2px' : '1px'
+            }}
           />
+          {usernameError && (
+            <div style={{
+              color: '#ff6b6b',
+              fontSize: '12px',
+              marginTop: '5px',
+              marginBottom: '10px',
+              padding: '8px',
+              backgroundColor: '#fff5f5',
+              borderRadius: '4px',
+              borderLeft: '3px solid #ff6b6b'
+            }}>
+              {usernameError}
+            </div>
+          )}
 
           <label>{t.auth.email}</label>
           <input
             type="email"
             value={email}
-            onChange={(e)=>setEmail(e.target.value)}
+            onChange={handleEmailChange}
             required
+            style={{
+              borderColor: emailError ? '#ff6b6b' : '#ccc',
+              borderWidth: emailError ? '2px' : '1px'
+            }}
           />
+          {emailError && (
+            <div style={{
+              color: '#ff6b6b',
+              fontSize: '12px',
+              marginTop: '5px',
+              marginBottom: '10px',
+              padding: '8px',
+              backgroundColor: '#fff5f5',
+              borderRadius: '4px',
+              borderLeft: '3px solid #ff6b6b'
+            }}>
+              {emailError}
+            </div>
+          )}
 
           <label>{t.auth.password}</label>
           <input
@@ -125,8 +226,8 @@ export default function RegisterPage() {
             onChange={handlePasswordChange}
             required
             style={{
-              borderColor: passwordErrors.length > 0 ? '#ff6b6b' : 'inherit',
-              backgroundColor: passwordErrors.length > 0 ? '#ffe0e0' : 'inherit'
+              borderColor: passwordErrors.length > 0 ? '#ff6b6b' : '#ccc',
+              borderWidth: passwordErrors.length > 0 ? '2px' : '1px'
             }}
           />
           
@@ -154,9 +255,27 @@ export default function RegisterPage() {
           <input
             type="password"
             value={confirmPassword}
-            onChange={(e)=>setConfirmPassword(e.target.value)}
+            onChange={handleConfirmPasswordChange}
             required
+            style={{
+              borderColor: confirmPasswordError ? '#ff6b6b' : '#ccc',
+              borderWidth: confirmPasswordError ? '2px' : '1px'
+            }}
           />
+          {confirmPasswordError && (
+            <div style={{
+              color: '#ff6b6b',
+              fontSize: '12px',
+              marginTop: '5px',
+              marginBottom: '10px',
+              padding: '8px',
+              backgroundColor: '#fff5f5',
+              borderRadius: '4px',
+              borderLeft: '3px solid #ff6b6b'
+            }}>
+              {confirmPasswordError}
+            </div>
+          )}
 
           {generalError && (
             <div style={{
@@ -165,13 +284,21 @@ export default function RegisterPage() {
               marginBottom: '10px',
               padding: '8px',
               backgroundColor: '#fff5f5',
-              borderRadius: '4px'
+              borderRadius: '4px',
+              borderLeft: '3px solid #ff6b6b'
             }}>
-              {generalError}
+              <div style={{ fontWeight: 'bold', marginBottom: '5px' }}>{generalError}</div>
+              {generalErrorDetails.length > 0 && (
+                <ul style={{ margin: '5px 0', paddingLeft: '20px' }}>
+                  {generalErrorDetails.map((detail, idx) => (
+                    <li key={idx}>{detail}</li>
+                  ))}
+                </ul>
+              )}
             </div>
           )}
 
-          <button type="submit" className="register-btn" disabled={loading || passwordErrors.length > 0}>
+          <button type="submit" className="register-btn" disabled={loading || passwordErrors.length > 0 || confirmPasswordError || usernameError || emailError}>
             {loading ? t.auth.signingUp : t.auth.createAccount}
           </button>
 
