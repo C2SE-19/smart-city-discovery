@@ -2,7 +2,9 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTheme } from '../../contexts/ThemeContext';
 import translations from '../../constants/translations';
+import { APP_ROUTES } from '../../constants/routes';
 import './MerchantPostList.css';
 
 const MenuItems = [
@@ -36,10 +38,16 @@ function MerchantPostListPage() {
   const navigate = useNavigate();
   const { language } = useLanguage();
   const { user, logout } = useAuth();
+  const { theme } = useTheme();
   const t = translations[language];
   const [posts, setPosts] = useState(mockPosts);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeMenu, setActiveMenu] = useState('posts');
+  const copy = {
+    followers: language === 'en' ? 'Followers' : 'Người theo dõi',
+    following: language === 'en' ? 'Following' : 'Đang theo dõi',
+    ratingCount: language === 'en' ? 'reviews' : 'đánh giá'
+  };
 
   const handlePublishClick = () => {
     navigate('/merchant/workbench');
@@ -52,7 +60,7 @@ function MerchantPostListPage() {
     } else if (menuId === 'transactions') {
       navigate('/merchant/transactions');
     } else if (menuId === 'support') {
-      navigate('/merchant/support');
+      navigate(APP_ROUTES.FEEDBACK);
     }
   };
 
@@ -83,7 +91,7 @@ function MerchantPostListPage() {
   );
 
   return (
-    <div className="merchant-posts-wrapper">
+  <div className={`merchant-posts-wrapper theme-${theme}`}>
       {/* Sidebar */}
       <aside className="merchant-sidebar">
         <div className="merchant-sidebar-header">
@@ -136,15 +144,15 @@ function MerchantPostListPage() {
               <div className="merchant-profile-details">
                 <h2>{user?.fullname || 'Nguyễn Hữu Lộc'}</h2>
                 <div className="merchant-followers-info">
-                  <span>Người theo dõi: 18</span>
-                  <span>Danh theo dõi: 3</span>
+                  <span>{copy.followers}: 18</span>
+                  <span>{copy.following}: 3</span>
                 </div>
               </div>
             </div>
 
             <div className="merchant-rating-section">
               <div className="merchant-rating-stars">⭐⭐⭐⭐⭐</div>
-              <div className="merchant-rating-score">4.7 (14 đánh giá)</div>
+              <div className="merchant-rating-score">4.7 (14 {copy.ratingCount})</div>
             </div>
 
             <button 

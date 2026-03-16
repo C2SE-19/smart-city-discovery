@@ -1,16 +1,20 @@
 require('dotenv').config();
 const express = require('express');
+const path = require('path');
+const fs = require('fs');
 const { Pool } = require('pg');
 const cors = require('cors');
 const bcryptjs = require('bcryptjs');
 const axios = require('axios');
 const jwt = require('jsonwebtoken');
 const turf = require('@turf/turf');
+const multer = require('multer');
 const { OAuth2Client } = require('google-auth-library');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Initialize Google OAuth2 Client
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
@@ -63,6 +67,20 @@ function authenticateRequest(req, res, next) {
 
     if (!token) {
         return res.status(401).json({ message: 'Missing authentication token' });
+function getAuthToken(req) {
+    const header = req.headers.authorization || '';
+    if (!header.startsWith('Bearer ')) {
+        return null;
+    }
+
+    return header.slice('Bearer '.length).trim();
+}
+
+function authenticateOptional(req, res, next) {
+    const token = getAuthToken(req);
+
+    if (!token) {
+        return next();
     }
 
     try {
@@ -71,6 +89,10 @@ function authenticateRequest(req, res, next) {
             id: payload.sub,
             email: payload.email,
             role: normalizeRole(payload.role)
+        req.user = {
+            id: payload.sub,
+            email: payload.email,
+            role: payload.role
         };
         return next();
     } catch (error) {
@@ -83,6 +105,9 @@ function requireAdminRole(req, res, next) {
 
     if (role !== 'admin') {
         return res.status(403).json({ message: 'Admin permission is required' });
+function requireAuth(req, res, next) {
+    if (!req.user?.id) {
+        return res.status(401).json({ message: 'Bạn cần đăng nhập để thực hiện thao tác này.' });
     }
 
     return next();
@@ -103,6 +128,7 @@ function normalizeStatusList(statusInput) {
 }
 
 function normalizeCategoryId(value) {
+function normalizeNullable(value) {
     if (value === undefined || value === null || value === '') {
         return null;
     }
@@ -282,6 +308,9 @@ async function detectWardByCoordinates(latitude, longitude) {
     };
 }
 
+    return value;
+}
+
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: {
@@ -295,6 +324,111 @@ pool.query('SELECT NOW()', (err, res) => {
     console.log('✅ Database connected:', res.rows[0]);
   }
 });
+
+// ==========================================
+// FEEDBACK SUPPORT
+// ==========================================
+const feedbackUploadDir = path.join(__dirname, 'uploads', 'feedback');
+if (!fs.existsSync(feedbackUploadDir)) {
+    fs.mkdirSync(feedbackUploadDir, { recursive: true });
+}
+
+const feedbackStorage = multer.diskStorage({
+    destination: feedbackUploadDir,
+    filename: (_req, file, cb) => {
+        const safeName = file.originalname.replace(/\s+/g, '-');
+        cb(null, `${Date.now()}-${safeName}`);
+    }
+});
+
+const uploadFeedback = multer({
+    storage: feedbackStorage,
+    limits: { fileSize: 5 * 1024 * 1024 },
+    fileFilter: (_req, file, cb) => {
+        const allowed = ['image/png', 'image/jpeg', 'application/pdf'];
+        if (allowed.includes(file.mimetype)) {
+            cb(null, true);
+        } else {
+            cb(new Error('Unsupported file type'));
+        }
+    }
+});
+
+const FEEDBACK_CATEGORIES = ['bug', 'feature', 'ui', 'data', 'performance', 'payment', 'other'];
+
+const TERMS_OF_USE = {
+    title: 'Quy định chung của SMART CITY DISCOVERY',
+    intro: 'Bằng việc sử dụng nền tảng, bạn đồng ý tuân thủ các quy định dưới đây để đảm bảo trải nghiệm an toàn và minh bạch cho cộng đồng.',
+    sections: [
+        {
+            heading: 'Quy định chung của SMART CITY DISCOVERY',
+            items: [
+                {
+                    title: 'Nghiêm cấm đăng tải thông tin sai lệch.',
+                    description: 'Người dùng phải đảm bảo thông tin về địa điểm, dịch vụ hoặc nội dung đăng tải là chính xác và không gây hiểu nhầm cho người khác.'
+                },
+                {
+                    title: 'Nghiêm cấm hành vi quấy rối, xúc phạm.',
+                    description: 'Không sử dụng nền tảng để đăng tải nội dung xúc phạm, phân biệt đối xử hoặc gây ảnh hưởng tiêu cực đến người dùng khác.'
+                },
+                {
+                    title: 'Bảo mật thông tin cá nhân.',
+                    description: 'Người dùng không được chia sẻ thông tin cá nhân của người khác khi chưa có sự đồng ý.'
+                },
+                {
+                    title: 'Tôn trọng bản quyền nội dung.',
+                    description: 'Không đăng tải hình ảnh, video hoặc nội dung thuộc bản quyền của người khác khi chưa được cho phép.'
+                },
+                {
+                    title: 'Tuân thủ pháp luật hiện hành.',
+                    description: 'Mọi hoạt động trên nền tảng phải tuân thủ pháp luật Việt Nam và các quy định liên quan.'
+                }
+            ]
+        },
+        {
+            heading: 'Quy định của người đăng địa điểm / nội dung',
+            items: [
+                {
+                    title: 'Thông tin chính xác.',
+                    description: 'Người đăng địa điểm phải cung cấp thông tin chính xác về tên địa điểm, loại dịch vụ, vị trí và mô tả liên quan.'
+                },
+                {
+                    title: 'Hình ảnh rõ ràng.',
+                    description: 'Hình ảnh địa điểm hoặc dịch vụ phải là hình ảnh thực tế, không sử dụng hình ảnh không liên quan hoặc gây hiểu lầm.'
+                },
+                {
+                    title: 'Nội dung phù hợp.',
+                    description: 'Nội dung đăng tải phải phù hợp với mục đích của nền tảng, không chứa nội dung phản cảm, quảng cáo sai sự thật hoặc spam.'
+                },
+                {
+                    title: 'Hợp tác với quản trị viên.',
+                    description: 'Người đăng cần hợp tác với quản trị viên trong việc xác minh thông tin hoặc chỉnh sửa nội dung khi cần thiết.'
+                }
+            ]
+        },
+        {
+            heading: 'Quy định của người sử dụng nền tảng',
+            items: [
+                {
+                    title: 'Kiểm tra thông tin.',
+                    description: 'Người dùng nên kiểm tra thông tin địa điểm và đánh giá từ cộng đồng trước khi quyết định sử dụng dịch vụ.'
+                },
+                {
+                    title: 'Sử dụng nền tảng đúng mục đích.',
+                    description: 'Người dùng không được lợi dụng nền tảng để spam, quảng cáo trái phép hoặc gây ảnh hưởng đến trải nghiệm của người khác.'
+                },
+                {
+                    title: 'Phản hồi sau trải nghiệm.',
+                    description: 'Người dùng được khuyến khích đánh giá và phản hồi về trải nghiệm của mình để giúp cộng đồng có thêm thông tin tham khảo.'
+                },
+                {
+                    title: 'Báo cáo vi phạm.',
+                    description: 'Nếu phát hiện nội dung sai lệch, spam hoặc vi phạm quy định, người dùng cần báo cáo cho quản trị viên để xử lý kịp thời.'
+                }
+            ]
+        }
+    ]
+};
 
 // ==========================================
 // CORE SYSTEM APIs
@@ -1241,6 +1375,249 @@ app.post('/api/login', async (req, res) => {
 });
 
 // ==========================================
+// USER PROFILE APIS
+// ==========================================
+
+app.get('/api/users/profile', authenticateOptional, async (req, res) => {
+    try {
+        const userId = req.user?.id;
+        const email = req.query?.email;
+
+        if (!userId && !email) {
+            return res.status(401).json({ message: 'Unauthorized' });
+        }
+
+        const result = userId
+            ? await pool.query(
+                `SELECT id, username, fullname, email, phone, birth_date AS "birthDate",
+                        address, gender, bio, role
+                 FROM users
+                 WHERE id = $1`,
+                [userId]
+            )
+            : await pool.query(
+                `SELECT id, username, fullname, email, phone, birth_date AS "birthDate",
+                        address, gender, bio, role
+                 FROM users
+                 WHERE email = $1`,
+                [email]
+            );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        res.json({
+            success: true,
+            user: result.rows[0]
+        });
+    } catch (err) {
+        console.error('Profile fetch error:', err);
+        res.status(500).json({ message: 'Server error' });
+    }
+});
+
+app.put('/api/users/profile', authenticateOptional, requireAuth, async (req, res) => {
+    const userId = req.user.id;
+    const { fullname, email, phone, birthDate, address, gender, bio } = req.body;
+
+    try {
+        if (!fullname) {
+            return res.status(400).json({ message: 'Vui lòng nhập họ tên.' });
+        }
+
+        if (phone && !/^\d{10}$/.test(phone)) {
+            return res.status(400).json({ message: 'Số điện thoại không đúng định dạng.' });
+        }
+
+        if (birthDate && !/^\d{2}\/\d{2}\/\d{4}$/.test(birthDate)) {
+            return res.status(400).json({ message: 'Ngày sinh phải theo định dạng DD/MM/YYYY.' });
+        }
+
+        if (email) {
+            const emailCheck = await pool.query(
+                'SELECT 1 FROM users WHERE email = $1 AND id <> $2 LIMIT 1',
+                [email, userId]
+            );
+            if (emailCheck.rows.length > 0) {
+                return res.status(409).json({ message: 'Email đã tồn tại.' });
+            }
+        }
+
+        if (phone) {
+            const phoneCheck = await pool.query(
+                'SELECT 1 FROM users WHERE phone = $1 AND id <> $2 LIMIT 1',
+                [phone, userId]
+            );
+            if (phoneCheck.rows.length > 0) {
+                return res.status(409).json({ message: 'Số điện thoại đã tồn tại.' });
+            }
+        }
+
+        if (address) {
+            const addressCheck = await pool.query(
+                'SELECT 1 FROM users WHERE address = $1 AND id <> $2 LIMIT 1',
+                [address, userId]
+            );
+            if (addressCheck.rows.length > 0) {
+                return res.status(409).json({ message: 'Địa chỉ đã tồn tại.' });
+            }
+        }
+
+        const result = await pool.query(
+            `UPDATE users
+             SET fullname = $1,
+                 phone = $2,
+                 birth_date = $3,
+                 address = $4,
+                 gender = $5,
+                 bio = $6,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $7
+             RETURNING id, username, fullname, email, phone, birth_date AS "birthDate",
+                       address, gender, bio, role`,
+            [
+                fullname,
+                normalizeNullable(phone),
+                normalizeNullable(birthDate),
+                normalizeNullable(address),
+                normalizeNullable(gender),
+                normalizeNullable(bio),
+                userId
+            ]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        res.json({
+            success: true,
+            message: 'Profile updated successfully',
+            user: result.rows[0]
+        });
+    } catch (err) {
+        console.error('Profile update error:', err);
+        res.status(500).json({ message: 'Server error' });
+    }
+});
+
+app.put('/api/users/password', authenticateOptional, requireAuth, async (req, res) => {
+    const userId = req.user.id;
+    const { currentPassword, newPassword } = req.body;
+
+    try {
+        if (!currentPassword || !newPassword) {
+            return res.status(400).json({ message: 'Vui lòng nhập đầy đủ mật khẩu hiện tại và mật khẩu mới.' });
+        }
+
+        if (newPassword.length < 8) {
+            return res.status(400).json({ message: 'Mật khẩu mới phải có ít nhất 8 ký tự.' });
+        }
+
+        if (!/[A-Z]/.test(newPassword)) {
+            return res.status(400).json({ message: 'Mật khẩu mới phải có ít nhất 1 chữ in hoa (A-Z).' });
+        }
+
+        if (!/[!@#$%^&*()_+\-=\[\]{};:'",.<>?\/\\|`~]/.test(newPassword)) {
+            return res.status(400).json({ message: 'Mật khẩu mới phải có ít nhất 1 ký tự đặc biệt.' });
+        }
+
+        const userResult = await pool.query('SELECT password FROM users WHERE id = $1', [userId]);
+        if (userResult.rows.length === 0) {
+            return res.status(404).json({ message: 'Không tìm thấy người dùng.' });
+        }
+
+        const currentHash = userResult.rows[0].password;
+        const isPasswordValid = await bcryptjs.compare(currentPassword, currentHash);
+        if (!isPasswordValid) {
+            return res.status(400).json({ message: 'Mật khẩu hiện tại không đúng.' });
+        }
+
+        const newHashedPassword = await bcryptjs.hash(newPassword, 10);
+        await pool.query(
+            'UPDATE users SET password = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+            [newHashedPassword, userId]
+        );
+
+        res.json({ success: true, message: 'Đổi mật khẩu thành công.' });
+    } catch (err) {
+        console.error('Password update error:', err);
+        res.status(500).json({ message: 'Server error' });
+    }
+});
+
+// ==========================================
+// USER FAVORITES APIS
+// ==========================================
+
+app.get('/api/users/favorites', authenticateOptional, requireAuth, async (req, res) => {
+    const userId = req.user.id;
+
+    try {
+        const result = await pool.query(
+            `SELECT id, item_id AS "itemId", item_type AS "itemType",
+                    name, image, price, description, created_at AS "createdAt"
+             FROM user_favorites
+             WHERE user_id = $1
+             ORDER BY created_at DESC`,
+            [userId]
+        );
+
+        res.json({
+            success: true,
+            favorites: result.rows
+        });
+    } catch (err) {
+        console.error('Favorites fetch error:', err);
+        res.status(500).json({ message: 'Server error' });
+    }
+});
+
+app.post('/api/users/favorites/toggle', authenticateOptional, requireAuth, async (req, res) => {
+    const userId = req.user.id;
+    const { itemId, itemType, name, image, price, description } = req.body;
+
+    try {
+        if (!itemId || !itemType) {
+            return res.status(400).json({ message: 'Missing item information.' });
+        }
+
+        const existing = await pool.query(
+            'SELECT id FROM user_favorites WHERE user_id = $1 AND item_id = $2 AND item_type = $3',
+            [userId, String(itemId), String(itemType)]
+        );
+
+        if (existing.rows.length > 0) {
+            await pool.query(
+                'DELETE FROM user_favorites WHERE user_id = $1 AND item_id = $2 AND item_type = $3',
+                [userId, String(itemId), String(itemType)]
+            );
+            return res.json({ success: true, favorited: false });
+        }
+
+        await pool.query(
+            `INSERT INTO user_favorites (user_id, item_id, item_type, name, image, price, description)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            [
+                userId,
+                String(itemId),
+                String(itemType),
+                name || null,
+                image || null,
+                price || null,
+                description || null
+            ]
+        );
+
+        res.json({ success: true, favorited: true });
+    } catch (err) {
+        console.error('Favorites toggle error:', err);
+        res.status(500).json({ message: 'Server error' });
+    }
+});
+
+// ==========================================
 // GOOGLE OAUTH
 // ==========================================
 app.post('/api/auth/google', async (req, res) => {
@@ -1311,6 +1688,52 @@ app.post('/api/auth/google', async (req, res) => {
 // ==========================================
 // FACEBOOK OAUTH
 // ==========================================
+app.post('/api/v1/feedback', (req, res) => {
+    uploadFeedback.single('attachment')(req, res, async (uploadErr) => {
+        if (uploadErr) {
+            return res.status(400).json({ message: uploadErr.message || 'Upload failed' });
+        }
+
+        const { category, message, contactEmail, contactPhone } = req.body;
+
+        if (!category || !message || !message.trim()) {
+            return res.status(400).json({ message: 'Category and message are required' });
+        }
+
+        const normalizedCategory = FEEDBACK_CATEGORIES.includes(category) ? category : 'other';
+        const attachmentUrl = req.file ? `/uploads/feedback/${req.file.filename}` : null;
+
+        try {
+            const insertQuery = `
+                INSERT INTO feedbacks (category, issue_type, message, contact_email, contact_phone, attachment_url)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                RETURNING *;
+            `;
+
+            const { rows } = await pool.query(insertQuery, [
+                normalizedCategory,
+                normalizedCategory,
+                message.trim(),
+                contactEmail || null,
+                contactPhone || null,
+                attachmentUrl
+            ]);
+
+            res.status(201).json({ message: 'Feedback submitted', feedback: rows[0] });
+        } catch (err) {
+            console.error('Feedback submission error:', err);
+            res.status(500).json({ message: 'Unable to submit feedback' });
+        }
+    });
+});
+
+app.get('/api/v1/terms', (_req, res) => {
+    res.json({
+        lastUpdated: '2026-03-16',
+        ...TERMS_OF_USE
+    });
+});
+
 app.post('/api/auth/facebook', async (req, res) => {
     try {
         const { accessToken } = req.body;
