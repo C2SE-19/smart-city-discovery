@@ -10,6 +10,8 @@ import { useNavigate } from "react-router-dom";
 import { useLanguage } from "../../contexts/LanguageContext";
 import { useAuth } from "../../contexts/AuthContext";
 import translations from "../../constants/translations";
+import { ROLES } from "../../constants/roles";
+import { APP_ROUTES } from "../../constants/routes";
 import authService from "../../services/authService";
 
 export default function LoginPage() {
@@ -26,6 +28,14 @@ export default function LoginPage() {
   const { language } = useLanguage();
   const t = translations[language];
   const googleButtonRef = useRef(null);
+
+  const getRedirectPathByRole = (role) => {
+    if ((role || '').toLowerCase() === ROLES.ADMIN) {
+      return APP_ROUTES.ADMIN_DASHBOARD;
+    }
+
+    return APP_ROUTES.HOME;
+  };
 
   // Load Facebook SDK
   useEffect(() => {
@@ -84,10 +94,8 @@ export default function LoginPage() {
         password: password.trim()
       });
 
-      authLogin(response.user, response.token || `token-${response.user.id}`);
-      
-      // Redirect to overview
-      navigate("/");
+      authLogin(response.user, response.token);
+      navigate(getRedirectPathByRole(response?.user?.role));
     } catch (err) {
       const errorMsg = err.response?.data?.message || "Login failed. Please try again.";
       setError(errorMsg);
@@ -102,7 +110,7 @@ export default function LoginPage() {
     try {
       const result = await authService.loginWithGoogle(credentialResponse.credential);
       authLogin(result.user, result.token);
-      navigate("/");
+      navigate(getRedirectPathByRole(result?.user?.role));
     } catch (err) {
       alert(err.message || "Failed to login with Google");
     } finally {
@@ -144,7 +152,7 @@ export default function LoginPage() {
           .then(result => {
             console.log('Facebook auth result:', result);
             authLogin(result.user, result.token);
-            navigate("/");
+            navigate(getRedirectPathByRole(result?.user?.role));
           })
           .catch(err => {
             console.error('Facebook login error:', err);

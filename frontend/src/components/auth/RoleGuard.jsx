@@ -3,14 +3,22 @@ import { useAuth } from '../../contexts/AuthContext';
 import { APP_ROUTES } from '../../constants/routes';
 
 function RoleGuard({ allowedRoles, children }) {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, loading } = useAuth();
   const location = useLocation();
 
-  if (!isAuthenticated) {
-    return <Navigate replace to={APP_ROUTES.HOME} state={{ from: location.pathname }} />;
+  if (loading) {
+    return null;
   }
 
-  if (!allowedRoles.includes(user.role)) {
+  if (!isAuthenticated) {
+    return <Navigate replace to={APP_ROUTES.LOGIN} state={{ from: location.pathname }} />;
+  }
+
+  if (!Array.isArray(allowedRoles) || allowedRoles.length === 0) {
+    return children;
+  }
+
+  if (!allowedRoles.includes(user?.role)) {
     return <Navigate replace to={APP_ROUTES.HOME} state={{ from: location.pathname }} />;
   }
 

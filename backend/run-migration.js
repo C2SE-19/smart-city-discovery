@@ -13,11 +13,19 @@ async function runMigration() {
   });
 
   try {
-    const migrationPath = path.join(__dirname, 'database/migrations/20260313_create_users_table.sql');
-    const sql = fs.readFileSync(migrationPath, 'utf8');
-    
-    console.log('Executing migration...');
-    await pool.query(sql);
+    const migrationFiles = [
+      '20260313_create_users_table.sql',
+      '20260316_add_admin_role_and_seed_admin.sql'
+    ];
+
+    for (const migrationFile of migrationFiles) {
+      const migrationPath = path.join(__dirname, 'database/migrations', migrationFile);
+      const sql = fs.readFileSync(migrationPath, 'utf8');
+
+      console.log(`Executing migration: ${migrationFile}`);
+      await pool.query(sql);
+    }
+
     console.log('✅ Migration completed successfully!');
   } catch (error) {
     console.error('❌ Migration failed:', error.message);

@@ -15,6 +15,35 @@ app.use(express.json());
 // Initialize Google OAuth2 Client
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
+const FALLBACK_JWT_SECRET = 'smart-city-discovery-dev-secret-change-me';
+const jwtSecret = process.env.JWT_SECRET || process.env.SUPABASE_JWT_SECRET || FALLBACK_JWT_SECRET;
+const accessTokenTtl = process.env.ACCESS_TOKEN_TTL || '7d';
+
+if (jwtSecret === FALLBACK_JWT_SECRET) {
+    console.warn('⚠️ JWT_SECRET is not set. Using development fallback secret. Please set JWT_SECRET in production.');
+}
+
+function normalizeRole(role) {
+    const normalizedRole = (role || '').toString().trim().toLowerCase();
+    if (['admin', 'merchant', 'user'].includes(normalizedRole)) {
+        return normalizedRole;
+    }
+
+    return 'user';
+}
+
+function generateAccessToken(user) {
+    return jwt.sign(
+        {
+            sub: user.id,
+            email: user.email,
+            role: normalizeRole(user.role)
+        },
+        jwtSecret,
+        { expiresIn: accessTokenTtl }
+    );
+}
+
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: {
@@ -152,14 +181,19 @@ app.post('/api/register', async (req, res) => {
 
         // Add user to database
         const insertQuery = `
-            INSERT INTO users (fullname, username, email, password)
-            VALUES ($1, $2, $3, $4) RETURNING id, fullname, username, email;
+            INSERT INTO users (fullname, username, email, password, role)
+            VALUES ($1, $2, $3, $4, $5) RETURNING id, fullname, username, email, role;
         `;
-        const result = await pool.query(insertQuery, [fullname, username, email, hashedPassword]);
+        const result = await pool.query(insertQuery, [fullname, username, email, hashedPassword, 'user']);
+
+        const createdUser = result.rows[0];
 
         res.status(201).json({
             message: 'Registration successful!',
-            user: result.rows[0]
+            user: {
+                ...createdUser,
+                role: normalizeRole(createdUser.role)
+            }
         });
 
     } catch (err) {
@@ -194,14 +228,23 @@ app.post('/api/login', async (req, res) => {
             return res.status(401).json({ message: 'Incorrect password' });
         }
 
+        const userRole = normalizeRole(user.role);
+        const accessToken = generateAccessToken({
+            id: user.id,
+            email: user.email,
+            role: userRole
+        });
+
         // Login successful
         res.json({
             message: 'Login successful!',
+            token: accessToken,
             user: {
                 id: user.id,
                 fullname: user.fullname,
                 username: user.username,
-                email: user.email
+                email: user.email,
+                role: userRole
             }
         });
 
@@ -245,27 +288,21 @@ app.post('/api/auth/google', async (req, res) => {
             const hashedPassword = await bcryptjs.hash(Math.random().toString(), 10);
 
             const insertQuery = `
-                INSERT INTO users (fullname, username, email, password)
-                VALUES ($1, $2, $3, $4) RETURNING id, fullname, username, email;
+                INSERT INTO users (fullname, username, email, password, role)
+                VALUES ($1, $2, $3, $4, $5) RETURNING id, fullname, username, email, role;
             `;
-            user = await pool.query(insertQuery, [name || username, username, email, hashedPassword]);
+            user = await pool.query(insertQuery, [name || username, username, email, hashedPassword, 'user']);
         }
 
         const userData = user.rows[0];
+        const userRole = normalizeRole(userData.role);
 
         // Generate JWT token
-        console.log('DEBUG: JWT_SECRET =', process.env.JWT_SECRET ? '✓ Set' : '✗ Not set');
-        console.log('DEBUG: userData =', userData);
-        
-        if (!process.env.JWT_SECRET) {
-            throw new Error('JWT_SECRET is not configured');
-        }
-
-        const jwtToken = jwt.sign(
-            { id: userData.id, email: userData.email },
-            process.env.JWT_SECRET,
-            { expiresIn: '7d' }
-        );
+        const jwtToken = generateAccessToken({
+            id: userData.id,
+            email: userData.email,
+            role: userRole
+        });
 
         res.json({
             message: 'Login with Google successful!',
@@ -274,7 +311,8 @@ app.post('/api/auth/google', async (req, res) => {
                 id: userData.id,
                 fullname: userData.fullname,
                 username: userData.username,
-                email: userData.email
+                email: userData.email,
+                role: userRole
             }
         });
 
@@ -315,20 +353,21 @@ app.post('/api/auth/facebook', async (req, res) => {
             const hashedPassword = await bcryptjs.hash(Math.random().toString(), 10);
 
             const insertQuery = `
-                INSERT INTO users (fullname, username, email, password)
-                VALUES ($1, $2, $3, $4) RETURNING id, fullname, username, email;
+                INSERT INTO users (fullname, username, email, password, role)
+                VALUES ($1, $2, $3, $4, $5) RETURNING id, fullname, username, email, role;
             `;
-            user = await pool.query(insertQuery, [name || username, username, email, hashedPassword]);
+            user = await pool.query(insertQuery, [name || username, username, email, hashedPassword, 'user']);
         }
 
         const userData = user.rows[0];
+        const userRole = normalizeRole(userData.role);
 
         // Generate JWT token
-        const jwtToken = jwt.sign(
-            { id: userData.id, email: userData.email },
-            process.env.JWT_SECRET,
-            { expiresIn: '7d' }
-        );
+        const jwtToken = generateAccessToken({
+            id: userData.id,
+            email: userData.email,
+            role: userRole
+        });
 
         res.json({
             message: 'Login with Facebook successful!',
@@ -337,7 +376,8 @@ app.post('/api/auth/facebook', async (req, res) => {
                 id: userData.id,
                 fullname: userData.fullname,
                 username: userData.username,
-                email: userData.email
+                email: userData.email,
+                role: userRole
             }
         });
 
