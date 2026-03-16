@@ -44,6 +44,51 @@ function generateAccessToken(user) {
     );
 }
 
+function getAuthToken(req) {
+    const header = req.headers.authorization || '';
+    if (!header.startsWith('Bearer ')) {
+        return null;
+    }
+
+    return header.slice('Bearer '.length).trim();
+}
+
+function authenticateOptional(req, res, next) {
+    const token = getAuthToken(req);
+
+    if (!token) {
+        return next();
+    }
+
+    try {
+        const payload = jwt.verify(token, jwtSecret);
+        req.user = {
+            id: payload.sub,
+            email: payload.email,
+            role: payload.role
+        };
+        return next();
+    } catch (error) {
+        return res.status(401).json({ message: 'Invalid or expired token' });
+    }
+}
+
+function requireAuth(req, res, next) {
+    if (!req.user?.id) {
+        return res.status(401).json({ message: 'Bạn cần đăng nhập để thực hiện thao tác này.' });
+    }
+
+    return next();
+}
+
+function normalizeNullable(value) {
+    if (value === undefined || value === null || value === '') {
+        return null;
+    }
+
+    return value;
+}
+
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: {
@@ -251,6 +296,149 @@ app.post('/api/login', async (req, res) => {
     } catch (err) {
         console.error('Login error:', err);
         res.status(500).json({ message: 'Server error, please try again later' });
+    }
+});
+
+// ==========================================
+// USER PROFILE APIS
+// ==========================================
+
+app.get('/api/users/profile', authenticateOptional, async (req, res) => {
+    try {
+        const userId = req.user?.id;
+        const email = req.query?.email;
+
+        if (!userId && !email) {
+            return res.status(401).json({ message: 'Unauthorized' });
+        }
+
+        const result = userId
+            ? await pool.query(
+                `SELECT id, username, fullname, email, phone, birth_date AS "birthDate",
+                        address, gender, bio, role
+                 FROM users
+                 WHERE id = $1`,
+                [userId]
+            )
+            : await pool.query(
+                `SELECT id, username, fullname, email, phone, birth_date AS "birthDate",
+                        address, gender, bio, role
+                 FROM users
+                 WHERE email = $1`,
+                [email]
+            );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        res.json({
+            success: true,
+            user: result.rows[0]
+        });
+    } catch (err) {
+        console.error('Profile fetch error:', err);
+        res.status(500).json({ message: 'Server error' });
+    }
+});
+
+app.put('/api/users/profile', authenticateOptional, requireAuth, async (req, res) => {
+    const userId = req.user.id;
+    const { fullname, email, phone, birthDate, address, gender, bio } = req.body;
+
+    try {
+        if (!fullname) {
+            return res.status(400).json({ message: 'Vui lòng nhập họ tên.' });
+        }
+
+        if (phone && !/^\d{10}$/.test(phone)) {
+            return res.status(400).json({ message: 'Số điện thoại không đúng định dạng.' });
+        }
+
+        if (birthDate && !/^\d{2}\/\d{2}\/\d{4}$/.test(birthDate)) {
+            return res.status(400).json({ message: 'Ngày sinh phải theo định dạng DD/MM/YYYY.' });
+        }
+
+        const result = await pool.query(
+            `UPDATE users
+             SET fullname = $1,
+                 phone = $2,
+                 birth_date = $3,
+                 address = $4,
+                 gender = $5,
+                 bio = $6,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $7
+             RETURNING id, username, fullname, email, phone, birth_date AS "birthDate",
+                       address, gender, bio, role`,
+            [
+                fullname,
+                normalizeNullable(phone),
+                normalizeNullable(birthDate),
+                normalizeNullable(address),
+                normalizeNullable(gender),
+                normalizeNullable(bio),
+                userId
+            ]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        res.json({
+            success: true,
+            message: 'Profile updated successfully',
+            user: result.rows[0]
+        });
+    } catch (err) {
+        console.error('Profile update error:', err);
+        res.status(500).json({ message: 'Server error' });
+    }
+});
+
+app.put('/api/users/password', authenticateOptional, requireAuth, async (req, res) => {
+    const userId = req.user.id;
+    const { currentPassword, newPassword } = req.body;
+
+    try {
+        if (!currentPassword || !newPassword) {
+            return res.status(400).json({ message: 'Vui lòng nhập đầy đủ mật khẩu hiện tại và mật khẩu mới.' });
+        }
+
+        if (newPassword.length < 8) {
+            return res.status(400).json({ message: 'Mật khẩu mới phải có ít nhất 8 ký tự.' });
+        }
+
+        if (!/[A-Z]/.test(newPassword)) {
+            return res.status(400).json({ message: 'Mật khẩu mới phải có ít nhất 1 chữ in hoa (A-Z).' });
+        }
+
+        if (!/[!@#$%^&*()_+\-=\[\]{};:'",.<>?\/\\|`~]/.test(newPassword)) {
+            return res.status(400).json({ message: 'Mật khẩu mới phải có ít nhất 1 ký tự đặc biệt.' });
+        }
+
+        const userResult = await pool.query('SELECT password FROM users WHERE id = $1', [userId]);
+        if (userResult.rows.length === 0) {
+            return res.status(404).json({ message: 'Không tìm thấy người dùng.' });
+        }
+
+        const currentHash = userResult.rows[0].password;
+        const isPasswordValid = await bcryptjs.compare(currentPassword, currentHash);
+        if (!isPasswordValid) {
+            return res.status(400).json({ message: 'Mật khẩu hiện tại không đúng.' });
+        }
+
+        const newHashedPassword = await bcryptjs.hash(newPassword, 10);
+        await pool.query(
+            'UPDATE users SET password = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+            [newHashedPassword, userId]
+        );
+
+        res.json({ success: true, message: 'Đổi mật khẩu thành công.' });
+    } catch (err) {
+        console.error('Password update error:', err);
+        res.status(500).json({ message: 'Server error' });
     }
 });
 

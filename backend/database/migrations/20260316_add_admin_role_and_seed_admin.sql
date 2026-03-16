@@ -19,7 +19,7 @@ create index if not exists idx_users_role on users(role);
 -- Password: Admin@123!
 do $$
 declare
-  existing_user_id integer;
+  existing_user_id text;
 begin
   select id
   into existing_user_id
@@ -45,6 +45,6 @@ begin
         password = crypt('Admin@123!', gen_salt('bf')),
         role = 'admin',
         updated_at = current_timestamp
-    where id = existing_user_id;
+    where id::text = existing_user_id;
   end if;
 end $$;
