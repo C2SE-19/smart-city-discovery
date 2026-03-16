@@ -18,7 +18,7 @@ async function runMigration() {
       '20260313_create_users_table.sql',
       '20260316_admin_map_management_schema.sql',
       '20260317_place_categories_schema.sql',
-      '20260316_add_admin_role_and_seed_admin.sql'
+      '20260316_add_admin_role_and_seed_admin.sql',
       '20260316_add_admin_role_and_seed_admin.sql',
       '20260316_add_user_profile_fields.sql',
       '20260320_create_feedbacks_table.sql',
