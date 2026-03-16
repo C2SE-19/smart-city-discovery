@@ -98,7 +98,6 @@ const COPY = {
 function ProfilePage() {
   const { language } = useLanguage();
   const { user, token } = useAuth();
-  const { user } = useAuth();
   const navigate = useNavigate();
   const { theme } = useTheme();
   const t = translations[language];
@@ -385,8 +384,6 @@ function ProfilePage() {
                     setError('');
                   }}
                 >
-                  ✎ Chỉnh sửa
-                <button className="btn-edit" onClick={() => setIsEditing(true)}>
                   {copy.edit}
                 </button>
               )}
