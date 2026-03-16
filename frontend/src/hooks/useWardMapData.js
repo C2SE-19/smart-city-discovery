@@ -15,7 +15,7 @@ function useWardMapData() {
     setError('');
 
     try {
-      const [wardData, venueData] = await Promise.all([fetchWards(), fetchVenues()]);
+      const [wardData, venueData] = await Promise.all([fetchWards(), fetchVenues({ status: 'approved' })]);
       setWards(wardData);
       setVenues(venueData);
     } catch (loadError) {
