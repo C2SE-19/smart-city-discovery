@@ -15,6 +15,8 @@ async function runMigration() {
   try {
     const migrationFiles = [
       '20260313_create_users_table.sql',
+      '20260316_admin_map_management_schema.sql',
+      '20260317_place_categories_schema.sql',
       '20260316_add_admin_role_and_seed_admin.sql'
     ];
 
