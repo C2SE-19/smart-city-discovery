@@ -126,7 +126,15 @@ function ProfilePage() {
             show: 'Hiện',
             hide: 'Ẩn',
             showPasswordForm: 'Thay đổi mật khẩu',
-            hidePasswordForm: 'Ẩn đổi mật khẩu'
+            hidePasswordForm: 'Ẩn đổi mật khẩu',
+            removeFavorite: 'Bỏ yêu thích',
+            confirm: 'Có',
+            decline: 'Không'
+          },
+          favorites: {
+            removeTitle: 'Bỏ yêu thích',
+            removeMessage: 'Bạn có muốn bỏ yêu thích mục "{name}" không?',
+            unnamed: 'Không có tên'
           },
           messages: {
             nameRequired: 'Vui lòng nhập họ tên.',
@@ -140,7 +148,9 @@ function ProfilePage() {
             passwordSpecial: 'Mật khẩu mới phải có ít nhất 1 ký tự đặc biệt.',
             passwordMismatch: 'Xác nhận mật khẩu không khớp.',
             saveSuccess: 'Lưu thành công.',
-            saveFailed: 'Cập nhật thất bại. Vui lòng thử lại.'
+            saveFailed: 'Cập nhật thất bại. Vui lòng thử lại.',
+            favoriteRemoved: 'Đã bỏ yêu thích.',
+            favoriteRemoveFailed: 'Không thể bỏ yêu thích. Vui lòng thử lại.'
           }
         }
       : {
@@ -165,7 +175,15 @@ function ProfilePage() {
             show: 'Show',
             hide: 'Hide',
             showPasswordForm: 'Change password',
-            hidePasswordForm: 'Hide password form'
+            hidePasswordForm: 'Hide password form',
+            removeFavorite: 'Remove favorite',
+            confirm: 'Yes',
+            decline: 'No'
+          },
+          favorites: {
+            removeTitle: 'Remove favorite',
+            removeMessage: 'Do you want to remove "{name}" from favorites?',
+            unnamed: 'Untitled'
           },
           messages: {
             nameRequired: 'Please enter your full name.',
@@ -178,7 +196,9 @@ function ProfilePage() {
             passwordSpecial: 'New password must include at least 1 special character.',
             passwordMismatch: 'Password confirmation does not match.',
             saveSuccess: 'Saved successfully.',
-            saveFailed: 'Update failed. Please try again.'
+            saveFailed: 'Update failed. Please try again.',
+            favoriteRemoved: 'Removed from favorites.',
+            favoriteRemoveFailed: 'Unable to remove favorite. Please try again.'
           }
         };
   const MenuItems = [
@@ -216,13 +236,21 @@ function ProfilePage() {
     next: false,
     confirm: false
   });
+  const [favorites, setFavorites] = useState([]);
+  const [favoritesLoading, setFavoritesLoading] = useState(false);
+  const [confirmFavorite, setConfirmFavorite] = useState(null);
+  const [removingFavorite, setRemovingFavorite] = useState(false);
+
+  const apiUrl = useMemo(
+    () => import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api',
+    []
+  );
 
   // Fetch user profile on mount
   useEffect(() => {
     const fetchProfile = async () => {
       try {
         setLoading(true);
-        const apiUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
         const response = await axios.get(`${apiUrl}/users/profile`, {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
           params: { email: user?.email || editData.email || formData.email }
@@ -270,7 +298,33 @@ function ProfilePage() {
     };
 
     fetchProfile();
-  }, [user, token]);
+  }, [user, token, apiUrl]);
+
+  useEffect(() => {
+    const fetchFavorites = async () => {
+      if (activeMenu !== 'favorites') {
+        return;
+      }
+      if (!token) {
+        setFavorites([]);
+        return;
+      }
+      try {
+        setFavoritesLoading(true);
+        const response = await axios.get(`${apiUrl}/users/favorites`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setFavorites(response.data?.favorites || []);
+      } catch (err) {
+        console.error('Failed to fetch favorites:', err);
+        setFavorites([]);
+      } finally {
+        setFavoritesLoading(false);
+      }
+    };
+
+    fetchFavorites();
+  }, [activeMenu, apiUrl, token]);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -428,7 +482,6 @@ function ProfilePage() {
         return;
       }
 
-      const apiUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
       await axios.put(
         `${apiUrl}/users/profile`,
         {
@@ -484,6 +537,46 @@ function ProfilePage() {
     setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
     setShowPasswordForm(false);
     setPasswordVisibility({ current: false, next: false, confirm: false });
+  };
+
+  const handleConfirmRemoveFavorite = async () => {
+    if (!confirmFavorite || removingFavorite) {
+      return;
+    }
+    try {
+      setRemovingFavorite(true);
+      await axios.post(
+        `${apiUrl}/users/favorites/toggle`,
+        {
+          itemId: confirmFavorite.itemId,
+          itemType: confirmFavorite.itemType,
+          name: confirmFavorite.name,
+          image: confirmFavorite.image,
+          price: confirmFavorite.price,
+          description: confirmFavorite.description
+        },
+        {
+          headers: token ? { Authorization: `Bearer ${token}` } : {}
+        }
+      );
+      setFavorites((prev) =>
+        prev.filter(
+          (item) =>
+            !(item.itemId === confirmFavorite.itemId && item.itemType === confirmFavorite.itemType)
+        )
+      );
+      setConfirmFavorite(null);
+      setError('');
+      setSuccessMessage(ui.messages.favoriteRemoved);
+      setTimeout(() => setSuccessMessage(''), 1200);
+    } catch (err) {
+      console.error('Failed to remove favorite:', err);
+      setError(ui.messages.favoriteRemoveFailed);
+      setSuccessMessage('');
+      setTimeout(() => setError(''), 1500);
+    } finally {
+      setRemovingFavorite(false);
+    }
   };
 
   const maskedPhone = useMemo(() => {
@@ -761,7 +854,67 @@ function ProfilePage() {
         return (
           <div className="profile-content">
             <h2>{copy.headings.favorites}</h2>
-            <p className="placeholder-text">{copy.placeholder.favorites}</p>
+            {favoritesLoading ? (
+              <p className="placeholder-text">{copy.loading}</p>
+            ) : favorites.length === 0 ? (
+              <p className="placeholder-text">{copy.placeholder.favorites}</p>
+            ) : (
+              <>
+                <div className="favorites-grid">
+                  {favorites.map((item) => (
+                    <article key={`${item.itemType}-${item.itemId}`} className="favorite-card">
+                      <button
+                        type="button"
+                        className="favorite-remove"
+                        onClick={() => setConfirmFavorite(item)}
+                        aria-label={ui.actions.removeFavorite}
+                      >
+                        <span aria-hidden="true">-</span>
+                      </button>
+                      {item.image && (
+                        <img src={item.image} alt={item.name} className="favorite-image" />
+                      )}
+                      <div className="favorite-body">
+                        <h3>{item.name || ui.favorites.unnamed}</h3>
+                        {item.description && <p>{item.description}</p>}
+                        {item.price && <span className="favorite-price">{item.price}</span>}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+                {confirmFavorite && (
+                  <div className="confirm-overlay" role="dialog" aria-modal="true">
+                    <div className="confirm-dialog">
+                      <h3>{ui.favorites.removeTitle}</h3>
+                      <p>
+                        {ui.favorites.removeMessage.replace(
+                          '{name}',
+                          confirmFavorite.name || ui.favorites.unnamed
+                        )}
+                      </p>
+                      <div className="confirm-actions">
+                        <button
+                          type="button"
+                          className="btn-confirm"
+                          onClick={handleConfirmRemoveFavorite}
+                          disabled={removingFavorite}
+                        >
+                          {ui.actions.confirm}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-decline"
+                          onClick={() => setConfirmFavorite(null)}
+                          disabled={removingFavorite}
+                        >
+                          {ui.actions.decline}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         );
 

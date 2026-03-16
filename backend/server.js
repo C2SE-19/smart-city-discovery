@@ -582,6 +582,76 @@ app.put('/api/users/password', authenticateOptional, requireAuth, async (req, re
 });
 
 // ==========================================
+// USER FAVORITES APIS
+// ==========================================
+
+app.get('/api/users/favorites', authenticateOptional, requireAuth, async (req, res) => {
+    const userId = req.user.id;
+
+    try {
+        const result = await pool.query(
+            `SELECT id, item_id AS "itemId", item_type AS "itemType",
+                    name, image, price, description, created_at AS "createdAt"
+             FROM user_favorites
+             WHERE user_id = $1
+             ORDER BY created_at DESC`,
+            [userId]
+        );
+
+        res.json({
+            success: true,
+            favorites: result.rows
+        });
+    } catch (err) {
+        console.error('Favorites fetch error:', err);
+        res.status(500).json({ message: 'Server error' });
+    }
+});
+
+app.post('/api/users/favorites/toggle', authenticateOptional, requireAuth, async (req, res) => {
+    const userId = req.user.id;
+    const { itemId, itemType, name, image, price, description } = req.body;
+
+    try {
+        if (!itemId || !itemType) {
+            return res.status(400).json({ message: 'Missing item information.' });
+        }
+
+        const existing = await pool.query(
+            'SELECT id FROM user_favorites WHERE user_id = $1 AND item_id = $2 AND item_type = $3',
+            [userId, String(itemId), String(itemType)]
+        );
+
+        if (existing.rows.length > 0) {
+            await pool.query(
+                'DELETE FROM user_favorites WHERE user_id = $1 AND item_id = $2 AND item_type = $3',
+                [userId, String(itemId), String(itemType)]
+            );
+            return res.json({ success: true, favorited: false });
+        }
+
+        await pool.query(
+            `INSERT INTO user_favorites (user_id, item_id, item_type, name, image, price, description)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            [
+                userId,
+                String(itemId),
+                String(itemType),
+                name || null,
+                image || null,
+                price || null,
+                description || null
+            ]
+        );
+
+        res.json({ success: true, favorited: true });
+    } catch (err) {
+        console.error('Favorites toggle error:', err);
+        res.status(500).json({ message: 'Server error' });
+    }
+});
+
+// ==========================================
 // GOOGLE OAUTH
 // ==========================================
 app.post('/api/auth/google', async (req, res) => {
