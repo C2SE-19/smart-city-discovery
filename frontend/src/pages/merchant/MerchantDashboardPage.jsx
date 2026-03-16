@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useLanguage } from '../../contexts/LanguageContext';
+import { useAuth } from '../../contexts/AuthContext';
 import translations from '../../constants/translations';
 import './MerchantDashboard.css';
 
@@ -14,8 +15,21 @@ const MenuItems = [
 function MerchantDashboardPage() {
   const navigate = useNavigate();
   const { language } = useLanguage();
+  const { user, logout } = useAuth();
   const t = translations[language];
   const [activeMenu, setActiveMenu] = useState('overview');
+
+  const getUserInitial = () => {
+    if (user?.fullname) {
+      return user.fullname.charAt(0).toUpperCase();
+    }
+    return 'H';
+  };
+
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+  };
 
   const handlePublishClick = () => {
     navigate('/merchant/workbench');
@@ -27,6 +41,10 @@ function MerchantDashboardPage() {
     // Navigate to appropriate page
     if (menuId === 'posts') {
       navigate('/merchant/posts');
+    } else if (menuId === 'transactions') {
+      navigate('/merchant/transactions');
+    } else if (menuId === 'support') {
+      navigate('/merchant/support');
     } else if (menuId === 'overview') {
       navigate('/merchant');
     }
@@ -57,9 +75,9 @@ function MerchantDashboardPage() {
         <aside className="merchant-sidebar">
           <div className="merchant-sidebar-header">
             <div className="merchant-user-info">
-              <div className="merchant-user-avatar">HN</div>
+              <div className="merchant-user-avatar">{getUserInitial()}</div>
               <div className="merchant-user-details">
-                <h3>Nguyễn Hữu Lộc</h3>
+                <h3>{user?.fullname || 'Nguyễn Hữu Lộc'}</h3>
                 <p>Merchant</p>
               </div>
             </div>
@@ -89,7 +107,7 @@ function MerchantDashboardPage() {
 
           {/* Footer */}
           <div className="merchant-sidebar-footer">
-            <button className="merchant-logout-btn">{t.merchant.logout}</button>
+            <button className="merchant-logout-btn" onClick={handleLogout}>{t.merchant.logout}</button>
           </div>
         </aside>
 
