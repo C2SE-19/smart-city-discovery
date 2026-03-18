@@ -23,7 +23,8 @@ async function runMigration() {
       '20260316_add_user_profile_fields.sql',
       '20260317_cleanup_nan_profile_fields.sql',
       '20260320_create_feedbacks_table.sql',
-      '20260321_create_user_favorites.sql'
+      '20260321_create_user_favorites.sql',
+      '20260322_create_merchant_services.sql'
     ];
 
     for (const migrationFile of migrationFiles) {
