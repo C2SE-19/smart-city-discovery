@@ -10,7 +10,7 @@ const app = express();
 const corsOptions = env.corsOrigin === '*' ? {} : { origin: env.corsOrigin };
 
 app.use(cors(corsOptions));
-app.use(express.json());
+app.use(express.json({ limit: '5mb' }));
 
 app.get('/', (req, res) => {
   res.json({
