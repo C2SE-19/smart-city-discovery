@@ -4,13 +4,17 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import SectionCard from '../../components/common/SectionCard';
 import {
+  createAdminMerchantService,
   createAdminPlaceCategory,
+  deleteAdminMerchantService,
   deleteAdminPlaceCategory,
   deleteAdminWard,
+  fetchAdminMerchantServices,
   fetchAdminPlaceCategories,
   fetchAdminVenues,
   fetchAdminWards,
   moderateAdminVenue,
+  updateAdminMerchantService,
   updateAdminPlaceCategory,
   upsertAdminWard,
 } from '../../services/api/adminMapApi';
@@ -35,6 +39,11 @@ const PAGE_MODES = [
     value: 'category',
     label: 'Place Categories',
     helper: 'Manage a single shared category list used by merchant and user screens.',
+  },
+  {
+    value: 'service',
+    label: 'Services Offered - Merchant',
+    helper: 'Manage service options shown in merchant registration and moderation details.',
   },
 ];
 
@@ -110,6 +119,22 @@ function extractBoundaryFeatures(boundary) {
   }
 
   return [];
+}
+
+function toPolygonBoundaryFeatureCollection(boundary) {
+  const polygonFeatures = extractBoundaryFeatures(boundary).filter((feature) => {
+    const geometryType = feature?.geometry?.type;
+    return geometryType === 'Polygon' || geometryType === 'MultiPolygon';
+  });
+
+  if (!polygonFeatures.length) {
+    return null;
+  }
+
+  return {
+    type: 'FeatureCollection',
+    features: polygonFeatures,
+  };
 }
 
 function normalizeCoordinateValue(value) {
@@ -272,6 +297,112 @@ function sortCategories(categories) {
   return [...categories].sort((first, second) => String(first.name || '').localeCompare(String(second.name || '')));
 }
 
+function sortMerchantServices(services) {
+  return [...services].sort((first, second) => {
+    const firstOrder = Number(first.sort_order ?? first.sortOrder ?? 0);
+    const secondOrder = Number(second.sort_order ?? second.sortOrder ?? 0);
+
+    if (firstOrder !== secondOrder) {
+      return firstOrder - secondOrder;
+    }
+
+    return String(first.name || '').localeCompare(String(second.name || ''));
+  });
+}
+
+function normalizeVenueMetadata(metadata) {
+  if (metadata && typeof metadata === 'object' && !Array.isArray(metadata)) {
+    return metadata;
+  }
+
+  if (typeof metadata === 'string') {
+    try {
+      const parsed = JSON.parse(metadata);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch {
+      return {};
+    }
+  }
+
+  return {};
+}
+
+function normalizeSelectedServiceIds(selectedServices) {
+  if (!Array.isArray(selectedServices)) {
+    return [];
+  }
+
+  return [...new Set(selectedServices.map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0))];
+}
+
+function extractVenueServiceIds(venue) {
+  const metadata = normalizeVenueMetadata(venue?.metadata);
+  return normalizeSelectedServiceIds(metadata.selectedServices);
+}
+
+function resolveVenueServiceNames(venue, serviceNameMap) {
+  const metadata = normalizeVenueMetadata(venue?.metadata);
+  const serviceIds = normalizeSelectedServiceIds(metadata.selectedServices);
+  const mappedNames = serviceIds.map((serviceId) => serviceNameMap.get(serviceId)).filter(Boolean);
+
+  if (mappedNames.length) {
+    return [...new Set(mappedNames)];
+  }
+
+  if (!Array.isArray(metadata.selectedServiceNames)) {
+    return [];
+  }
+
+  return [...new Set(metadata.selectedServiceNames.map((name) => String(name || '').trim()).filter(Boolean))];
+}
+
+function normalizeImageUrls(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => (typeof item === 'string' ? item.trim() : ''))
+    .filter(Boolean);
+}
+
+function extractVenueGalleryImages(venue) {
+  const metadata = normalizeVenueMetadata(venue?.metadata);
+  const galleryImages = normalizeImageUrls(metadata.galleryImages);
+  const fallbackImages = normalizeImageUrls(metadata.images || metadata.imageUrls || metadata.photos);
+  const coverImage = typeof venue?.cover_image_url === 'string' ? venue.cover_image_url.trim() : '';
+
+  const merged = [...galleryImages, ...fallbackImages];
+
+  if (coverImage) {
+    merged.unshift(coverImage);
+  }
+
+  return [...new Set(merged)];
+}
+
+function formatCurrencyVnd(value) {
+  const amount = Number(value);
+
+  if (!Number.isFinite(amount)) {
+    return 'Not provided';
+  }
+
+  return `${amount.toLocaleString('vi-VN')} VND`;
+}
+
+function formatCoordinate(value) {
+  const coordinate = Number(value);
+
+  if (!Number.isFinite(coordinate)) {
+    return 'Not provided';
+  }
+
+  return coordinate.toFixed(6);
+}
+
 function MapViewportController({ center, zoom }) {
   const map = useMap();
 
@@ -291,6 +422,7 @@ function AdminBoundaryPage() {
   const [wards, setWards] = useState([]);
   const [venues, setVenues] = useState([]);
   const [placeCategories, setPlaceCategories] = useState([]);
+  const [merchantServices, setMerchantServices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [operationMessage, setOperationMessage] = useState('');
@@ -299,12 +431,18 @@ function AdminBoundaryPage() {
   const [deletingWard, setDeletingWard] = useState(false);
   const [submittingCategory, setSubmittingCategory] = useState(false);
   const [deletingCategoryId, setDeletingCategoryId] = useState(null);
+  const [submittingService, setSubmittingService] = useState(false);
+  const [deletingServiceId, setDeletingServiceId] = useState(null);
   const [moderatingVenueId, setModeratingVenueId] = useState(null);
 
   const [selectedVenueId, setSelectedVenueId] = useState(null);
   const [selectedWardId, setSelectedWardId] = useState('');
   const [selectedCategoryId, setSelectedCategoryId] = useState(null);
+  const [selectedServiceId, setSelectedServiceId] = useState(null);
   const [rejectReasons, setRejectReasons] = useState({});
+  const [isSubmissionDetailClosed, setIsSubmissionDetailClosed] = useState(false);
+  const [selectedVenueImageIndex, setSelectedVenueImageIndex] = useState(0);
+  const [expandedImageUrl, setExpandedImageUrl] = useState('');
 
   const [mapCenter, setMapCenter] = useState(DEFAULT_CENTER);
   const [mapZoom, setMapZoom] = useState(DEFAULT_ZOOM);
@@ -315,13 +453,22 @@ function AdminBoundaryPage() {
     boundaryJson: EMPTY_BOUNDARY_TEMPLATE,
   });
   const [categoryNameInput, setCategoryNameInput] = useState('');
+  const [serviceNameInput, setServiceNameInput] = useState('');
 
   const pendingVenues = useMemo(
     () => venues.filter((venue) => String(venue.status || '').toLowerCase() === 'pending'),
     [venues]
   );
+  const pendingModeVenues = useMemo(
+    () => venues.filter((venue) => String(venue.status || '').toLowerCase() !== 'rejected'),
+    [venues]
+  );
   const approvedVenues = useMemo(
     () => venues.filter((venue) => String(venue.status || '').toLowerCase() === 'approved'),
+    [venues]
+  );
+  const usageEligibleVenues = useMemo(
+    () => venues.filter((venue) => String(venue.status || '').toLowerCase() !== 'rejected'),
     [venues]
   );
   const categoryModeVenues = useMemo(
@@ -335,21 +482,36 @@ function AdminBoundaryPage() {
       }),
     [approvedVenues, selectedCategoryId]
   );
+  const serviceModeVenues = useMemo(
+    () =>
+      approvedVenues.filter((venue) => {
+        if (!selectedServiceId) {
+          return true;
+        }
+
+        return extractVenueServiceIds(venue).includes(Number(selectedServiceId));
+      }),
+    [approvedVenues, selectedServiceId]
+  );
   const visibleVenues = useMemo(() => {
     if (activeMode === 'pending') {
-      return pendingVenues;
+      return pendingModeVenues;
     }
 
     if (activeMode === 'category') {
       return categoryModeVenues;
     }
 
+    if (activeMode === 'service') {
+      return serviceModeVenues;
+    }
+
     return approvedVenues;
-  }, [activeMode, pendingVenues, categoryModeVenues, approvedVenues]);
+  }, [activeMode, pendingModeVenues, categoryModeVenues, serviceModeVenues, approvedVenues]);
 
   const selectedVenue = useMemo(
-    () => pendingVenues.find((venue) => Number(venue.id) === Number(selectedVenueId)) || null,
-    [pendingVenues, selectedVenueId]
+    () => pendingModeVenues.find((venue) => Number(venue.id) === Number(selectedVenueId)) || null,
+    [pendingModeVenues, selectedVenueId]
   );
   const selectedWard = useMemo(
     () => wards.find((ward) => ward.ward_id === selectedWardId) || null,
@@ -359,6 +521,56 @@ function AdminBoundaryPage() {
     () => placeCategories.find((category) => Number(category.id) === Number(selectedCategoryId)) || null,
     [placeCategories, selectedCategoryId]
   );
+  const selectedMerchantService = useMemo(
+    () => merchantServices.find((service) => Number(service.id) === Number(selectedServiceId)) || null,
+    [merchantServices, selectedServiceId]
+  );
+  const serviceNameById = useMemo(
+    () =>
+      new Map(
+        merchantServices
+          .map((service) => [Number(service.id), String(service.name || '').trim()])
+          .filter(([serviceId, serviceName]) => Number.isInteger(serviceId) && serviceId > 0 && Boolean(serviceName))
+      ),
+    [merchantServices]
+  );
+  const serviceUsageCountById = useMemo(() => {
+    const countById = new Map();
+
+    usageEligibleVenues.forEach((venue) => {
+      extractVenueServiceIds(venue).forEach((serviceId) => {
+        countById.set(serviceId, (countById.get(serviceId) || 0) + 1);
+      });
+    });
+
+    return countById;
+  }, [usageEligibleVenues]);
+  const categoryUsageCountById = useMemo(() => {
+    const countById = new Map();
+
+    usageEligibleVenues.forEach((venue) => {
+      const categoryId = Number(venue.category_id);
+
+      if (!Number.isInteger(categoryId) || categoryId <= 0) {
+        return;
+      }
+
+      countById.set(categoryId, (countById.get(categoryId) || 0) + 1);
+    });
+
+    return countById;
+  }, [usageEligibleVenues]);
+  const selectedVenueMetadata = useMemo(() => normalizeVenueMetadata(selectedVenue?.metadata), [selectedVenue]);
+  const selectedVenueServiceNames = useMemo(
+    () => (selectedVenue ? resolveVenueServiceNames(selectedVenue, serviceNameById) : []),
+    [selectedVenue, serviceNameById]
+  );
+  const selectedVenueGalleryImages = useMemo(
+    () => (selectedVenue ? extractVenueGalleryImages(selectedVenue) : []),
+    [selectedVenue]
+  );
+  const selectedVenueActiveImage =
+    selectedVenueGalleryImages[selectedVenueImageIndex] || selectedVenueGalleryImages[0] || selectedVenue?.cover_image_url || '';
   const activeModeMeta = PAGE_MODES.find((mode) => mode.value === activeMode);
 
   async function loadData() {
@@ -366,15 +578,17 @@ function AdminBoundaryPage() {
     setError('');
 
     try {
-      const [wardData, venueData, categoryData] = await Promise.all([
+      const [wardData, venueData, categoryData, serviceData] = await Promise.all([
         fetchAdminWards(),
         fetchAdminVenues(),
         fetchAdminPlaceCategories(),
+        fetchAdminMerchantServices(),
       ]);
 
       setWards(wardData);
       setVenues(venueData);
       setPlaceCategories(sortCategories(categoryData));
+      setMerchantServices(sortMerchantServices(serviceData));
     } catch (loadError) {
       setError(loadError.response?.data?.message || 'Could not load map management data.');
     } finally {
@@ -394,6 +608,11 @@ function AdminBoundaryPage() {
     setVenues(venueData);
   }
 
+  async function refreshMerchantServices() {
+    const serviceData = await fetchAdminMerchantServices();
+    setMerchantServices(sortMerchantServices(serviceData));
+  }
+
   useEffect(() => {
     loadData();
   }, []);
@@ -403,15 +622,29 @@ function AdminBoundaryPage() {
       return;
     }
 
-    if (!pendingVenues.length) {
+    if (!pendingModeVenues.length) {
       setSelectedVenueId(null);
+      setIsSubmissionDetailClosed(false);
       return;
     }
 
-    if (!selectedVenueId || !pendingVenues.some((venue) => Number(venue.id) === Number(selectedVenueId))) {
-      setSelectedVenueId(pendingVenues[0].id);
+    const hasSelectedVenue = selectedVenueId
+      ? pendingModeVenues.some((venue) => Number(venue.id) === Number(selectedVenueId))
+      : false;
+
+    if (!hasSelectedVenue) {
+      setSelectedVenueId(null);
     }
-  }, [activeMode, pendingVenues, selectedVenueId]);
+
+    if (isSubmissionDetailClosed) {
+      return;
+    }
+
+    if (!hasSelectedVenue) {
+      const fallbackVenueId = pendingVenues[0]?.id ?? pendingModeVenues[0]?.id ?? null;
+      setSelectedVenueId(fallbackVenueId);
+    }
+  }, [activeMode, pendingModeVenues, pendingVenues, selectedVenueId, isSubmissionDetailClosed]);
 
   useEffect(() => {
     if (activeMode !== 'pending' || !selectedVenue) {
@@ -426,6 +659,30 @@ function AdminBoundaryPage() {
       setMapZoom(15);
     }
   }, [activeMode, selectedVenue]);
+
+  useEffect(() => {
+    setSelectedVenueImageIndex(0);
+    setExpandedImageUrl('');
+  }, [activeMode, selectedVenueId]);
+
+  useEffect(() => {
+    if (activeMode !== 'pending') {
+      return;
+    }
+
+    const intervalId = window.setInterval(async () => {
+      try {
+        const freshVenues = await fetchAdminVenues();
+        setVenues(freshVenues);
+      } catch {
+        // Polling failures should be silent to avoid disrupting moderation workflow.
+      }
+    }, 8000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [activeMode]);
 
   useEffect(() => {
     if (!selectedWardId) {
@@ -455,6 +712,18 @@ function AdminBoundaryPage() {
   }, [placeCategories, selectedCategoryId]);
 
   useEffect(() => {
+    if (!selectedServiceId) {
+      return;
+    }
+
+    const foundService = merchantServices.find((service) => Number(service.id) === Number(selectedServiceId));
+    if (!foundService) {
+      setSelectedServiceId(null);
+      setServiceNameInput('');
+    }
+  }, [merchantServices, selectedServiceId]);
+
+  useEffect(() => {
     if (activeMode !== 'category') {
       return;
     }
@@ -473,13 +742,47 @@ function AdminBoundaryPage() {
     }
   }, [activeMode, selectedCategoryId, categoryModeVenues]);
 
+  useEffect(() => {
+    if (activeMode !== 'service') {
+      return;
+    }
+
+    if (!selectedServiceId && merchantServices.length) {
+      const firstService = merchantServices[0];
+      setSelectedServiceId(firstService.id);
+      setServiceNameInput(firstService.name || '');
+      return;
+    }
+
+    if (!selectedServiceId || !serviceModeVenues.length) {
+      return;
+    }
+
+    const firstVenue = serviceModeVenues[0];
+    const latitude = Number(firstVenue.latitude);
+    const longitude = Number(firstVenue.longitude);
+
+    if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+      setMapCenter([latitude, longitude]);
+      setMapZoom(13);
+    }
+  }, [activeMode, selectedServiceId, serviceModeVenues, merchantServices]);
+
   function handleModeChange(mode) {
     setActiveMode(mode);
     setError('');
     setOperationMessage('');
+    setIsSubmissionDetailClosed(false);
 
-    if (mode === 'pending' && pendingVenues.length) {
-      setSelectedVenueId(pendingVenues[0].id);
+    if (mode === 'pending') {
+      const fallbackVenueId = pendingVenues[0]?.id ?? pendingModeVenues[0]?.id ?? null;
+      setSelectedVenueId(fallbackVenueId);
+    }
+
+    if (mode === 'service' && !selectedServiceId && merchantServices.length) {
+      const firstService = merchantServices[0];
+      setSelectedServiceId(firstService.id);
+      setServiceNameInput(firstService.name || '');
     }
   }
 
@@ -747,7 +1050,129 @@ function AdminBoundaryPage() {
     }
   }
 
+  function loadServiceToEditor(service) {
+    setSelectedServiceId(service.id);
+    setServiceNameInput(service.name || '');
+  }
+
+  async function handleAddService() {
+    const name = serviceNameInput.trim();
+
+    if (!name) {
+      setError('Service name is required.');
+      return;
+    }
+
+    const nextSortOrder = merchantServices.reduce((maxOrder, service) => {
+      const serviceOrder = Number(service.sort_order ?? service.sortOrder ?? 0);
+      return Number.isFinite(serviceOrder) ? Math.max(maxOrder, serviceOrder) : maxOrder;
+    }, 0) + 10;
+
+    setError('');
+    setOperationMessage('');
+    setSubmittingService(true);
+
+    try {
+      const created = await createAdminMerchantService({
+        name,
+        slug: slugifyText(name),
+        sortOrder: nextSortOrder,
+      });
+
+      await refreshMerchantServices();
+      setSelectedServiceId(created.id);
+      setServiceNameInput(created.name || name);
+      setOperationMessage('Service added successfully.');
+    } catch (saveError) {
+      setError(saveError.response?.data?.message || 'Could not add service.');
+    } finally {
+      setSubmittingService(false);
+    }
+  }
+
+  async function handleUpdateService() {
+    if (!selectedServiceId) {
+      setError('Select a service first before updating.');
+      return;
+    }
+
+    if (!selectedMerchantService) {
+      setError('Selected service no longer exists. Please select a service again.');
+      return;
+    }
+
+    const name = serviceNameInput.trim();
+    if (!name) {
+      setError('Service name is required.');
+      return;
+    }
+
+    if (normalizeComparableText(selectedMerchantService.name) === name) {
+      setError('No changes detected. Please edit service name before updating.');
+      return;
+    }
+
+    setError('');
+    setOperationMessage('');
+    setSubmittingService(true);
+
+    try {
+      const updated = await updateAdminMerchantService(selectedServiceId, {
+        name,
+      });
+
+      await refreshMerchantServices();
+      setServiceNameInput(updated.name || name);
+      setOperationMessage('Service updated successfully.');
+    } catch (updateError) {
+      setError(updateError.response?.data?.message || 'Could not update service.');
+    } finally {
+      setSubmittingService(false);
+    }
+  }
+
+  async function handleDeleteService() {
+    if (!selectedServiceId) {
+      return;
+    }
+
+    const shouldDelete = window.confirm(`Delete service "${selectedMerchantService?.name || serviceNameInput}"?`);
+    if (!shouldDelete) {
+      return;
+    }
+
+    setError('');
+    setOperationMessage('');
+    setDeletingServiceId(selectedServiceId);
+
+    try {
+      await deleteAdminMerchantService(selectedServiceId);
+      await refreshMerchantServices();
+
+      setSelectedServiceId(null);
+      setServiceNameInput('');
+      setOperationMessage('Service deleted successfully.');
+    } catch (deleteError) {
+      setError(deleteError.response?.data?.message || 'Could not delete service.');
+    } finally {
+      setDeletingServiceId(null);
+    }
+  }
+
   async function handleModeration(venueId, action) {
+    const venueToModerate = venues.find((item) => Number(item.id) === Number(venueId));
+    const venueDisplayName = venueToModerate?.title || venueToModerate?.name || `#${venueId}`;
+    const confirmationMessage =
+      action === 'approve'
+        ? `Approve post "${venueDisplayName}"? This will add this location to the approved map.`
+        : `Reject post "${venueDisplayName}"? This will permanently remove this location from the database.`;
+
+    const shouldProceed = window.confirm(confirmationMessage);
+
+    if (!shouldProceed) {
+      return;
+    }
+
     setError('');
     setOperationMessage('');
 
@@ -760,16 +1185,19 @@ function AdminBoundaryPage() {
         rejectionReason,
       });
 
-      const updatedVenue = response.venue;
-      setVenues((currentVenues) =>
-        currentVenues.map((item) => (Number(item.id) === Number(updatedVenue.id) ? updatedVenue : item))
-      );
-
       if (action === 'reject') {
+        const deletedVenueId = Number(response.deletedVenueId ?? venueId);
+
+        setVenues((currentVenues) => currentVenues.filter((item) => Number(item.id) !== deletedVenueId));
         setRejectReasons((currentReasons) => ({
           ...currentReasons,
           [venueId]: '',
         }));
+      } else if (response.venue) {
+        const updatedVenue = response.venue;
+        setVenues((currentVenues) =>
+          currentVenues.map((item) => (Number(item.id) === Number(updatedVenue.id) ? updatedVenue : item))
+        );
       }
 
       setOperationMessage(response.message || 'Moderation status updated.');
@@ -778,6 +1206,31 @@ function AdminBoundaryPage() {
     } finally {
       setModeratingVenueId(null);
     }
+  }
+
+  function handleOpenVenueDetails(venueId) {
+    setIsSubmissionDetailClosed(false);
+    setSelectedVenueId(venueId);
+    setSelectedVenueImageIndex(0);
+    setExpandedImageUrl('');
+  }
+
+  function handlePreviousVenueImage() {
+    if (selectedVenueGalleryImages.length <= 1) {
+      return;
+    }
+
+    setSelectedVenueImageIndex((currentIndex) =>
+      currentIndex === 0 ? selectedVenueGalleryImages.length - 1 : currentIndex - 1
+    );
+  }
+
+  function handleNextVenueImage() {
+    if (selectedVenueGalleryImages.length <= 1) {
+      return;
+    }
+
+    setSelectedVenueImageIndex((currentIndex) => (currentIndex + 1) % selectedVenueGalleryImages.length);
   }
 
   function resolveMarkerIcon(venue) {
@@ -803,7 +1256,7 @@ function AdminBoundaryPage() {
                 key={venue.id}
                 type="button"
                 className={`admin-list-item ${Number(selectedVenueId) === Number(venue.id) ? 'is-active' : ''}`.trim()}
-                onClick={() => setSelectedVenueId(venue.id)}
+                onClick={() => handleOpenVenueDetails(venue.id)}
               >
                 <strong>{venue.title || venue.name}</strong>
                 <span>{venue.address || 'Address pending'}</span>
@@ -844,6 +1297,34 @@ function AdminBoundaryPage() {
       );
     }
 
+    if (activeMode === 'service') {
+      return (
+        <div className="admin-list-panel">
+          <header>
+            <h3>Merchant Services</h3>
+            <p>{merchantServices.length} service option(s)</p>
+          </header>
+
+          <div className="admin-scroll-list">
+            {merchantServices.map((service) => (
+              <button
+                key={service.id}
+                type="button"
+                className={`admin-list-item ${Number(selectedServiceId) === Number(service.id) ? 'is-active' : ''}`.trim()}
+                onClick={() => loadServiceToEditor(service)}
+              >
+                <strong>{service.name}</strong>
+                <span>{serviceUsageCountById.get(Number(service.id)) || 0} venue(s) using this service</span>
+                <small>{service.slug}</small>
+              </button>
+            ))}
+
+            {!merchantServices.length ? <p className="admin-empty-note">No merchant services yet.</p> : null}
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="admin-list-panel">
         <header>
@@ -863,6 +1344,7 @@ function AdminBoundaryPage() {
                 <span className="category-color-dot" style={{ backgroundColor: resolveCategoryColor(category.id) }} />
                 {category.name}
               </strong>
+                <span>{categoryUsageCountById.get(Number(category.id)) || 0} venue(s) using this category</span>
             </button>
           ))}
 
@@ -874,23 +1356,77 @@ function AdminBoundaryPage() {
 
   function renderRightPanel() {
     if (activeMode === 'pending') {
+      const selectedVenueStatus = String(selectedVenue?.status || '').toLowerCase();
+
       return (
         <div className="admin-detail-panel">
-          <header>
-            <h3>Submission Detail</h3>
-            <p>Review selected post and decide moderation action.</p>
+          <header className="admin-detail-panel-header">
+            <div className="admin-detail-panel-header-text">
+              <h3>Submission Detail</h3>
+              <p>Review selected post and decide moderation action.</p>
+            </div>
+
+            {selectedVenue ? (
+              <button
+                type="button"
+                className="admin-detail-close-btn"
+                onClick={() => {
+                  setIsSubmissionDetailClosed(true);
+                  setSelectedVenueId(null);
+                  setExpandedImageUrl('');
+                }}
+                aria-label="Close submission detail"
+              >
+                ×
+              </button>
+            ) : null}
           </header>
 
           {!selectedVenue ? (
             <p className="admin-empty-note">Select a pending post from the queue.</p>
           ) : (
             <div className="admin-detail-stack">
-              {selectedVenue.cover_image_url ? (
-                <img
-                  src={selectedVenue.cover_image_url}
-                  alt={selectedVenue.title || selectedVenue.name}
-                  className="admin-detail-image"
-                />
+              {selectedVenueActiveImage ? (
+                <div className="admin-image-carousel">
+                  <button
+                    type="button"
+                    className="admin-carousel-btn"
+                    onClick={handlePreviousVenueImage}
+                    disabled={selectedVenueGalleryImages.length <= 1}
+                    aria-label="Show previous image"
+                  >
+                    ‹
+                  </button>
+
+                  <button
+                    type="button"
+                    className="admin-carousel-image-wrap"
+                    onClick={() => setExpandedImageUrl(selectedVenueActiveImage)}
+                    aria-label="Open image preview"
+                  >
+                    <img
+                      src={selectedVenueActiveImage}
+                      alt={selectedVenue.title || selectedVenue.name}
+                      className="admin-detail-image admin-detail-image-clickable"
+                    />
+                  </button>
+
+                  <button
+                    type="button"
+                    className="admin-carousel-btn"
+                    onClick={handleNextVenueImage}
+                    disabled={selectedVenueGalleryImages.length <= 1}
+                    aria-label="Show next image"
+                  >
+                    ›
+                  </button>
+
+                  <p className="admin-carousel-counter">
+                    {Math.min(selectedVenueImageIndex + 1, Math.max(selectedVenueGalleryImages.length, 1))}
+                    {' / '}
+                    {Math.max(selectedVenueGalleryImages.length, 1)}
+                  </p>
+                </div>
               ) : (
                 <div className="admin-detail-image-placeholder">No cover image</div>
               )}
@@ -898,17 +1434,70 @@ function AdminBoundaryPage() {
               <h4>{selectedVenue.title || selectedVenue.name}</h4>
               <p>{selectedVenue.address || 'Address pending'}</p>
 
-              <ul className="admin-detail-meta">
-                <li>Ward: {selectedVenue.ward_name || selectedVenue.ward_id || 'Not detected'}</li>
-                <li>Category: {selectedVenue.category_name || 'Uncategorized'}</li>
-                <li>Phone: {selectedVenue.phone || 'Not provided'}</li>
-                <li>Submitted: {formatDateTime(selectedVenue.submitted_at)}</li>
-              </ul>
+              <div className="admin-extra-detail-block">
+                <ul className="admin-detail-meta">
+                  <li>Venue ID: {selectedVenue.id}</li>
+                  <li>Name: {selectedVenue.name || 'Not provided'}</li>
+                  <li>Ward: {selectedVenue.ward_name || selectedVenue.ward_id || 'Not detected'}</li>
+                  <li>Category: {selectedVenue.category_name || 'Uncategorized'}</li>
+                  <li>Status: {statusLabel(selectedVenue.status)}</li>
+                  <li>Phone: {selectedVenue.phone || 'Not provided'}</li>
+                  <li>Submitted: {formatDateTime(selectedVenue.submitted_at)}</li>
+                  <li>Latitude: {formatCoordinate(selectedVenue.latitude)}</li>
+                  <li>Longitude: {formatCoordinate(selectedVenue.longitude)}</li>
+                  <li>
+                    Price range:
+                    {' '}
+                    {formatCurrencyVnd(selectedVenueMetadata.minPrice)} - {formatCurrencyVnd(selectedVenueMetadata.maxPrice)}
+                  </li>
+                  <li>
+                    Operating hours:
+                    {' '}
+                    {selectedVenueMetadata.startTime && selectedVenueMetadata.endTime
+                      ? `${selectedVenueMetadata.startTime} - ${selectedVenueMetadata.endTime}`
+                      : 'Not provided'}
+                  </li>
+                  <li>Gallery images: {selectedVenueGalleryImages.length || 0}</li>
+                  <li>Business license: {selectedVenue.business_license_image_url ? 'Uploaded' : 'Missing'}</li>
+                </ul>
 
-              {selectedVenue.description ? <p>{selectedVenue.description}</p> : null}
+                {selectedVenue.description ? <p>{selectedVenue.description}</p> : null}
+
+                <div className="admin-service-summary">
+                  <strong>Services offered</strong>
+                  {selectedVenueServiceNames.length ? (
+                    <div className="admin-service-chip-list">
+                      {selectedVenueServiceNames.map((serviceName) => (
+                        <span key={serviceName} className="admin-service-chip">
+                          {serviceName}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="admin-empty-note">No services selected by merchant.</p>
+                  )}
+                </div>
+
+                {selectedVenue.business_license_image_url ? (
+                  <div className="admin-license-preview">
+                    <p>Business license preview</p>
+                    <button
+                      type="button"
+                      className="admin-license-image-wrap"
+                      onClick={() => setExpandedImageUrl(selectedVenue.business_license_image_url)}
+                    >
+                      <img
+                        src={selectedVenue.business_license_image_url}
+                        alt={`${selectedVenue.title || selectedVenue.name} license`}
+                        className="admin-detail-image admin-detail-image-clickable"
+                      />
+                    </button>
+                  </div>
+                ) : null}
+              </div>
 
               <div className="admin-form-field">
-                <label htmlFor="rejectionReason">Rejection Reason</label>
+                <label htmlFor="rejectionReason">Rejection Reason (Optional)</label>
                 <textarea
                   id="rejectionReason"
                   value={rejectReasons[selectedVenue.id] || ''}
@@ -919,19 +1508,21 @@ function AdminBoundaryPage() {
                     }))
                   }
                   rows={3}
-                  placeholder="Required only when rejecting this post."
+                  placeholder="Optional note when rejecting this post."
                 />
               </div>
 
               <div className="admin-action-row">
-                <button
-                  type="button"
-                  className="action-approve"
-                  disabled={moderatingVenueId === selectedVenue.id}
-                  onClick={() => handleModeration(selectedVenue.id, 'approve')}
-                >
-                  {moderatingVenueId === selectedVenue.id ? 'Updating...' : 'Approve Post'}
-                </button>
+                {selectedVenueStatus !== 'approved' ? (
+                  <button
+                    type="button"
+                    className="action-approve"
+                    disabled={moderatingVenueId === selectedVenue.id}
+                    onClick={() => handleModeration(selectedVenue.id, 'approve')}
+                  >
+                    {moderatingVenueId === selectedVenue.id ? 'Updating...' : 'Approve Post'}
+                  </button>
+                ) : null}
 
                 <button
                   type="button"
@@ -1034,6 +1625,65 @@ function AdminBoundaryPage() {
       );
     }
 
+    if (activeMode === 'service') {
+      return (
+        <div className="admin-detail-panel">
+          <header>
+            <h3>Services Offered - Merchant</h3>
+            <p>Manage service options shown in the merchant registration form.</p>
+          </header>
+
+          <div className="admin-form-stack">
+            <div className="admin-form-field">
+              <label htmlFor="merchantServiceName">Service Name</label>
+              <input
+                id="merchantServiceName"
+                value={serviceNameInput}
+                onChange={(event) => setServiceNameInput(event.target.value)}
+                placeholder="e.g. Family Room"
+              />
+            </div>
+
+            <div className="admin-action-row">
+              <button type="button" className="action-primary" disabled={submittingService} onClick={handleAddService}>
+                {submittingService ? 'Processing...' : 'Add'}
+              </button>
+
+              <button
+                type="button"
+                className="action-secondary"
+                disabled={!selectedServiceId || submittingService}
+                onClick={handleUpdateService}
+              >
+                {submittingService ? 'Processing...' : 'Update'}
+              </button>
+
+              <button
+                type="button"
+                className="action-danger"
+                disabled={!selectedServiceId || deletingServiceId === selectedServiceId}
+                onClick={handleDeleteService}
+              >
+                {deletingServiceId === selectedServiceId ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+
+            {selectedMerchantService ? (
+              <p className="admin-inline-note">
+                Selected service:
+                <strong>{selectedMerchantService.name}</strong>
+                <span>
+                  ({serviceUsageCountById.get(Number(selectedMerchantService.id)) || 0} venue(s) use this option)
+                </span>
+              </p>
+            ) : (
+              <p className="admin-inline-note">Select a service from the left list to update or delete it.</p>
+            )}
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="admin-detail-panel">
         <header>
@@ -1048,7 +1698,7 @@ function AdminBoundaryPage() {
               id="placeCategoryName"
               value={categoryNameInput}
               onChange={(event) => setCategoryNameInput(event.target.value)}
-              placeholder="e.g. Khu vui choi"
+              placeholder="e.g. Entertainment Venue"
             />
           </div>
 
@@ -1078,9 +1728,10 @@ function AdminBoundaryPage() {
 
           {selectedCategory ? (
             <p className="admin-inline-note">
-              Selected category color:
+              Selected category:
               <span className="category-color-dot" style={{ backgroundColor: resolveCategoryColor(selectedCategory.id) }} />
               {selectedCategory.name}
+              <span>({categoryUsageCountById.get(Number(selectedCategory.id)) || 0} venue(s) use this category)</span>
             </p>
           ) : (
             <p className="admin-inline-note">Select a category from the list to update or delete it.</p>
@@ -1096,7 +1747,7 @@ function AdminBoundaryPage() {
         className="admin-map-section-card"
         eyebrow="Admin Map Management"
         title="Map Moderation Workspace"
-        description="Manage pending posts, ward boundaries, and place categories without affecting other modules."
+        description="Manage pending posts, ward boundaries, place categories, and merchant services without affecting other modules."
       >
         {operationMessage ? <div className="admin-map-message success">{operationMessage}</div> : null}
         {error ? <div className="admin-map-message error">{error}</div> : null}
@@ -1129,63 +1780,73 @@ function AdminBoundaryPage() {
                 url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
               />
 
-              {wards.map((ward) => (
-                <GeoJSON
-                  key={`${ward.ward_id}-${ward.updated_at || ward.created_at || ''}`}
-                  data={ward.boundary}
-                  style={{
-                    color: selectedWardId === ward.ward_id ? '#f25f29' : '#155e63',
-                    weight: selectedWardId === ward.ward_id ? 3 : 2,
-                    fillOpacity: selectedWardId === ward.ward_id ? 0.24 : 0.08,
-                  }}
-                  eventHandlers={
-                    activeMode === 'ward'
-                      ? {
-                          click: () => loadWardToEditor(ward),
-                        }
-                      : undefined
-                  }
-                >
-                  <Tooltip sticky>
-                    <span>{ward.name}</span>
-                  </Tooltip>
-                </GeoJSON>
-              ))}
+              {wards.map((ward) => {
+                const polygonBoundary = toPolygonBoundaryFeatureCollection(ward.boundary);
 
-              {visibleVenues.map((venue) => (
-                <Marker
-                  key={venue.id}
-                  position={[Number(venue.latitude), Number(venue.longitude)]}
-                  icon={resolveMarkerIcon(venue)}
-                  eventHandlers={
-                    activeMode === 'pending'
-                      ? {
-                          click: () => setSelectedVenueId(venue.id),
-                        }
-                      : undefined
-                  }
-                >
-                  <Popup>
-                    <div className="admin-map-popup">
-                      {venue.cover_image_url ? (
-                        <img src={venue.cover_image_url} alt={venue.name} className="admin-map-popup-image" />
-                      ) : (
-                        <div className="admin-map-popup-image-placeholder">No cover image</div>
-                      )}
+                if (!polygonBoundary) {
+                  return null;
+                }
 
-                      <h3>{venue.title || venue.name}</h3>
-                      <p>{venue.address || 'Address pending'}</p>
-                      <ul>
-                        <li>Ward: {venue.ward_name || venue.ward_id || 'Not detected'}</li>
-                        <li>Category: {venue.category_name || 'Uncategorized'}</li>
-                        <li>Status: {statusLabel(venue.status)}</li>
-                        <li>Phone: {venue.phone || 'Not provided'}</li>
-                      </ul>
-                      {venue.description ? <p className="admin-map-popup-description">{venue.description}</p> : null}
-                    </div>
-                  </Popup>
-                </Marker>
-              ))}
+                return (
+                  <GeoJSON
+                    key={`${ward.ward_id}-${ward.updated_at || ward.created_at || ''}`}
+                    data={polygonBoundary}
+                    style={{
+                      color: selectedWardId === ward.ward_id ? '#f25f29' : '#155e63',
+                      weight: selectedWardId === ward.ward_id ? 3 : 2,
+                      fillOpacity: selectedWardId === ward.ward_id ? 0.24 : 0.08,
+                    }}
+                    eventHandlers={
+                      activeMode === 'ward'
+                        ? {
+                            click: () => loadWardToEditor(ward),
+                          }
+                        : undefined
+                    }
+                  >
+                    <Tooltip sticky>
+                      <span>{ward.name}</span>
+                    </Tooltip>
+                  </GeoJSON>
+                );
+              })}
+
+              {visibleVenues
+                .filter((venue) => Number.isFinite(Number(venue.latitude)) && Number.isFinite(Number(venue.longitude)))
+                .map((venue) => (
+                  <Marker
+                    key={venue.id}
+                    position={[Number(venue.latitude), Number(venue.longitude)]}
+                    icon={resolveMarkerIcon(venue)}
+                    eventHandlers={
+                      activeMode === 'pending'
+                        ? {
+                            click: () => handleOpenVenueDetails(venue.id),
+                          }
+                        : undefined
+                    }
+                  >
+                    <Popup>
+                      <div className="admin-map-popup">
+                        {venue.cover_image_url ? (
+                          <img src={venue.cover_image_url} alt={venue.name} className="admin-map-popup-image" />
+                        ) : (
+                          <div className="admin-map-popup-image-placeholder">No cover image</div>
+                        )}
+
+                        <h3>{venue.title || venue.name}</h3>
+                        <p>{venue.address || 'Address pending'}</p>
+                        <ul>
+                          <li>Ward: {venue.ward_name || venue.ward_id || 'Not detected'}</li>
+                          <li>Category: {venue.category_name || 'Uncategorized'}</li>
+                          <li>Status: {statusLabel(venue.status)}</li>
+                          <li>Phone: {venue.phone || 'Not provided'}</li>
+                        </ul>
+                        {venue.description ? <p className="admin-map-popup-description">{venue.description}</p> : null}
+                      </div>
+                    </Popup>
+                  </Marker>
+                ))}
             </MapContainer>
 
             {loading ? <div className="admin-map-overlay">Loading map management data...</div> : null}
@@ -1193,6 +1854,25 @@ function AdminBoundaryPage() {
 
           <aside className="admin-workspace-panel right">{renderRightPanel()}</aside>
         </div>
+
+        {expandedImageUrl ? (
+          <div className="admin-image-lightbox" role="dialog" aria-modal="true" onClick={() => setExpandedImageUrl('')}>
+            <button
+              type="button"
+              className="admin-lightbox-close"
+              onClick={() => setExpandedImageUrl('')}
+              aria-label="Close image preview"
+            >
+              ×
+            </button>
+            <img
+              src={expandedImageUrl}
+              alt="Expanded venue"
+              className="admin-lightbox-image"
+              onClick={(event) => event.stopPropagation()}
+            />
+          </div>
+        ) : null}
       </SectionCard>
     </div>
   );
