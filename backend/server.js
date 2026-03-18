@@ -158,6 +158,18 @@ function normalizeCategoryId(value) {
     return normalizeNullableNumber(value);
 }
 
+function normalizeServiceIds(input) {
+    if (!Array.isArray(input)) {
+        return [];
+    }
+
+    const normalized = input
+        .map((item) => Number(item))
+        .filter((item) => Number.isInteger(item) && item > 0);
+
+    return [...new Set(normalized)];
+}
+
 function normalizeNullableNumber(value) {
     if (value === undefined || value === null || value === '') {
         return null;
@@ -635,12 +647,13 @@ async function generateWardIdFromName(name) {
             } = req.body;
 
             const normalizedName = String(name || '').trim();
-            const normalizedAddress = String(address || '').trim() || 'Chua co dia chi';
+            const normalizedAddress = String(address || '').trim() || 'Address not provided';
             const normalizedLatitude = Number(latitude);
             const normalizedLongitude = Number(longitude);
             const normalizedCategoryId = normalizeCategoryId(categoryId ?? category_id);
             const normalizedCategoryName = String(category || '').trim();
             const normalizedMetadata = metadata && typeof metadata === 'object' ? { ...metadata } : {};
+            const requestedServiceIds = normalizeServiceIds(normalizedMetadata.selectedServices);
 
             if (!normalizedMetadata.category && normalizedCategoryName) {
                 normalizedMetadata.category = normalizedCategoryName;
@@ -692,6 +705,57 @@ async function generateWardIdFromName(name) {
                     if (!categoryCheck.rows.length) {
                         return res.status(400).json({ message: 'Selected category is invalid or inactive' });
                     }
+                }
+
+                if (requestedServiceIds.length) {
+                    const servicesResult = await pool.query(
+                        `
+                        SELECT id, name
+                        FROM merchant_services
+                        WHERE id = ANY($1::int[])
+                          AND is_active = true
+                    `,
+                        [requestedServiceIds]
+                    );
+
+                    if (servicesResult.rows.length !== requestedServiceIds.length) {
+                        return res.status(400).json({ message: 'Selected services are invalid or inactive' });
+                    }
+
+                    const serviceNameMap = new Map(
+                        servicesResult.rows.map((service) => [Number(service.id), service.name])
+                    );
+
+                    normalizedMetadata.selectedServices = requestedServiceIds;
+                    normalizedMetadata.selectedServiceNames = requestedServiceIds
+                        .map((serviceId) => serviceNameMap.get(serviceId))
+                        .filter(Boolean);
+                } else {
+                    normalizedMetadata.selectedServices = [];
+                    normalizedMetadata.selectedServiceNames = [];
+                }
+
+                const duplicateLocationResult = await pool.query(
+                    `
+                    SELECT id, status::text AS status
+                    FROM venues
+                    WHERE COALESCE(status::text, '') IN ('pending', 'approved')
+                                            AND ABS(latitude - $1) <= 0.00003
+                                            AND ABS(longitude - $2) <= 0.00003
+                    ORDER BY COALESCE(submitted_at, created_at) DESC, id DESC
+                    LIMIT 1
+                `,
+                    [normalizedLatitude, normalizedLongitude]
+                );
+
+                if (duplicateLocationResult.rows.length) {
+                    const existingStatus = String(duplicateLocationResult.rows[0].status || '').toLowerCase();
+                    return res.status(409).json({
+                        message:
+                            existingStatus === 'pending'
+                                ? 'A venue submission at this location is already waiting for admin review.'
+                                : 'A venue at this location has already been approved. Please pick a different location.'
+                    });
                 }
 
                 const detection = await detectWardByCoordinates(normalizedLatitude, normalizedLongitude);
@@ -958,6 +1022,7 @@ async function generateWardIdFromName(name) {
                 SELECT COUNT(*)::int AS usage_count
                 FROM venues
                 WHERE category_id = $1
+                  AND COALESCE(venues.status::text, '') <> 'rejected'
             `,
                     [categoryId]
                 );
@@ -982,6 +1047,207 @@ async function generateWardIdFromName(name) {
                 }
 
                 return res.json({ message: 'Category deleted successfully' });
+            } catch (error) {
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
+        async function listPublicMerchantServices(req, res) {
+            const includeInactive = String(req.query.includeInactive || '').toLowerCase() === 'true';
+
+            try {
+                const result = await pool.query(
+                    `
+                        SELECT id, name, slug, icon, description, sort_order, is_active, created_at, updated_at
+                        FROM merchant_services
+                        ${includeInactive ? '' : 'WHERE is_active = true'}
+                        ORDER BY sort_order ASC, name ASC
+                    `
+                );
+
+                return res.json(result.rows);
+            } catch (error) {
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
+        async function listAdminMerchantServices(req, res) {
+            try {
+                const result = await pool.query(
+                    `
+                        SELECT id, name, slug, icon, description, sort_order, is_active, created_at, updated_at
+                        FROM merchant_services
+                        ORDER BY sort_order ASC, name ASC
+                    `
+                );
+
+                return res.json(result.rows);
+            } catch (error) {
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
+        async function createAdminMerchantService(req, res) {
+            const name = String(req.body.name || '').trim();
+            const icon = normalizeNullableText(req.body.icon);
+            const description = normalizeNullableText(req.body.description);
+            const slugInput = String(req.body.slug || '').trim();
+            const slug = slugifyText(slugInput || name);
+            const sortOrder = Number.isFinite(Number(req.body.sortOrder)) ? Number(req.body.sortOrder) : 0;
+            const isActive = req.body.isActive !== false;
+
+            if (!name) {
+                return res.status(400).json({ message: 'name is required' });
+            }
+
+            if (!slug) {
+                return res.status(400).json({ message: 'slug is required' });
+            }
+
+            try {
+                const result = await pool.query(
+                    `
+                        INSERT INTO merchant_services (name, slug, icon, description, sort_order, is_active, updated_at)
+                        VALUES ($1, $2, $3, $4, $5, $6, now())
+                        RETURNING id, name, slug, icon, description, sort_order, is_active, created_at, updated_at
+                    `,
+                    [name, slug, icon, description, sortOrder, isActive]
+                );
+
+                return res.status(201).json(result.rows[0]);
+            } catch (error) {
+                if (error.code === '23505') {
+                    return res.status(409).json({ message: 'Service slug already exists' });
+                }
+
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
+        async function updateAdminMerchantService(req, res) {
+            const serviceId = normalizeNullableNumber(req.params.serviceId);
+
+            if (Number.isNaN(serviceId) || serviceId === null) {
+                return res.status(400).json({ message: 'serviceId must be a positive integer' });
+            }
+
+            try {
+                const existingResult = await pool.query(
+                    `
+                        SELECT id, name, slug, icon, description, sort_order, is_active
+                        FROM merchant_services
+                        WHERE id = $1
+                        LIMIT 1
+                    `,
+                    [serviceId]
+                );
+
+                if (!existingResult.rows.length) {
+                    return res.status(404).json({ message: 'Service not found' });
+                }
+
+                const existing = existingResult.rows[0];
+                const hasName = Object.prototype.hasOwnProperty.call(req.body, 'name');
+                const hasSlug = Object.prototype.hasOwnProperty.call(req.body, 'slug');
+                const hasIcon = Object.prototype.hasOwnProperty.call(req.body, 'icon');
+                const hasDescription = Object.prototype.hasOwnProperty.call(req.body, 'description');
+                const hasSortOrder = Object.prototype.hasOwnProperty.call(req.body, 'sortOrder');
+                const hasIsActive = Object.prototype.hasOwnProperty.call(req.body, 'isActive');
+
+                const nextName = hasName ? String(req.body.name || '').trim() : existing.name;
+                const nextSlug = hasSlug
+                    ? slugifyText(String(req.body.slug || '').trim())
+                    : hasName
+                        ? slugifyText(nextName)
+                        : existing.slug;
+                const nextIcon = hasIcon ? normalizeNullableText(req.body.icon) : existing.icon;
+                const nextDescription = hasDescription ? normalizeNullableText(req.body.description) : existing.description;
+                const nextSortOrder = hasSortOrder
+                    ? Number.isFinite(Number(req.body.sortOrder))
+                        ? Number(req.body.sortOrder)
+                        : existing.sort_order
+                    : existing.sort_order;
+                const nextIsActive = hasIsActive ? req.body.isActive !== false : existing.is_active;
+
+                if (!nextName) {
+                    return res.status(400).json({ message: 'name is required' });
+                }
+
+                if (!nextSlug) {
+                    return res.status(400).json({ message: 'slug is required' });
+                }
+
+                const updateResult = await pool.query(
+                    `
+                        UPDATE merchant_services
+                        SET
+                            name = $2,
+                            slug = $3,
+                            icon = $4,
+                            description = $5,
+                            sort_order = $6,
+                            is_active = $7,
+                            updated_at = now()
+                        WHERE id = $1
+                        RETURNING id, name, slug, icon, description, sort_order, is_active, created_at, updated_at
+                    `,
+                    [serviceId, nextName, nextSlug, nextIcon, nextDescription, nextSortOrder, nextIsActive]
+                );
+
+                return res.json(updateResult.rows[0]);
+            } catch (error) {
+                if (error.code === '23505') {
+                    return res.status(409).json({ message: 'Service slug already exists' });
+                }
+
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
+        async function deleteAdminMerchantService(req, res) {
+            const serviceId = normalizeNullableNumber(req.params.serviceId);
+
+            if (Number.isNaN(serviceId) || serviceId === null) {
+                return res.status(400).json({ message: 'serviceId must be a positive integer' });
+            }
+
+            try {
+                const usageResult = await pool.query(
+                    `
+                        SELECT COUNT(*)::int AS usage_count
+                        FROM venues
+                        WHERE metadata ? 'selectedServices'
+                          AND COALESCE(venues.status::text, '') <> 'rejected'
+                          AND EXISTS (
+                              SELECT 1
+                              FROM jsonb_array_elements_text(metadata->'selectedServices') AS selected(value)
+                              WHERE selected.value ~ '^[0-9]+$'
+                                AND selected.value::int = $1
+                          )
+                    `,
+                    [serviceId]
+                );
+
+                if ((usageResult.rows[0]?.usage_count || 0) > 0) {
+                    return res.status(409).json({
+                        message: 'Service is used by existing venues. Remove it from venues before deletion.'
+                    });
+                }
+
+                const deleteResult = await pool.query(
+                    `
+                        DELETE FROM merchant_services
+                        WHERE id = $1
+                        RETURNING id
+                    `,
+                    [serviceId]
+                );
+
+                if (!deleteResult.rows.length) {
+                    return res.status(404).json({ message: 'Service not found' });
+                }
+
+                return res.json({ message: 'Service deleted successfully' });
             } catch (error) {
                 return res.status(500).json({ message: error.message });
             }
@@ -1187,7 +1453,6 @@ async function generateWardIdFromName(name) {
         async function moderateVenueSubmission(req, res) {
             const venueId = Number(req.params.venueId);
             const action = String(req.body.action || '').trim().toLowerCase();
-            const rejectionReason = String(req.body.rejectionReason || '').trim() || null;
 
             if (!Number.isFinite(venueId)) {
                 return res.status(400).json({ message: 'Invalid venue id' });
@@ -1197,17 +1462,31 @@ async function generateWardIdFromName(name) {
                 return res.status(400).json({ message: 'action must be approve or reject' });
             }
 
-            if (action === 'reject' && !rejectionReason) {
-                return res.status(400).json({ message: 'rejectionReason is required when rejecting a submission' });
-            }
-
             const reviewer = req.authUser?.email || req.authUser?.id || 'admin';
 
             try {
-                const result =
-                    action === 'approve'
-                        ? await pool.query(
-                            `
+                if (action === 'reject') {
+                    const deleteResult = await pool.query(
+                        `
+                          DELETE FROM venues
+                          WHERE id = $1
+                          RETURNING id
+                      `,
+                        [venueId]
+                    );
+
+                    if (!deleteResult.rows.length) {
+                        return res.status(404).json({ message: 'Venue submission not found' });
+                    }
+
+                    return res.json({
+                        message: 'Venue rejected and removed successfully',
+                        deletedVenueId: deleteResult.rows[0].id
+                    });
+                }
+
+                const result = await pool.query(
+                    `
                           UPDATE venues
                           SET
                               status = 'approved',
@@ -1219,23 +1498,8 @@ async function generateWardIdFromName(name) {
                           WHERE id = $1
                           RETURNING id
                       `,
-                            [venueId, reviewer]
-                        )
-                        : await pool.query(
-                            `
-                          UPDATE venues
-                          SET
-                              status = 'rejected',
-                              approved_at = NULL,
-                              rejected_at = now(),
-                              rejection_reason = $2,
-                              reviewed_by = $3,
-                              updated_at = now()
-                          WHERE id = $1
-                          RETURNING id
-                      `,
-                            [venueId, rejectionReason, reviewer]
-                        );
+                    [venueId, reviewer]
+                );
 
                 if (!result.rows.length) {
                     return res.status(404).json({ message: 'Venue submission not found' });
@@ -1277,7 +1541,7 @@ async function generateWardIdFromName(name) {
                 );
 
                 return res.json({
-                    message: action === 'approve' ? 'Venue approved successfully' : 'Venue rejected successfully',
+                    message: 'Venue approved successfully',
                     venue: details.rows[0]
                 });
             } catch (error) {
@@ -1287,6 +1551,7 @@ async function generateWardIdFromName(name) {
 
         registerVersionedRoute('get', '/wards', listPublicWards);
         registerVersionedRoute('get', '/place-categories', listPublicPlaceCategories);
+        registerVersionedRoute('get', '/merchant-services', listPublicMerchantServices);
         registerVersionedRoute('get', '/venues', listPublicVenues);
         registerVersionedRoute('get', '/venues/:venueId', authenticateRequest, getVenueDetails);
         registerVersionedRoute('post', '/venues', createVenueSubmission);
@@ -1298,6 +1563,10 @@ async function generateWardIdFromName(name) {
         registerVersionedRoute('post', '/admin/place-categories', authenticateRequest, requireAdminRole, createAdminPlaceCategory);
         registerVersionedRoute('patch', '/admin/place-categories/:categoryId', authenticateRequest, requireAdminRole, updateAdminPlaceCategory);
         registerVersionedRoute('delete', '/admin/place-categories/:categoryId', authenticateRequest, requireAdminRole, deleteAdminPlaceCategory);
+        registerVersionedRoute('get', '/admin/merchant-services', authenticateRequest, requireAdminRole, listAdminMerchantServices);
+        registerVersionedRoute('post', '/admin/merchant-services', authenticateRequest, requireAdminRole, createAdminMerchantService);
+        registerVersionedRoute('patch', '/admin/merchant-services/:serviceId', authenticateRequest, requireAdminRole, updateAdminMerchantService);
+        registerVersionedRoute('delete', '/admin/merchant-services/:serviceId', authenticateRequest, requireAdminRole, deleteAdminMerchantService);
         registerVersionedRoute('get', '/admin/venues', authenticateRequest, requireAdminRole, listAdminVenues);
         registerVersionedRoute('patch', '/admin/venues/:venueId/moderation', authenticateRequest, requireAdminRole, moderateVenueSubmission);
 
