@@ -50,3 +50,26 @@ export async function deleteAdminPlaceCategory(categoryId) {
   const response = await apiClient.delete(`/admin/place-categories/${categoryId}`);
   return response.data;
 }
+
+export async function fetchAdminMerchantServices(params = {}) {
+  const response = await apiClient.get('/admin/merchant-services', {
+    params,
+  });
+
+  return response.data;
+}
+
+export async function createAdminMerchantService(payload) {
+  const response = await apiClient.post('/admin/merchant-services', payload);
+  return response.data;
+}
+
+export async function updateAdminMerchantService(serviceId, payload) {
+  const response = await apiClient.patch(`/admin/merchant-services/${serviceId}`, payload);
+  return response.data;
+}
+
+export async function deleteAdminMerchantService(serviceId) {
+  const response = await apiClient.delete(`/admin/merchant-services/${serviceId}`);
+  return response.data;
+}
