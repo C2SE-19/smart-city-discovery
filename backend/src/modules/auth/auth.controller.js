@@ -75,6 +75,7 @@ const getProfile = async (req, res) => {
         address: user.address || '',
         gender: user.gender || 'Nam',
         bio: user.bio || '',
+        avatarUrl: user.avatar_url || user.avatarUrl || '',
         role: user.role
       }
     });

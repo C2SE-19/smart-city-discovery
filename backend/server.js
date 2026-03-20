@@ -11,6 +11,7 @@ const turf = require('@turf/turf');
 const multer = require('multer');
 const nodemailer = require('nodemailer');
 const { OAuth2Client } = require('google-auth-library');
+const { supabaseAdmin } = require('./src/lib/supabase');
 
 const app = express();
 app.use(cors());
@@ -540,6 +541,23 @@ async function generateWardIdFromName(name) {
             }
         });
 
+        // ==========================================
+        // AVATAR UPLOAD
+        // ==========================================
+        const uploadAvatar = multer({
+            storage: multer.memoryStorage(),
+            limits: { fileSize: 20 * 1024 * 1024 },
+            fileFilter: (_req, file, cb) => {
+                const allowed = ['image/png', 'image/jpeg', 'image/webp'];
+                if (allowed.includes(file.mimetype)) {
+                    cb(null, true);
+                } else {
+                    cb(new Error('Unsupported file type'));
+                }
+            }
+        });
+
+        const FEEDBACK_CATEGORIES = ['bug', 'feature', 'ui', 'data', 'performance', 'payment', 'other'];
         const uploadFeedbackReply = multer({
             storage: feedbackReplyStorage,
             limits: { fileSize: 8 * 1024 * 1024 },
@@ -2778,14 +2796,14 @@ async function generateWardIdFromName(name) {
                 const result = userId
                     ? await pool.query(
                         `SELECT id, username, fullname, email, phone, birth_date AS "birthDate",
-                        address, gender, bio, role
+                        address, gender, bio, role, avatar_url AS "avatarUrl"
                  FROM users
                  WHERE id = $1`,
                         [userId]
                     )
                     : await pool.query(
                         `SELECT id, username, fullname, email, phone, birth_date AS "birthDate",
-                        address, gender, bio, role
+                        address, gender, bio, role, avatar_url AS "avatarUrl"
                  FROM users
                  WHERE email = $1`,
                         [email]
@@ -2873,7 +2891,7 @@ async function generateWardIdFromName(name) {
                  updated_at = CURRENT_TIMESTAMP
              WHERE id = $7
              RETURNING id, username, fullname, email, phone, birth_date AS "birthDate",
-                       address, gender, bio, role`,
+                       address, gender, bio, role, avatar_url AS "avatarUrl"`,
                     [
                         fullname,
                         normalizeNullableText(phone),
@@ -2953,6 +2971,85 @@ async function generateWardIdFromName(name) {
                 console.error('Password update error:', err);
                 res.status(500).json({ message: 'Server error' });
             }
+        });
+
+        const AVATAR_BUCKET = process.env.SUPABASE_AVATAR_BUCKET || 'avatars';
+
+        registerVersionedRoute('put', '/users/avatar', authenticateOptional, requireAuth, async (req, res) => {
+            const userId = req.user.id;
+
+            uploadAvatar.single('avatar')(req, res, async (uploadErr) => {
+                if (uploadErr) {
+                    return res.status(400).json({ message: uploadErr.message || 'Upload failed' });
+                }
+
+                if (!req.file) {
+                    return res.status(400).json({ message: 'No file uploaded' });
+                }
+
+                const safeName = req.file.originalname.replace(/\s+/g, '-');
+                const fileName = `${userId}-${Date.now()}-${safeName}`;
+                const storagePath = `${userId}/${fileName}`;
+
+                try {
+                    const { error: uploadError } = await supabaseAdmin.storage
+                        .from(AVATAR_BUCKET)
+                        .upload(storagePath, req.file.buffer, {
+                            contentType: req.file.mimetype,
+                            upsert: true
+                        });
+
+                    if (uploadError) {
+                        console.error('Avatar upload error (storage):', uploadError);
+                        return res.status(500).json({
+                            message: uploadError.message || 'Unable to upload avatar'
+                        });
+                    }
+
+                    const { data: publicData } = supabaseAdmin.storage
+                        .from(AVATAR_BUCKET)
+                        .getPublicUrl(storagePath);
+
+                    const avatarUrl = publicData?.publicUrl || null;
+
+                    if (!avatarUrl) {
+                        return res.status(500).json({ message: 'Unable to generate avatar URL' });
+                    }
+
+                    const result = await pool.query(
+                        `UPDATE users
+                         SET avatar_url = $1,
+                             updated_at = CURRENT_TIMESTAMP
+                         WHERE id = $2
+                         RETURNING id, username, fullname, email, phone, birth_date AS "birthDate",
+                                   address, gender, bio, role, avatar_url AS "avatarUrl"`,
+                        [avatarUrl, userId]
+                    );
+
+                    if (result.rows.length === 0) {
+                        return res.status(404).json({ message: 'User not found' });
+                    }
+
+                    const updatedRawUser = result.rows[0];
+                    const updatedUser = {
+                        ...updatedRawUser,
+                        phone: sanitizeTextField(updatedRawUser.phone),
+                        birthDate: sanitizeTextField(updatedRawUser.birthDate),
+                        address: sanitizeTextField(updatedRawUser.address),
+                        gender: sanitizeTextField(updatedRawUser.gender),
+                        bio: sanitizeTextField(updatedRawUser.bio)
+                    };
+
+                    res.json({
+                        success: true,
+                        message: 'Avatar updated successfully',
+                        user: updatedUser
+                    });
+                } catch (err) {
+                    console.error('Avatar update error:', err);
+                    res.status(500).json({ message: 'Server error' });
+                }
+            });
         });
 
         // ==========================================
