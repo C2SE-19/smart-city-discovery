@@ -1,19 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useTheme } from '../../contexts/ThemeContext';
-import { submitFeedback } from '../../services/feedbackService';
+import { fetchFeedbackTypes, submitFeedback } from '../../services/feedbackService';
 import './FeedbackSupportPage.css';
-
-const CATEGORY_OPTIONS = [
-  { value: 'bug', label: 'Tính năng bị lỗi', labelEn: 'Feature is broken' },
-  { value: 'feature', label: 'Yêu cầu tính năng mới', labelEn: 'Request a new feature' },
-  { value: 'ui', label: 'Góp ý về giao diện mới', labelEn: 'UI/UX suggestion' },
-  { value: 'data', label: 'Dữ liệu/bản đồ chưa đúng', labelEn: 'Data or map mismatch' },
-  { value: 'performance', label: 'Hiệu năng/độ trễ', labelEn: 'Performance or latency' },
-  { value: 'payment', label: 'Vấn đề thanh toán/đặt chỗ', labelEn: 'Payment / booking issues' },
-  { value: 'other', label: 'Vấn đề khác', labelEn: 'Other issues' },
-];
 
 const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15MB
 
@@ -22,12 +12,14 @@ const COPY = {
     kicker: 'SMART CITY · TRUNG TÂM HỖ TRỢ',
     title: 'Góp ý & hỗ trợ',
     lead: 'Đây là nơi Smart City thu thập những ý kiến của bạn để cải thiện trải nghiệm người dùng. Nếu cần hỗ trợ ngay, liên hệ:',
-    hotline: 'Hotline: 1900 **** · Email: support@smartcity.vn',
+    hotline: 'Hotline: 0787606053 · Email: smartcity.discovery2026@gmail.com',
     categoryLabel: 'Loại vấn đề bạn muốn góp ý là',
+    loadingTypes: 'Đang tải loại phản hồi...',
+    noTypes: 'Chưa có loại phản hồi khả dụng',
+    typeLoadFail: 'Không thể tải loại phản hồi. Vui lòng thử lại.',
     choose: 'Chọn loại vấn đề...',
     messageLabel: 'Nêu chi tiết ý kiến của bạn',
     placeholder: 'Câu trả lời của bạn...',
-    email: 'Email liên hệ',
     phone: 'Số điện thoại',
   attach: 'Đính kèm file',
   hint: 'Hỗ trợ JPG, PNG, PDF · Tối đa 15MB',
@@ -43,12 +35,14 @@ const COPY = {
     kicker: 'SMART CITY · SUPPORT DESK',
     title: 'Feedback & Support',
     lead: 'Smart City collects your feedback to improve the experience. For urgent help, please contact:',
-    hotline: 'Hotline: 1900 **** · Email: support@smartcity.vn',
+    hotline: 'Hotline: 0787606053 · Email: smartcity.discovery2026@gmail.com',
     categoryLabel: 'Choose a feedback type',
+    loadingTypes: 'Loading feedback types...',
+    noTypes: 'No feedback types available',
+    typeLoadFail: 'Could not load feedback types. Please try again.',
     choose: 'Select an issue type...',
     messageLabel: 'Describe your feedback',
     placeholder: 'Your message...',
-    email: 'Contact email',
     phone: 'Phone',
   attach: 'Attach file',
   hint: 'Supports JPG, PNG, PDF · Up to 15MB',
@@ -69,17 +63,65 @@ function FeedbackSupportPage() {
   const t = COPY[language] || COPY.vi;
 
   const [form, setForm] = useState({
-    category: '',
+    feedbackTypeValue: '',
     message: '',
-    contactEmail: user?.email || '',
     contactPhone: '',
     attachment: null,
   });
+  const [feedbackTypes, setFeedbackTypes] = useState([]);
+  const [loadingTypes, setLoadingTypes] = useState(true);
+  const [typeLoadError, setTypeLoadError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [status, setStatus] = useState({ type: '', message: '' });
-  const [fieldErrors, setFieldErrors] = useState({ email: false, phone: false });
+  const [fieldErrors, setFieldErrors] = useState({ phone: false });
 
   const setField = (field, value) => setForm((prev) => ({ ...prev, [field]: value }));
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadFeedbackTypes = async () => {
+      try {
+        setLoadingTypes(true);
+        setTypeLoadError('');
+        const rows = await fetchFeedbackTypes();
+
+        if (!isMounted) {
+          return;
+        }
+
+        const normalizedRows = Array.isArray(rows) ? rows : [];
+        setFeedbackTypes(normalizedRows);
+      } catch (error) {
+        if (!isMounted) {
+          return;
+        }
+
+        setFeedbackTypes([]);
+        setTypeLoadError(error?.response?.data?.message || t.typeLoadFail);
+      } finally {
+        if (isMounted) {
+          setLoadingTypes(false);
+        }
+      }
+    };
+
+    loadFeedbackTypes();
+
+    const pollingTimerId = window.setInterval(() => {
+      loadFeedbackTypes();
+    }, 7000);
+
+    return () => {
+      isMounted = false;
+      window.clearInterval(pollingTimerId);
+    };
+  }, [t.typeLoadFail]);
+
+  const selectedFeedbackType = useMemo(
+    () => feedbackTypes.find((option) => String(option.id ?? option.code) === form.feedbackTypeValue) || null,
+    [feedbackTypes, form.feedbackTypeValue]
+  );
 
   const handleFileChange = (event) => {
     const file = event.target.files?.[0];
@@ -96,18 +138,13 @@ function FeedbackSupportPage() {
     event.preventDefault();
     setStatus({ type: '', message: '' });
 
-    const emailValid = form.contactEmail.trim().toLowerCase().endsWith('@gmail.com');
     const phoneDigits = form.contactPhone.replace(/\D/g, '');
     const phoneValid = phoneDigits.length === 10;
 
-    setFieldErrors({ email: !emailValid, phone: !phoneValid });
+    setFieldErrors({ phone: !phoneValid });
 
-    if (!form.category || !form.message.trim()) {
+    if (!form.feedbackTypeValue || !form.message.trim()) {
       return setStatus({ type: 'error', message: t.requiredError });
-    }
-
-    if (!emailValid) {
-      return setStatus({ type: 'error', message: language === 'en' ? 'Email must end with @gmail.com' : 'Email phải kết thúc bằng @gmail.com' });
     }
 
     if (!phoneValid) {
@@ -116,9 +153,16 @@ function FeedbackSupportPage() {
 
     try {
       setSubmitting(true);
-      await submitFeedback({ ...form, contactPhone: phoneDigits });
+      await submitFeedback({
+        feedbackTypeId: selectedFeedbackType?.id ?? null,
+        category: selectedFeedbackType?.code || form.feedbackTypeValue,
+        message: form.message,
+        contactEmail: user?.email || '',
+        contactPhone: phoneDigits,
+        attachment: form.attachment,
+      });
       setStatus({ type: 'success', message: t.thank });
-      setForm((prev) => ({ ...prev, message: '', category: '', attachment: null }));
+      setForm((prev) => ({ ...prev, message: '', feedbackTypeValue: '', contactPhone: '', attachment: null }));
       const fileInput = document.getElementById('feedback-attachment');
       if (fileInput) fileInput.value = '';
     } catch (error) {
@@ -147,17 +191,26 @@ function FeedbackSupportPage() {
             <select
               id="feedback-category"
               className="feedback-select"
-              value={form.category}
-              onChange={(e) => setField('category', e.target.value)}
+              value={form.feedbackTypeValue}
+              onChange={(e) => setField('feedbackTypeValue', e.target.value)}
+              disabled={loadingTypes || feedbackTypes.length === 0}
             >
-              <option value="">{t.choose}</option>
-              {CATEGORY_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {language === 'en' ? option.labelEn : option.label}
+              <option value="">
+                {loadingTypes ? t.loadingTypes : feedbackTypes.length ? t.choose : t.noTypes}
+              </option>
+              {feedbackTypes.map((option) => (
+                <option key={option.id ?? option.code} value={String(option.id ?? option.code)}>
+                  {option.name}
                 </option>
               ))}
             </select>
           </div>
+
+          {!!typeLoadError && (
+            <div className="feedback-status error">
+              {typeLoadError}
+            </div>
+          )}
 
           <label className="feedback-label" htmlFor="feedback-message">
             {t.messageLabel} <span className="required">*</span>
@@ -176,20 +229,6 @@ function FeedbackSupportPage() {
           </div>
 
           <div className="feedback-grid">
-            <div className="feedback-field">
-              <label className="feedback-label" htmlFor="feedback-email">{t.email} <span className="required">*</span></label>
-              <input
-                id="feedback-email"
-                type="email"
-                className={`feedback-input ${fieldErrors.email ? 'invalid' : ''}`}
-                value={form.contactEmail}
-                onChange={(e) => {
-                  setField('contactEmail', e.target.value);
-                  setFieldErrors((prev) => ({ ...prev, email: false }));
-                }}
-                placeholder="name@gmail.com"
-              />
-            </div>
             <div className="feedback-field">
               <label className="feedback-label" htmlFor="feedback-phone">{t.phone} <span className="required">*</span></label>
               <input
