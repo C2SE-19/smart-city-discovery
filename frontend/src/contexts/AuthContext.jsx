@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { ROLES } from '../constants/roles';
+import axios from 'axios';
 
 const AuthContext = createContext(null);
 const AUTH_STORAGE_KEY = 'auth';
@@ -71,6 +72,39 @@ export function AuthProvider({ children }) {
       setLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (!token) {
+      return;
+    }
+
+    const apiUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+    const fetchProfile = async () => {
+      try {
+        const response = await axios.get(`${apiUrl}/users/profile`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const nextUser = normalizeUser(response.data?.user || null);
+        if (nextUser) {
+          setUser((prevUser) => {
+            const mergedUser = normalizeUser({ ...prevUser, ...nextUser });
+            localStorage.setItem(
+              AUTH_STORAGE_KEY,
+              JSON.stringify({
+                user: mergedUser,
+                token
+              })
+            );
+            return mergedUser;
+          });
+        }
+      } catch (error) {
+        // Silent: keep existing user if refresh fails.
+      }
+    };
+
+    fetchProfile();
+  }, [token]);
 
   const value = useMemo(
     () => ({
