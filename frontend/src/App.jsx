@@ -16,6 +16,7 @@ import AdminBoundaryPage from './pages/admin/AdminBoundaryPage';
 import AdminUserManagementPage from './pages/admin/AdminUserManagementPage';
 import AdminReportsPage from './pages/admin/AdminReportsPage';
 import AdminVenueApprovalPage from './pages/admin/AdminVenueApprovalPage';
+import AdminFeedbackManagementPage from './pages/admin/AdminFeedbackManagementPage';
 import MerchantWorkbenchPage from './pages/merchant/MerchantWorkbenchPage';
 import MerchantDashboardPage from './pages/merchant/MerchantDashboardPage';
 import MerchantPostListPage from './pages/merchant/MerchantPostListPage';
@@ -137,6 +138,7 @@ function App() {
           <Route path="users" element={<AdminUserManagementPage />} />
           <Route path="reports" element={<AdminReportsPage />} />
           <Route path="approvals" element={<AdminVenueApprovalPage />} />
+          <Route path="feedback" element={<AdminFeedbackManagementPage />} />
         </Route>
 
         <Route path="*" element={<Navigate replace to={APP_ROUTES.HOME} />} />
