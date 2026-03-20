@@ -42,6 +42,11 @@ function NavGlyph({ type }) {
         <path d="M12 11v10" />
       </svg>
     ),
+    feedback: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v7A2.5 2.5 0 0 1 17.5 16H10l-4 4v-4H6.5A2.5 2.5 0 0 1 4 13.5Z" />
+      </svg>
+    ),
   };
 
   return icons[type] ?? icons.dashboard;
@@ -71,6 +76,7 @@ const adminNavigation = [
   { label: 'Map Management', path: APP_ROUTES.ADMIN_BOUNDARIES, icon: 'map' },
   { label: 'Reports & Revenue', path: APP_ROUTES.ADMIN_REPORTS, icon: 'payments' },
   { label: 'Ad Packages', path: APP_ROUTES.ADMIN_APPROVALS, icon: 'packages' },
+  { label: 'Feedback & Support', path: APP_ROUTES.ADMIN_FEEDBACK, icon: 'feedback' },
 ];
 
 function AdminLayout() {
