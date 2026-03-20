@@ -24,6 +24,7 @@ const getProfile = async (req, res) => {
         address: user.address || '',
         gender: user.gender || 'Nam',
         bio: user.bio || '',
+        avatarUrl: user.avatar_url || user.avatarUrl || '',
         role: user.role
       }
     });
@@ -71,6 +72,7 @@ const updateProfile = async (req, res) => {
         address: updatedUser.address || '',
         gender: updatedUser.gender || 'Nam',
         bio: updatedUser.bio || '',
+        avatarUrl: updatedUser.avatar_url || updatedUser.avatarUrl || '',
         role: updatedUser.role
       }
     });
