@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import Cropper from 'react-easy-crop';
 import { useNavigate } from 'react-router-dom';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../../contexts/AuthContext';
@@ -8,13 +9,6 @@ import { APP_ROUTES } from '../../constants/routes';
 import axios from 'axios';
 import './ProfilePage.css';
 
-const MenuItems = [
-  { id: 'overview', label: 'Tổng Quan', icon: '🏠' },
-  { id: 'account-info', label: 'Thông tin tài khoản', icon: '👤' },
-  { id: 'favorites', label: 'Yêu Thích', icon: '❤️' },
-  { id: 'ratings', label: 'Đánh giá', icon: '⭐' },
-  { id: 'support', label: 'Góp ý & hỗ trợ', icon: '💬' }
-];
 const COPY = {
   vi: {
     menu: {
@@ -97,7 +91,7 @@ const COPY = {
 
 function ProfilePage() {
   const { language } = useLanguage();
-  const { user, token } = useAuth();
+  const { user, token, loading: authLoading, updateUser } = useAuth();
   const navigate = useNavigate();
   const { theme } = useTheme();
   const t = translations[language];
@@ -206,7 +200,6 @@ function ProfilePage() {
     { id: 'account-info', label: copy.menu.account, icon: '👤' },
     { id: 'favorites', label: copy.menu.favorites, icon: '❤️' },
     { id: 'ratings', label: copy.menu.ratings, icon: '⭐' },
-    { id: 'posts', label: copy.menu.posts, icon: '📝' },
     { id: 'support', label: copy.menu.support, icon: '💬' }
   ];
   const [activeMenu, setActiveMenu] = useState('account-info');
@@ -240,20 +233,59 @@ function ProfilePage() {
   const [favoritesLoading, setFavoritesLoading] = useState(false);
   const [confirmFavorite, setConfirmFavorite] = useState(null);
   const [removingFavorite, setRemovingFavorite] = useState(false);
+  const [avatarUrl, setAvatarUrl] = useState(
+    () => user?.avatarUrl || user?.avatar_url || ''
+  );
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const avatarInputRef = useRef(null);
+  const [avatarMenuOpen, setAvatarMenuOpen] = useState(false);
+  const [avatarCropOpen, setAvatarCropOpen] = useState(false);
+  const [avatarImageSrc, setAvatarImageSrc] = useState('');
+  const [avatarCrop, setAvatarCrop] = useState({ x: 0, y: 0 });
+  const [avatarZoom, setAvatarZoom] = useState(1);
+  const [avatarCroppedArea, setAvatarCroppedArea] = useState(null);
 
   const apiUrl = useMemo(
     () => import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api',
     []
   );
 
+  const apiBase = useMemo(() => apiUrl.replace(/\/api\/v1$|\/api$/i, ''), [apiUrl]);
+
+  useEffect(() => {
+    if (user?.avatarUrl && user.avatarUrl !== avatarUrl) {
+      setAvatarUrl(user.avatarUrl);
+    } else if (user?.avatar_url && user.avatar_url !== avatarUrl) {
+      setAvatarUrl(user.avatar_url);
+    }
+  }, [user?.avatarUrl, user?.avatar_url, avatarUrl]);
+
+  const displayAvatarUrl = useMemo(() => {
+    const resolved =
+      avatarUrl || user?.avatarUrl || user?.avatar_url || formData.avatarUrl || '';
+    if (!resolved) return '';
+    if (/^https?:\/\//i.test(resolved)) return resolved;
+    return `${apiBase}${resolved}`;
+  }, [avatarUrl, apiBase, formData.avatarUrl, user?.avatarUrl, user?.avatar_url]);
+
   // Fetch user profile on mount
   useEffect(() => {
+    if (authLoading) {
+      return;
+    }
+
     const fetchProfile = async () => {
       try {
         setLoading(true);
+        const emailParam = user?.email || editData.email || formData.email || '';
+        if (!token && !emailParam) {
+          setLoading(false);
+          return;
+        }
+
         const response = await axios.get(`${apiUrl}/users/profile`, {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
-          params: { email: user?.email || editData.email || formData.email }
+          params: emailParam ? { email: emailParam } : {}
         });
         
         const userData = response.data.user;
@@ -264,11 +296,13 @@ function ProfilePage() {
           birthDate: userData.birthDate || '',
           address: userData.address || '',
           gender: userData.gender || 'Nam',
-          bio: userData.bio || ''
+          bio: userData.bio || '',
+          avatarUrl: userData.avatarUrl || userData.avatar_url || ''
         };
         
         setFormData(profileData);
         setEditData(profileData);
+        setAvatarUrl(profileData.avatarUrl || '');
         setError(null);
         setSuccessMessage('');
         setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
@@ -284,10 +318,12 @@ function ProfilePage() {
           birthDate: '',
           address: '',
           gender: 'Nam',
-          bio: ''
+          bio: '',
+          avatarUrl: user?.avatarUrl || ''
         };
         setFormData(fallbackData);
         setEditData(fallbackData);
+        setAvatarUrl(fallbackData.avatarUrl || '');
         setSuccessMessage('');
         setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
         setShowPasswordForm(false);
@@ -585,6 +621,150 @@ function ProfilePage() {
     const visible = phone.slice(0, 4);
     return `${visible}${'*'.repeat(Math.max(phone.length - 4, 0))}`;
   }, [formData.phone]);
+
+  const userInitial = useMemo(() => {
+    const name = formData.name || user?.fullname || user?.username || '';
+    return name.trim().charAt(0).toUpperCase() || 'U';
+  }, [formData.name, user?.fullname, user?.username]);
+
+  const handleAvatarChange = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const reader = new FileReader();
+      reader.addEventListener('load', () => {
+        setAvatarImageSrc(reader.result?.toString() || '');
+        setAvatarCrop({ x: 0, y: 0 });
+        setAvatarZoom(1);
+        setAvatarCroppedArea(null);
+        setAvatarCropOpen(true);
+      });
+      reader.readAsDataURL(file);
+    } finally {
+      event.target.value = '';
+    }
+  };
+
+  const onAvatarCropComplete = useCallback((_croppedArea, croppedAreaPixels) => {
+    setAvatarCroppedArea(croppedAreaPixels);
+  }, []);
+
+  const getCroppedAvatarBlob = async () => {
+    if (!avatarImageSrc || !avatarCroppedArea) return null;
+    const image = new Image();
+    image.src = avatarImageSrc;
+    await new Promise((resolve, reject) => {
+      image.onload = resolve;
+      image.onerror = reject;
+    });
+
+    const canvas = document.createElement('canvas');
+    canvas.width = avatarCroppedArea.width;
+    canvas.height = avatarCroppedArea.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+
+    ctx.drawImage(
+      image,
+      avatarCroppedArea.x,
+      avatarCroppedArea.y,
+      avatarCroppedArea.width,
+      avatarCroppedArea.height,
+      0,
+      0,
+      avatarCroppedArea.width,
+      avatarCroppedArea.height
+    );
+
+    return new Promise((resolve) => {
+      canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.92);
+    });
+  };
+
+  const handleUploadCroppedAvatar = async () => {
+    if (!token) {
+      setError('Bạn cần đăng nhập để cập nhật ảnh đại diện.');
+      setSuccessMessage('');
+      setTimeout(() => setError(''), 1500);
+      return;
+    }
+
+    try {
+      setAvatarUploading(true);
+      setError('');
+      setSuccessMessage('');
+
+      const blob = await getCroppedAvatarBlob();
+      if (!blob) {
+        setError('Không thể cắt ảnh. Vui lòng thử lại.');
+        setTimeout(() => setError(''), 1500);
+        return;
+      }
+
+      const form = new FormData();
+      form.append('avatar', blob, 'avatar.jpg');
+
+      const response = await axios.put(`${apiUrl}/users/avatar`, form, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+
+      const nextAvatar =
+        response.data?.user?.avatarUrl ||
+        response.data?.user?.avatar_url ||
+        response.data?.avatarUrl ||
+        response.data?.avatar_url ||
+        '';
+      if (nextAvatar) {
+        setAvatarUrl(nextAvatar);
+        updateUser({ avatarUrl: nextAvatar });
+      }
+      setAvatarCropOpen(false);
+      setSuccessMessage('Cập nhật ảnh đại diện thành công.');
+      setTimeout(() => setSuccessMessage(''), 1200);
+    } catch (err) {
+      console.error('Avatar upload error:', err);
+      const apiMessage = err.response?.data?.message;
+      setError(apiMessage || 'Tải ảnh thất bại. Vui lòng thử lại.');
+      setTimeout(() => setError(''), 1500);
+    } finally {
+      setAvatarUploading(false);
+    }
+  };
+
+  const handleOpenAvatarPicker = () => {
+    setAvatarMenuOpen(false);
+    avatarInputRef.current?.click();
+  };
+
+  const handleEditAvatar = async () => {
+    setAvatarMenuOpen(false);
+    if (!displayAvatarUrl) {
+      setError('Chưa có avatar để chỉnh sửa.');
+      setTimeout(() => setError(''), 1500);
+      return;
+    }
+
+    try {
+      const response = await fetch(displayAvatarUrl);
+      const blob = await response.blob();
+      const reader = new FileReader();
+      reader.addEventListener('load', () => {
+        setAvatarImageSrc(reader.result?.toString() || '');
+        setAvatarCrop({ x: 0, y: 0 });
+        setAvatarZoom(1);
+        setAvatarCroppedArea(null);
+        setAvatarCropOpen(true);
+      });
+      reader.readAsDataURL(blob);
+    } catch (err) {
+      console.error('Avatar load error:', err);
+      setError('Không thể tải ảnh để chỉnh sửa.');
+      setTimeout(() => setError(''), 1500);
+    }
+  };
 
   const renderContent = () => {
     if (loading) {
@@ -926,14 +1106,6 @@ function ProfilePage() {
           </div>
         );
 
-      case 'posts':
-        return (
-          <div className="profile-content">
-            <h2>{copy.headings.posts}</h2>
-            <p className="placeholder-text">{copy.placeholder.posts}</p>
-          </div>
-        );
-
       case 'support':
         return (
           <div className="profile-content">
@@ -953,9 +1125,23 @@ function ProfilePage() {
       <div className="profile-header">
         <div className="user-card">
           <div className="user-avatar">
-            <div className="avatar-initial" style={{ backgroundColor: '#ff6b35' }}>
-              N
+            <div className={`avatar-button ${avatarUploading ? 'is-uploading' : ''}`} aria-label="Avatar">
+              {displayAvatarUrl ? (
+                <img src={displayAvatarUrl} alt={user?.fullname || 'User avatar'} className="avatar-image" />
+              ) : (
+                <div className="avatar-initial" style={{ backgroundColor: '#ff6b35' }}>
+                  {userInitial}
+                </div>
+              )}
+              {avatarUploading && <span className="avatar-uploading">Uploading...</span>}
             </div>
+            <input
+              ref={avatarInputRef}
+              type="file"
+              accept="image/*"
+              className="avatar-input"
+              onChange={handleAvatarChange}
+            />
           </div>
           <div className="user-info">
             <h1 className="user-name">
@@ -963,40 +1149,104 @@ function ProfilePage() {
               <span className="verify-badge">✓</span>
             </h1>
           </div>
-        </div>
-
-        <div className="rating-card">
-          <div className="rating-header">
-            <h3>{copy.ratingTitle}</h3>
-            <div className="rating-badge">👍</div>
+          <div className="avatar-menu">
+            <button
+              type="button"
+              className="avatar-menu-trigger"
+              aria-label="Profile menu"
+              aria-expanded={avatarMenuOpen}
+              onClick={() => setAvatarMenuOpen((prev) => !prev)}
+            >
+              ...
+            </button>
+            {avatarMenuOpen && (
+              <div className="avatar-menu-dropdown">
+                <button type="button" onClick={handleOpenAvatarPicker}>
+                  Thêm avatar
+                </button>
+                <button type="button" onClick={handleEditAvatar}>
+                  Chỉnh sửa avatar
+                </button>
+              </div>
+            )}
           </div>
-          <div className="rating-stars">
-            ⭐⭐⭐⭐⭐
-          </div>
-            <div className="rating-count">{copy.ratingCount}</div>
         </div>
       </div>
+
+      {avatarCropOpen && (
+        <div className="avatar-crop-overlay" role="dialog" aria-modal="true">
+          <div className="avatar-crop-modal">
+            <div className="avatar-crop-header">
+              <h3>Cắt ảnh đại diện</h3>
+              <button type="button" className="avatar-crop-close" onClick={() => setAvatarCropOpen(false)}>
+                ×
+              </button>
+            </div>
+            <div className="avatar-cropper">
+              <Cropper
+                image={avatarImageSrc}
+                crop={avatarCrop}
+                zoom={avatarZoom}
+                aspect={1}
+                cropShape="round"
+                onCropChange={setAvatarCrop}
+                onZoomChange={setAvatarZoom}
+                onCropComplete={onAvatarCropComplete}
+              />
+            </div>
+            <div className="avatar-crop-controls">
+              <input
+                type="range"
+                min={1}
+                max={3}
+                step={0.01}
+                value={avatarZoom}
+                onChange={(e) => setAvatarZoom(Number(e.target.value))}
+              />
+              <div className="avatar-crop-actions">
+                <button type="button" className="btn-cancel" onClick={() => setAvatarCropOpen(false)}>
+                  Hủy
+                </button>
+                <button type="button" className="btn-save" onClick={handleUploadCroppedAvatar} disabled={avatarUploading}>
+                  Lưu ảnh
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="profile-container">
         {/* Sidebar */}
         <aside className="profile-sidebar">
           <nav className="sidebar-menu">
-            {MenuItems.map((item) => (
-              <button
-                key={item.id}
-                className={`menu-item ${activeMenu === item.id ? 'active' : ''}`}
-                onClick={() => {
-                  if (item.id === 'support') {
-                    navigate(APP_ROUTES.FEEDBACK);
-                  } else {
-                    setActiveMenu(item.id);
-                  }
-                }}
-              >
-                <span className="menu-icon">{item.icon}</span>
-                <span className="menu-label">{item.label}</span>
-              </button>
-            ))}
+            {MenuItems.map((item) => {
+              if (item.id === 'overview') {
+                return (
+                  <div key={item.id} className="menu-item menu-item-heading">
+                    <span className="menu-icon">{item.icon}</span>
+                    <span className="menu-label">{item.label}</span>
+                  </div>
+                );
+              }
+
+              return (
+                <button
+                  key={item.id}
+                  className={`menu-item ${activeMenu === item.id ? 'active' : ''}`}
+                  onClick={() => {
+                    if (item.id === 'support') {
+                      navigate(APP_ROUTES.FEEDBACK);
+                    } else {
+                      setActiveMenu(item.id);
+                    }
+                  }}
+                >
+                  <span className="menu-icon">{item.icon}</span>
+                  <span className="menu-label">{item.label}</span>
+                </button>
+              );
+            })}
           </nav>
         </aside>
 

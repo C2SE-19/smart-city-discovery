@@ -44,7 +44,7 @@ function normalizeUser(user) {
     fullname: user.fullname || displayName,
     fullName: user.fullName || displayName,
     role: normalizeRole(user),
-    avatarUrl: user.avatarUrl || '',
+    avatarUrl: user.avatarUrl || user.avatar_url || '',
   };
 }
 
@@ -91,6 +91,22 @@ export function AuthProvider({ children }) {
             token: normalizedToken,
           })
         );
+      },
+      updateUser: (patch) => {
+        setUser((prevUser) => {
+          if (!prevUser) {
+            return prevUser;
+          }
+          const mergedUser = normalizeUser({ ...prevUser, ...patch });
+          localStorage.setItem(
+            AUTH_STORAGE_KEY,
+            JSON.stringify({
+              user: mergedUser,
+              token,
+            })
+          );
+          return mergedUser;
+        });
       },
       logout: () => {
         setUser(null);
