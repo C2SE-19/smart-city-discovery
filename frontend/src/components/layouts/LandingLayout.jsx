@@ -18,6 +18,7 @@ function LandingLayout() {
   const navigate = useNavigate();
   const t = translations[language];
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const avatarUrl = user?.avatarUrl || user?.avatar_url || '';
 
   const handleLogout = () => {
     logout();
@@ -87,9 +88,17 @@ function LandingLayout() {
                   aria-label="Profile menu"
                 >
                   <div className="landing-profile-avatar">
-                    <div className="landing-avatar-initial">
-                      {user.fullname?.charAt(0).toUpperCase() || user.username?.charAt(0).toUpperCase()}
-                    </div>
+                    {avatarUrl ? (
+                      <img
+                        src={avatarUrl}
+                        alt={user.fullname || user.username || 'User avatar'}
+                        className="landing-avatar-image"
+                      />
+                    ) : (
+                      <div className="landing-avatar-initial">
+                        {user.fullname?.charAt(0).toUpperCase() || user.username?.charAt(0).toUpperCase()}
+                      </div>
+                    )}
                   </div>
                   <MdExpandMore className="landing-profile-arrow" />
                 </button>
