@@ -9,6 +9,7 @@ const axios = require('axios');
 const jwt = require('jsonwebtoken');
 const turf = require('@turf/turf');
 const multer = require('multer');
+const nodemailer = require('nodemailer');
 const { OAuth2Client } = require('google-auth-library');
 
 const app = express();
@@ -213,6 +214,118 @@ function sanitizeTextField(value) {
 
     return text;
 }
+
+function isValidEmail(value) {
+    if (value === undefined || value === null) {
+        return false;
+    }
+
+    const normalized = String(value).trim();
+    if (!normalized) {
+        return false;
+    }
+
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized);
+}
+
+function escapeHtml(value) {
+    return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function formatMultilineHtml(value) {
+    return escapeHtml(value).replace(/\n/g, '<br />');
+}
+
+function normalizeFeedbackStatusLabel(value) {
+    const map = {
+        new: 'New',
+        in_progress: 'In Progress',
+        replied: 'Replied',
+        closed: 'Closed'
+    };
+
+    return map[String(value || '').toLowerCase()] || 'Replied';
+}
+
+function formatFeedbackTimestamp(value) {
+    if (!value) {
+        return 'N/A';
+    }
+
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+        return 'N/A';
+    }
+
+    return date.toLocaleString('en-US', {
+        dateStyle: 'medium',
+        timeStyle: 'short'
+    });
+}
+
+function normalizeFeedbackStatusList(statusInput) {
+    if (!statusInput) {
+        return [];
+    }
+
+    const allowedStatuses = new Set(['new', 'in_progress', 'replied', 'closed']);
+
+    return String(statusInput)
+        .split(',')
+        .map((value) => value.trim().toLowerCase())
+        .filter((value) => allowedStatuses.has(value));
+}
+
+function normalizePaginationValue(value, fallback, { min = 1, max = 100 } = {}) {
+    const parsed = Number(value);
+
+    if (!Number.isInteger(parsed)) {
+        return fallback;
+    }
+
+    return Math.min(Math.max(parsed, min), max);
+}
+
+function resolveUploadPathFromUrl(fileUrl) {
+    if (!fileUrl || typeof fileUrl !== 'string') {
+        return null;
+    }
+
+    const normalizedUrl = fileUrl.replace(/\\/g, '/');
+    if (!normalizedUrl.startsWith('/uploads/')) {
+        return null;
+    }
+
+    const relativePath = normalizedUrl.replace('/uploads/', '');
+    const uploadsRoot = path.resolve(path.join(__dirname, 'uploads'));
+    const targetPath = path.resolve(path.join(uploadsRoot, relativePath));
+
+    if (!targetPath.startsWith(uploadsRoot)) {
+        return null;
+    }
+
+    return targetPath;
+}
+
+function safeDeleteUploadedFile(fileUrl) {
+    const targetPath = resolveUploadPathFromUrl(fileUrl);
+
+    if (!targetPath || !fs.existsSync(targetPath)) {
+        return;
+    }
+
+    try {
+        fs.unlinkSync(targetPath);
+    } catch (error) {
+        console.warn(`Unable to delete uploaded file ${targetPath}:`, error.message);
+    }
+}
+
 async function generateWardIdFromName(name) {
                 const fallbackSeed = Date.now().toString().slice(-6);
                 const baseSlug = slugifyText(name).slice(0, 42) || `ward-${fallbackSeed}`;
@@ -393,11 +506,24 @@ async function generateWardIdFromName(name) {
             fs.mkdirSync(feedbackUploadDir, { recursive: true });
         }
 
+        const feedbackReplyUploadDir = path.join(feedbackUploadDir, 'admin-replies');
+        if (!fs.existsSync(feedbackReplyUploadDir)) {
+            fs.mkdirSync(feedbackReplyUploadDir, { recursive: true });
+        }
+
         const feedbackStorage = multer.diskStorage({
             destination: feedbackUploadDir,
             filename: (_req, file, cb) => {
                 const safeName = file.originalname.replace(/\s+/g, '-');
                 cb(null, `${Date.now()}-${safeName}`);
+            }
+        });
+
+        const feedbackReplyStorage = multer.diskStorage({
+            destination: feedbackReplyUploadDir,
+            filename: (_req, file, cb) => {
+                const safeName = file.originalname.replace(/\s+/g, '-');
+                cb(null, `${Date.now()}-admin-${safeName}`);
             }
         });
 
@@ -414,7 +540,95 @@ async function generateWardIdFromName(name) {
             }
         });
 
-        const FEEDBACK_CATEGORIES = ['bug', 'feature', 'ui', 'data', 'performance', 'payment', 'other'];
+        const uploadFeedbackReply = multer({
+            storage: feedbackReplyStorage,
+            limits: { fileSize: 8 * 1024 * 1024 },
+            fileFilter: (_req, file, cb) => {
+                const allowed = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+                if (allowed.includes(file.mimetype)) {
+                    cb(null, true);
+                } else {
+                    cb(new Error('Only image attachments are supported for admin replies'));
+                }
+            }
+        });
+
+        const DEFAULT_FEEDBACK_TYPES = [
+            {
+                code: 'bug',
+                name: 'Feature Bug',
+                description: 'Something is broken or not working as expected.',
+                sortOrder: 10
+            },
+            {
+                code: 'feature',
+                name: 'Feature Request',
+                description: 'Suggest a new capability or enhancement.',
+                sortOrder: 20
+            },
+            {
+                code: 'ui',
+                name: 'UI/UX Suggestion',
+                description: 'Feedback about layout, styling, or interaction flow.',
+                sortOrder: 30
+            },
+            {
+                code: 'data',
+                name: 'Data/Map Issue',
+                description: 'Report incorrect location data, map mismatch, or missing place.',
+                sortOrder: 40
+            },
+            {
+                code: 'performance',
+                name: 'Performance Issue',
+                description: 'Slow loading, lag, or stability concerns.',
+                sortOrder: 50
+            },
+            {
+                code: 'payment',
+                name: 'Payment/Booking Issue',
+                description: 'Problems related to payment or booking experience.',
+                sortOrder: 60
+            },
+            {
+                code: 'other',
+                name: 'Other',
+                description: 'Any issue that does not fit into predefined categories.',
+                sortOrder: 70
+            }
+        ];
+
+        const FEEDBACK_CATEGORY_CODES = new Set(DEFAULT_FEEDBACK_TYPES.map((item) => item.code));
+
+        const DEFAULT_FEEDBACK_REPLY_GMAIL = 'smartcity.discovery2026@gmail.com';
+
+        const feedbackReplySmtpUser = String(
+            process.env.FEEDBACK_GMAIL_USER || process.env.GMAIL_USER || DEFAULT_FEEDBACK_REPLY_GMAIL
+        ).trim();
+        const feedbackReplySmtpPass = String(
+            process.env.FEEDBACK_GMAIL_APP_PASSWORD || process.env.GMAIL_APP_PASSWORD || ''
+        ).trim();
+        const feedbackReplyFromName =
+            String(process.env.FEEDBACK_REPLY_FROM_NAME || '').trim() || 'Smart City Discovery Support';
+        const feedbackReplyFromEmail =
+            String(process.env.FEEDBACK_REPLY_FROM_EMAIL || '').trim() || feedbackReplySmtpUser || DEFAULT_FEEDBACK_REPLY_GMAIL;
+
+        const feedbackReplyTransporter =
+            feedbackReplySmtpUser && feedbackReplySmtpPass
+                ? nodemailer.createTransport({
+                    service: 'gmail',
+                    auth: {
+                        user: feedbackReplySmtpUser,
+                        pass: feedbackReplySmtpPass
+                    }
+                })
+                : null;
+
+        if (!feedbackReplyTransporter) {
+            console.warn(
+                '⚠️ FEEDBACK_GMAIL_USER/FEEDBACK_GMAIL_APP_PASSWORD is not configured. Admin feedback reply email is disabled.'
+            );
+        }
 
         const TERMS_OF_USE = {
             title: 'Quy định chung của SMART CITY DISCOVERY',
@@ -1549,12 +1763,861 @@ async function generateWardIdFromName(name) {
             }
         }
 
+        function mapDefaultFeedbackTypesForResponse() {
+            return DEFAULT_FEEDBACK_TYPES.map((type) => ({
+                id: null,
+                code: type.code,
+                name: type.name,
+                description: type.description,
+                sortOrder: type.sortOrder,
+                isActive: true
+            }));
+        }
+
+        function isFeedbackSchemaMissingError(error) {
+            return ['42P01', '42703', '42704'].includes(error?.code);
+        }
+
+        async function listPublicFeedbackTypes(_req, res) {
+            try {
+                const result = await pool.query(
+                    `
+                        SELECT id, code, name, description, sort_order, is_active
+                        FROM feedback_types
+                        WHERE is_active = true
+                        ORDER BY sort_order ASC, name ASC
+                    `
+                );
+
+                if (!result.rows.length) {
+                    return res.json(mapDefaultFeedbackTypesForResponse());
+                }
+
+                return res.json(
+                    result.rows.map((row) => ({
+                        id: row.id,
+                        code: row.code,
+                        name: row.name,
+                        description: row.description,
+                        sortOrder: row.sort_order,
+                        isActive: row.is_active
+                    }))
+                );
+            } catch (error) {
+                if (error.code === '42P01') {
+                    return res.json(mapDefaultFeedbackTypesForResponse());
+                }
+
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
+        async function listAdminFeedbackTypes(_req, res) {
+            try {
+                const result = await pool.query(
+                    `
+                        SELECT id, code, name, description, sort_order, is_active, created_at, updated_at
+                        FROM feedback_types
+                        ORDER BY sort_order ASC, name ASC
+                    `
+                );
+
+                return res.json(
+                    result.rows.map((row) => ({
+                        id: row.id,
+                        code: row.code,
+                        name: row.name,
+                        description: row.description,
+                        sortOrder: row.sort_order,
+                        isActive: row.is_active,
+                        createdAt: row.created_at,
+                        updatedAt: row.updated_at
+                    }))
+                );
+            } catch (error) {
+                if (isFeedbackSchemaMissingError(error)) {
+                    return res.status(500).json({
+                        message: 'Feedback management schema is missing. Please run backend migrations.'
+                    });
+                }
+
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
+        async function createAdminFeedbackType(req, res) {
+            const name = String(req.body.name || '').trim();
+            const codeInput = String(req.body.code || '').trim();
+            const description = normalizeNullableText(req.body.description);
+            const sortOrder = Number.isFinite(Number(req.body.sortOrder)) ? Number(req.body.sortOrder) : 0;
+            const isActive = req.body.isActive !== false;
+            const code = String(slugifyText(codeInput || name)).replace(/-/g, '_');
+
+            if (!name) {
+                return res.status(400).json({ message: 'name is required' });
+            }
+
+            if (!code) {
+                return res.status(400).json({ message: 'code is required' });
+            }
+
+            try {
+                const result = await pool.query(
+                    `
+                        INSERT INTO feedback_types (code, name, description, sort_order, is_active, updated_at)
+                        VALUES ($1, $2, $3, $4, $5, now())
+                        RETURNING id, code, name, description, sort_order, is_active, created_at, updated_at
+                    `,
+                    [code, name, description, sortOrder, isActive]
+                );
+
+                const row = result.rows[0];
+                return res.status(201).json({
+                    id: row.id,
+                    code: row.code,
+                    name: row.name,
+                    description: row.description,
+                    sortOrder: row.sort_order,
+                    isActive: row.is_active,
+                    createdAt: row.created_at,
+                    updatedAt: row.updated_at
+                });
+            } catch (error) {
+                if (error.code === '23505') {
+                    return res.status(409).json({ message: 'Feedback type code already exists' });
+                }
+
+                if (isFeedbackSchemaMissingError(error)) {
+                    return res.status(500).json({
+                        message: 'Feedback management schema is missing. Please run backend migrations.'
+                    });
+                }
+
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
+        async function updateAdminFeedbackType(req, res) {
+            const typeId = normalizeNullableNumber(req.params.typeId);
+
+            if (Number.isNaN(typeId) || typeId === null) {
+                return res.status(400).json({ message: 'typeId must be a positive integer' });
+            }
+
+            try {
+                const existingResult = await pool.query(
+                    `
+                        SELECT id, code, name, description, sort_order, is_active
+                        FROM feedback_types
+                        WHERE id = $1
+                        LIMIT 1
+                    `,
+                    [typeId]
+                );
+
+                if (!existingResult.rows.length) {
+                    return res.status(404).json({ message: 'Feedback type not found' });
+                }
+
+                const existing = existingResult.rows[0];
+                const hasName = Object.prototype.hasOwnProperty.call(req.body, 'name');
+                const hasCode = Object.prototype.hasOwnProperty.call(req.body, 'code');
+                const hasDescription = Object.prototype.hasOwnProperty.call(req.body, 'description');
+                const hasSortOrder = Object.prototype.hasOwnProperty.call(req.body, 'sortOrder');
+                const hasIsActive = Object.prototype.hasOwnProperty.call(req.body, 'isActive');
+
+                const nextName = hasName ? String(req.body.name || '').trim() : existing.name;
+                const nextCode = hasCode
+                    ? String(slugifyText(String(req.body.code || '').trim())).replace(/-/g, '_')
+                    : hasName
+                        ? String(slugifyText(nextName)).replace(/-/g, '_')
+                        : existing.code;
+                const nextDescription = hasDescription
+                    ? normalizeNullableText(req.body.description)
+                    : existing.description;
+                const nextSortOrder = hasSortOrder
+                    ? Number.isFinite(Number(req.body.sortOrder))
+                        ? Number(req.body.sortOrder)
+                        : existing.sort_order
+                    : existing.sort_order;
+                const nextIsActive = hasIsActive ? req.body.isActive !== false : existing.is_active;
+
+                if (!nextName) {
+                    return res.status(400).json({ message: 'name is required' });
+                }
+
+                if (!nextCode) {
+                    return res.status(400).json({ message: 'code is required' });
+                }
+
+                const updateResult = await pool.query(
+                    `
+                        UPDATE feedback_types
+                        SET
+                            code = $2,
+                            name = $3,
+                            description = $4,
+                            sort_order = $5,
+                            is_active = $6,
+                            updated_at = now()
+                        WHERE id = $1
+                        RETURNING id, code, name, description, sort_order, is_active, created_at, updated_at
+                    `,
+                    [typeId, nextCode, nextName, nextDescription, nextSortOrder, nextIsActive]
+                );
+
+                const row = updateResult.rows[0];
+                return res.json({
+                    id: row.id,
+                    code: row.code,
+                    name: row.name,
+                    description: row.description,
+                    sortOrder: row.sort_order,
+                    isActive: row.is_active,
+                    createdAt: row.created_at,
+                    updatedAt: row.updated_at
+                });
+            } catch (error) {
+                if (error.code === '23505') {
+                    return res.status(409).json({ message: 'Feedback type code already exists' });
+                }
+
+                if (isFeedbackSchemaMissingError(error)) {
+                    return res.status(500).json({
+                        message: 'Feedback management schema is missing. Please run backend migrations.'
+                    });
+                }
+
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
+        async function deleteAdminFeedbackType(req, res) {
+            const typeId = normalizeNullableNumber(req.params.typeId);
+
+            if (Number.isNaN(typeId) || typeId === null) {
+                return res.status(400).json({ message: 'typeId must be a positive integer' });
+            }
+
+            try {
+                const deleteResult = await pool.query(
+                    `
+                        DELETE FROM feedback_types
+                        WHERE id = $1
+                        RETURNING id
+                    `,
+                    [typeId]
+                );
+
+                if (!deleteResult.rows.length) {
+                    return res.status(404).json({ message: 'Feedback type not found' });
+                }
+
+                return res.json({ message: 'Feedback type deleted successfully' });
+            } catch (error) {
+                if (isFeedbackSchemaMissingError(error)) {
+                    return res.status(500).json({
+                        message: 'Feedback management schema is missing. Please run backend migrations.'
+                    });
+                }
+
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
+        function submitFeedbackReport(req, res) {
+            uploadFeedback.single('attachment')(req, res, async (uploadErr) => {
+                if (uploadErr) {
+                    return res.status(400).json({ message: uploadErr.message || 'Upload failed' });
+                }
+
+                const rawFeedbackTypeId =
+                    req.body.feedbackTypeId ?? req.body.feedback_type_id ?? req.body.typeId;
+                const feedbackTypeId = normalizeNullableNumber(rawFeedbackTypeId);
+
+                if (Number.isNaN(feedbackTypeId)) {
+                    return res.status(400).json({ message: 'feedbackTypeId must be a positive integer' });
+                }
+
+                const message = String(req.body.message || '').trim();
+                const legacyCategoryRaw = String(
+                    req.body.category || req.body.issueType || req.body.issue_type || ''
+                )
+                    .trim()
+                    .toLowerCase();
+
+                if (!message) {
+                    return res.status(400).json({ message: 'Message is required' });
+                }
+
+                const normalizedPhone = String(req.body.contactPhone || req.body.contact_phone || '')
+                    .replace(/\D/g, '')
+                    .slice(0, 15);
+
+                const payloadEmail = String(req.body.contactEmail || req.body.contact_email || '').trim();
+                const fallbackAuthEmail = String(req.authUser?.email || '').trim();
+                const contactEmail = payloadEmail || fallbackAuthEmail;
+
+                if (contactEmail && !isValidEmail(contactEmail)) {
+                    return res.status(400).json({ message: 'contactEmail is invalid' });
+                }
+
+                const normalizedLegacyCategory = FEEDBACK_CATEGORY_CODES.has(legacyCategoryRaw)
+                    ? legacyCategoryRaw
+                    : 'other';
+                const attachmentUrl = req.file ? `/uploads/feedback/${req.file.filename}` : null;
+
+                let resolvedTypeId = null;
+                let resolvedTypeCode = normalizedLegacyCategory;
+                let resolvedTypeName =
+                    DEFAULT_FEEDBACK_TYPES.find((type) => type.code === normalizedLegacyCategory)?.name || 'Other';
+
+                try {
+                    if (feedbackTypeId !== null) {
+                        const selectedTypeResult = await pool.query(
+                            `
+                                SELECT id, code, name
+                                FROM feedback_types
+                                WHERE id = $1
+                                  AND is_active = true
+                                LIMIT 1
+                            `,
+                            [feedbackTypeId]
+                        );
+
+                        if (!selectedTypeResult.rows.length) {
+                            return res.status(400).json({ message: 'Selected feedback type is invalid or inactive' });
+                        }
+
+                        resolvedTypeId = selectedTypeResult.rows[0].id;
+                        resolvedTypeCode = selectedTypeResult.rows[0].code;
+                        resolvedTypeName = selectedTypeResult.rows[0].name;
+                    } else {
+                        const selectedTypeResult = await pool.query(
+                            `
+                                SELECT id, code, name
+                                FROM feedback_types
+                                WHERE code = $1
+                                  AND is_active = true
+                                LIMIT 1
+                            `,
+                            [normalizedLegacyCategory]
+                        );
+
+                        if (selectedTypeResult.rows.length) {
+                            resolvedTypeId = selectedTypeResult.rows[0].id;
+                            resolvedTypeCode = selectedTypeResult.rows[0].code;
+                            resolvedTypeName = selectedTypeResult.rows[0].name;
+                        }
+                    }
+                } catch (typeLookupError) {
+                    if (typeLookupError.code !== '42P01') {
+                        return res.status(500).json({ message: typeLookupError.message });
+                    }
+                }
+
+                try {
+                    const insertQuery = `
+                        INSERT INTO feedbacks (
+                            feedback_type_id,
+                            reporter_user_id,
+                            category,
+                            issue_type,
+                            message,
+                            contact_email,
+                            contact_phone,
+                            attachment_url,
+                            status,
+                            updated_at
+                        )
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'new', now())
+                        RETURNING *
+                    `;
+
+                    const { rows } = await pool.query(insertQuery, [
+                        resolvedTypeId,
+                        req.authUser?.id || null,
+                        resolvedTypeCode,
+                        resolvedTypeCode,
+                        message,
+                        contactEmail || null,
+                        normalizedPhone || null,
+                        attachmentUrl
+                    ]);
+
+                    return res.status(201).json({
+                        message: 'Feedback submitted',
+                        feedback: rows[0],
+                        feedbackType: {
+                            id: resolvedTypeId,
+                            code: resolvedTypeCode,
+                            name: resolvedTypeName
+                        }
+                    });
+                } catch (insertError) {
+                    if (!isFeedbackSchemaMissingError(insertError)) {
+                        return res.status(500).json({ message: insertError.message });
+                    }
+
+                    try {
+                        const fallbackInsertQuery = `
+                            INSERT INTO feedbacks (category, issue_type, message, contact_email, contact_phone, attachment_url)
+                            VALUES ($1, $2, $3, $4, $5, $6)
+                            RETURNING *
+                        `;
+
+                        const fallbackResult = await pool.query(fallbackInsertQuery, [
+                            resolvedTypeCode,
+                            resolvedTypeCode,
+                            message,
+                            contactEmail || null,
+                            normalizedPhone || null,
+                            attachmentUrl
+                        ]);
+
+                        return res.status(201).json({
+                            message: 'Feedback submitted',
+                            feedback: fallbackResult.rows[0],
+                            feedbackType: {
+                                id: null,
+                                code: resolvedTypeCode,
+                                name: resolvedTypeName
+                            }
+                        });
+                    } catch (fallbackError) {
+                        console.error('Feedback submission error:', fallbackError);
+                        return res.status(500).json({ message: 'Unable to submit feedback' });
+                    }
+                }
+            });
+        }
+
+        async function listAdminFeedbackReports(req, res) {
+            const statuses = normalizeFeedbackStatusList(req.query.status);
+            const page = normalizePaginationValue(req.query.page, 1, { min: 1, max: 100000 });
+            const pageSize = normalizePaginationValue(req.query.pageSize, 20, { min: 1, max: 100 });
+            const search = String(req.query.search || '').trim();
+
+            const values = [];
+            const whereConditions = [];
+
+            if (statuses.length) {
+                values.push(statuses);
+                whereConditions.push(`f.status = ANY($${values.length}::text[])`);
+            }
+
+            if (search) {
+                values.push(`%${search}%`);
+                whereConditions.push(
+                    `(f.message ILIKE $${values.length} OR COALESCE(f.contact_email, '') ILIKE $${values.length} OR COALESCE(ft.name, '') ILIKE $${values.length})`
+                );
+            }
+
+            const whereClause = whereConditions.length ? `WHERE ${whereConditions.join(' AND ')}` : '';
+
+            try {
+                const countResult = await pool.query(
+                    `
+                        SELECT COUNT(*)::int AS total
+                        FROM feedbacks AS f
+                        LEFT JOIN feedback_types AS ft ON ft.id = f.feedback_type_id
+                        ${whereClause}
+                    `,
+                    values
+                );
+
+                const total = countResult.rows[0]?.total || 0;
+
+                const listValues = [...values, pageSize, (page - 1) * pageSize];
+
+                const listResult = await pool.query(
+                    `
+                        SELECT
+                            f.id,
+                            f.feedback_type_id,
+                            COALESCE(ft.code, f.category, f.issue_type, 'other') AS feedback_type_code,
+                            COALESCE(ft.name, f.issue_type, f.category, 'Other') AS feedback_type_name,
+                            f.message,
+                            f.contact_email,
+                            f.contact_phone,
+                            f.attachment_url,
+                            f.status,
+                            f.admin_replied_at,
+                            f.admin_replied_by,
+                            f.created_at,
+                            f.updated_at
+                        FROM feedbacks AS f
+                        LEFT JOIN feedback_types AS ft ON ft.id = f.feedback_type_id
+                        ${whereClause}
+                        ORDER BY f.created_at DESC, f.id DESC
+                        LIMIT $${values.length + 1}
+                        OFFSET $${values.length + 2}
+                    `,
+                    listValues
+                );
+
+                return res.json({
+                    items: listResult.rows,
+                    pagination: {
+                        page,
+                        pageSize,
+                        total,
+                        totalPages: Math.max(1, Math.ceil(total / pageSize))
+                    }
+                });
+            } catch (error) {
+                if (isFeedbackSchemaMissingError(error)) {
+                    return res.status(500).json({
+                        message: 'Feedback management schema is missing. Please run backend migrations.'
+                    });
+                }
+
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
+        async function getAdminFeedbackReportDetail(req, res) {
+            const feedbackId = normalizeNullableNumber(req.params.feedbackId);
+
+            if (Number.isNaN(feedbackId) || feedbackId === null) {
+                return res.status(400).json({ message: 'feedbackId must be a positive integer' });
+            }
+
+            try {
+                const result = await pool.query(
+                    `
+                        SELECT
+                            f.id,
+                            f.feedback_type_id,
+                            COALESCE(ft.code, f.category, f.issue_type, 'other') AS feedback_type_code,
+                            COALESCE(ft.name, f.issue_type, f.category, 'Other') AS feedback_type_name,
+                            f.category,
+                            f.issue_type,
+                            f.message,
+                            f.contact_email,
+                            f.contact_phone,
+                            f.attachment_url,
+                            f.status,
+                            f.admin_reply_message,
+                            f.admin_reply_attachment_url,
+                            f.admin_replied_at,
+                            f.admin_replied_by,
+                            f.reporter_user_id,
+                            f.created_at,
+                            f.updated_at
+                        FROM feedbacks AS f
+                        LEFT JOIN feedback_types AS ft ON ft.id = f.feedback_type_id
+                        WHERE f.id = $1
+                        LIMIT 1
+                    `,
+                    [feedbackId]
+                );
+
+                if (!result.rows.length) {
+                    return res.status(404).json({ message: 'Feedback report not found' });
+                }
+
+                return res.json(result.rows[0]);
+            } catch (error) {
+                if (isFeedbackSchemaMissingError(error)) {
+                    return res.status(500).json({
+                        message: 'Feedback management schema is missing. Please run backend migrations.'
+                    });
+                }
+
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
+        function replyAdminFeedbackReport(req, res) {
+            uploadFeedbackReply.single('attachment')(req, res, async (uploadErr) => {
+                if (uploadErr) {
+                    return res.status(400).json({ message: uploadErr.message || 'Upload failed' });
+                }
+
+                const feedbackId = normalizeNullableNumber(req.params.feedbackId);
+
+                if (Number.isNaN(feedbackId) || feedbackId === null) {
+                    return res.status(400).json({ message: 'feedbackId must be a positive integer' });
+                }
+
+                const replyMessage = String(req.body.replyMessage || req.body.message || '').trim();
+
+                if (!replyMessage) {
+                    if (req.file) {
+                        safeDeleteUploadedFile(`/uploads/feedback/admin-replies/${req.file.filename}`);
+                    }
+
+                    return res.status(400).json({ message: 'replyMessage is required' });
+                }
+
+                const requestedStatus = String(req.body.status || 'replied').trim().toLowerCase();
+                const allowedNextStatuses = new Set(['in_progress', 'replied', 'closed']);
+                const nextStatus = allowedNextStatuses.has(requestedStatus) ? requestedStatus : 'replied';
+
+                if (!feedbackReplyTransporter || !feedbackReplySmtpUser) {
+                    if (req.file) {
+                        safeDeleteUploadedFile(`/uploads/feedback/admin-replies/${req.file.filename}`);
+                    }
+
+                    return res.status(500).json({
+                        message:
+                            'Gmail configuration is missing. Set FEEDBACK_GMAIL_USER and FEEDBACK_GMAIL_APP_PASSWORD in backend environment.'
+                    });
+                }
+
+                try {
+                    const feedbackResult = await pool.query(
+                        `
+                            SELECT
+                                f.id,
+                                f.message,
+                                f.created_at,
+                                f.contact_email,
+                                f.reporter_user_id,
+                                reporter.email AS reporter_email,
+                                f.admin_reply_attachment_url,
+                                COALESCE(ft.name, f.issue_type, f.category, 'Other') AS feedback_type_name
+                            FROM feedbacks AS f
+                            LEFT JOIN feedback_types AS ft ON ft.id = f.feedback_type_id
+                            LEFT JOIN users AS reporter ON reporter.id::text = f.reporter_user_id
+                            WHERE f.id = $1
+                            LIMIT 1
+                        `,
+                        [feedbackId]
+                    );
+
+                    if (!feedbackResult.rows.length) {
+                        if (req.file) {
+                            safeDeleteUploadedFile(`/uploads/feedback/admin-replies/${req.file.filename}`);
+                        }
+
+                        return res.status(404).json({ message: 'Feedback report not found' });
+                    }
+
+                    const feedback = feedbackResult.rows[0];
+                    const primaryContactEmail = normalizeNullableText(feedback.contact_email);
+                    const reporterEmail = normalizeNullableText(feedback.reporter_email);
+                    const recipientEmail = [primaryContactEmail, reporterEmail].find((candidate) =>
+                        isValidEmail(candidate)
+                    );
+
+                    if (!recipientEmail) {
+                        if (req.file) {
+                            safeDeleteUploadedFile(`/uploads/feedback/admin-replies/${req.file.filename}`);
+                        }
+
+                        return res.status(400).json({
+                            message:
+                                'This report does not contain a valid recipient email. Please ensure the feedback account uses a real email address.'
+                        });
+                    }
+
+                    const replyAttachmentUrl = req.file
+                        ? `/uploads/feedback/admin-replies/${req.file.filename}`
+                        : feedback.admin_reply_attachment_url;
+
+                    const mailFrom = `${feedbackReplyFromName} <${feedbackReplyFromEmail || feedbackReplySmtpUser}>`;
+                    const reviewer = req.authUser?.email || req.authUser?.id || 'Support Team';
+                    const reviewerLabelForEmail =
+                        feedbackReplyFromEmail || feedbackReplySmtpUser || 'smartcity.discovery2026@gmail.com';
+                    const reportTypeLabel = escapeHtml(feedback.feedback_type_name || 'Other');
+                    const reportCreatedAtLabel = escapeHtml(formatFeedbackTimestamp(feedback.created_at));
+                    const nextStatusLabel = escapeHtml(normalizeFeedbackStatusLabel(nextStatus));
+                    const reportMessageText = String(feedback.message || '').trim() || 'No report details provided.';
+                    const attachmentNoticeText = req.file
+                        ? 'An image attachment from our support team is included in this email.'
+                        : '';
+
+                    const plainTextBody = [
+                        'Smart City Discovery - Feedback Update',
+                        '',
+                        `Feedback ID: #${feedback.id}`,
+                        `Feedback Type: ${feedback.feedback_type_name || 'Other'}`,
+                        `Submitted At: ${formatFeedbackTimestamp(feedback.created_at)}`,
+                        '',
+                        'Original Report:',
+                        reportMessageText,
+                        '',
+                        'Support Team Response:',
+                        replyMessage,
+                        '',
+                        `Current Status: ${normalizeFeedbackStatusLabel(nextStatus)}`,
+                        `Handled By: ${reviewerLabelForEmail}`,
+                        attachmentNoticeText,
+                        '',
+                        'If you need further help, please reply to this email.',
+                        '',
+                        'Best regards,',
+                        'Smart City Discovery Support'
+                    ]
+                        .filter(Boolean)
+                        .join('\n');
+
+                    const htmlBody = `
+                        <div style="margin:0;padding:0;background:#f4f6fb;font-family:Segoe UI,Arial,sans-serif;color:#1f2937;">
+                            <div style="max-width:680px;margin:0 auto;padding:24px 16px;">
+                                <div style="background:#ffffff;border:1px solid #e4e8f1;border-radius:14px;overflow:hidden;box-shadow:0 10px 28px rgba(23,33,79,0.08);">
+                                    <div style="padding:18px 22px;background:linear-gradient(135deg,#1e3a8a,#2563eb);color:#ffffff;">
+                                        <p style="margin:0;font-size:12px;letter-spacing:.08em;text-transform:uppercase;opacity:.88;">Smart City Discovery Support</p>
+                                        <h2 style="margin:8px 0 0;font-size:22px;line-height:1.3;">Update on your feedback report #${feedback.id}</h2>
+                                    </div>
+                                    <div style="padding:20px 22px 24px;">
+                                        <p style="margin:0 0 14px;font-size:14px;color:#334155;">Hello,</p>
+                                        <p style="margin:0 0 18px;font-size:14px;line-height:1.7;color:#334155;">Thank you for contacting Smart City Discovery. Our support team has reviewed your report and provided an update below.</p>
+
+                                        <div style="margin:0 0 18px;padding:14px;border:1px solid #e4e8f1;border-radius:10px;background:#f8faff;">
+                                            <p style="margin:0 0 8px;font-size:13px;color:#475569;"><strong>Feedback ID:</strong> #${feedback.id}</p>
+                                            <p style="margin:0 0 8px;font-size:13px;color:#475569;"><strong>Feedback Type:</strong> ${reportTypeLabel}</p>
+                                            <p style="margin:0 0 8px;font-size:13px;color:#475569;"><strong>Submitted At:</strong> ${reportCreatedAtLabel}</p>
+                                            <p style="margin:0;font-size:13px;color:#475569;"><strong>Current Status:</strong> ${nextStatusLabel}</p>
+                                        </div>
+
+                                        <h3 style="margin:0 0 8px;font-size:15px;color:#1e293b;">Original report</h3>
+                                        <div style="margin:0 0 18px;padding:12px;border-radius:10px;background:#f9fafb;border:1px solid #eceff5;font-size:14px;line-height:1.65;color:#334155;">${formatMultilineHtml(reportMessageText)}</div>
+
+                                        <h3 style="margin:0 0 8px;font-size:15px;color:#1e293b;">Support team response</h3>
+                                        <div style="margin:0 0 8px;padding:12px;border-radius:10px;background:#eff6ff;border:1px solid #dbeafe;font-size:14px;line-height:1.65;color:#1e3a8a;">${formatMultilineHtml(replyMessage)}</div>
+                                        <p style="margin:0 0 18px;font-size:12px;color:#64748b;"><strong>Handled by:</strong> ${escapeHtml(reviewerLabelForEmail)}</p>
+
+                                        ${req.file ? '<p style="margin:0 0 18px;font-size:13px;color:#0f766e;">An image attachment from our support team is included in this email.</p>' : ''}
+
+                                        <div style="margin:0;padding:14px;border-radius:10px;background:#f8fafc;border:1px dashed #d3dae8;">
+                                            <p style="margin:0;font-size:13px;line-height:1.6;color:#475569;">If you need further assistance, please reply directly to this email and we will continue supporting your request.</p>
+                                        </div>
+
+                                        <p style="margin:18px 0 0;font-size:13px;color:#64748b;">Best regards,<br /><strong>Smart City Discovery Support</strong></p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+
+                    const mailResult = await feedbackReplyTransporter.sendMail({
+                        from: mailFrom,
+                        to: recipientEmail,
+                        subject: `[Smart City Discovery] Update on your feedback #${feedback.id}`,
+                        text: plainTextBody,
+                        html: htmlBody,
+                        attachments: req.file
+                            ? [
+                                {
+                                    filename: req.file.originalname,
+                                    path: req.file.path,
+                                    contentType: req.file.mimetype
+                                }
+                            ]
+                            : []
+                    });
+
+                    const updateResult = await pool.query(
+                        `
+                            UPDATE feedbacks
+                            SET
+                                admin_reply_message = $2,
+                                admin_reply_attachment_url = $3,
+                                admin_replied_at = now(),
+                                admin_replied_by = $4,
+                                status = $5,
+                                updated_at = now()
+                            WHERE id = $1
+                            RETURNING id, status, admin_reply_message, admin_reply_attachment_url, admin_replied_at, admin_replied_by, updated_at
+                        `,
+                        [feedbackId, replyMessage, replyAttachmentUrl, reviewer, nextStatus]
+                    );
+
+                    if (
+                        req.file &&
+                        feedback.admin_reply_attachment_url &&
+                        feedback.admin_reply_attachment_url !== replyAttachmentUrl
+                    ) {
+                        safeDeleteUploadedFile(feedback.admin_reply_attachment_url);
+                    }
+
+                    return res.json({
+                        message: 'Reply sent successfully via Gmail',
+                        deliveredTo: recipientEmail,
+                        messageId: mailResult?.messageId || null,
+                        feedback: updateResult.rows[0]
+                    });
+                } catch (error) {
+                    if (req.file) {
+                        safeDeleteUploadedFile(`/uploads/feedback/admin-replies/${req.file.filename}`);
+                    }
+
+                    if (isFeedbackSchemaMissingError(error)) {
+                        return res.status(500).json({
+                            message: 'Feedback management schema is missing. Please run backend migrations.'
+                        });
+                    }
+
+                    if (error?.code === 'EAUTH' || error?.responseCode === 535) {
+                        return res.status(500).json({
+                            message:
+                                'Gmail authentication failed. Please re-check FEEDBACK_GMAIL_USER and FEEDBACK_GMAIL_APP_PASSWORD.'
+                        });
+                    }
+
+                    if (error?.code === 'EENVELOPE') {
+                        return res.status(400).json({
+                            message: 'Recipient email is invalid or rejected by SMTP provider.'
+                        });
+                    }
+
+                    return res.status(500).json({ message: error.message });
+                }
+            });
+        }
+
+        async function deleteAdminFeedbackReport(req, res) {
+            const feedbackId = normalizeNullableNumber(req.params.feedbackId);
+
+            if (Number.isNaN(feedbackId) || feedbackId === null) {
+                return res.status(400).json({ message: 'feedbackId must be a positive integer' });
+            }
+
+            try {
+                const deleteResult = await pool.query(
+                    `
+                        DELETE FROM feedbacks
+                        WHERE id = $1
+                        RETURNING id, attachment_url, admin_reply_attachment_url
+                    `,
+                    [feedbackId]
+                );
+
+                if (!deleteResult.rows.length) {
+                    return res.status(404).json({ message: 'Feedback report not found' });
+                }
+
+                const deletedReport = deleteResult.rows[0];
+
+                safeDeleteUploadedFile(deletedReport.attachment_url);
+                safeDeleteUploadedFile(deletedReport.admin_reply_attachment_url);
+
+                return res.json({
+                    message: 'Feedback report deleted successfully',
+                    deletedFeedbackId: deletedReport.id
+                });
+            } catch (error) {
+                if (isFeedbackSchemaMissingError(error)) {
+                    return res.status(500).json({
+                        message: 'Feedback management schema is missing. Please run backend migrations.'
+                    });
+                }
+
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
         registerVersionedRoute('get', '/wards', listPublicWards);
         registerVersionedRoute('get', '/place-categories', listPublicPlaceCategories);
         registerVersionedRoute('get', '/merchant-services', listPublicMerchantServices);
+        registerVersionedRoute('get', '/feedback/types', listPublicFeedbackTypes);
         registerVersionedRoute('get', '/venues', listPublicVenues);
         registerVersionedRoute('get', '/venues/:venueId', authenticateRequest, getVenueDetails);
         registerVersionedRoute('post', '/venues', createVenueSubmission);
+        registerVersionedRoute('post', '/feedback', authenticateOptional, submitFeedbackReport);
 
         registerVersionedRoute('get', '/admin/wards', authenticateRequest, requireAdminRole, listAdminWards);
         registerVersionedRoute('post', '/admin/wards', authenticateRequest, requireAdminRole, upsertAdminWard);
@@ -1569,6 +2632,14 @@ async function generateWardIdFromName(name) {
         registerVersionedRoute('delete', '/admin/merchant-services/:serviceId', authenticateRequest, requireAdminRole, deleteAdminMerchantService);
         registerVersionedRoute('get', '/admin/venues', authenticateRequest, requireAdminRole, listAdminVenues);
         registerVersionedRoute('patch', '/admin/venues/:venueId/moderation', authenticateRequest, requireAdminRole, moderateVenueSubmission);
+        registerVersionedRoute('get', '/admin/feedback/types', authenticateRequest, requireAdminRole, listAdminFeedbackTypes);
+        registerVersionedRoute('post', '/admin/feedback/types', authenticateRequest, requireAdminRole, createAdminFeedbackType);
+        registerVersionedRoute('patch', '/admin/feedback/types/:typeId', authenticateRequest, requireAdminRole, updateAdminFeedbackType);
+        registerVersionedRoute('delete', '/admin/feedback/types/:typeId', authenticateRequest, requireAdminRole, deleteAdminFeedbackType);
+        registerVersionedRoute('get', '/admin/feedback/reports', authenticateRequest, requireAdminRole, listAdminFeedbackReports);
+        registerVersionedRoute('get', '/admin/feedback/reports/:feedbackId', authenticateRequest, requireAdminRole, getAdminFeedbackReportDetail);
+        registerVersionedRoute('post', '/admin/feedback/reports/:feedbackId/reply', authenticateRequest, requireAdminRole, replyAdminFeedbackReport);
+        registerVersionedRoute('delete', '/admin/feedback/reports/:feedbackId', authenticateRequest, requireAdminRole, deleteAdminFeedbackReport);
 
         // ==========================================
         // REGISTRATION AND LOGIN APIS
@@ -2025,44 +3096,6 @@ async function generateWardIdFromName(name) {
         // ==========================================
         // FACEBOOK OAUTH
         // ==========================================
-        app.post('/api/v1/feedback', (req, res) => {
-            uploadFeedback.single('attachment')(req, res, async (uploadErr) => {
-                if (uploadErr) {
-                    return res.status(400).json({ message: uploadErr.message || 'Upload failed' });
-                }
-
-                const { category, message, contactEmail, contactPhone } = req.body;
-
-                if (!category || !message || !message.trim()) {
-                    return res.status(400).json({ message: 'Category and message are required' });
-                }
-
-                const normalizedCategory = FEEDBACK_CATEGORIES.includes(category) ? category : 'other';
-                const attachmentUrl = req.file ? `/uploads/feedback/${req.file.filename}` : null;
-
-                try {
-                    const insertQuery = `
-                INSERT INTO feedbacks (category, issue_type, message, contact_email, contact_phone, attachment_url)
-                VALUES ($1, $2, $3, $4, $5, $6)
-                RETURNING *;
-            `;
-
-                    const { rows } = await pool.query(insertQuery, [
-                        normalizedCategory,
-                        normalizedCategory,
-                        message.trim(),
-                        contactEmail || null,
-                        contactPhone || null,
-                        attachmentUrl
-                    ]);
-
-                    res.status(201).json({ message: 'Feedback submitted', feedback: rows[0] });
-                } catch (err) {
-                    console.error('Feedback submission error:', err);
-                    res.status(500).json({ message: 'Unable to submit feedback' });
-                }
-            });
-        });
 
         app.get('/api/v1/terms', (_req, res) => {
             res.json({

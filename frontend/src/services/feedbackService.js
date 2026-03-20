@@ -1,8 +1,25 @@
 import apiClient from './api/client';
 
-export async function submitFeedback({ category, message, contactEmail, contactPhone, attachment }) {
+export async function fetchFeedbackTypes() {
+  const response = await apiClient.get('/feedback/types');
+  return response.data;
+}
+
+export async function submitFeedback({
+  feedbackTypeId,
+  category,
+  message,
+  contactEmail,
+  contactPhone,
+  attachment,
+}) {
   const formData = new FormData();
-  formData.append('category', category || '');
+  if (feedbackTypeId !== undefined && feedbackTypeId !== null && feedbackTypeId !== '') {
+    formData.append('feedbackTypeId', String(feedbackTypeId));
+  }
+  if (category) {
+    formData.append('category', String(category));
+  }
   formData.append('message', message || '');
   if (contactEmail) formData.append('contactEmail', contactEmail);
   if (contactPhone) formData.append('contactPhone', contactPhone);
