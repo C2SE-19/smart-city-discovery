@@ -172,6 +172,48 @@ function normalizeServiceIds(input) {
     return [...new Set(normalized)];
 }
 
+function parsePositiveIntegerList(input) {
+    if (input === undefined || input === null || input === '') {
+        return { values: [], invalid: false };
+    }
+
+    const rawItems = Array.isArray(input)
+        ? input.flatMap((value) => String(value).split(','))
+        : String(input).split(',');
+
+    const values = [];
+
+    for (const item of rawItems) {
+        const trimmed = String(item).trim();
+
+        if (!trimmed) {
+            continue;
+        }
+
+        const parsed = Number(trimmed);
+
+        if (!Number.isInteger(parsed) || parsed <= 0) {
+            return { values: [], invalid: true };
+        }
+
+        values.push(parsed);
+    }
+
+    return { values: [...new Set(values)], invalid: false };
+}
+
+function parseTextList(input) {
+    if (input === undefined || input === null || input === '') {
+        return [];
+    }
+
+    const rawItems = Array.isArray(input)
+        ? input.flatMap((value) => String(value).split(','))
+        : String(input).split(',');
+
+    return [...new Set(rawItems.map((value) => String(value).trim()).filter(Boolean))];
+}
+
 function normalizeNullableNumber(value) {
     if (value === undefined || value === null || value === '') {
         return null;
@@ -746,17 +788,84 @@ async function generateWardIdFromName(name) {
                 const statusFilter = normalizeStatusList(req.query.status);
                 const effectiveStatuses = statusFilter.length ? statusFilter : ['approved'];
                 const categoryId = normalizeCategoryId(req.query.categoryId);
+                const categoryIdsFilter = parsePositiveIntegerList(req.query.categoryIds);
+                const serviceIdsFilter = parsePositiveIntegerList(req.query.serviceIds);
+                const wardIdsFilter = parseTextList(req.query.wardIds);
+                const singleWardId = normalizeNullableText(req.query.wardId);
+                const searchKeyword = String(req.query.q ?? req.query.search ?? '').trim().toLowerCase();
 
                 if (Number.isNaN(categoryId)) {
                     return res.status(400).json({ message: 'categoryId must be a positive integer' });
                 }
 
+                if (categoryIdsFilter.invalid) {
+                    return res
+                        .status(400)
+                        .json({ message: 'categoryIds must be a comma-separated list of positive integers' });
+                }
+
+                if (serviceIdsFilter.invalid) {
+                    return res
+                        .status(400)
+                        .json({ message: 'serviceIds must be a comma-separated list of positive integers' });
+                }
+
+                const effectiveCategoryIds = [...categoryIdsFilter.values];
+
+                if (categoryId !== null && !effectiveCategoryIds.includes(categoryId)) {
+                    effectiveCategoryIds.push(categoryId);
+                }
+
+                const effectiveWardIds = [...wardIdsFilter];
+
+                if (singleWardId && !effectiveWardIds.includes(singleWardId)) {
+                    effectiveWardIds.push(singleWardId);
+                }
+
                 const values = [effectiveStatuses];
                 const whereConditions = ['venues.status::text = ANY($1::text[])'];
 
-                if (categoryId !== null) {
-                    values.push(categoryId);
-                    whereConditions.push(`venues.category_id = $${values.length}`);
+                if (effectiveCategoryIds.length) {
+                    values.push(effectiveCategoryIds);
+                    whereConditions.push(`venues.category_id = ANY($${values.length}::int[])`);
+                }
+
+                if (effectiveWardIds.length) {
+                    values.push(effectiveWardIds);
+                    whereConditions.push(`venues.ward_id::text = ANY($${values.length}::text[])`);
+                }
+
+                if (serviceIdsFilter.values.length) {
+                    values.push(serviceIdsFilter.values);
+                    whereConditions.push(`
+                        EXISTS (
+                            SELECT 1
+                            FROM jsonb_array_elements_text(COALESCE(venues.metadata->'selectedServices', '[]'::jsonb)) AS selected(value)
+                            WHERE selected.value ~ '^[0-9]+$'
+                              AND selected.value::int = ANY($${values.length}::int[])
+                        )
+                    `);
+                }
+
+                if (searchKeyword) {
+                    values.push(`%${searchKeyword}%`);
+                    const searchParamIndex = values.length;
+
+                    whereConditions.push(`
+                        (
+                            LOWER(COALESCE(venues.name, '')) LIKE $${searchParamIndex}
+                            OR LOWER(COALESCE(venues.title, '')) LIKE $${searchParamIndex}
+                            OR LOWER(COALESCE(venues.address, '')) LIKE $${searchParamIndex}
+                            OR LOWER(COALESCE(venues.description, '')) LIKE $${searchParamIndex}
+                            OR LOWER(COALESCE(wards.name, '')) LIKE $${searchParamIndex}
+                            OR LOWER(COALESCE(place_categories.name, '')) LIKE $${searchParamIndex}
+                            OR EXISTS (
+                                SELECT 1
+                                FROM jsonb_array_elements_text(COALESCE(venues.metadata->'selectedServiceNames', '[]'::jsonb)) AS service_name(value)
+                                WHERE LOWER(service_name.value) LIKE $${searchParamIndex}
+                            )
+                        )
+                    `);
                 }
 
                 const result = await pool.query(
