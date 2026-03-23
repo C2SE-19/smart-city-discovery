@@ -1,0 +1,1 @@
+Shared service scaffold placeholder.
