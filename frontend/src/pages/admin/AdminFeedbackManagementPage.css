@@ -106,10 +106,8 @@
 }
 
 .admin-feedback-workspace .admin-feedback-detail-panel {
-  max-height: calc(100vh - 185px);
-  overflow-y: scroll;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
+  max-height: none;
+  overflow: visible;
 }
 
 .admin-feedback-card-head h2 {
@@ -191,11 +189,8 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 10px;
-  position: sticky;
-  bottom: 0;
-  z-index: 2;
-  padding: 10px 0 2px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.96) 26%);
+  padding: 0;
+  background: transparent;
 }
 
 .admin-feedback-reply-footer .admin-feedback-reply-actions {

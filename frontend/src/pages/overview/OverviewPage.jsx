@@ -1,147 +1,172 @@
-import { useState, useEffect, useRef,useMemo} from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../../contexts/AuthContext';
 import translations from '../../constants/translations';
 import axios from 'axios';
+import { fetchPlaceCategories } from '../../services/api/placeCategoriesApi';
+import { fetchMerchantServices } from '../../services/api/merchantServicesApi';
+import { fetchWards } from '../../services/api/wardsApi';
+import { fetchVenues } from '../../services/api/venuesApi';
 import './OverviewPage.css';
 
-const foodItems = [
-  {
-    id: 1,
-    name: 'Shrimp Fried Rice',
-    description:
-      'Shrimp fried rice, with sliced carrots, peas, corn, and bell peppers.',
-    price: 2.3,
-    image:
-      'https://images.unsplash.com/photo-1512058564366-18510be2db19?auto=format&fit=crop&w=900&q=80'
-  },
-  {
-    id: 2,
-    name: 'Pork Satay, Grilled Pork',
-    description:
-      'Skewers of marinated pork grilled to perfection, resting in a peanut dip.',
-    price: 2.23,
-    image:
-      'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=900&q=80'
-  },
-  {
-    id: 3,
-    name: 'Papaya Salad',
-    description:
-      'A fresh combination of lime juice, fish sauce, palm sugar, and green papaya.',
-    price: 2.32,
-    image:
-      'https://images.unsplash.com/photo-1512621776951-a57141f2eefd?auto=format&fit=crop&w=900&q=80'
-  },
-  {
-    id: 4,
-    name: 'Pork Satay, Grilled Pork',
-    description:
-      'Tender skewers with roasted peanuts, cucumber, and a savory dipping sauce.',
-    price: 2.23,
-    image:
-      'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=900&q=80'
+const FALLBACK_VENUE_IMAGE =
+  'https://images.unsplash.com/photo-1469474968028-56623f02e42e?auto=format&fit=crop&w=900&q=80';
+
+function renderHighlightedTitle(title) {
+  const match = String(title || '').match(/^(.*)<span>(.*)<\/span>(.*)$/);
+
+  if (!match) {
+    return <h1>{title}</h1>;
   }
-];
 
-const landscapeColumns = {
-  left: [
-    {
-      id: 1,
-      name: 'The Marble Mountains',
-      description:
-        'Five limestone peaks known for caves, pagodas, and panoramic views.',
-      price: '1.50 USD',
-      image:
-        'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=900&q=80'
-    },
-    {
-      id: 2,
-      name: 'Cham Sculpture Museum',
-      description:
-        'The largest collection of Cham sandstone sculpture in the world.',
-      price: '2.30 USD',
-      image:
-        'https://images.unsplash.com/photo-1518998053901-5348d3961a04?auto=format&fit=crop&w=900&q=80'
-    }
-  ],
-  featured: {
-    id: 3,
-    name: 'Dragon Bridge (Cau Rong)',
-    description:
-      'Iconic bridge in Da Nang, loved for its fire and water show every weekend.',
-    price: '0.00 USD',
-    image:
-      'https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?auto=format&fit=crop&w=900&q=80'
-  },
-  right: [
-    {
-      id: 4,
-      name: 'Golden Bridge (Ba Na Hills)',
-      description:
-        'A breathtaking bridge supported by giant hands at Sun World Ba Na Hills.',
-      price: '37.00 USD',
-      image:
-        'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=900&q=80'
-    },
-    {
-      id: 5,
-      name: 'Linh Ung Pagoda (Son Tra)',
-      description:
-        'A massive Lady Buddha statue offering stunning coastal views from the peninsula.',
-      price: '0.00 USD',
-      image:
-        'https://images.unsplash.com/photo-1504609813442-a8924e83f76e?auto=format&fit=crop&w=900&q=80'
-    }
-  ]
-};
-
-function FoodCard({ item, index, isFavorite, onToggleFavorite }) {
   return (
-    <article className={`overview-food-card overview-food-card-animate overview-food-card-${index}`}>
-      <button
-        type="button"
-        className={`overview-favorite ${isFavorite ? 'is-active' : ''}`}
-        aria-label={isFavorite ? `Unsave ${item.name}` : `Save ${item.name}`}
-        onClick={() => onToggleFavorite(item, 'food')}
-      />
-
-      <div className="overview-food-media">
-        <img src={item.image} alt={item.name} className="overview-food-image" />
-      </div>
-
-      <div className="overview-food-body">
-        <h3>{item.name}</h3>
-        <p>{item.description}</p>
-
-        <div className="overview-card-footer">
-          <span>{item.price.toFixed(2)} USD</span>
-          <button type="button" className="overview-add-button" aria-label={`Add ${item.name}`} />
-        </div>
-      </div>
-    </article>
+    <h1>
+      {match[1]}
+      <span>{match[2]}</span>
+      {match[3]}
+    </h1>
   );
 }
 
-function PlaceCard({ item, isFavorite, onToggleFavorite }) {
-  return (
-    <article className="overview-place-card">
-      <img src={item.image} alt={item.name} className="overview-place-image" />
+function normalizeVenueMetadata(metadata) {
+  if (metadata && typeof metadata === 'object' && !Array.isArray(metadata)) {
+    return metadata;
+  }
 
-      <div className="overview-place-body">
+  if (typeof metadata === 'string') {
+    try {
+      const parsed = JSON.parse(metadata);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch {
+      return {};
+    }
+  }
+
+  return {};
+}
+
+function getVenueImage(venue) {
+  return (
+    venue.cover_image_url ||
+    venue.coverImageUrl ||
+    venue.image ||
+    FALLBACK_VENUE_IMAGE
+  );
+}
+
+function getVenueCategoryId(venue) {
+  const normalized = Number(venue.category_id ?? venue.categoryId);
+  return Number.isInteger(normalized) && normalized > 0 ? normalized : null;
+}
+
+function getVenueServices(venue, serviceNameById) {
+  const metadata = normalizeVenueMetadata(venue.metadata);
+  const byName = Array.isArray(metadata.selectedServiceNames)
+    ? metadata.selectedServiceNames
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+    : [];
+
+  if (byName.length) {
+    return byName;
+  }
+
+  if (!Array.isArray(metadata.selectedServices)) {
+    return [];
+  }
+
+  return [...new Set(
+    metadata.selectedServices
+      .map((value) => Number(value))
+      .filter((value) => Number.isInteger(value) && value > 0)
+      .map((serviceId) => serviceNameById.get(serviceId))
+      .filter(Boolean)
+  )];
+}
+
+function toFavoriteVenuePayload(venue) {
+  return {
+    id: venue.id,
+    name: venue.name || venue.title || 'Untitled venue',
+    image: getVenueImage(venue),
+    price: 'N/A',
+    description: venue.description || venue.address || ''
+  };
+}
+
+function FilterGroup({ title, options, selectedValues, optionValue, optionLabel, onToggle }) {
+  return (
+    <section className="overview-filter-group">
+      <header>
+        <h3>{title}</h3>
+      </header>
+
+      {!options.length ? (
+        <p className="overview-empty-copy">No options available.</p>
+      ) : (
+        <div className="overview-filter-options">
+          {options.map((option) => {
+            const value = optionValue(option);
+            const checked = selectedValues.includes(value);
+
+            return (
+              <label key={`${title}-${String(value)}`} className="overview-filter-option">
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => onToggle(value)}
+                />
+                <span>{optionLabel(option)}</span>
+              </label>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function VenueCard({ venue, isFavorite, onToggleFavorite, onExplore, services }) {
+  const venueName = venue.name || venue.title || 'Untitled venue';
+  const venueDescription = venue.description || 'No description provided yet.';
+  const venueAddress = venue.address || 'Address not available';
+  const wardName = venue.ward_name || venue.wardName;
+
+  return (
+    <article className="overview-dynamic-card">
+      <div className="overview-dynamic-media">
+        <img src={getVenueImage(venue)} alt={venueName} loading="lazy" />
+
         <button
           type="button"
           className={`overview-favorite ${isFavorite ? 'is-active' : ''}`}
-          aria-label={isFavorite ? `Unsave ${item.name}` : `Save ${item.name}`}
-          onClick={() => onToggleFavorite(item, 'place')}
+          aria-label={isFavorite ? `Unsave ${venueName}` : `Save ${venueName}`}
+          onClick={() => onToggleFavorite(toFavoriteVenuePayload(venue), 'place')}
         />
-        <h3>{item.name}</h3>
-        <p>{item.description}</p>
+      </div>
 
-        <div className="overview-card-footer">
-          <span>{item.price}</span>
-          <button type="button" className="overview-add-button" aria-label={`Add ${item.name}`} />
+      <div className="overview-dynamic-body">
+        <h4>{venueName}</h4>
+        <p className="overview-dynamic-address">{venueAddress}</p>
+        <p className="overview-dynamic-description">{venueDescription}</p>
+
+        <div className="overview-dynamic-tags">
+          {wardName ? <span className="overview-venue-chip">{wardName}</span> : null}
+
+          {services.slice(0, 2).map((serviceName) => (
+            <span key={`${venue.id}-${serviceName}`} className="overview-venue-chip overview-venue-chip-muted">
+              {serviceName}
+            </span>
+          ))}
+        </div>
+
+        <div className="overview-dynamic-footer">
+          <button type="button" className="overview-card-link" onClick={() => onExplore(venue)}>
+            View on Discovery
+          </button>
         </div>
       </div>
     </article>
@@ -152,12 +177,22 @@ function OverviewPage() {
   const navigate = useNavigate();
   const { language } = useLanguage();
   const { token } = useAuth();
-  const t = translations[language];
+  const t = translations[language] || translations.en;
   const [favoriteKeys, setFavoriteKeys] = useState(new Set());
-  const [deliveryType, setDeliveryType] = useState('delivery');
-  const [address, setAddress] = useState('');
-  const [currentFoodIndex, setCurrentFoodIndex] = useState(0);
-  const [direction, setDirection] = useState('right');
+  const [searchInput, setSearchInput] = useState('');
+  const [submittedSearch, setSubmittedSearch] = useState('');
+  const [showFilterPanel, setShowFilterPanel] = useState(false);
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState([]);
+  const [selectedWardIds, setSelectedWardIds] = useState([]);
+  const [selectedServiceIds, setSelectedServiceIds] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [wards, setWards] = useState([]);
+  const [services, setServices] = useState([]);
+  const [venues, setVenues] = useState([]);
+  const [loadingFilters, setLoadingFilters] = useState(true);
+  const [loadingVenues, setLoadingVenues] = useState(true);
+  const [filterError, setFilterError] = useState('');
+  const [venueError, setVenueError] = useState('');
   const [currentLocation, setCurrentLocation] = useState(null);
   const [currentWeather, setCurrentWeather] = useState(null);
   const [showImageSearch, setShowImageSearch] = useState(false);
@@ -180,6 +215,107 @@ function OverviewPage() {
     () => import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api',
     []
   );
+
+  const serviceNameById = useMemo(
+    () =>
+      new Map(
+        services
+          .map((service) => [Number(service.id), service.name])
+          .filter(([serviceId, serviceName]) => Number.isInteger(serviceId) && Boolean(serviceName))
+      ),
+    [services]
+  );
+
+  const venueParams = useMemo(() => {
+    const params = { status: 'approved' };
+
+    if (selectedCategoryIds.length) {
+      params.categoryIds = selectedCategoryIds.join(',');
+    }
+
+    if (selectedWardIds.length) {
+      params.wardIds = selectedWardIds.join(',');
+    }
+
+    if (selectedServiceIds.length) {
+      params.serviceIds = selectedServiceIds.join(',');
+    }
+
+    if (submittedSearch.trim()) {
+      params.q = submittedSearch.trim();
+    }
+
+    return params;
+  }, [selectedCategoryIds, selectedWardIds, selectedServiceIds, submittedSearch]);
+
+  const categorySections = useMemo(() => {
+    const groupedByCategory = new Map();
+
+    venues.forEach((venue) => {
+      const categoryId = getVenueCategoryId(venue);
+
+      if (categoryId === null) {
+        return;
+      }
+
+      if (!groupedByCategory.has(categoryId)) {
+        groupedByCategory.set(categoryId, []);
+      }
+
+      groupedByCategory.get(categoryId).push(venue);
+    });
+
+    const visibleSections = categories
+      .map((category) => {
+        const categoryId = Number(category.id);
+
+        if (!Number.isInteger(categoryId) || categoryId <= 0) {
+          return null;
+        }
+
+        if (selectedCategoryIds.length && !selectedCategoryIds.includes(categoryId)) {
+          return null;
+        }
+
+        return {
+          id: categoryId,
+          name: category.name,
+          description: category.description,
+          venues: groupedByCategory.get(categoryId) || []
+        };
+      })
+      .filter(Boolean);
+
+    groupedByCategory.forEach((categoryVenues, categoryId) => {
+      if (visibleSections.some((section) => section.id === categoryId)) {
+        return;
+      }
+
+      if (selectedCategoryIds.length && !selectedCategoryIds.includes(categoryId)) {
+        return;
+      }
+
+      visibleSections.push({
+        id: categoryId,
+        name: categoryVenues[0]?.category_name || `Category ${categoryId}`,
+        description: '',
+        venues: categoryVenues
+      });
+    });
+
+    return visibleSections;
+  }, [categories, venues, selectedCategoryIds]);
+
+  const uncategorizedVenues = useMemo(
+    () => venues.filter((venue) => getVenueCategoryId(venue) === null),
+    [venues]
+  );
+
+  const activeFilterCount =
+    selectedCategoryIds.length +
+    selectedWardIds.length +
+    selectedServiceIds.length +
+    (submittedSearch ? 1 : 0);
 
   useEffect(() => {
     const fetchFavorites = async () => {
@@ -204,6 +340,94 @@ function OverviewPage() {
 
     fetchFavorites();
   }, [apiUrl, token]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadFilterOptions = async () => {
+      setLoadingFilters(true);
+      setFilterError('');
+
+      try {
+        const [categoryData, wardData, serviceData] = await Promise.all([
+          fetchPlaceCategories(),
+          fetchWards(),
+          fetchMerchantServices()
+        ]);
+
+        if (!isMounted) {
+          return;
+        }
+
+        setCategories(
+          Array.isArray(categoryData)
+            ? categoryData.filter((category) => category.is_active !== false)
+            : []
+        );
+        setWards(Array.isArray(wardData) ? wardData : []);
+        setServices(
+          Array.isArray(serviceData)
+            ? serviceData.filter((service) => service.is_active !== false)
+            : []
+        );
+      } catch (error) {
+        if (!isMounted) {
+          return;
+        }
+
+        setFilterError(error.response?.data?.message || 'Unable to load filter options right now.');
+        setCategories([]);
+        setWards([]);
+        setServices([]);
+      } finally {
+        if (isMounted) {
+          setLoadingFilters(false);
+        }
+      }
+    };
+
+    loadFilterOptions();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadVenues = async () => {
+      setLoadingVenues(true);
+      setVenueError('');
+
+      try {
+        const venueData = await fetchVenues(venueParams);
+
+        if (!isMounted) {
+          return;
+        }
+
+        setVenues(Array.isArray(venueData) ? venueData : []);
+      } catch (error) {
+        if (!isMounted) {
+          return;
+        }
+
+        setVenueError(error.response?.data?.message || 'Unable to load venues right now.');
+        setVenues([]);
+      } finally {
+        if (isMounted) {
+          setLoadingVenues(false);
+        }
+      }
+    };
+
+    loadVenues();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [venueParams]);
 
   const isFavorite = (itemType, itemId) => favoriteKeys.has(`${itemType}:${itemId}`);
 
@@ -244,23 +468,41 @@ function OverviewPage() {
     }
   };
 
-  const handleNextFood = () => {
-    setDirection('right');
-    setCurrentFoodIndex((prev) => (prev + 1) % foodItems.length);
+  const toggleCategorySelection = (categoryId) => {
+    setSelectedCategoryIds((current) =>
+      current.includes(categoryId)
+        ? current.filter((item) => item !== categoryId)
+        : [...current, categoryId]
+    );
   };
 
-  const handlePrevFood = () => {
-    setDirection('left');
-    setCurrentFoodIndex((prev) => (prev - 1 + foodItems.length) % foodItems.length);
+  const toggleWardSelection = (wardId) => {
+    setSelectedWardIds((current) =>
+      current.includes(wardId)
+        ? current.filter((item) => item !== wardId)
+        : [...current, wardId]
+    );
   };
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setDirection('right');
-      setCurrentFoodIndex((prev) => (prev + 1) % foodItems.length);
-    }, 3000);
-    return () => clearInterval(interval);
-  }, []);
+  const toggleServiceSelection = (serviceId) => {
+    setSelectedServiceIds((current) =>
+      current.includes(serviceId)
+        ? current.filter((item) => item !== serviceId)
+        : [...current, serviceId]
+    );
+  };
+
+  const applySearch = () => {
+    setSubmittedSearch(searchInput.trim());
+  };
+
+  const clearAllFilters = () => {
+    setSelectedCategoryIds([]);
+    setSelectedWardIds([]);
+    setSelectedServiceIds([]);
+    setSearchInput('');
+    setSubmittedSearch('');
+  };
 
   // retrieve user's location and (dummy) weather
   useEffect(() => {
@@ -303,6 +545,14 @@ function OverviewPage() {
     if (cameraInputRef.current) cameraInputRef.current.value = '';
   };
 
+  const handleExploreVenue = (venue) => {
+    navigate('/discovery', {
+      state: {
+        focusVenueId: venue.id
+      }
+    });
+  };
+
   return (
     <div className="overview-page">
       <section className="overview-hero">
@@ -341,11 +591,7 @@ function OverviewPage() {
 
         <div className="overview-hero-copy">
           <p className="overview-hero-kicker">{t.hero.kicker}</p>
-          <h1>
-            {t.hero.title.split('<span>')[0]}
-            <span>{t.hero.title.split('<span>')[1].split('</span>')[0]}</span>
-            {t.hero.title.split('</span>')[1]}
-          </h1>
+          {renderHighlightedTitle(t.hero.title)}
           <p>
             {t.hero.description}
           </p>
@@ -441,21 +687,9 @@ function OverviewPage() {
 
       <section className="overview-search">
         <div className="overview-search-top">
-          <div className="overview-search-tabs" role="tablist" aria-label="Delivery type">
-            <button
-              type="button"
-              className={`overview-search-tab ${deliveryType === 'delivery' ? 'is-active' : ''}`}
-              onClick={() => setDeliveryType('delivery')}
-            >
-              {t.search.food}
-            </button>
-            <button
-              type="button"
-              className={`overview-search-tab ${deliveryType === 'pickup' ? 'is-active' : ''}`}
-              onClick={() => setDeliveryType('pickup')}
-            >
-              {t.search.landscape}
-            </button>
+          <div className="overview-search-headline">
+            <h2>Explore with live filters</h2>
+            <p>Search by place categories, ward naming, and merchant services.</p>
           </div>
 
           {currentLocation && currentWeather && (
@@ -477,15 +711,30 @@ function OverviewPage() {
             <span className="overview-address-icon" aria-hidden="true" />
             <input
               type="text"
-              placeholder=" "
-              value={address}
-              onChange={(event) => setAddress(event.target.value)}
+              placeholder="Search venue name, address, ward, or service"
+              value={searchInput}
+              onChange={(event) => setSearchInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  applySearch();
+                }
+              }}
             />
           </label>
 
-          <button type="button" className="overview-search-submit">
-            {t.search.findFood}
+          <button type="button" className="overview-search-submit" onClick={applySearch}>
+            Search
           </button>
+
+          <button
+            type="button"
+            className={`overview-search-filter ${showFilterPanel ? 'is-active' : ''}`}
+            onClick={() => setShowFilterPanel((current) => !current)}
+          >
+            Filter
+          </button>
+
           {/* AI suggestion button */}
           <button
             type="button"
@@ -496,127 +745,131 @@ function OverviewPage() {
             {t.search.aiSuggest}
           </button>
         </div>
+
+        {activeFilterCount > 0 ? (
+          <div className="overview-active-filters">
+            <span>{activeFilterCount} filter{activeFilterCount === 1 ? '' : 's'} active</span>
+            <button type="button" onClick={clearAllFilters}>
+              Clear all
+            </button>
+          </div>
+        ) : null}
+
+        {showFilterPanel ? (
+          <div className="overview-filter-panel" role="region" aria-label="Filter options">
+            <FilterGroup
+              title="Place Categories"
+              options={categories}
+              selectedValues={selectedCategoryIds}
+              optionValue={(category) => Number(category.id)}
+              optionLabel={(category) => category.name}
+              onToggle={toggleCategorySelection}
+            />
+
+            <FilterGroup
+              title="Ward Naming"
+              options={wards}
+              selectedValues={selectedWardIds}
+              optionValue={(ward) => String(ward.ward_id)}
+              optionLabel={(ward) => ward.name}
+              onToggle={toggleWardSelection}
+            />
+
+            <FilterGroup
+              title="Services Offered - Merchant"
+              options={services}
+              selectedValues={selectedServiceIds}
+              optionValue={(service) => Number(service.id)}
+              optionLabel={(service) => service.name}
+              onToggle={toggleServiceSelection}
+            />
+
+            {loadingFilters ? <p className="overview-empty-copy">Loading filter options...</p> : null}
+            {filterError ? <p className="overview-inline-error">{filterError}</p> : null}
+          </div>
+        ) : null}
       </section>
 
       <section className="overview-section">
         <div className="overview-section-heading">
-          <h2>{t.sections.food}</h2>
+          <h2>Dynamic Category Showcase</h2>
           <span />
+          <p className="overview-section-subcopy">
+            {loadingVenues
+              ? 'Loading approved venues...'
+              : `${venues.length} approved venue${venues.length === 1 ? '' : 's'} matched your filters.`}
+          </p>
         </div>
 
-        <div className="overview-food-carousel">
-          <button
-            type="button"
-            className="overview-carousel-nav overview-carousel-nav-prev"
-            onClick={handlePrevFood}
-            aria-label="Previous food items"
-          >
-            &#8249;
-          </button>
+        {venueError ? <p className="overview-inline-error">{venueError}</p> : null}
 
-          <div className={`overview-food-grid overview-food-grid-${direction}`}>
-            {[0, 1, 2, 3].map((i) => {
-              const itemIndex = (currentFoodIndex + i) % foodItems.length;
-              return (
-                <FoodCard
-                  key={i}
-                  item={foodItems[itemIndex]}
-                  index={i}
-                  isFavorite={isFavorite('food', foodItems[itemIndex].id)}
-                  onToggleFavorite={handleToggleFavorite}
-                />
-              );
-            })}
-          </div>
+        {!loadingVenues && !venueError && !categorySections.length && !uncategorizedVenues.length ? (
+          <p className="overview-empty-copy">No approved venues match your current filters.</p>
+        ) : null}
 
-          <button
-            type="button"
-            className="overview-carousel-nav overview-carousel-nav-next"
-            onClick={handleNextFood}
-            aria-label="Next food items"
-          >
-            &#8250;
-          </button>
-        </div>
+        <div className="overview-category-sections">
+          {categorySections.map((section) => (
+            <article key={`category-section-${section.id}`} className="overview-category-block">
+              <header className="overview-category-block-header">
+                <div>
+                  <h3>{section.name}</h3>
+                  <p>
+                    {section.description ||
+                      `${section.venues.length} approved venue${section.venues.length === 1 ? '' : 's'}`}
+                  </p>
+                </div>
+                <span>{section.venues.length}</span>
+              </header>
 
-        <div className="overview-food-carousel-indicator">
-          <div className="overview-food-progress-track">
-            <div className="overview-food-progress-bar" />
-          </div>
-        </div>
-      </section>
+              {section.venues.length ? (
+                <div className="overview-dynamic-grid">
+                  {section.venues.slice(0, 6).map((venue) => (
+                    <VenueCard
+                      key={`venue-${section.id}-${venue.id}`}
+                      venue={venue}
+                      isFavorite={isFavorite('place', venue.id)}
+                      onToggleFavorite={handleToggleFavorite}
+                      onExplore={handleExploreVenue}
+                      services={getVenueServices(venue, serviceNameById)}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <p className="overview-empty-copy">No approved places in this category yet.</p>
+              )}
+            </article>
+          ))}
 
-      <section className="overview-section">
-        <div className="overview-section-heading">
-          <h2>{t.sections.landscape}</h2>
-          <span />
-        </div>
+          {!selectedCategoryIds.length && uncategorizedVenues.length ? (
+            <article className="overview-category-block">
+              <header className="overview-category-block-header">
+                <div>
+                  <h3>Other Places</h3>
+                  <p>Approved venues that are not linked to a place category yet.</p>
+                </div>
+                <span>{uncategorizedVenues.length}</span>
+              </header>
 
-        <div className="overview-places-layout">
-          <div className="overview-places-column">
-            {landscapeColumns.left.map((item) => (
-              <PlaceCard
-                key={item.id}
-                item={item}
-                isFavorite={isFavorite('place', item.id)}
-                onToggleFavorite={handleToggleFavorite}
-              />
-            ))}
-          </div>
-
-          <article className="overview-featured-place">
-            <div className="overview-featured-ring" />
-
-            <button
-              type="button"
-              className={`overview-favorite ${
-                isFavorite('place', landscapeColumns.featured.id) ? 'is-active' : ''
-              }`}
-              aria-label={
-                isFavorite('place', landscapeColumns.featured.id)
-                  ? `Unsave ${landscapeColumns.featured.name}`
-                  : `Save ${landscapeColumns.featured.name}`
-              }
-              onClick={() => handleToggleFavorite(landscapeColumns.featured, 'place')}
-            />
-
-            <img
-              src={landscapeColumns.featured.image}
-              alt={landscapeColumns.featured.name}
-              className="overview-featured-image"
-            />
-
-            <div className="overview-featured-body">
-              <h3>{landscapeColumns.featured.name}</h3>
-              <p>{landscapeColumns.featured.description}</p>
-
-              <div className="overview-card-footer">
-                <span>{landscapeColumns.featured.price}</span>
-                <button
-                  type="button"
-                  className="overview-add-button"
-                  aria-label={`Add ${landscapeColumns.featured.name}`}
-                />
+              <div className="overview-dynamic-grid">
+                {uncategorizedVenues.slice(0, 6).map((venue) => (
+                  <VenueCard
+                    key={`uncategorized-${venue.id}`}
+                    venue={venue}
+                    isFavorite={isFavorite('place', venue.id)}
+                    onToggleFavorite={handleToggleFavorite}
+                    onExplore={handleExploreVenue}
+                    services={getVenueServices(venue, serviceNameById)}
+                  />
+                ))}
               </div>
-            </div>
-          </article>
-
-          <div className="overview-places-column">
-            {landscapeColumns.right.map((item) => (
-              <PlaceCard
-                key={item.id}
-                item={item}
-                isFavorite={isFavorite('place', item.id)}
-                onToggleFavorite={handleToggleFavorite}
-              />
-            ))}
-          </div>
+            </article>
+          ) : null}
         </div>
       </section>
 
       <section className="overview-section overview-map-section">
         <div className="overview-section-heading">
-          <h2>{t.sections.maps}</h2>
+          <h2>City map</h2>
           <span />
         </div>
 
