@@ -308,6 +308,23 @@ function AdminFeedbackManagementPage() {
     setReplyNoticeType('');
   }, [activeView, selectedReportId]);
 
+  useEffect(() => {
+    const contentFrameElement = document.querySelector('.admin-content-frame');
+    if (!contentFrameElement) {
+      return undefined;
+    }
+
+    if (activeView === 'reports') {
+      contentFrameElement.classList.add('admin-content-frame--allow-scroll');
+    } else {
+      contentFrameElement.classList.remove('admin-content-frame--allow-scroll');
+    }
+
+    return () => {
+      contentFrameElement.classList.remove('admin-content-frame--allow-scroll');
+    };
+  }, [activeView]);
+
   const handleTypeSelect = (row) => {
     setSelectedTypeId(row.id);
     setTypeNameInput(row.name || '');
