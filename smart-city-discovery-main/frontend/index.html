@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Smart City Discovery</title>
+    
+    <!-- Google OAuth SDK -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    
+    <!-- Facebook SDK -->
+    <script>
+      window.fbAsyncInit = function() {
+        FB.init({
+          appId: '1234567890123456', // Will be replaced by environment variable
+          xfbml: true,
+          version: 'v18.0'
+        });
+      };
+    </script>
+    <script async defer crossorigin="anonymous" 
+      src="https://connect.facebook.net/en_US/sdk.js#xfbml=1&version=v18.0" 
+      id="facebook-jssdk"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
