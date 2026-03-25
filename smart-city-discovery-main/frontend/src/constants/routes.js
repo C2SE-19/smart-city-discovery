@@ -6,6 +6,8 @@ export const APP_ROUTES = {
   ALL_CITY: '/all-city',
   SERVICE: '/service',
   DISCOVERY: '/discovery',
+  VENUE_DETAIL: '/venues/:venueId',
+  WARD_DETAIL: '/wards/:wardName',
   TERMS: '/terms',
   FEEDBACK: '/feedback', // Restored FEEDBACK route constant
   ADMIN_DASHBOARD: '/admin',
