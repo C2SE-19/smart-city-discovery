@@ -185,6 +185,9 @@ function OverviewPage() {
   const [selectedCategoryIds, setSelectedCategoryIds] = useState([]);
   const [selectedWardIds, setSelectedWardIds] = useState([]);
   const [selectedServiceIds, setSelectedServiceIds] = useState([]);
+  const [appliedCategoryIds, setAppliedCategoryIds] = useState([]);
+  const [appliedWardIds, setAppliedWardIds] = useState([]);
+  const [appliedServiceIds, setAppliedServiceIds] = useState([]);
   const [categories, setCategories] = useState([]);
   const [wards, setWards] = useState([]);
   const [services, setServices] = useState([]);
@@ -199,6 +202,9 @@ function OverviewPage() {
   const [selectedImage, setSelectedImage] = useState(null);
   const [previewUrl, setPreviewUrl] = useState('');
   const [imageError, setImageError] = useState('');
+  const [searchPage, setSearchPage] = useState(1);
+  const [searchTriggered, setSearchTriggered] = useState(false);
+  const sliderRefs = useRef(new Map());
   const libraryInputRef = useRef(null);
   const cameraInputRef = useRef(null);
 
@@ -229,16 +235,16 @@ function OverviewPage() {
   const venueParams = useMemo(() => {
     const params = { status: 'approved' };
 
-    if (selectedCategoryIds.length) {
-      params.categoryIds = selectedCategoryIds.join(',');
+    if (appliedCategoryIds.length) {
+      params.categoryIds = appliedCategoryIds.join(',');
     }
 
-    if (selectedWardIds.length) {
-      params.wardIds = selectedWardIds.join(',');
+    if (appliedWardIds.length) {
+      params.wardIds = appliedWardIds.join(',');
     }
 
-    if (selectedServiceIds.length) {
-      params.serviceIds = selectedServiceIds.join(',');
+    if (appliedServiceIds.length) {
+      params.serviceIds = appliedServiceIds.join(',');
     }
 
     if (submittedSearch.trim()) {
@@ -246,7 +252,7 @@ function OverviewPage() {
     }
 
     return params;
-  }, [selectedCategoryIds, selectedWardIds, selectedServiceIds, submittedSearch]);
+  }, [appliedCategoryIds, appliedWardIds, appliedServiceIds, submittedSearch]);
 
   const categorySections = useMemo(() => {
     const groupedByCategory = new Map();
@@ -315,7 +321,20 @@ function OverviewPage() {
     selectedCategoryIds.length +
     selectedWardIds.length +
     selectedServiceIds.length +
-    (submittedSearch ? 1 : 0);
+    (searchInput.trim() ? 1 : 0);
+  const appliedFilterCount =
+    appliedCategoryIds.length +
+    appliedWardIds.length +
+    appliedServiceIds.length +
+    (submittedSearch.trim() ? 1 : 0);
+  const isSearchMode = searchTriggered && appliedFilterCount > 0;
+
+  const searchPageSize = 8;
+  const totalSearchPages = Math.max(1, Math.ceil(venues.length / searchPageSize));
+  const pagedSearchVenues = useMemo(() => {
+    const start = (searchPage - 1) * searchPageSize;
+    return venues.slice(start, start + searchPageSize);
+  }, [venues, searchPage]);
 
   useEffect(() => {
     const fetchFavorites = async () => {
@@ -429,6 +448,16 @@ function OverviewPage() {
     };
   }, [venueParams]);
 
+  useEffect(() => {
+    setSearchPage(1);
+  }, [submittedSearch]);
+
+  useEffect(() => {
+    if (activeFilterCount === 0) {
+      setSearchTriggered(false);
+    }
+  }, [activeFilterCount]);
+
   const isFavorite = (itemType, itemId) => favoriteKeys.has(`${itemType}:${itemId}`);
 
   const handleToggleFavorite = async (item, itemType) => {
@@ -494,14 +523,23 @@ function OverviewPage() {
 
   const applySearch = () => {
     setSubmittedSearch(searchInput.trim());
+    setAppliedCategoryIds(selectedCategoryIds);
+    setAppliedWardIds(selectedWardIds);
+    setAppliedServiceIds(selectedServiceIds);
+    setSearchTriggered(true);
+    setShowFilterPanel(false);
   };
 
   const clearAllFilters = () => {
     setSelectedCategoryIds([]);
     setSelectedWardIds([]);
     setSelectedServiceIds([]);
+    setAppliedCategoryIds([]);
+    setAppliedWardIds([]);
+    setAppliedServiceIds([]);
     setSearchInput('');
     setSubmittedSearch('');
+    setSearchTriggered(false);
   };
 
   // retrieve user's location and (dummy) weather
@@ -553,67 +591,102 @@ function OverviewPage() {
     });
   };
 
+  const registerSliderRef = (sectionId) => (node) => {
+    if (!node) {
+      sliderRefs.current.delete(sectionId);
+      return;
+    }
+    sliderRefs.current.set(sectionId, node);
+  };
+
+  const scrollCategorySlider = (sectionId, direction) => {
+    const node = sliderRefs.current.get(sectionId);
+    if (!node) return;
+    const distance = Math.max(260, node.clientWidth * 0.85) * direction;
+    const targetLeft = node.scrollLeft + distance;
+    const startLeft = node.scrollLeft;
+    const delta = targetLeft - startLeft;
+    const duration = 520;
+    let startTime = null;
+
+    const easeInOut = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+
+    const step = (timestamp) => {
+      if (startTime === null) startTime = timestamp;
+      const elapsed = timestamp - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      node.scrollLeft = startLeft + delta * easeInOut(progress);
+      if (progress < 1) {
+        requestAnimationFrame(step);
+      }
+    };
+
+    requestAnimationFrame(step);
+  };
+
   return (
-    <div className="overview-page">
-      <section className="overview-hero">
-        <div className="overview-hero-visual">
-          <div className="overview-hero-plate">
-            <img
-              src="https://media.discordapp.net/attachments/1480399002565349536/1481206693173137470/anh_myquang.png?ex=69b3ca3b&is=69b278bb&hm=106ee06cafe406d8b99a675fea25f705d570ea648443a19d7c29fba2b87ec3f6&=&format=webp&quality=lossless&width=988&height=859"
-              alt="Asian food bowl"
-              className="overview-hero-image"
-            />
+    <div className={`overview-page ${isSearchMode ? 'is-search' : ''}`.trim()}>
+      {!isSearchMode && (
+        <section className="overview-hero">
+          <div className="overview-hero-visual">
+            <div className="overview-hero-plate">
+              <img
+                src="https://media.discordapp.net/attachments/1480399002565349536/1481206693173137470/anh_myquang.png?ex=69b3ca3b&is=69b278bb&hm=106ee06cafe406d8b99a675fea25f705d570ea648443a19d7c29fba2b87ec3f6&=&format=webp&quality=lossless&width=988&height=859"
+                alt="Asian food bowl"
+                className="overview-hero-image"
+              />
+            </div>
+
+            <div className="overview-hero-float overview-hero-float-top">
+              <img
+                src="https://images.unsplash.com/photo-1523906630133-f6934a1ab2b9?auto=format&fit=crop&w=400&q=80"
+                alt="Dragon Bridge"
+              />
+            </div>
+
+            <div className="overview-hero-float overview-hero-float-bottom-left">
+              <img
+                src="https://images.unsplash.com/photo-1512058564366-18510be2db19?auto=format&fit=crop&w=400&q=80"
+                alt="Food side dish"
+              />
+            </div>
+
+            <div className="overview-hero-float overview-hero-float-bottom-right">
+              <img
+                src="https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=400&q=80"
+                alt="Ba Na Hills"
+              />
+            </div>
           </div>
 
-          <div className="overview-hero-float overview-hero-float-top">
-            <img
-              src="https://images.unsplash.com/photo-1523906630133-f6934a1ab2b9?auto=format&fit=crop&w=400&q=80"
-              alt="Dragon Bridge"
-            />
+          <button type="button" className="overview-hero-arrow" aria-label="Explore more" />
+
+          <div className="overview-hero-copy">
+            <p className="overview-hero-kicker">{t.hero.kicker}</p>
+            {renderHighlightedTitle(t.hero.title)}
+            <p>
+              {t.hero.description}
+            </p>
+
+            <div className="overview-hero-actions">
+              <button 
+                type="button" 
+                className="overview-hero-button overview-hero-button-primary"
+                onClick={() => setShowImageSearch(true)}
+              >
+                {t.hero.findByPictures}
+              </button>
+              <button 
+                type="button" 
+                className="overview-hero-button overview-hero-button-secondary"
+                onClick={() => navigate('/merchant')}
+              >
+                {t.hero.merchant}
+              </button>
+            </div>
           </div>
-
-          <div className="overview-hero-float overview-hero-float-bottom-left">
-            <img
-              src="https://images.unsplash.com/photo-1512058564366-18510be2db19?auto=format&fit=crop&w=400&q=80"
-              alt="Food side dish"
-            />
-          </div>
-
-          <div className="overview-hero-float overview-hero-float-bottom-right">
-            <img
-              src="https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=400&q=80"
-              alt="Ba Na Hills"
-            />
-          </div>
-        </div>
-
-        <button type="button" className="overview-hero-arrow" aria-label="Explore more" />
-
-        <div className="overview-hero-copy">
-          <p className="overview-hero-kicker">{t.hero.kicker}</p>
-          {renderHighlightedTitle(t.hero.title)}
-          <p>
-            {t.hero.description}
-          </p>
-
-          <div className="overview-hero-actions">
-            <button 
-              type="button" 
-              className="overview-hero-button overview-hero-button-primary"
-              onClick={() => setShowImageSearch(true)}
-            >
-              {t.hero.findByPictures}
-            </button>
-            <button 
-              type="button" 
-              className="overview-hero-button overview-hero-button-secondary"
-              onClick={() => navigate('/merchant')}
-            >
-              {t.hero.merchant}
-            </button>
-          </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       {showImageSearch && (
         <div className="overview-image-overlay" onClick={closeImageModal}>
@@ -685,7 +758,7 @@ function OverviewPage() {
         </div>
       )}
 
-      <section className="overview-search">
+      <section className={`overview-search ${isSearchMode ? 'is-searching' : ''}`.trim()}>
         <div className="overview-search-top">
           <div className="overview-search-headline">
             <h2>Explore with live filters</h2>
@@ -790,107 +863,204 @@ function OverviewPage() {
         ) : null}
       </section>
 
-      <section className="overview-section">
-        <div className="overview-section-heading">
-          <h2>Dynamic Category Showcase</h2>
-          <span />
-          <p className="overview-section-subcopy">
-            {loadingVenues
-              ? 'Loading approved venues...'
-              : `${venues.length} approved venue${venues.length === 1 ? '' : 's'} matched your filters.`}
-          </p>
-        </div>
+      {isSearchMode ? (
+        <section className="overview-section overview-search-result-section">
+          <div className="overview-section-heading">
+            <h2>Search Results</h2>
+            <span />
+            <p className="overview-section-subcopy">
+              Results for "{submittedSearch.trim()}" ({venues.length})
+            </p>
+          </div>
 
-        {venueError ? <p className="overview-inline-error">{venueError}</p> : null}
+          {venueError ? <p className="overview-inline-error">{venueError}</p> : null}
 
-        {!loadingVenues && !venueError && !categorySections.length && !uncategorizedVenues.length ? (
-          <p className="overview-empty-copy">No approved venues match your current filters.</p>
-        ) : null}
+          <div className="overview-search-results">
+            <div className="overview-dynamic-grid overview-search-grid">
+              {pagedSearchVenues.map((venue) => (
+                <VenueCard
+                  key={`search-${venue.id}`}
+                  venue={venue}
+                  isFavorite={isFavorite('place', venue.id)}
+                  onToggleFavorite={handleToggleFavorite}
+                  onExplore={handleExploreVenue}
+                  services={getVenueServices(venue, serviceNameById)}
+                />
+              ))}
+            </div>
 
-        <div className="overview-category-sections">
-          {categorySections.map((section) => (
-            <article key={`category-section-${section.id}`} className="overview-category-block">
-              <header className="overview-category-block-header">
-                <div>
-                  <h3>{section.name}</h3>
-                  <p>
-                    {section.description ||
-                      `${section.venues.length} approved venue${section.venues.length === 1 ? '' : 's'}`}
-                  </p>
-                </div>
-                <span>{section.venues.length}</span>
-              </header>
+            <div className="overview-pagination">
+              <button
+                type="button"
+                className="overview-pagination-btn"
+                disabled={searchPage === 1}
+                onClick={() => setSearchPage((prev) => Math.max(1, prev - 1))}
+              >
+                Prev
+              </button>
+              {Array.from({ length: totalSearchPages }).map((_, index) => {
+                const page = index + 1;
+                return (
+                  <button
+                    key={`search-page-${page}`}
+                    type="button"
+                    className={`overview-pagination-btn ${page === searchPage ? 'is-active' : ''}`.trim()}
+                    onClick={() => setSearchPage(page)}
+                  >
+                    {page}
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                className="overview-pagination-btn"
+                disabled={searchPage === totalSearchPages}
+                onClick={() => setSearchPage((prev) => Math.min(totalSearchPages, prev + 1))}
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        </section>
+      ) : (
+        <section className="overview-section">
+          <div className="overview-section-heading">
+            <h2>Dynamic Category Showcase</h2>
+            <span />
+            <p className="overview-section-subcopy">
+              {loadingVenues
+                ? 'Loading approved venues...'
+                : `${venues.length} approved venue${venues.length === 1 ? '' : 's'} matched your filters.`}
+            </p>
+          </div>
 
-              {section.venues.length ? (
-                <div className="overview-dynamic-grid">
-                  {section.venues.slice(0, 6).map((venue) => (
-                    <VenueCard
-                      key={`venue-${section.id}-${venue.id}`}
-                      venue={venue}
-                      isFavorite={isFavorite('place', venue.id)}
-                      onToggleFavorite={handleToggleFavorite}
-                      onExplore={handleExploreVenue}
-                      services={getVenueServices(venue, serviceNameById)}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <p className="overview-empty-copy">No approved places in this category yet.</p>
-              )}
-            </article>
-          ))}
+          {venueError ? <p className="overview-inline-error">{venueError}</p> : null}
 
-          {!selectedCategoryIds.length && uncategorizedVenues.length ? (
-            <article className="overview-category-block">
-              <header className="overview-category-block-header">
-                <div>
-                  <h3>Other Places</h3>
-                  <p>Approved venues that are not linked to a place category yet.</p>
-                </div>
-                <span>{uncategorizedVenues.length}</span>
-              </header>
-
-              <div className="overview-dynamic-grid">
-                {uncategorizedVenues.slice(0, 6).map((venue) => (
-                  <VenueCard
-                    key={`uncategorized-${venue.id}`}
-                    venue={venue}
-                    isFavorite={isFavorite('place', venue.id)}
-                    onToggleFavorite={handleToggleFavorite}
-                    onExplore={handleExploreVenue}
-                    services={getVenueServices(venue, serviceNameById)}
-                  />
-                ))}
-              </div>
-            </article>
+          {!loadingVenues && !venueError && !categorySections.length && !uncategorizedVenues.length ? (
+            <p className="overview-empty-copy">No approved venues match your current filters.</p>
           ) : null}
-        </div>
-      </section>
 
-      <section className="overview-section overview-map-section">
-        <div className="overview-section-heading">
-          <h2>City map</h2>
-          <span />
-        </div>
+          <div className="overview-category-sections">
+            {categorySections.map((section) => (
+              <article key={`category-section-${section.id}`} className="overview-category-block">
+                <header className="overview-category-block-header">
+                  <div>
+                    <h3>{section.name}</h3>
+                    <p>
+                      {section.description ||
+                        `${section.venues.length} approved venue${section.venues.length === 1 ? '' : 's'}`}
+                    </p>
+                  </div>
+                  <span>{section.venues.length}</span>
+                </header>
 
-        <div className="overview-map-frame">
-          <iframe
-            title="Da Nang map"
-            src="https://www.google.com/maps?q=Da%20Nang%20Vietnam&z=12&output=embed"
-            loading="lazy"
-            referrerPolicy="no-referrer-when-downgrade"
-          />
-        </div>
+                {section.venues.length ? (
+                  <div className="overview-category-board">
+                    <button
+                      type="button"
+                      className="overview-slider-btn prev"
+                      aria-label={`Scroll ${section.name} left`}
+                      onClick={() => scrollCategorySlider(section.id, -1)}
+                    />
+                    <div
+                      className="overview-dynamic-grid overview-dynamic-grid-slider"
+                      ref={registerSliderRef(section.id)}
+                    >
+                      {section.venues.slice(0, 12).map((venue) => (
+                        <VenueCard
+                          key={`venue-${section.id}-${venue.id}`}
+                          venue={venue}
+                          isFavorite={isFavorite('place', venue.id)}
+                          onToggleFavorite={handleToggleFavorite}
+                          onExplore={handleExploreVenue}
+                          services={getVenueServices(venue, serviceNameById)}
+                        />
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      className="overview-slider-btn next"
+                      aria-label={`Scroll ${section.name} right`}
+                      onClick={() => scrollCategorySlider(section.id, 1)}
+                    />
+                  </div>
+                ) : (
+                  <p className="overview-empty-copy">No approved places in this category yet.</p>
+                )}
+              </article>
+            ))}
 
-        <a
-          className="overview-map-link"
-          href="https://www.google.com/maps/place/Da+Nang,+Vietnam/"
-          target="_blank"
-          rel="noreferrer"
-        >
-          View larger map
-        </a>
-      </section>
+            {!selectedCategoryIds.length && uncategorizedVenues.length ? (
+              <article className="overview-category-block">
+                <header className="overview-category-block-header">
+                  <div>
+                    <h3>Other Places</h3>
+                    <p>Approved venues that are not linked to a place category yet.</p>
+                  </div>
+                  <span>{uncategorizedVenues.length}</span>
+                </header>
+
+                <div className="overview-category-board">
+                  <button
+                    type="button"
+                    className="overview-slider-btn prev"
+                    aria-label="Scroll other places left"
+                    onClick={() => scrollCategorySlider('uncategorized', -1)}
+                  />
+                  <div
+                    className="overview-dynamic-grid overview-dynamic-grid-slider"
+                    ref={registerSliderRef('uncategorized')}
+                  >
+                    {uncategorizedVenues.slice(0, 12).map((venue) => (
+                      <VenueCard
+                        key={`uncategorized-${venue.id}`}
+                        venue={venue}
+                        isFavorite={isFavorite('place', venue.id)}
+                        onToggleFavorite={handleToggleFavorite}
+                        onExplore={handleExploreVenue}
+                        services={getVenueServices(venue, serviceNameById)}
+                      />
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    className="overview-slider-btn next"
+                    aria-label="Scroll other places right"
+                    onClick={() => scrollCategorySlider('uncategorized', 1)}
+                  />
+                </div>
+              </article>
+            ) : null}
+          </div>
+        </section>
+      )}
+
+      {!isSearchMode && (
+        <section className="overview-section overview-map-section">
+          <div className="overview-section-heading">
+            <h2>City map</h2>
+            <span />
+          </div>
+
+          <div className="overview-map-frame">
+            <iframe
+              title="Da Nang map"
+              src="https://www.google.com/maps?q=Da%20Nang%20Vietnam&z=12&output=embed"
+              loading="lazy"
+              referrerPolicy="no-referrer-when-downgrade"
+            />
+          </div>
+
+          <a
+            className="overview-map-link"
+            href="https://www.google.com/maps/place/Da+Nang,+Vietnam/"
+            target="_blank"
+            rel="noreferrer"
+          >
+            View larger map
+          </a>
+        </section>
+      )}
     </div>
   );
 }
