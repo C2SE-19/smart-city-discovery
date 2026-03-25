@@ -279,6 +279,116 @@
   border-left: 3px solid #1bcf8e;
 }
 
+.schedule-block {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.schedule-block h3 {
+  margin: 0;
+  font-size: 1rem;
+  color: #102530;
+}
+
+.schedule-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.schedule-day-tabs {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.schedule-day-tab {
+  border: 1px solid rgba(21, 94, 99, 0.2);
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 10px;
+  padding: 10px 6px;
+  display: grid;
+  gap: 2px;
+  justify-items: center;
+  color: #21414a;
+  transition: all 200ms ease;
+}
+
+.schedule-day-tab span {
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.schedule-day-tab small {
+  font-size: 0.7rem;
+  color: #56747c;
+}
+
+.schedule-day-tab:hover {
+  transform: translateY(-1px);
+  border-color: rgba(242, 95, 41, 0.36);
+}
+
+.schedule-day-tab.is-active {
+  border-color: rgba(242, 95, 41, 0.58);
+  background: rgba(255, 240, 232, 0.92);
+  color: #a94a25;
+}
+
+.schedule-editor {
+  border: 1px solid rgba(21, 94, 99, 0.12);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(248, 251, 252, 0.85);
+  display: grid;
+  gap: 12px;
+}
+
+.schedule-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.schedule-editor-header strong {
+  color: #173a43;
+  font-size: 0.94rem;
+}
+
+.schedule-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.schedule-input-wrap {
+  display: grid;
+  gap: 6px;
+}
+
+.schedule-label {
+  font-size: 0.8rem;
+  color: #355862;
+  font-weight: 600;
+}
+
+.schedule-status {
+  align-self: center;
+  justify-self: end;
+  border-radius: 999px;
+  border: 1px solid rgba(21, 94, 99, 0.2);
+  padding: 5px 10px;
+  font-size: 0.75rem;
+  color: #1f5360;
+  background: rgba(232, 245, 246, 0.9);
+}
+
+.schedule-error {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
 .form-actions {
   display: flex;
   gap: 16px;
@@ -456,6 +566,18 @@
   .btn-submit {
     padding: 14px 24px;
     font-size: 1rem;
+  }
+
+  .schedule-status {
+    justify-self: start;
+  }
+
+  .schedule-day-tabs {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .schedule-editor-grid {
+    grid-template-columns: 1fr;
   }
 
   .form-actions {
