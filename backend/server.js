@@ -236,6 +236,85 @@ function normalizeNullableText(value) {
     return trimmed === '' ? null : trimmed;
 }
 
+const WEEKLY_SCHEDULE_DAYS = [
+    { key: 'monday', label: 'Monday' },
+    { key: 'tuesday', label: 'Tuesday' },
+    { key: 'wednesday', label: 'Wednesday' },
+    { key: 'thursday', label: 'Thursday' },
+    { key: 'friday', label: 'Friday' },
+    { key: 'saturday', label: 'Saturday' },
+    { key: 'sunday', label: 'Sunday' }
+];
+
+function normalizeWeeklyScheduleInput(scheduleInput, options = {}) {
+    const fallbackStart = String(options.fallbackStart || '').trim();
+    const fallbackEnd = String(options.fallbackEnd || '').trim();
+    const hasFallbackRange = /^\d{2}:\d{2}$/.test(fallbackStart) && /^\d{2}:\d{2}$/.test(fallbackEnd) && fallbackStart < fallbackEnd;
+    const source = scheduleInput && typeof scheduleInput === 'object' && !Array.isArray(scheduleInput) ? scheduleInput : null;
+
+    if (!source && !hasFallbackRange) {
+        return {
+            value: null,
+            error: 'weeklySchedule is required and must include all 7 days'
+        };
+    }
+
+    const normalized = {};
+
+    for (const day of WEEKLY_SCHEDULE_DAYS) {
+        const dayValue = source?.[day.key] || null;
+        const startRaw = String(dayValue?.start ?? '').trim();
+        const endRaw = String(dayValue?.end ?? '').trim();
+        const isOff = Boolean(dayValue?.off) || startRaw.toUpperCase() === 'OFF' || endRaw.toUpperCase() === 'OFF';
+
+        if (isOff) {
+            normalized[day.key] = {
+                day: day.label,
+                start: 'OFF',
+                end: 'OFF',
+                off: true
+            };
+            continue;
+        }
+
+        const start = startRaw || (hasFallbackRange ? fallbackStart : '');
+        const end = endRaw || (hasFallbackRange ? fallbackEnd : '');
+
+        if (!start || !end) {
+            return {
+                value: null,
+                error: `${day.label} must include both start and end time, or use OFF`
+            };
+        }
+
+        if (!/^\d{2}:\d{2}$/.test(start) || !/^\d{2}:\d{2}$/.test(end)) {
+            return {
+                value: null,
+                error: `${day.label} has invalid time format`
+            };
+        }
+
+        if (start >= end) {
+            return {
+                value: null,
+                error: `${day.label} end time must be later than start time`
+            };
+        }
+
+        normalized[day.key] = {
+            day: day.label,
+            start,
+            end,
+            off: false
+        };
+    }
+
+    return {
+        value: normalized,
+        error: null
+    };
+}
+
 function slugifyText(value) {
     return String(value || '')
         .normalize('NFD')
@@ -613,6 +692,19 @@ async function generateWardIdFromName(name) {
             }
         });
 
+        const uploadVenueModerationMessage = multer({
+            storage: feedbackReplyStorage,
+            limits: { fileSize: 8 * 1024 * 1024, files: 5 },
+            fileFilter: (_req, file, cb) => {
+                const allowed = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+                if (allowed.includes(file.mimetype)) {
+                    cb(null, true);
+                } else {
+                    cb(new Error('Only image attachments are supported for venue moderation messages'));
+                }
+            }
+        });
+
         const DEFAULT_FEEDBACK_TYPES = [
             {
                 code: 'bug',
@@ -982,6 +1074,7 @@ async function generateWardIdFromName(name) {
                 longitude,
                 description,
                 phone,
+                contactEmail,
                 coverImageUrl,
                 businessLicenseImageUrl,
                 metadata
@@ -995,6 +1088,23 @@ async function generateWardIdFromName(name) {
             const normalizedCategoryName = String(category || '').trim();
             const normalizedMetadata = metadata && typeof metadata === 'object' ? { ...metadata } : {};
             const requestedServiceIds = normalizeServiceIds(normalizedMetadata.selectedServices);
+            const normalizedContactEmail = normalizeNullableText(contactEmail ?? normalizedMetadata.contactEmail);
+
+            if (!normalizedContactEmail || !isValidEmail(normalizedContactEmail)) {
+                return res.status(400).json({ message: 'A valid contactEmail is required' });
+            }
+
+            const normalizedScheduleResult = normalizeWeeklyScheduleInput(normalizedMetadata.weeklySchedule, {
+                fallbackStart: normalizeNullableText(normalizedMetadata.startTime),
+                fallbackEnd: normalizeNullableText(normalizedMetadata.endTime)
+            });
+
+            if (normalizedScheduleResult.error) {
+                return res.status(400).json({ message: normalizedScheduleResult.error });
+            }
+
+            normalizedMetadata.contactEmail = normalizedContactEmail;
+            normalizedMetadata.weeklySchedule = normalizedScheduleResult.value;
 
             if (!normalizedMetadata.category && normalizedCategoryName) {
                 normalizedMetadata.category = normalizedCategoryName;
@@ -1791,9 +1901,264 @@ async function generateWardIdFromName(name) {
             }
         }
 
+        async function listAdminVenueReviews(req, res) {
+            const venueId = Number(req.params.venueId);
+            const sort = String(req.query.sort || 'newest').trim().toLowerCase();
+
+            if (!Number.isFinite(venueId)) {
+                return res.status(400).json({ message: 'Invalid venue id' });
+            }
+
+            const sortClauseByType = {
+                newest: 'r.created_at DESC, r.id DESC',
+                oldest: 'r.created_at ASC, r.id ASC',
+                rating_high: 'r.rating DESC, r.created_at DESC',
+                rating_low: 'r.rating ASC, r.created_at DESC'
+            };
+
+            const sortClause = sortClauseByType[sort] || sortClauseByType.newest;
+
+            try {
+                const venueResult = await pool.query(
+                    `
+                        SELECT id
+                        FROM venues
+                        WHERE id = $1
+                        LIMIT 1
+                    `,
+                    [venueId]
+                );
+
+                if (!venueResult.rows.length) {
+                    return res.status(404).json({ message: 'Venue not found' });
+                }
+
+                const reviewResult = await pool.query(
+                    `
+                        SELECT
+                            r.id,
+                            r.rating,
+                            r.comment,
+                            r.author_profile_id,
+                            r.created_at,
+                            r.updated_at,
+                            COALESCE(p.full_name, p.display_name, p.username, 'Anonymous') AS author_name
+                        FROM reviews AS r
+                        LEFT JOIN profiles AS p ON p.id = r.author_profile_id
+                        WHERE r.venue_id = $1
+                        ORDER BY ${sortClause}
+                    `,
+                    [venueId]
+                );
+
+                return res.json({
+                    items: reviewResult.rows,
+                    total: reviewResult.rows.length,
+                    sort
+                });
+            } catch (error) {
+                if (['42P01', '42703', '42883'].includes(error?.code)) {
+                    return res.json({
+                        items: [],
+                        total: 0,
+                        sort
+                    });
+                }
+
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
+        function sendAdminVenueModerationMessage(req, res) {
+            uploadVenueModerationMessage.array('attachments', 5)(req, res, async (uploadErr) => {
+                if (uploadErr) {
+                    return res.status(400).json({ message: uploadErr.message || 'Upload failed' });
+                }
+
+                const uploadedFiles = Array.isArray(req.files) ? req.files : [];
+
+                function cleanupUploadedFiles() {
+                    uploadedFiles.forEach((file) => {
+                        if (file?.filename) {
+                            safeDeleteUploadedFile(`/uploads/feedback/admin-replies/${file.filename}`);
+                        }
+                    });
+                }
+
+                const venueId = Number(req.params.venueId);
+                const adminMessage = String(req.body.message || '').trim();
+
+                if (!Number.isFinite(venueId)) {
+                    cleanupUploadedFiles();
+
+                    return res.status(400).json({ message: 'Invalid venue id' });
+                }
+
+                if (!adminMessage) {
+                    cleanupUploadedFiles();
+
+                    return res.status(400).json({ message: 'message is required' });
+                }
+
+                if (!feedbackReplyTransporter || !feedbackReplySmtpUser) {
+                    cleanupUploadedFiles();
+
+                    return res.status(500).json({
+                        message:
+                            'Gmail configuration is missing. Set FEEDBACK_GMAIL_USER and FEEDBACK_GMAIL_APP_PASSWORD in backend environment.'
+                    });
+                }
+
+                try {
+                    const venueResult = await pool.query(
+                        `
+                            SELECT
+                                venues.id,
+                                venues.name,
+                                venues.title,
+                                venues.address,
+                                venues.phone,
+                                venues.metadata,
+                                wards.name AS ward_name,
+                                place_categories.name AS category_name
+                            FROM venues
+                            LEFT JOIN wards ON wards.ward_id = venues.ward_id
+                            LEFT JOIN place_categories ON place_categories.id = venues.category_id
+                            WHERE venues.id = $1
+                            LIMIT 1
+                        `,
+                        [venueId]
+                    );
+
+                    if (!venueResult.rows.length) {
+                        cleanupUploadedFiles();
+
+                        return res.status(404).json({ message: 'Venue not found' });
+                    }
+
+                    const venue = venueResult.rows[0];
+                    const venueMetadata =
+                        venue.metadata && typeof venue.metadata === 'object' && !Array.isArray(venue.metadata)
+                            ? venue.metadata
+                            : {};
+                    const recipientEmail = normalizeNullableText(venueMetadata.contactEmail || venueMetadata.email);
+
+                    if (!isValidEmail(recipientEmail)) {
+                        cleanupUploadedFiles();
+
+                        return res.status(400).json({
+                            message: 'Venue submission does not contain a valid contact email.'
+                        });
+                    }
+
+                    const venueName = String(venue.title || venue.name || '').trim() || `Venue #${venue.id}`;
+                    const reviewerLabel = req.authUser?.email || req.authUser?.id || 'Admin Team';
+                    const mailFrom = `${feedbackReplyFromName} <${feedbackReplyFromEmail || feedbackReplySmtpUser}>`;
+                    const attachmentNotice = uploadedFiles.length
+                        ? 'Image attachments from admin are included in this email.'
+                        : '';
+
+                    const plainTextBody = [
+                        'Smart City Discovery - Venue Moderation Note',
+                        '',
+                        `Venue: ${venueName}`,
+                        `Venue ID: ${venue.id}`,
+                        `Address: ${venue.address || 'Not provided'}`,
+                        `Ward: ${venue.ward_name || 'Not provided'}`,
+                        `Category: ${venue.category_name || 'Not provided'}`,
+                        `Phone: ${venue.phone || 'Not provided'}`,
+                        '',
+                        'Admin Message:',
+                        adminMessage,
+                        '',
+                        `Handled by: ${reviewerLabel}`,
+                        attachmentNotice,
+                        '',
+                        'Best regards,',
+                        'Smart City Discovery Admin'
+                    ]
+                        .filter(Boolean)
+                        .join('\n');
+
+                    const htmlBody = `
+                        <div style="margin:0;padding:0;background:#f5f7fb;font-family:Segoe UI,Arial,sans-serif;color:#1f2937;">
+                            <div style="max-width:680px;margin:0 auto;padding:24px 16px;">
+                                <div style="background:#ffffff;border:1px solid #e4e8f1;border-radius:14px;overflow:hidden;box-shadow:0 10px 28px rgba(23,33,79,0.08);">
+                                    <div style="padding:18px 22px;background:linear-gradient(135deg,#0f766e,#0f5f88);color:#ffffff;">
+                                        <p style="margin:0;font-size:12px;letter-spacing:.08em;text-transform:uppercase;opacity:.88;">Smart City Discovery Admin</p>
+                                        <h2 style="margin:8px 0 0;font-size:22px;line-height:1.3;">Venue Report Feedback</h2>
+                                    </div>
+                                    <div style="padding:20px 22px 24px;">
+                                        <p style="margin:0 0 14px;font-size:14px;color:#334155;">Hello merchant,</p>
+                                        <p style="margin:0 0 18px;font-size:14px;line-height:1.7;color:#334155;">Our admin team reviewed your venue submission. Please read the note below.</p>
+
+                                        <div style="margin:0 0 18px;padding:14px;border:1px solid #e4e8f1;border-radius:10px;background:#f8faff;">
+                                            <p style="margin:0 0 8px;font-size:13px;color:#475569;"><strong>Venue:</strong> ${escapeHtml(venueName)}</p>
+                                            <p style="margin:0 0 8px;font-size:13px;color:#475569;"><strong>Venue ID:</strong> #${venue.id}</p>
+                                            <p style="margin:0 0 8px;font-size:13px;color:#475569;"><strong>Address:</strong> ${escapeHtml(venue.address || 'Not provided')}</p>
+                                            <p style="margin:0 0 8px;font-size:13px;color:#475569;"><strong>Ward:</strong> ${escapeHtml(venue.ward_name || 'Not provided')}</p>
+                                            <p style="margin:0 0 8px;font-size:13px;color:#475569;"><strong>Category:</strong> ${escapeHtml(venue.category_name || 'Not provided')}</p>
+                                            <p style="margin:0;font-size:13px;color:#475569;"><strong>Phone:</strong> ${escapeHtml(venue.phone || 'Not provided')}</p>
+                                        </div>
+
+                                        <h3 style="margin:0 0 8px;font-size:15px;color:#1e293b;">Admin message</h3>
+                                        <div style="margin:0 0 10px;padding:12px;border-radius:10px;background:#eff6ff;border:1px solid #dbeafe;font-size:14px;line-height:1.65;color:#1e3a8a;">${formatMultilineHtml(adminMessage)}</div>
+                                        <p style="margin:0 0 18px;font-size:12px;color:#64748b;"><strong>Handled by:</strong> ${escapeHtml(reviewerLabel)}</p>
+
+                                        ${uploadedFiles.length ? '<p style="margin:0 0 18px;font-size:13px;color:#0f766e;">Image attachments from admin are included in this email.</p>' : ''}
+
+                                        <p style="margin:0;font-size:13px;color:#64748b;">Best regards,<br /><strong>Smart City Discovery Admin</strong></p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+
+                    const mailResult = await feedbackReplyTransporter.sendMail({
+                        from: mailFrom,
+                        to: recipientEmail,
+                        subject: 'Venue Report Feedback',
+                        text: plainTextBody,
+                        html: htmlBody,
+                        attachments: uploadedFiles.map((file) => ({
+                            filename: file.originalname,
+                            path: file.path,
+                            contentType: file.mimetype
+                        }))
+                    });
+
+                    cleanupUploadedFiles();
+
+                    return res.json({
+                        message: 'Moderation message sent successfully',
+                        deliveredTo: recipientEmail,
+                        messageId: mailResult?.messageId || null
+                    });
+                } catch (error) {
+                    cleanupUploadedFiles();
+
+                    if (error?.code === 'EAUTH' || error?.responseCode === 535) {
+                        return res.status(500).json({
+                            message:
+                                'Gmail authentication failed. Please re-check FEEDBACK_GMAIL_USER and FEEDBACK_GMAIL_APP_PASSWORD.'
+                        });
+                    }
+
+                    if (error?.code === 'EENVELOPE') {
+                        return res.status(400).json({
+                            message: 'Recipient email is invalid or rejected by SMTP provider.'
+                        });
+                    }
+
+                    return res.status(500).json({ message: error.message });
+                }
+            });
+        }
+
         async function moderateVenueSubmission(req, res) {
             const venueId = Number(req.params.venueId);
             const action = String(req.body.action || '').trim().toLowerCase();
+            const rejectionReason = String(req.body.rejectionReason || '').trim();
 
             if (!Number.isFinite(venueId)) {
                 return res.status(400).json({ message: 'Invalid venue id' });
@@ -1807,6 +2172,104 @@ async function generateWardIdFromName(name) {
 
             try {
                 if (action === 'reject') {
+                    const venueResult = await pool.query(
+                        `
+                            SELECT
+                                venues.id,
+                                venues.name,
+                                venues.title,
+                                venues.address,
+                                venues.phone,
+                                venues.metadata,
+                                wards.name AS ward_name,
+                                place_categories.name AS category_name
+                            FROM venues
+                            LEFT JOIN wards ON wards.ward_id = venues.ward_id
+                            LEFT JOIN place_categories ON place_categories.id = venues.category_id
+                            WHERE venues.id = $1
+                            LIMIT 1
+                        `,
+                        [venueId]
+                    );
+
+                    if (!venueResult.rows.length) {
+                        return res.status(404).json({ message: 'Venue submission not found' });
+                    }
+
+                    const rejectedVenue = venueResult.rows[0];
+                    const venueMetadata =
+                        rejectedVenue.metadata && typeof rejectedVenue.metadata === 'object' && !Array.isArray(rejectedVenue.metadata)
+                            ? rejectedVenue.metadata
+                            : {};
+
+                    const recipientEmail = normalizeNullableText(venueMetadata.contactEmail || venueMetadata.email);
+
+                    if (rejectionReason && isValidEmail(recipientEmail) && feedbackReplyTransporter && feedbackReplySmtpUser) {
+                        const venueName = String(rejectedVenue.title || rejectedVenue.name || '').trim() || `Venue #${rejectedVenue.id}`;
+                        const mailFrom = `${feedbackReplyFromName} <${feedbackReplyFromEmail || feedbackReplySmtpUser}>`;
+
+                        const plainTextBody = [
+                            'Smart City Discovery - Venue Submission Rejected',
+                            '',
+                            `Venue: ${venueName}`,
+                            `Venue ID: ${rejectedVenue.id}`,
+                            `Address: ${rejectedVenue.address || 'Not provided'}`,
+                            `Ward: ${rejectedVenue.ward_name || 'Not provided'}`,
+                            `Category: ${rejectedVenue.category_name || 'Not provided'}`,
+                            `Phone: ${rejectedVenue.phone || 'Not provided'}`,
+                            '',
+                            'Rejection Reason:',
+                            rejectionReason,
+                            '',
+                            `Reviewed by: ${reviewer}`,
+                            '',
+                            'You can revise your submission and submit again later.',
+                            '',
+                            'Best regards,',
+                            'Smart City Discovery Admin'
+                        ].join('\n');
+
+                        const htmlBody = `
+                            <div style="margin:0;padding:0;background:#f5f7fb;font-family:Segoe UI,Arial,sans-serif;color:#1f2937;">
+                                <div style="max-width:680px;margin:0 auto;padding:24px 16px;">
+                                    <div style="background:#ffffff;border:1px solid #e4e8f1;border-radius:14px;overflow:hidden;box-shadow:0 10px 28px rgba(23,33,79,0.08);">
+                                        <div style="padding:18px 22px;background:linear-gradient(135deg,#b91c1c,#dc2626);color:#ffffff;">
+                                            <p style="margin:0;font-size:12px;letter-spacing:.08em;text-transform:uppercase;opacity:.88;">Smart City Discovery Admin</p>
+                                            <h2 style="margin:8px 0 0;font-size:22px;line-height:1.3;">Venue Submission Rejected</h2>
+                                        </div>
+                                        <div style="padding:20px 22px 24px;">
+                                            <p style="margin:0 0 14px;font-size:14px;color:#334155;">Hello merchant,</p>
+                                            <p style="margin:0 0 18px;font-size:14px;line-height:1.7;color:#334155;">Your venue submission has been rejected after admin review.</p>
+
+                                            <div style="margin:0 0 18px;padding:14px;border:1px solid #e4e8f1;border-radius:10px;background:#f8faff;">
+                                                <p style="margin:0 0 8px;font-size:13px;color:#475569;"><strong>Venue:</strong> ${escapeHtml(venueName)}</p>
+                                                <p style="margin:0 0 8px;font-size:13px;color:#475569;"><strong>Venue ID:</strong> #${rejectedVenue.id}</p>
+                                                <p style="margin:0 0 8px;font-size:13px;color:#475569;"><strong>Address:</strong> ${escapeHtml(rejectedVenue.address || 'Not provided')}</p>
+                                                <p style="margin:0 0 8px;font-size:13px;color:#475569;"><strong>Ward:</strong> ${escapeHtml(rejectedVenue.ward_name || 'Not provided')}</p>
+                                                <p style="margin:0 0 8px;font-size:13px;color:#475569;"><strong>Category:</strong> ${escapeHtml(rejectedVenue.category_name || 'Not provided')}</p>
+                                                <p style="margin:0;font-size:13px;color:#475569;"><strong>Phone:</strong> ${escapeHtml(rejectedVenue.phone || 'Not provided')}</p>
+                                            </div>
+
+                                            <h3 style="margin:0 0 8px;font-size:15px;color:#1e293b;">Rejection Reason</h3>
+                                            <div style="margin:0 0 10px;padding:12px;border-radius:10px;background:#fef2f2;border:1px solid #fecaca;font-size:14px;line-height:1.65;color:#991b1b;">${formatMultilineHtml(rejectionReason)}</div>
+                                            <p style="margin:0 0 18px;font-size:12px;color:#64748b;"><strong>Reviewed by:</strong> ${escapeHtml(reviewer)}</p>
+
+                                            <p style="margin:0;font-size:13px;color:#64748b;">You can revise your venue information and submit again later.<br /><br />Best regards,<br /><strong>Smart City Discovery Admin</strong></p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+
+                        await feedbackReplyTransporter.sendMail({
+                            from: mailFrom,
+                            to: recipientEmail,
+                            subject: 'Venue Submission Rejected',
+                            text: plainTextBody,
+                            html: htmlBody
+                        });
+                    }
+
                     const deleteResult = await pool.query(
                         `
                           DELETE FROM venues
@@ -2759,6 +3222,8 @@ async function generateWardIdFromName(name) {
         registerVersionedRoute('delete', '/admin/merchant-services/:serviceId', authenticateRequest, requireAdminRole, deleteAdminMerchantService);
         registerVersionedRoute('get', '/admin/venues', authenticateRequest, requireAdminRole, listAdminVenues);
         registerVersionedRoute('patch', '/admin/venues/:venueId/moderation', authenticateRequest, requireAdminRole, moderateVenueSubmission);
+        registerVersionedRoute('get', '/admin/venues/:venueId/reviews', authenticateRequest, requireAdminRole, listAdminVenueReviews);
+        registerVersionedRoute('post', '/admin/venues/:venueId/message', authenticateRequest, requireAdminRole, sendAdminVenueModerationMessage);
         registerVersionedRoute('get', '/admin/feedback/types', authenticateRequest, requireAdminRole, listAdminFeedbackTypes);
         registerVersionedRoute('post', '/admin/feedback/types', authenticateRequest, requireAdminRole, createAdminFeedbackType);
         registerVersionedRoute('patch', '/admin/feedback/types/:typeId', authenticateRequest, requireAdminRole, updateAdminFeedbackType);
