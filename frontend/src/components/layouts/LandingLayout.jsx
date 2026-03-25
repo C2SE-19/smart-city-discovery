@@ -25,11 +25,17 @@ function LandingLayout() {
     navigate('/');
     setShowProfileMenu(false);
   };
+
+  const handleHomeClick = (event) => {
+    event.preventDefault();
+    navigate(APP_ROUTES.HOME, { state: { resetOverview: Date.now() } });
+    setShowProfileMenu(false);
+  };
   return (
     <div className="landing-shell">
       <div className="landing-page">
         <header className="landing-header">
-          <Link to="/" className="landing-logo" aria-label="Smart City homepage">
+          <Link to="/" className="landing-logo" aria-label="Smart City homepage" onClick={handleHomeClick}>
             <span className="landing-logo-mark">
               <img src={logo} alt="Smart City Logo" className="landing-logo-image" />
             </span>
@@ -40,7 +46,12 @@ function LandingLayout() {
           </Link>
 
           <nav className="landing-nav" aria-label="Primary">
-            <NavLink to="/" end className={({ isActive }) => `landing-nav-link${isActive ? ' is-active' : ''}`}>
+            <NavLink
+              to="/"
+              end
+              onClick={handleHomeClick}
+              className={({ isActive }) => `landing-nav-link${isActive ? ' is-active' : ''}`}
+            >
               {t.header.home}
             </NavLink>
             <NavLink
