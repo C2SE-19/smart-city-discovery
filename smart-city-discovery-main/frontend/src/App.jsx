@@ -11,6 +11,8 @@ import RoleGuard from './components/auth/RoleGuard';
 import OverviewPage from './pages/overview/OverviewPage';
 import LandingInfoPage from './LandingInfoPage';
 import DiscoveryPage from './pages/discovery/DiscoveryPage';
+import VenueDetailPage from './pages/venue/VenueDetailPage';
+import WardPage from './pages/ward/WardPage';
 import AdminDashboardPage from './pages/admin/AdminDashboardPage';
 import AdminBoundaryPage from './pages/admin/AdminBoundaryPage';
 import AdminUserManagementPage from './pages/admin/AdminUserManagementPage';
@@ -38,6 +40,8 @@ function App() {
             <Routes>
           <Route element={<LandingLayout />}>
           <Route path={APP_ROUTES.HOME} element={<OverviewPage />} />
+          <Route path={APP_ROUTES.VENUE_DETAIL} element={<VenueDetailPage />} />
+          <Route path={APP_ROUTES.WARD_DETAIL} element={<WardPage />} />
           <Route
             path={APP_ROUTES.ABOUT}
             element={

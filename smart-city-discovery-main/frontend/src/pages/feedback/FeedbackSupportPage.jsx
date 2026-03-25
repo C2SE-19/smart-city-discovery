@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -57,6 +58,7 @@ const COPY = {
 };
 
 function FeedbackSupportPage() {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const { language } = useLanguage();
   const { theme } = useTheme();
@@ -175,6 +177,9 @@ function FeedbackSupportPage() {
   return (
     <div className={`feedback-shell theme-${theme}`}>
       <div className="feedback-card">
+        <button type="button" className="feedback-back" onClick={() => navigate(-1)}>
+          ← {language === 'vi' ? 'Quay lại' : 'Back'}
+        </button>
         <div className="feedback-header">
           <p className="feedback-kicker">{t.kicker}</p>
           <h1 className="feedback-title">{t.title}</h1>
