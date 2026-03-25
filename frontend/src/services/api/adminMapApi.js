@@ -28,6 +28,35 @@ export async function moderateAdminVenue(venueId, payload) {
   return response.data;
 }
 
+export async function fetchAdminVenueReviews(venueId, params = {}) {
+  const response = await apiClient.get(`/admin/venues/${venueId}/reviews`, {
+    params,
+  });
+
+  return response.data;
+}
+
+export async function sendAdminVenueModerationMessage(venueId, payload) {
+  const formData = new FormData();
+  formData.append('message', payload.message || '');
+
+  if (Array.isArray(payload.attachments)) {
+    payload.attachments.slice(0, 5).forEach((file) => {
+      if (file) {
+        formData.append('attachments', file);
+      }
+    });
+  }
+
+  const response = await apiClient.post(`/admin/venues/${venueId}/message`, formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  });
+
+  return response.data;
+}
+
 export async function fetchAdminPlaceCategories(params = {}) {
   const response = await apiClient.get('/admin/place-categories', {
     params,
