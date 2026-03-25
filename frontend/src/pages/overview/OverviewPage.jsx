@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../../contexts/AuthContext';
 import translations from '../../constants/translations';
@@ -175,6 +175,7 @@ function VenueCard({ venue, isFavorite, onToggleFavorite, onExplore, services })
 
 function OverviewPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { language } = useLanguage();
   const { token } = useAuth();
   const t = translations[language] || translations.en;
@@ -327,7 +328,7 @@ function OverviewPage() {
     appliedWardIds.length +
     appliedServiceIds.length +
     (submittedSearch.trim() ? 1 : 0);
-  const isSearchMode = searchTriggered && appliedFilterCount > 0;
+  const isSearchMode = searchTriggered;
 
   const searchPageSize = 8;
   const totalSearchPages = Math.max(1, Math.ceil(venues.length / searchPageSize));
@@ -418,6 +419,7 @@ function OverviewPage() {
     const loadVenues = async () => {
       setLoadingVenues(true);
       setVenueError('');
+      setVenues([]);
 
       try {
         const venueData = await fetchVenues(venueParams);
@@ -453,10 +455,21 @@ function OverviewPage() {
   }, [submittedSearch]);
 
   useEffect(() => {
-    if (activeFilterCount === 0) {
-      setSearchTriggered(false);
+    if (!location.state?.resetOverview) {
+      return;
     }
-  }, [activeFilterCount]);
+    setSelectedCategoryIds([]);
+    setSelectedWardIds([]);
+    setSelectedServiceIds([]);
+    setAppliedCategoryIds([]);
+    setAppliedWardIds([]);
+    setAppliedServiceIds([]);
+    setSearchInput('');
+    setSubmittedSearch('');
+    setSearchTriggered(false);
+    setShowFilterPanel(false);
+    setSearchPage(1);
+  }, [location.state?.resetOverview]);
 
   const isFavorite = (itemType, itemId) => favoriteKeys.has(`${itemType}:${itemId}`);
 
@@ -539,7 +552,7 @@ function OverviewPage() {
     setAppliedServiceIds([]);
     setSearchInput('');
     setSubmittedSearch('');
-    setSearchTriggered(false);
+    setSearchTriggered(true);
   };
 
   // retrieve user's location and (dummy) weather
@@ -927,11 +940,6 @@ function OverviewPage() {
           <div className="overview-section-heading">
             <h2>Dynamic Category Showcase</h2>
             <span />
-            <p className="overview-section-subcopy">
-              {loadingVenues
-                ? 'Loading approved venues...'
-                : `${venues.length} approved venue${venues.length === 1 ? '' : 's'} matched your filters.`}
-            </p>
           </div>
 
           {venueError ? <p className="overview-inline-error">{venueError}</p> : null}
@@ -948,10 +956,9 @@ function OverviewPage() {
                     <h3>{section.name}</h3>
                     <p>
                       {section.description ||
-                        `${section.venues.length} approved venue${section.venues.length === 1 ? '' : 's'}`}
+                        ''}
                     </p>
                   </div>
-                  <span>{section.venues.length}</span>
                 </header>
 
                 {section.venues.length ? (
@@ -997,7 +1004,6 @@ function OverviewPage() {
                     <h3>Other Places</h3>
                     <p>Approved venues that are not linked to a place category yet.</p>
                   </div>
-                  <span>{uncategorizedVenues.length}</span>
                 </header>
 
                 <div className="overview-category-board">
