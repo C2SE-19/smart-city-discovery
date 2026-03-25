@@ -28,6 +28,18 @@
   transition: background 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
 }
 
+.feedback-back {
+  border: none;
+  background: transparent;
+  color: #d7263d;
+  font-weight: 700;
+  margin-bottom: 10px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .theme-dark .feedback-card {
   background: #0f1f2a;
   border-color: rgba(255, 255, 255, 0.06);

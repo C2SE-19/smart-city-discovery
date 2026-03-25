@@ -129,22 +129,36 @@ function FilterGroup({ title, options, selectedValues, optionValue, optionLabel,
   );
 }
 
-function VenueCard({ venue, isFavorite, onToggleFavorite, onExplore, services }) {
+function VenueCard({ venue, isFavorite, onToggleFavorite, onViewDetail, onViewDiscovery, services }) {
   const venueName = venue.name || venue.title || 'Untitled venue';
   const venueDescription = venue.description || 'No description provided yet.';
   const venueAddress = venue.address || 'Address not available';
   const wardName = venue.ward_name || venue.wardName;
 
   return (
-    <article className="overview-dynamic-card">
+    <article
+      className="overview-dynamic-card"
+      onClick={() => onViewDetail(venue)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onViewDetail(venue);
+        }
+      }}
+    >
       <div className="overview-dynamic-media">
         <img src={getVenueImage(venue)} alt={venueName} loading="lazy" />
 
         <button
           type="button"
-          className={`overview-favorite ${isFavorite ? 'is-active' : ''}`}
+          className={`overview-favorite overview-favorite-left ${isFavorite ? 'is-active' : ''}`}
           aria-label={isFavorite ? `Unsave ${venueName}` : `Save ${venueName}`}
-          onClick={() => onToggleFavorite(toFavoriteVenuePayload(venue), 'place')}
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleFavorite(toFavoriteVenuePayload(venue), 'place');
+          }}
         />
       </div>
 
@@ -156,7 +170,7 @@ function VenueCard({ venue, isFavorite, onToggleFavorite, onExplore, services })
         <div className="overview-dynamic-tags">
           {wardName ? <span className="overview-venue-chip">{wardName}</span> : null}
 
-          {services.slice(0, 2).map((serviceName) => (
+          {services.slice(0, 3).map((serviceName) => (
             <span key={`${venue.id}-${serviceName}`} className="overview-venue-chip overview-venue-chip-muted">
               {serviceName}
             </span>
@@ -164,7 +178,14 @@ function VenueCard({ venue, isFavorite, onToggleFavorite, onExplore, services })
         </div>
 
         <div className="overview-dynamic-footer">
-          <button type="button" className="overview-card-link" onClick={() => onExplore(venue)}>
+          <button
+            type="button"
+            className="overview-card-link"
+            onClick={(event) => {
+              event.stopPropagation();
+              onViewDiscovery(venue);
+            }}
+          >
             View on Discovery
           </button>
         </div>
@@ -545,12 +566,16 @@ function OverviewPage() {
     if (cameraInputRef.current) cameraInputRef.current.value = '';
   };
 
-  const handleExploreVenue = (venue) => {
+  const handleViewDiscovery = (venue) => {
     navigate('/discovery', {
       state: {
         focusVenueId: venue.id
       }
     });
+  };
+
+  const handleViewVenueDetail = (venue) => {
+    navigate(`/venues/${venue.id}`, { state: { venue } });
   };
 
   return (
@@ -829,7 +854,8 @@ function OverviewPage() {
                       venue={venue}
                       isFavorite={isFavorite('place', venue.id)}
                       onToggleFavorite={handleToggleFavorite}
-                      onExplore={handleExploreVenue}
+                      onViewDetail={handleViewVenueDetail}
+                      onViewDiscovery={handleViewDiscovery}
                       services={getVenueServices(venue, serviceNameById)}
                     />
                   ))}
@@ -857,7 +883,8 @@ function OverviewPage() {
                     venue={venue}
                     isFavorite={isFavorite('place', venue.id)}
                     onToggleFavorite={handleToggleFavorite}
-                    onExplore={handleExploreVenue}
+                    onViewDetail={handleViewVenueDetail}
+                    onViewDiscovery={handleViewDiscovery}
                     services={getVenueServices(venue, serviceNameById)}
                   />
                 ))}

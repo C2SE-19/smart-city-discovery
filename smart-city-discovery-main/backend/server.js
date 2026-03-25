@@ -13,6 +13,81 @@ const nodemailer = require('nodemailer');
 const { OAuth2Client } = require('google-auth-library');
 const { supabaseAdmin } = require('./src/lib/supabase');
 
+// In-memory fallback store for reviews when database is unavailable
+const inMemoryReviews = new Map();
+const fallbackDataDir = path.join(__dirname, 'data');
+const fallbackReviewsFile = path.join(fallbackDataDir, 'reviews-fallback.json');
+
+// Very simple bad-words list (can be expanded as needed)
+const PROFANITY_LIST = ['địt', 'lon', 'lồn', 'cặc', 'cạc', 'cuc', 'cứt', 'fuck', 'shit', 'dm', 'đmm', 'đm', 'đụ', 'bitch', 'cc', 'cl'];
+
+function ensureFallbackFile() {
+    try {
+        if (!fs.existsSync(fallbackDataDir)) {
+            fs.mkdirSync(fallbackDataDir, { recursive: true });
+        }
+        if (!fs.existsSync(fallbackReviewsFile)) {
+            fs.writeFileSync(fallbackReviewsFile, JSON.stringify({}), 'utf8');
+        }
+    } catch (err) {
+        console.error('⚠️ Could not ensure fallback reviews file:', err.message);
+    }
+}
+
+function readFallbackReviews(venueId) {
+    try {
+        ensureFallbackFile();
+        const raw = fs.readFileSync(fallbackReviewsFile, 'utf8');
+        const parsed = JSON.parse(raw || '{}');
+        return Array.isArray(parsed[venueId]) ? parsed[venueId] : [];
+    } catch (err) {
+        console.error('⚠️ Read fallback reviews failed:', err.message);
+        return [];
+    }
+}
+
+function writeFallbackReviews(venueId, list) {
+    try {
+        ensureFallbackFile();
+        const raw = fs.readFileSync(fallbackReviewsFile, 'utf8');
+        const parsed = raw ? JSON.parse(raw) : {};
+        parsed[venueId] = list;
+        fs.writeFileSync(fallbackReviewsFile, JSON.stringify(parsed, null, 2), 'utf8');
+    } catch (err) {
+        console.error('⚠️ Write fallback reviews failed:', err.message);
+    }
+}
+
+function mergeReviewsUnique(list) {
+    const map = new Map();
+    for (const item of list || []) {
+        if (!item) continue;
+        const key = item.id ?? item.localId;
+        if (!key) continue;
+        if (!map.has(key)) map.set(key, item);
+    }
+    return Array.from(map.values());
+}
+
+function normalizeText(text = '') {
+    return text
+        .toString()
+        .normalize('NFD')
+        .replace(/\p{Diacritic}/gu, '')
+        .toLowerCase();
+}
+
+function containsProfanity(text = '') {
+    const normalized = normalizeText(text);
+    return PROFANITY_LIST.some((bad) => normalized.includes(bad));
+}
+
+function filterOutProfanity(list = []) {
+    return (list || []).filter(
+        (item) => !containsProfanity(item?.title || '') && !containsProfanity(item?.content || '')
+    );
+}
+
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '5mb' }));
@@ -540,6 +615,29 @@ async function generateWardIdFromName(name) {
                 console.log('✅ Database connected:', res.rows[0]);
             }
         });
+
+                // Ensure minimal reviews table for venues (app_reviews)
+                pool.query(
+                        `create table if not exists app_reviews (
+                            id bigserial primary key,
+                            venue_id integer not null,
+                            user_id uuid references users(id) on delete set null,
+                            author_name text,
+                            rating integer not null check (rating between 1 and 5),
+                            title text,
+                            content text,
+                            media jsonb default '[]'::jsonb,
+                            created_at timestamptz not null default now()
+                        );
+                        create index if not exists app_reviews_venue_id_idx on app_reviews(venue_id);
+                        create index if not exists app_reviews_user_id_idx on app_reviews(user_id);
+                    `,
+                        (err) => {
+                                if (err) {
+                                        console.error('❌ Failed to ensure app_reviews table:', err);
+                                }
+                        }
+                );
 
         // ==========================================
         // FEEDBACK SUPPORT
@@ -2892,6 +2990,179 @@ async function generateWardIdFromName(name) {
         // ==========================================
         // USER PROFILE APIS
         // ==========================================
+
+        // ------------------------------------------
+        // Venue reviews (app_reviews table)
+        // ------------------------------------------
+        registerVersionedRoute('get', '/venues/:venueId/reviews', async (req, res) => {
+            const venueId = Number(req.params.venueId);
+            if (!Number.isInteger(venueId)) {
+                return res.status(400).json({ message: 'Invalid venue id' });
+            }
+
+            try {
+                const result = await pool.query(
+                    `select id, venue_id as "venueId", user_id as "userId", author_name as "authorName",
+                            rating, title, content, media, created_at as "createdAt"
+                     from app_reviews
+                     where venue_id = $1
+                     order by created_at desc` ,
+                    [venueId]
+                );
+
+                const dbReviews = result.rows.map((row) => ({
+                    id: row.id,
+                    venueId: row.venueId,
+                    userId: row.userId,
+                    author: row.authorName,
+                    rating: row.rating,
+                    title: row.title,
+                    content: row.content,
+                    photos: Array.isArray(row.media) ? row.media.filter((m) => m?.type === 'photo').map((m) => m.url) : [],
+                    videos: Array.isArray(row.media) ? row.media.filter((m) => m?.type === 'video').map((m) => m.url) : [],
+                    date: new Date(row.createdAt).toLocaleString()
+                }));
+
+                const fileFallback = readFallbackReviews(venueId) || [];
+                const combinedRaw = mergeReviewsUnique([...dbReviews, ...fileFallback]);
+                const combined = filterOutProfanity(combinedRaw);
+
+                // Persist cleaned fallback (remove profanity + dupes)
+                const cleanedFallback = filterOutProfanity(fileFallback).filter((r) => combined.some((c) => (c.id ?? c.localId) === (r.id ?? r.localId)) === false);
+                writeFallbackReviews(venueId, cleanedFallback);
+
+                return res.json({ reviews: combined });
+            } catch (error) {
+                console.error('Load reviews failed, using fallbacks:', error.message);
+                const memoryFallback = inMemoryReviews.get(venueId) || [];
+                const fileFallback = readFallbackReviews(venueId) || [];
+                const combinedRaw = [...memoryFallback, ...fileFallback].slice(0, 100);
+                const combined = filterOutProfanity(combinedRaw);
+                writeFallbackReviews(venueId, combined.filter((r) => !containsProfanity(r.title) && !containsProfanity(r.content)));
+                return res.json({ reviews: combined, storage: 'fallback' });
+            }
+        });
+
+        registerVersionedRoute('delete', '/venues/:venueId/reviews/:reviewId', authenticateRequest, async (req, res) => {
+            const venueId = Number(req.params.venueId);
+            const reviewId = req.params.reviewId;
+
+            if (!Number.isInteger(venueId)) {
+                return res.status(400).json({ message: 'Invalid venue id' });
+            }
+
+            try {
+                // Try delete from DB (ignore if not exists)
+                await pool.query('delete from app_reviews where venue_id = $1 and id = $2', [venueId, reviewId]);
+            } catch (err) {
+                console.error('Delete review db failed (ignored):', err.message);
+            }
+
+            // Remove from memory fallback
+            const memList = inMemoryReviews.get(venueId) || [];
+            const memFiltered = memList.filter((r) => String(r.id ?? r.localId) !== String(reviewId));
+            inMemoryReviews.set(venueId, memFiltered);
+
+            // Remove from file fallback
+            const fileList = readFallbackReviews(venueId) || [];
+            const fileFiltered = fileList.filter((r) => String(r.id ?? r.localId) !== String(reviewId));
+            writeFallbackReviews(venueId, fileFiltered);
+
+            return res.json({ message: 'deleted' });
+        });
+
+        registerVersionedRoute('post', '/venues/:venueId/reviews', authenticateRequest, async (req, res) => {
+            const venueId = Number(req.params.venueId);
+            if (!Number.isInteger(venueId)) {
+                return res.status(400).json({ message: 'Invalid venue id' });
+            }
+
+            const { rating, title, content, photos = [], videos = [] } = req.body || {};
+            const normalizedRating = Number(rating);
+
+            if (!Number.isInteger(normalizedRating) || normalizedRating < 1 || normalizedRating > 5) {
+                return res.status(400).json({ message: 'Invalid rating' });
+            }
+
+            if (containsProfanity(title) || containsProfanity(content)) {
+                return res.status(400).json({ message: 'Nội dung chứa từ ngữ không phù hợp, vui lòng chỉnh sửa.' });
+            }
+
+            try {
+                const userId = req.user?.id;
+                const userResult = await pool.query('select fullname, username, email from users where id = $1', [userId]);
+                const userRow = userResult.rows[0] || {};
+                const authorName = userRow.fullname || userRow.username || userRow.email || 'Khách';
+
+                const media = [
+                    ...photos.map((url) => ({ type: 'photo', url })),
+                    ...videos.map((url) => ({ type: 'video', url }))
+                ];
+
+                const insertResult = await pool.query(
+                    `insert into app_reviews (venue_id, user_id, author_name, rating, title, content, media)
+                     values ($1, $2, $3, $4, $5, $6, $7)
+                     returning id, venue_id as "venueId", user_id as "userId", author_name as "authorName",
+                               rating, title, content, media, created_at as "createdAt";`,
+                    [venueId, userId || null, authorName, normalizedRating, title || '', content || '', JSON.stringify(media)]
+                );
+
+                const row = insertResult.rows[0];
+                const review = {
+                    id: row.id,
+                    venueId: row.venueId,
+                    userId: row.userId,
+                    author: row.authorName,
+                    rating: row.rating,
+                    title: row.title,
+                    content: row.content,
+                    photos: Array.isArray(row.media) ? row.media.filter((m) => m?.type === 'photo').map((m) => m.url) : [],
+                    videos: Array.isArray(row.media) ? row.media.filter((m) => m?.type === 'video').map((m) => m.url) : [],
+                    date: new Date(row.createdAt).toLocaleString()
+                };
+
+                // Also append to fallback file to keep reload consistency even if DB sync hiccups later
+                const existingFallback = readFallbackReviews(venueId) || [];
+                const mergedFallback = filterOutProfanity(mergeReviewsUnique([review, ...existingFallback])).slice(0, 100);
+                writeFallbackReviews(venueId, mergedFallback);
+
+                return res.status(201).json({ review });
+            } catch (error) {
+                console.error('Create review failed, storing fallbacks:', error.message);
+
+                const userId = req.user?.id;
+                const authorName = req.user?.email || 'Khách';
+                const media = [
+                    ...photos.map((url) => ({ type: 'photo', url })),
+                    ...videos.map((url) => ({ type: 'video', url }))
+                ];
+
+                const review = {
+                    id: `local-${Date.now()}`,
+                    venueId,
+                    userId,
+                    author: authorName,
+                    rating: normalizedRating,
+                    title: title || '',
+                    content: content || '',
+                    photos: media.filter((m) => m.type === 'photo').map((m) => m.url),
+                    videos: media.filter((m) => m.type === 'video').map((m) => m.url),
+                    date: new Date().toLocaleString()
+                };
+
+                // Memory fallback
+                const memoryList = inMemoryReviews.get(venueId) || [];
+                memoryList.unshift(review);
+                inMemoryReviews.set(venueId, memoryList.slice(0, 100));
+
+                // File fallback (durable across restarts)
+                const fileList = readFallbackReviews(venueId) || [];
+                fileList.unshift(review);
+                writeFallbackReviews(venueId, fileList.slice(0, 100));
+
+                return res.status(201).json({ review, storage: 'fallback' });
+            }
+        });
 
         app.get('/api/users/profile', authenticateOptional, async (req, res) => {
             try {
