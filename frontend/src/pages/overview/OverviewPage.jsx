@@ -423,7 +423,7 @@ function OverviewPage() {
       setVenues([]);
 
       try {
-        const venueData = await fetchVenues(venueParams);
+        const venueData = await fetchVenues({ ...venueParams, compact: 'true' });
 
         if (!isMounted) {
           return;
