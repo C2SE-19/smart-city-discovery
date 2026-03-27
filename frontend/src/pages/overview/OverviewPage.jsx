@@ -371,7 +371,7 @@ function OverviewPage() {
       try {
         const [categoryData, wardData, serviceData] = await Promise.all([
           fetchPlaceCategories(),
-          fetchWards(),
+          fetchWards({ summary: 'true' }),
           fetchMerchantServices()
         ]);
 
@@ -446,6 +446,31 @@ function OverviewPage() {
 
     return () => {
       isMounted = false;
+    };
+  }, [venueParams]);
+
+  useEffect(() => {
+    let pollingInFlight = false;
+
+    const intervalId = window.setInterval(async () => {
+      if (pollingInFlight) {
+        return;
+      }
+
+      pollingInFlight = true;
+
+      try {
+        const liveVenueData = await fetchVenues({ ...venueParams, compact: 'true', live: 'true' });
+        setVenues(Array.isArray(liveVenueData) ? liveVenueData : []);
+      } catch {
+        // Keep currently rendered venue list on transient polling errors.
+      } finally {
+        pollingInFlight = false;
+      }
+    }, 8000);
+
+    return () => {
+      window.clearInterval(intervalId);
     };
   }, [venueParams]);
 

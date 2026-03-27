@@ -1,11 +1,47 @@
 import apiClient from './client';
 
-export async function fetchVenues(params = {}) {
-  const response = await apiClient.get('/venues', {
-    params,
-  });
+const venuesCache = new Map();
+const venuesInFlight = new Map();
+const VENUES_CACHE_TTL_MS = 8000;
 
-  return response.data;
+function buildVenuesCacheKey(params = {}) {
+  const normalized = Object.keys(params)
+    .sort()
+    .reduce((result, key) => {
+      result[key] = params[key];
+      return result;
+    }, {});
+
+  return JSON.stringify(normalized);
+}
+
+export async function fetchVenues(params = {}) {
+  const cacheKey = buildVenuesCacheKey(params);
+  const now = Date.now();
+  const cached = venuesCache.get(cacheKey);
+
+  if (cached && now - cached.timestamp < VENUES_CACHE_TTL_MS) {
+    return cached.data;
+  }
+
+  if (venuesInFlight.has(cacheKey)) {
+    return venuesInFlight.get(cacheKey);
+  }
+
+  const request = apiClient
+    .get('/venues', {
+      params,
+    })
+    .then((response) => {
+      venuesCache.set(cacheKey, { data: response.data, timestamp: Date.now() });
+      return response.data;
+    })
+    .finally(() => {
+      venuesInFlight.delete(cacheKey);
+    });
+
+  venuesInFlight.set(cacheKey, request);
+  return request;
 }
 
 export async function createVenueRequest(payload) {
