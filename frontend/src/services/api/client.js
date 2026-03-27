@@ -1,6 +1,27 @@
 import axios from 'axios';
 
-const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api/v1';
+const DEFAULT_API_BASE_URL = 'http://localhost:5000/api';
+
+function normalizeBaseUrl(value) {
+  const trimmed = String(value || '').trim();
+  return trimmed.replace(/\/+$/, '');
+}
+
+function resolveFallbackBaseUrl(baseUrl) {
+  const normalized = normalizeBaseUrl(baseUrl);
+
+  if (/\/api\/v1$/i.test(normalized)) {
+    return normalized.replace(/\/api\/v1$/i, '/api');
+  }
+
+  if (/\/api$/i.test(normalized)) {
+    return `${normalized}/v1`;
+  }
+
+  return '';
+}
+
+const baseURL = normalizeBaseUrl(import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL);
 
 export const apiClient = axios.create({
   baseURL,
@@ -30,6 +51,37 @@ apiClient.interceptors.request.use(
     return config;
   },
   (error) => Promise.reject(error)
+);
+
+apiClient.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error?.config;
+
+    if (!originalRequest || originalRequest.__baseFallbackRetried) {
+      return Promise.reject(error);
+    }
+
+    const statusCode = Number(error?.response?.status);
+    const hasResponse = Boolean(error?.response);
+    const shouldAttemptFallback = !hasResponse || statusCode === 404 || statusCode === 405;
+
+    if (!shouldAttemptFallback) {
+      return Promise.reject(error);
+    }
+
+    const currentBaseUrl = normalizeBaseUrl(originalRequest.baseURL || apiClient.defaults.baseURL);
+    const fallbackBaseUrl = resolveFallbackBaseUrl(currentBaseUrl);
+
+    if (!fallbackBaseUrl || fallbackBaseUrl === currentBaseUrl) {
+      return Promise.reject(error);
+    }
+
+    originalRequest.__baseFallbackRetried = true;
+    originalRequest.baseURL = fallbackBaseUrl;
+
+    return apiClient.request(originalRequest);
+  }
 );
 
 export default apiClient;
