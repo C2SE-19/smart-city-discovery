@@ -26,6 +26,14 @@ export async function fetchAdminVenues(params = {}) {
   return response.data;
 }
 
+export async function fetchAdminVenueDetail(venueId) {
+  const response = await apiClient.get(`/admin/venues/${venueId}`, {
+    timeout: 30000,
+  });
+
+  return response.data;
+}
+
 export async function moderateAdminVenue(venueId, payload) {
   const response = await apiClient.patch(`/admin/venues/${venueId}/moderation`, payload);
   return response.data;

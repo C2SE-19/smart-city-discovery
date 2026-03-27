@@ -22,6 +22,9 @@ import './OverviewCityMapCard.css';
 
 const markerCache = new Map();
 
+const FALLBACK_VENUE_IMAGE =
+  'https://images.unsplash.com/photo-1469474968028-56623f02e42e?auto=format&fit=crop&w=900&q=80';
+
 function hashCategoryId(value) {
   const text = String(value || 'default');
   let hash = 0;
@@ -34,7 +37,7 @@ function hashCategoryId(value) {
 }
 
 function buildCategoryIcon(categoryId, emoji) {
-  const palette = ['#0f766e', '#ca8a04', '#1d4ed8', '#be185d', '#9333ea', '#0891b2', '#b45309'];
+  const palette = ['#0f766e', '#ca8a04', '#be185d', '#9333ea', '#b45309', '#65a30d', '#9a3412'];
   const normalizedEmoji = typeof emoji === 'string' && emoji.trim() ? emoji.trim() : '📍';
   const color = palette[hashCategoryId(categoryId) % palette.length];
   const cacheKey = `${categoryId}-${normalizedEmoji}`;
@@ -68,6 +71,19 @@ function renderStars(rating) {
 
   const rounded = Math.max(0, Math.min(5, Math.round(rating)));
   return `${'★'.repeat(rounded)}${'☆'.repeat(5 - rounded)} ${rating.toFixed(1)}`;
+}
+
+function resolveVenuePopupImage(venue) {
+  const candidates = [venue?.cover_image_url, venue?.coverImageUrl, venue?.image];
+
+  for (const candidate of candidates) {
+    const normalized = typeof candidate === 'string' ? candidate.trim() : '';
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return FALLBACK_VENUE_IMAGE;
 }
 
 function OverviewCityMapCard() {
@@ -117,6 +133,32 @@ function OverviewCityMapCard() {
 
     return () => {
       mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let pollingInFlight = false;
+
+    const intervalId = window.setInterval(async () => {
+      if (pollingInFlight) {
+        return;
+      }
+
+      pollingInFlight = true;
+
+      try {
+        const liveVenues = await fetchVenues({ status: 'approved', compact: 'true', live: 'true' });
+        setVenues(normalizeVenues(liveVenues));
+        setError('');
+      } catch {
+        // Keep existing markers when a polling cycle fails.
+      } finally {
+        pollingInFlight = false;
+      }
+    }, 8000);
+
+    return () => {
+      window.clearInterval(intervalId);
     };
   }, []);
 
@@ -210,6 +252,12 @@ function OverviewCityMapCard() {
               <Marker key={`overview-map-${venue.id}`} position={[venue.latitude, venue.longitude]} icon={icon}>
                 <Popup>
                   <div className="overview-city-popup">
+                    <img
+                      src={resolveVenuePopupImage(venue)}
+                      alt={resolveVenueName(venue)}
+                      className="overview-city-popup-image"
+                      loading="lazy"
+                    />
                     <strong>{resolveVenueName(venue)}</strong>
                     <span>{venue.address || 'Address not available'}</span>
                     <span>{resolveWardName(venue)} • {resolveVenueCategoryName(venue)}</span>

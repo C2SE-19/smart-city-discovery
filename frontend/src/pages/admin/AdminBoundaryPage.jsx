@@ -10,6 +10,7 @@ import {
   deleteAdminPlaceCategory,
   deleteAdminWard,
   fetchAdminMerchantServices,
+  fetchAdminVenueDetail,
   fetchAdminPlaceCategories,
   fetchAdminVenueReviews,
   fetchAdminVenues,
@@ -20,7 +21,6 @@ import {
   updateAdminPlaceCategory,
   upsertAdminWard,
 } from '../../services/api/adminMapApi';
-import { fetchVenueDetails } from '../../services/api/venuesApi';
 import './AdminBoundaryPage.css';
 
 const DEFAULT_CENTER = [16.0471, 108.2068];
@@ -876,7 +876,7 @@ function AdminBoundaryPage() {
 
     async function loadSelectedVenueDetail() {
       try {
-        const detail = await fetchVenueDetails(selectedVenueId);
+        const detail = await fetchAdminVenueDetail(selectedVenueId);
 
         if (!isMounted) {
           return;
