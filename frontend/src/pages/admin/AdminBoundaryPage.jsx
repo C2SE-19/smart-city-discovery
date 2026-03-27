@@ -51,6 +51,15 @@ const PAGE_MODES = [
 
 const CATEGORY_PIN_COLORS = ['#0f766e', '#ea580c', '#2563eb', '#db2777', '#7c3aed', '#65a30d', '#dc2626', '#0891b2'];
 const categoryIconCache = new Map();
+const PLACE_CATEGORY_ICON_OPTIONS = [
+  '🍽️', '☕', '🍜', '🥐', '🍸', '🍰', '🛍️', '🎯', '🏞️', '📍',
+  '🍔', '🍕', '🍣', '🍖', '🥗', '🍦', '🧋', '🍺', '🍷', '🥘',
+  '🏨', '🛏️', '🏬', '🛒', '🏪', '💊', '🏥', '🩺', '🏫', '📚',
+  '🏛️', '🏦', '💼', '🏢', '🧰', '🔧', '🚗', '⛽', '🧼', '💇',
+  '💄', '💅', '🧖', '💪', '⚽', '🎬', '🎵', '🎨', '🖼️', '📸',
+  '🪴', '🌳', '🏖️', '🗺️', '🚉', '🚌', '✈️', '🚴', '🐶', '🐱'
+];
+const DEFAULT_PLACE_CATEGORY_ICON = '📍';
 const VENUE_WEEK_DAYS = [
   { key: 'monday', label: 'Monday' },
   { key: 'tuesday', label: 'Tuesday' },
@@ -258,22 +267,24 @@ function resolveCategoryColor(categoryId) {
   return CATEGORY_PIN_COLORS[index];
 }
 
-function resolveCategoryIcon(categoryId) {
+function resolveCategoryIcon(categoryId, iconSymbol) {
   const color = resolveCategoryColor(categoryId);
+  const normalizedIcon = PLACE_CATEGORY_ICON_OPTIONS.includes(iconSymbol) ? iconSymbol : DEFAULT_PLACE_CATEGORY_ICON;
+  const cacheKey = `${color}-${normalizedIcon}`;
 
-  if (!categoryIconCache.has(color)) {
+  if (!categoryIconCache.has(cacheKey)) {
     categoryIconCache.set(
-      color,
+      cacheKey,
       L.divIcon({
-        className: 'admin-venue-pin',
-        html: `<span style="background:${color}"></span>`,
-        iconSize: [18, 18],
-        iconAnchor: [9, 9],
+        className: 'admin-venue-pin admin-venue-pin-category-icon',
+        html: `<span style="background:${color}"><b>${normalizedIcon}</b></span>`,
+        iconSize: [22, 22],
+        iconAnchor: [11, 11],
       })
     );
   }
 
-  return categoryIconCache.get(color);
+  return categoryIconCache.get(cacheKey);
 }
 
 function extractBoundaryCenter(boundary) {
@@ -477,6 +488,30 @@ function MapViewportController({ center, zoom }) {
   return null;
 }
 
+function wait(ms) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+async function fetchAdminVenuesWithRetry(maxAttempts = 3) {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await fetchAdminVenues();
+    } catch (error) {
+      lastError = error;
+
+      if (attempt < maxAttempts) {
+        await wait(350 * attempt);
+      }
+    }
+  }
+
+  throw lastError;
+}
+
 function AdminBoundaryPage() {
   const [activeMode, setActiveMode] = useState('pending');
   const [wards, setWards] = useState([]);
@@ -485,6 +520,7 @@ function AdminBoundaryPage() {
   const [merchantServices, setMerchantServices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [loadWarning, setLoadWarning] = useState('');
   const [operationMessage, setOperationMessage] = useState('');
 
   const [submittingWard, setSubmittingWard] = useState(false);
@@ -521,6 +557,8 @@ function AdminBoundaryPage() {
     boundaryJson: EMPTY_BOUNDARY_TEMPLATE,
   });
   const [categoryNameInput, setCategoryNameInput] = useState('');
+  const [categoryIconInput, setCategoryIconInput] = useState('');
+  const [isCategoryIconPickerOpen, setIsCategoryIconPickerOpen] = useState(false);
   const [serviceNameInput, setServiceNameInput] = useState('');
 
   const pendingVenues = useMemo(
@@ -593,6 +631,15 @@ function AdminBoundaryPage() {
     () => merchantServices.find((service) => Number(service.id) === Number(selectedServiceId)) || null,
     [merchantServices, selectedServiceId]
   );
+  const placeCategoryById = useMemo(
+    () =>
+      new Map(
+        placeCategories
+          .map((category) => [Number(category.id), category])
+          .filter(([categoryId]) => Number.isInteger(categoryId) && categoryId > 0)
+      ),
+    [placeCategories]
+  );
   const serviceNameById = useMemo(
     () =>
       new Map(
@@ -646,19 +693,54 @@ function AdminBoundaryPage() {
   async function loadData() {
     setLoading(true);
     setError('');
+    setLoadWarning('');
 
     try {
-      const [wardData, venueData, categoryData, serviceData] = await Promise.all([
+      const [wardResult, venueResult, categoryResult, serviceResult] = await Promise.allSettled([
         fetchAdminWards(),
-        fetchAdminVenues(),
+        fetchAdminVenuesWithRetry(),
         fetchAdminPlaceCategories(),
         fetchAdminMerchantServices(),
       ]);
 
-      setWards(wardData);
-      setVenues(venueData);
-      setPlaceCategories(sortCategories(categoryData));
-      setMerchantServices(sortMerchantServices(serviceData));
+      const failedCoreMessages = [];
+      const optionalFailures = [];
+
+      if (wardResult.status === 'fulfilled') {
+        setWards(Array.isArray(wardResult.value) ? wardResult.value : []);
+      } else {
+        setWards([]);
+        failedCoreMessages.push(wardResult.reason?.response?.data?.message || 'Could not load ward boundaries');
+      }
+
+      if (venueResult.status === 'fulfilled') {
+        setVenues(Array.isArray(venueResult.value) ? venueResult.value : []);
+      } else {
+        setVenues([]);
+        optionalFailures.push('venues');
+      }
+
+      if (categoryResult.status === 'fulfilled') {
+        const categories = Array.isArray(categoryResult.value) ? categoryResult.value : [];
+        setPlaceCategories(sortCategories(categories));
+      } else {
+        setPlaceCategories([]);
+        optionalFailures.push('place categories');
+      }
+
+      if (serviceResult.status === 'fulfilled') {
+        const services = Array.isArray(serviceResult.value) ? serviceResult.value : [];
+        setMerchantServices(sortMerchantServices(services));
+      } else {
+        setMerchantServices([]);
+        optionalFailures.push('merchant services');
+      }
+
+      if (failedCoreMessages.length) {
+        setError(failedCoreMessages[0] || 'Could not load map management data.');
+      } else if (optionalFailures.length) {
+        setLoadWarning(`Loaded map data with limited modules: ${optionalFailures.join(', ')}.`);
+      }
     } catch (loadError) {
       setError(loadError.response?.data?.message || 'Could not load map management data.');
     } finally {
@@ -667,13 +749,13 @@ function AdminBoundaryPage() {
   }
 
   async function refreshWardsAndVenues() {
-    const [wardData, venueData] = await Promise.all([fetchAdminWards(), fetchAdminVenues()]);
+    const [wardData, venueData] = await Promise.all([fetchAdminWards(), fetchAdminVenuesWithRetry()]);
     setWards(wardData);
     setVenues(venueData);
   }
 
   async function refreshCategoriesAndVenues() {
-    const [categoryData, venueData] = await Promise.all([fetchAdminPlaceCategories(), fetchAdminVenues()]);
+    const [categoryData, venueData] = await Promise.all([fetchAdminPlaceCategories(), fetchAdminVenuesWithRetry()]);
     setPlaceCategories(sortCategories(categoryData));
     setVenues(venueData);
   }
@@ -799,8 +881,10 @@ function AdminBoundaryPage() {
 
     const intervalId = window.setInterval(async () => {
       try {
-        const freshVenues = await fetchAdminVenues();
+        const freshVenues = await fetchAdminVenuesWithRetry(2);
         setVenues(freshVenues);
+        setError((currentError) => (/venue/i.test(String(currentError || '')) ? '' : currentError));
+        setLoadWarning((currentWarning) => (/venue/i.test(String(currentWarning || '')) ? '' : currentWarning));
       } catch {
         // Polling failures should be silent to avoid disrupting moderation workflow.
       }
@@ -835,6 +919,8 @@ function AdminBoundaryPage() {
     if (!foundCategory) {
       setSelectedCategoryId(null);
       setCategoryNameInput('');
+      setCategoryIconInput('');
+      setIsCategoryIconPickerOpen(false);
     }
   }, [placeCategories, selectedCategoryId]);
 
@@ -1077,13 +1163,21 @@ function AdminBoundaryPage() {
   function loadCategoryToEditor(category) {
     setSelectedCategoryId(category.id);
     setCategoryNameInput(category.name || '');
+    setCategoryIconInput(String(category.icon || '').trim());
+    setIsCategoryIconPickerOpen(false);
   }
 
   async function handleAddCategory() {
     const name = categoryNameInput.trim();
+    const icon = String(categoryIconInput || '').trim();
 
     if (!name) {
       setError('Category name is required.');
+      return;
+    }
+
+    if (!PLACE_CATEGORY_ICON_OPTIONS.includes(icon)) {
+      setError('Category icon is required. Please choose an icon before adding.');
       return;
     }
 
@@ -1095,11 +1189,14 @@ function AdminBoundaryPage() {
       const created = await createAdminPlaceCategory({
         name,
         slug: slugifyText(name),
+        icon,
       });
 
       await refreshCategoriesAndVenues();
       setSelectedCategoryId(created.id);
       setCategoryNameInput(created.name || name);
+      setCategoryIconInput(created.icon || icon);
+      setIsCategoryIconPickerOpen(false);
       setOperationMessage('Category added successfully.');
     } catch (saveError) {
       setError(saveError.response?.data?.message || 'Could not add category.');
@@ -1120,13 +1217,19 @@ function AdminBoundaryPage() {
     }
 
     const name = categoryNameInput.trim();
+    const icon = String(categoryIconInput || '').trim();
     if (!name) {
       setError('Category name is required.');
       return;
     }
 
-    if (normalizeComparableText(selectedCategory.name) === name) {
-      setError('No changes detected. Please edit category name before updating.');
+    if (!icon) {
+      setError('Category icon is required.');
+      return;
+    }
+
+    if (normalizeComparableText(selectedCategory.name) === name && String(selectedCategory.icon || '').trim() === icon) {
+      setError('No changes detected. Please edit category before updating.');
       return;
     }
 
@@ -1137,10 +1240,13 @@ function AdminBoundaryPage() {
     try {
       const updated = await updateAdminPlaceCategory(selectedCategoryId, {
         name,
+        icon,
       });
 
       await refreshCategoriesAndVenues();
       setCategoryNameInput(updated.name || name);
+      setCategoryIconInput(updated.icon || icon);
+      setIsCategoryIconPickerOpen(false);
       setOperationMessage('Category updated successfully.');
     } catch (updateError) {
       setError(updateError.response?.data?.message || 'Could not update category.');
@@ -1169,6 +1275,8 @@ function AdminBoundaryPage() {
 
       setSelectedCategoryId(null);
       setCategoryNameInput('');
+      setCategoryIconInput('');
+      setIsCategoryIconPickerOpen(false);
       setOperationMessage('Category deleted successfully.');
     } catch (deleteError) {
       setError(deleteError.response?.data?.message || 'Could not delete category.');
@@ -1439,7 +1547,8 @@ function AdminBoundaryPage() {
 
   function resolveMarkerIcon(venue) {
     if (activeMode === 'category') {
-      return resolveCategoryIcon(venue.category_id);
+      const categoryIcon = placeCategoryById.get(Number(venue.category_id))?.icon;
+      return resolveCategoryIcon(venue.category_id, categoryIcon);
     }
 
     return resolveStatusIcon(venue.status);
@@ -1545,7 +1654,9 @@ function AdminBoundaryPage() {
               onClick={() => loadCategoryToEditor(category)}
             >
               <strong>
-                <span className="category-color-dot" style={{ backgroundColor: resolveCategoryColor(category.id) }} />
+                <span className="category-icon-dot" aria-hidden="true">
+                  {PLACE_CATEGORY_ICON_OPTIONS.includes(category.icon) ? category.icon : DEFAULT_PLACE_CATEGORY_ICON}
+                </span>
                 {category.name}
               </strong>
                 <span>{categoryUsageCountById.get(Number(category.id)) || 0} venue(s) using this category</span>
@@ -2073,12 +2184,41 @@ function AdminBoundaryPage() {
         <div className="admin-form-stack">
           <div className="admin-form-field">
             <label htmlFor="placeCategoryName">Category Name</label>
-            <input
-              id="placeCategoryName"
-              value={categoryNameInput}
-              onChange={(event) => setCategoryNameInput(event.target.value)}
-              placeholder="e.g. Entertainment Venue"
-            />
+            <div className="admin-category-input-row">
+              <button
+                type="button"
+                className="admin-category-icon-picker-btn"
+                onClick={() => setIsCategoryIconPickerOpen((currentState) => !currentState)}
+                aria-label="Choose category icon"
+              >
+                {PLACE_CATEGORY_ICON_OPTIONS.includes(categoryIconInput) ? categoryIconInput : '🙂'}
+              </button>
+              <input
+                id="placeCategoryName"
+                value={categoryNameInput}
+                onChange={(event) => setCategoryNameInput(event.target.value)}
+                placeholder="e.g. Entertainment Venue"
+              />
+            </div>
+
+            {isCategoryIconPickerOpen ? (
+              <div className="admin-category-icon-picker-grid">
+                {PLACE_CATEGORY_ICON_OPTIONS.map((iconOption) => (
+                  <button
+                    key={iconOption}
+                    type="button"
+                    className={`admin-category-icon-option ${categoryIconInput === iconOption ? 'is-active' : ''}`.trim()}
+                    onClick={() => {
+                      setCategoryIconInput(iconOption);
+                      setIsCategoryIconPickerOpen(false);
+                    }}
+                    aria-label={`Select ${iconOption} icon`}
+                  >
+                    {iconOption}
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
 
           <div className="admin-action-row">
@@ -2108,7 +2248,9 @@ function AdminBoundaryPage() {
           {selectedCategory ? (
             <p className="admin-inline-note">
               Selected category:
-              <span className="category-color-dot" style={{ backgroundColor: resolveCategoryColor(selectedCategory.id) }} />
+              <span className="category-icon-dot" aria-hidden="true">
+                {PLACE_CATEGORY_ICON_OPTIONS.includes(selectedCategory.icon) ? selectedCategory.icon : DEFAULT_PLACE_CATEGORY_ICON}
+              </span>
               {selectedCategory.name}
               <span>({categoryUsageCountById.get(Number(selectedCategory.id)) || 0} venue(s) use this category)</span>
             </p>
@@ -2129,6 +2271,7 @@ function AdminBoundaryPage() {
         description="Manage pending posts, ward boundaries, place categories, and merchant services without affecting other modules."
       >
         {operationMessage ? <div className="admin-map-message success">{operationMessage}</div> : null}
+        {loadWarning ? <div className="admin-map-message warning">{loadWarning}</div> : null}
         {error ? <div className="admin-map-message error">{error}</div> : null}
 
         <div className="admin-mode-tabs" role="tablist" aria-label="Admin map modes">
@@ -2156,7 +2299,7 @@ function AdminBoundaryPage() {
 
               <TileLayer
                 attribution="&copy; OpenStreetMap contributors &copy; CARTO"
-                url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+                url="https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png"
               />
 
               {wards.map((ward) => {
