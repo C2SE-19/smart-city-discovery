@@ -9,40 +9,6 @@ import { fetchMerchantServices } from '../../../services/api/merchantServicesApi
 import { fetchWards } from '../../../services/api/wardsApi';
 import '../styles/MerchantVenueForm.css';
 
-const WEEKLY_SCHEDULE_DAYS = [
-  { key: 'monday', label: 'Monday', shortLabel: 'Mon' },
-  { key: 'tuesday', label: 'Tuesday', shortLabel: 'Tue' },
-  { key: 'wednesday', label: 'Wednesday', shortLabel: 'Wed' },
-  { key: 'thursday', label: 'Thursday', shortLabel: 'Thu' },
-  { key: 'friday', label: 'Friday', shortLabel: 'Fri' },
-  { key: 'saturday', label: 'Saturday', shortLabel: 'Sat' },
-  { key: 'sunday', label: 'Sunday', shortLabel: 'Sun' }
-];
-
-const TIME_OPTIONS = (() => {
-  const values = [];
-  for (let hour = 0; hour < 24; hour += 1) {
-    for (let minute = 0; minute < 60; minute += 30) {
-      const hourText = String(hour).padStart(2, '0');
-      const minuteText = String(minute).padStart(2, '0');
-      values.push(`${hourText}:${minuteText}`);
-    }
-  }
-  return values;
-})();
-
-function buildDefaultWeeklySchedule() {
-  return WEEKLY_SCHEDULE_DAYS.reduce((result, day) => {
-    result[day.key] = {
-      start: '09:00',
-      end: '21:00',
-      off: false
-    };
-
-    return result;
-  }, {});
-}
-
 function MerchantVenueForm() {
   const [formData, setFormData] = useState({
     venueName: '',
@@ -52,10 +18,10 @@ function MerchantVenueForm() {
     latitude: null,
     longitude: null,
     phone: '',
-    contactEmail: '',
     minPrice: '',
     maxPrice: '',
-    weeklySchedule: buildDefaultWeeklySchedule(),
+    startTime: '',
+    endTime: '',
     description: '',
     selectedServices: [],
     images: [],
@@ -76,7 +42,6 @@ function MerchantVenueForm() {
   const [wardsLoading, setWardsLoading] = useState(true);
   const [wardLoadError, setWardLoadError] = useState('');
   const [isResubmitLocked, setIsResubmitLocked] = useState(false);
-  const [activeScheduleDayKey, setActiveScheduleDayKey] = useState(WEEKLY_SCHEDULE_DAYS[0].key);
 
   useEffect(() => {
     async function loadPlaceCategories() {
@@ -198,52 +163,6 @@ function MerchantVenueForm() {
     }
   };
 
-  const handleScheduleChange = (dayKey, field, value) => {
-    unlockResubmitIfNeeded();
-
-    setFormData((prev) => {
-      const currentSchedule = prev.weeklySchedule?.[dayKey] || { start: '09:00', end: '21:00', off: false };
-      const nextSchedule = { ...currentSchedule };
-
-      if (value === 'OFF') {
-        nextSchedule.start = 'OFF';
-        nextSchedule.end = 'OFF';
-        nextSchedule.off = true;
-      } else {
-        nextSchedule[field] = value;
-
-        if (currentSchedule.off) {
-          nextSchedule.off = false;
-          if (nextSchedule.start === 'OFF') {
-            nextSchedule.start = '09:00';
-          }
-          if (nextSchedule.end === 'OFF') {
-            nextSchedule.end = '21:00';
-          }
-        }
-      }
-
-      return {
-        ...prev,
-        weeklySchedule: {
-          ...prev.weeklySchedule,
-          [dayKey]: nextSchedule
-        }
-      };
-    });
-
-    if (formErrors[dayKey]) {
-      setFormErrors((prev) => ({
-        ...prev,
-        [dayKey]: ''
-      }));
-    }
-
-    if (submitStatus?.type === 'success') {
-      setSubmitStatus(null);
-    }
-  };
-
   const validateForm = () => {
     const errors = {};
 
@@ -262,11 +181,6 @@ function MerchantVenueForm() {
       errors.wardId = 'Selected ward is not available';
     }
     if (!formData.phone.trim()) errors.phone = 'Phone number is required';
-    if (!formData.contactEmail.trim()) {
-      errors.contactEmail = 'Email is required';
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.contactEmail.trim())) {
-      errors.contactEmail = 'Please provide a valid email address';
-    }
     if (!formData.businessLicense) errors.businessLicense = 'Business license is required';
     
     // Location picking is mandatory
@@ -290,25 +204,12 @@ function MerchantVenueForm() {
       }
     }
 
-    WEEKLY_SCHEDULE_DAYS.forEach((day) => {
-      const schedule = formData.weeklySchedule?.[day.key];
-      const start = String(schedule?.start || '').trim();
-      const end = String(schedule?.end || '').trim();
-      const isOff = Boolean(schedule?.off) || start === 'OFF' || end === 'OFF';
-
-      if (isOff) {
-        return;
+    // Operating hours validation
+    if (formData.startTime && formData.endTime) {
+      if (formData.startTime >= formData.endTime) {
+        errors.endTime = 'End time must be after start time';
       }
-
-      if (!start || !end) {
-        errors[day.key] = `${day.label} requires both start and end time, or select Off`;
-        return;
-      }
-
-      if (start >= end) {
-        errors[day.key] = `${day.label} end time must be later than start time`;
-      }
-    });
+    }
 
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
@@ -428,7 +329,6 @@ function MerchantVenueForm() {
         longitude: formData.longitude,
         description: formData.description,
         phone: formData.phone,
-        contactEmail: formData.contactEmail.trim(),
         coverImageUrl,
         businessLicenseImageUrl,
         metadata: {
@@ -436,21 +336,10 @@ function MerchantVenueForm() {
           categoryName: selectedCategory?.name || '',
           wardId: selectedWard?.ward_id || null,
           wardName: selectedWard?.name || null,
-          contactEmail: formData.contactEmail.trim(),
           minPrice: formData.minPrice ? Number(formData.minPrice) : null,
           maxPrice: formData.maxPrice ? Number(formData.maxPrice) : null,
-          weeklySchedule: WEEKLY_SCHEDULE_DAYS.reduce((result, day) => {
-            const schedule = formData.weeklySchedule?.[day.key] || {};
-            const isOff = Boolean(schedule.off) || schedule.start === 'OFF' || schedule.end === 'OFF';
-            result[day.key] = {
-              day: day.label,
-              start: isOff ? 'OFF' : schedule.start,
-              end: isOff ? 'OFF' : schedule.end,
-              off: isOff
-            };
-
-            return result;
-          }, {}),
+          startTime: formData.startTime || null,
+          endTime: formData.endTime || null,
           selectedServices: formData.selectedServices,
           imagesCount: formData.images.length,
           galleryImages: galleryImageUrls
@@ -473,16 +362,15 @@ function MerchantVenueForm() {
           latitude: null,
           longitude: null,
           phone: '',
-          contactEmail: '',
           minPrice: '',
           maxPrice: '',
-          weeklySchedule: buildDefaultWeeklySchedule(),
+          startTime: '',
+          endTime: '',
           description: '',
           selectedServices: [],
           images: [],
           businessLicense: null
         });
-        setActiveScheduleDayKey(WEEKLY_SCHEDULE_DAYS[0].key);
         setFormErrors({});
         setSubmitStatus(null);
       }, 3500);
@@ -583,23 +471,6 @@ function MerchantVenueForm() {
           </div>
 
           <div className="form-group">
-            <label htmlFor="contactEmail">
-              Contact Email <span className="required">*</span>
-              {formErrors.contactEmail && <span className="error-text"> - {formErrors.contactEmail}</span>}
-            </label>
-            <input
-              type="email"
-              id="contactEmail"
-              name="contactEmail"
-              value={formData.contactEmail}
-              onChange={handleInputChange}
-              placeholder="e.g., venue-owner@gmail.com"
-              required
-              className={`form-input ${formErrors.contactEmail ? 'input-error' : ''}`}
-            />
-          </div>
-
-          <div className="form-group">
             <label htmlFor="description">Description</label>
             <textarea
               id="description"
@@ -665,84 +536,33 @@ function MerchantVenueForm() {
             )}
           </div>
 
-          <div className="schedule-block">
-            <h3>Weekly Opening Hours</h3>
-            <p className="section-hint">Set opening and closing time for each day. Select Off to mark a closed day.</p>
-
-            <div className="schedule-day-tabs" role="tablist" aria-label="Weekly opening days">
-              {WEEKLY_SCHEDULE_DAYS.map((day) => {
-                const schedule = formData.weeklySchedule?.[day.key] || { start: '09:00', end: '21:00', off: false };
-                const isOff = Boolean(schedule.off) || schedule.start === 'OFF';
-
-                return (
-                  <button
-                    key={day.key}
-                    type="button"
-                    role="tab"
-                    aria-selected={activeScheduleDayKey === day.key}
-                    className={`schedule-day-tab ${activeScheduleDayKey === day.key ? 'is-active' : ''}`.trim()}
-                    onClick={() => setActiveScheduleDayKey(day.key)}
-                  >
-                    <span>{day.shortLabel}</span>
-                    <small>{isOff ? 'Off' : 'Open'}</small>
-                  </button>
-                );
-              })}
+          <div className="form-row">
+            <div className="form-group">
+              <label htmlFor="startTime">Start Time</label>
+              <input
+                type="time"
+                id="startTime"
+                name="startTime"
+                value={formData.startTime}
+                onChange={handleInputChange}
+                className="form-input"
+              />
             </div>
 
-            {(() => {
-              const activeDay = WEEKLY_SCHEDULE_DAYS.find((day) => day.key === activeScheduleDayKey) || WEEKLY_SCHEDULE_DAYS[0];
-              const schedule = formData.weeklySchedule?.[activeDay.key] || { start: '09:00', end: '21:00', off: false };
-              const isOff = Boolean(schedule.off) || schedule.start === 'OFF';
-
-              return (
-                <div className="schedule-editor" role="tabpanel" aria-label={`${activeDay.label} schedule`}>
-                  <div className="schedule-editor-header">
-                    <strong>{activeDay.label}</strong>
-                    <span className="schedule-status">{isOff ? 'Closed' : 'Open'}</span>
-                  </div>
-
-                  <div className="schedule-editor-grid">
-                    <div className="schedule-input-wrap">
-                      <label htmlFor={`${activeDay.key}-start`} className="schedule-label">Start</label>
-                      <select
-                        id={`${activeDay.key}-start`}
-                        value={isOff ? 'OFF' : schedule.start}
-                        onChange={(event) => handleScheduleChange(activeDay.key, 'start', event.target.value)}
-                        className={`form-input ${formErrors[activeDay.key] ? 'input-error' : ''}`}
-                      >
-                        <option value="OFF">Off</option>
-                        {TIME_OPTIONS.map((timeValue) => (
-                          <option key={`${activeDay.key}-start-${timeValue}`} value={timeValue}>
-                            {timeValue}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="schedule-input-wrap">
-                      <label htmlFor={`${activeDay.key}-end`} className="schedule-label">End</label>
-                      <select
-                        id={`${activeDay.key}-end`}
-                        value={isOff ? 'OFF' : schedule.end}
-                        onChange={(event) => handleScheduleChange(activeDay.key, 'end', event.target.value)}
-                        className={`form-input ${formErrors[activeDay.key] ? 'input-error' : ''}`}
-                        disabled={isOff}
-                      >
-                        <option value="OFF">Off</option>
-                        {TIME_OPTIONS.map((timeValue) => (
-                          <option key={`${activeDay.key}-end-${timeValue}`} value={timeValue}>
-                            {timeValue}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  {formErrors[activeDay.key] ? <p className="error-text schedule-error">{formErrors[activeDay.key]}</p> : null}
-                </div>
-              );
-            })()}
+            <div className="form-group">
+              <label htmlFor="endTime">
+                End Time
+                {formErrors.endTime && <span className="error-text"> - {formErrors.endTime}</span>}
+              </label>
+              <input
+                type="time"
+                id="endTime"
+                name="endTime"
+                value={formData.endTime}
+                onChange={handleInputChange}
+                className={`form-input ${formErrors.endTime ? 'input-error' : ''}`}
+              />
+            </div>
           </div>
 
           <div className="form-row">
