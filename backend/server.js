@@ -236,6 +236,43 @@ function normalizeNullableText(value) {
     return trimmed === '' ? null : trimmed;
 }
 
+const PLACE_CATEGORY_ICON_OPTIONS = [
+    '🍽️', '☕', '🍜', '🥐', '🍸', '🍰', '🛍️', '🎯', '🏞️', '📍',
+    '🍔', '🍕', '🍣', '🍖', '🥗', '🍦', '🧋', '🍺', '🍷', '🥘',
+    '🏨', '🛏️', '🏬', '🛒', '🏪', '💊', '🏥', '🩺', '🏫', '📚',
+    '🏛️', '🏦', '💼', '🏢', '🧰', '🔧', '🚗', '⛽', '🧼', '💇',
+    '💄', '💅', '🧖', '💪', '⚽', '🎬', '🎵', '🎨', '🖼️', '📸',
+    '🪴', '🌳', '🏖️', '🗺️', '🚉', '🚌', '✈️', '🚴', '🐶', '🐱'
+];
+const PLACE_CATEGORY_ICON_SET = new Set(PLACE_CATEGORY_ICON_OPTIONS);
+
+function normalizePlaceCategoryIcon(value, options = {}) {
+    const required = options.required === true;
+    const normalized = String(value || '').trim();
+
+    if (!normalized) {
+        if (required) {
+            return { value: null, error: 'icon is required' };
+        }
+
+        return { value: null, error: null };
+    }
+
+    if (!PLACE_CATEGORY_ICON_SET.has(normalized)) {
+        return { value: null, error: 'icon is invalid' };
+    }
+
+    return { value: normalized, error: null };
+}
+
+function isUndefinedColumnError(error) {
+    return Boolean(error && error.code === '42703');
+}
+
+function isUndefinedTableError(error) {
+    return Boolean(error && error.code === '42P01');
+}
+
 const WEEKLY_SCHEDULE_DAYS = [
     { key: 'monday', label: 'Monday' },
     { key: 'tuesday', label: 'Tuesday' },
@@ -606,11 +643,23 @@ async function generateWardIdFromName(name) {
                 };
             }
 
+        const poolMax = Number(process.env.PG_POOL_MAX || 2);
+        const poolIdleTimeoutMs = Number(process.env.PG_IDLE_TIMEOUT_MS || 10000);
+        const poolConnectionTimeoutMs = Number(process.env.PG_CONNECTION_TIMEOUT_MS || 60000);
+
         const pool = new Pool({
             connectionString: process.env.DATABASE_URL,
+            max: Number.isFinite(poolMax) && poolMax > 0 ? poolMax : 2,
+            idleTimeoutMillis: Number.isFinite(poolIdleTimeoutMs) && poolIdleTimeoutMs > 0 ? poolIdleTimeoutMs : 10000,
+            connectionTimeoutMillis: Number.isFinite(poolConnectionTimeoutMs) && poolConnectionTimeoutMs > 0 ? poolConnectionTimeoutMs : 60000,
             ssl: {
                 rejectUnauthorized: false
             }
+        });
+        console.log('ℹ️ PostgreSQL pool config:', {
+            max: Number.isFinite(poolMax) && poolMax > 0 ? poolMax : 2,
+            idleTimeoutMillis: Number.isFinite(poolIdleTimeoutMs) && poolIdleTimeoutMs > 0 ? poolIdleTimeoutMs : 10000,
+            connectionTimeoutMillis: Number.isFinite(poolConnectionTimeoutMs) && poolConnectionTimeoutMs > 0 ? poolConnectionTimeoutMs : 60000
         });
         pool.query('SELECT NOW()', (err, res) => {
             if (err) {
@@ -618,6 +667,25 @@ async function generateWardIdFromName(name) {
             } else {
                 console.log('✅ Database connected:', res.rows[0]);
             }
+        });
+
+        pool.query(
+            `
+                ALTER TABLE IF EXISTS place_categories
+                ADD COLUMN IF NOT EXISTS icon varchar(16)
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                UPDATE place_categories
+                SET icon = '📍'
+                WHERE icon IS NULL OR btrim(icon) = ''
+            `
+        ).catch(() => {
+            // Ignore if place_categories table does not exist yet.
         });
 
         // ==========================================
@@ -1316,7 +1384,7 @@ async function generateWardIdFromName(name) {
             try {
                 const result = await pool.query(
                     `
-                SELECT id, name, slug, description, sort_order, is_active, created_at, updated_at
+                SELECT id, name, slug, icon, description, sort_order, is_active, created_at, updated_at
                 FROM place_categories
                 ${includeInactive ? '' : 'WHERE is_active = true'}
                 ORDER BY sort_order ASC, name ASC
@@ -1325,6 +1393,28 @@ async function generateWardIdFromName(name) {
 
                 return res.json(result.rows);
             } catch (error) {
+                if (isUndefinedColumnError(error)) {
+                    try {
+                        const fallbackResult = await pool.query(
+                            `
+                                SELECT id, name, slug, description, sort_order, is_active, created_at, updated_at
+                                FROM place_categories
+                                ${includeInactive ? '' : 'WHERE is_active = true'}
+                                ORDER BY sort_order ASC, name ASC
+                            `
+                        );
+
+                        return res.json(
+                            fallbackResult.rows.map((row) => ({
+                                ...row,
+                                icon: '📍'
+                            }))
+                        );
+                    } catch (fallbackError) {
+                        return res.status(500).json({ message: fallbackError.message });
+                    }
+                }
+
                 return res.status(500).json({ message: error.message });
             }
         }
@@ -1333,7 +1423,7 @@ async function generateWardIdFromName(name) {
             try {
                 const result = await pool.query(
                     `
-                SELECT id, name, slug, description, sort_order, is_active, created_at, updated_at
+                SELECT id, name, slug, icon, description, sort_order, is_active, created_at, updated_at
                 FROM place_categories
                 ORDER BY sort_order ASC, name ASC
             `
@@ -1341,12 +1431,34 @@ async function generateWardIdFromName(name) {
 
                 return res.json(result.rows);
             } catch (error) {
+                if (isUndefinedColumnError(error)) {
+                    try {
+                        const fallbackResult = await pool.query(
+                            `
+                                SELECT id, name, slug, description, sort_order, is_active, created_at, updated_at
+                                FROM place_categories
+                                ORDER BY sort_order ASC, name ASC
+                            `
+                        );
+
+                        return res.json(
+                            fallbackResult.rows.map((row) => ({
+                                ...row,
+                                icon: '📍'
+                            }))
+                        );
+                    } catch (fallbackError) {
+                        return res.status(500).json({ message: fallbackError.message });
+                    }
+                }
+
                 return res.status(500).json({ message: error.message });
             }
         }
 
         async function createAdminPlaceCategory(req, res) {
             const name = String(req.body.name || '').trim();
+            const iconResult = normalizePlaceCategoryIcon(req.body.icon, { required: true });
             const description = String(req.body.description || '').trim() || null;
             const slugInput = String(req.body.slug || '').trim();
             const slug = slugifyText(slugInput || name);
@@ -1361,14 +1473,18 @@ async function generateWardIdFromName(name) {
                 return res.status(400).json({ message: 'slug is required' });
             }
 
+            if (iconResult.error) {
+                return res.status(400).json({ message: iconResult.error });
+            }
+
             try {
                 const result = await pool.query(
                     `
-                INSERT INTO place_categories (name, slug, description, sort_order, is_active, updated_at)
-                VALUES ($1, $2, $3, $4, $5, now())
-                RETURNING id, name, slug, description, sort_order, is_active, created_at, updated_at
+                INSERT INTO place_categories (name, slug, icon, description, sort_order, is_active, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, now())
+                RETURNING id, name, slug, icon, description, sort_order, is_active, created_at, updated_at
             `,
-                    [name, slug, description, sortOrder, isActive]
+                    [name, slug, iconResult.value, description, sortOrder, isActive]
                 );
 
                 return res.status(201).json(result.rows[0]);
@@ -1391,7 +1507,7 @@ async function generateWardIdFromName(name) {
             try {
                 const existingResult = await pool.query(
                     `
-                SELECT id, name, slug, description, sort_order, is_active
+                SELECT id, name, slug, icon, description, sort_order, is_active
                 FROM place_categories
                 WHERE id = $1
                 LIMIT 1
@@ -1406,6 +1522,7 @@ async function generateWardIdFromName(name) {
                 const existing = existingResult.rows[0];
                 const hasName = Object.prototype.hasOwnProperty.call(req.body, 'name');
                 const hasSlug = Object.prototype.hasOwnProperty.call(req.body, 'slug');
+                const hasIcon = Object.prototype.hasOwnProperty.call(req.body, 'icon');
                 const hasDescription = Object.prototype.hasOwnProperty.call(req.body, 'description');
                 const hasSortOrder = Object.prototype.hasOwnProperty.call(req.body, 'sortOrder');
                 const hasIsActive = Object.prototype.hasOwnProperty.call(req.body, 'isActive');
@@ -1414,6 +1531,9 @@ async function generateWardIdFromName(name) {
                 const nextDescription = hasDescription
                     ? String(req.body.description || '').trim() || null
                     : existing.description;
+                const nextIcon = hasIcon
+                    ? normalizePlaceCategoryIcon(req.body.icon, { required: true })
+                    : { value: existing.icon || null, error: null };
                 const nextSlug = hasSlug
                     ? slugifyText(String(req.body.slug || '').trim())
                     : hasName
@@ -1434,20 +1554,25 @@ async function generateWardIdFromName(name) {
                     return res.status(400).json({ message: 'slug is required' });
                 }
 
+                if (nextIcon.error) {
+                    return res.status(400).json({ message: nextIcon.error });
+                }
+
                 const updateResult = await pool.query(
                     `
                 UPDATE place_categories
                 SET
                     name = $2,
                     slug = $3,
-                    description = $4,
-                    sort_order = $5,
-                    is_active = $6,
+                    icon = $4,
+                    description = $5,
+                    sort_order = $6,
+                    is_active = $7,
                     updated_at = now()
                 WHERE id = $1
-                RETURNING id, name, slug, description, sort_order, is_active, created_at, updated_at
+                RETURNING id, name, slug, icon, description, sort_order, is_active, created_at, updated_at
             `,
-                    [categoryId, nextName, nextSlug, nextDescription, nextSortOrder, nextIsActive]
+                    [categoryId, nextName, nextSlug, nextIcon.value, nextDescription, nextSortOrder, nextIsActive]
                 );
 
                 return res.json(updateResult.rows[0]);
@@ -1518,6 +1643,32 @@ async function generateWardIdFromName(name) {
 
                 return res.json(result.rows);
             } catch (error) {
+                if (isUndefinedTableError(error)) {
+                    return res.json([]);
+                }
+
+                if (isUndefinedColumnError(error)) {
+                    try {
+                        const fallbackResult = await pool.query(
+                            `
+                                SELECT id, name, slug, description, sort_order, is_active, created_at, updated_at
+                                FROM merchant_services
+                                ${includeInactive ? '' : 'WHERE is_active = true'}
+                                ORDER BY sort_order ASC, name ASC
+                            `
+                        );
+
+                        return res.json(
+                            fallbackResult.rows.map((row) => ({
+                                ...row,
+                                icon: null
+                            }))
+                        );
+                    } catch (fallbackError) {
+                        return res.status(500).json({ message: fallbackError.message });
+                    }
+                }
+
                 return res.status(500).json({ message: error.message });
             }
         }
@@ -1534,6 +1685,31 @@ async function generateWardIdFromName(name) {
 
                 return res.json(result.rows);
             } catch (error) {
+                if (isUndefinedTableError(error)) {
+                    return res.json([]);
+                }
+
+                if (isUndefinedColumnError(error)) {
+                    try {
+                        const fallbackResult = await pool.query(
+                            `
+                                SELECT id, name, slug, description, sort_order, is_active, created_at, updated_at
+                                FROM merchant_services
+                                ORDER BY sort_order ASC, name ASC
+                            `
+                        );
+
+                        return res.json(
+                            fallbackResult.rows.map((row) => ({
+                                ...row,
+                                icon: null
+                            }))
+                        );
+                    } catch (fallbackError) {
+                        return res.status(500).json({ message: fallbackError.message });
+                    }
+                }
+
                 return res.status(500).json({ message: error.message });
             }
         }

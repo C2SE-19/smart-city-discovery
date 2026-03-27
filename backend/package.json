@@ -5,7 +5,10 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "backup:wards": "node scripts/backup-wards.js",
+    "restore:wards": "node scripts/restore-wards.js",
+    "restore:wards:latest": "node scripts/restore-wards.js --latest --mode merge"
   },
   "keywords": [],
   "author": "Smart City Team",

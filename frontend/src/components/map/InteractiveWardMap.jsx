@@ -86,7 +86,7 @@ function InteractiveWardMap({
         <MapContainer center={[16.035, 108.218]} zoom={13} style={{ height: '100%', width: '100%' }}>
           <TileLayer
             attribution="&copy; OpenStreetMap contributors &copy; CARTO"
-            url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+            url="https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png"
           />
 
           <MapClickHandler disabled={!allowPinCreation} onMapClick={setDraftPin} />

@@ -8,6 +8,7 @@ import { fetchPlaceCategories } from '../../services/api/placeCategoriesApi';
 import { fetchMerchantServices } from '../../services/api/merchantServicesApi';
 import { fetchWards } from '../../services/api/wardsApi';
 import { fetchVenues } from '../../services/api/venuesApi';
+import OverviewCityMapCard from '../../components/map/OverviewCityMapCard';
 import './OverviewPage.css';
 
 const FALLBACK_VENUE_IMAGE =
@@ -1048,23 +1049,7 @@ function OverviewPage() {
             <span />
           </div>
 
-          <div className="overview-map-frame">
-            <iframe
-              title="Da Nang map"
-              src="https://www.google.com/maps?q=Da%20Nang%20Vietnam&z=12&output=embed"
-              loading="lazy"
-              referrerPolicy="no-referrer-when-downgrade"
-            />
-          </div>
-
-          <a
-            className="overview-map-link"
-            href="https://www.google.com/maps/place/Da+Nang,+Vietnam/"
-            target="_blank"
-            rel="noreferrer"
-          >
-            View larger map
-          </a>
+          <OverviewCityMapCard />
         </section>
       )}
     </div>

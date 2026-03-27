@@ -162,7 +162,7 @@ function LocationPickerModal({ isOpen, onClose, onLocationSelect, defaultLocatio
 
               <TileLayer
                 attribution="&copy; OpenStreetMap contributors &copy; CARTO"
-                url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+                url="https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png"
               />
 
               {wards.map((ward) => {
