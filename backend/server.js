@@ -928,15 +928,37 @@ async function generateWardIdFromName(name) {
         // CORE SYSTEM APIs
         // ==========================================
 
+        const PUBLIC_WARDS_CACHE_TTL_MS = 30000;
+        const PUBLIC_VENUES_COMPACT_CACHE_TTL_MS = 3000;
+        let publicWardsSummaryCache = { timestamp: 0, data: null };
+        let publicWardsFullCache = { timestamp: 0, data: null };
+        let publicCompactApprovedVenuesCache = { timestamp: 0, data: null };
+
         async function listPublicWards(req, res) {
             try {
+                const summaryMode = ['1', 'true', 'yes'].includes(String(req.query.summary || '').trim().toLowerCase());
+                const now = Date.now();
+                const targetCache = summaryMode ? publicWardsSummaryCache : publicWardsFullCache;
+
+                if (targetCache.data && now - targetCache.timestamp < PUBLIC_WARDS_CACHE_TTL_MS) {
+                    return res.json(targetCache.data);
+                }
+
+                const selectClause = summaryMode ? 'ward_id, name' : 'ward_id, name, boundary';
                 const result = await pool.query(
                     `
-                SELECT ward_id, name, boundary
+                SELECT ${selectClause}
                 FROM wards
                 ORDER BY name ASC
             `
                 );
+
+                if (summaryMode) {
+                    publicWardsSummaryCache = { timestamp: Date.now(), data: result.rows };
+                } else {
+                    publicWardsFullCache = { timestamp: Date.now(), data: result.rows };
+                }
+
                 res.json(result.rows);
             } catch (err) {
                 res.status(500).json({ error: err.message });
@@ -948,6 +970,7 @@ async function generateWardIdFromName(name) {
                 const statusFilter = normalizeStatusList(req.query.status);
                 const effectiveStatuses = statusFilter.length ? statusFilter : ['approved'];
                 const compactMode = ['1', 'true', 'yes'].includes(String(req.query.compact || '').trim().toLowerCase());
+                const liveMode = ['1', 'true', 'yes'].includes(String(req.query.live || '').trim().toLowerCase());
                 const categoryId = normalizeCategoryId(req.query.categoryId);
                 const categoryIdsFilter = parsePositiveIntegerList(req.query.categoryIds);
                 const serviceIdsFilter = parsePositiveIntegerList(req.query.serviceIds);
@@ -1029,6 +1052,26 @@ async function generateWardIdFromName(name) {
                     `);
                 }
 
+                const useCompactApprovedCache =
+                    compactMode &&
+                    !liveMode &&
+                    effectiveStatuses.length === 1 &&
+                    effectiveStatuses[0] === 'approved' &&
+                    effectiveCategoryIds.length === 0 &&
+                    effectiveWardIds.length === 0 &&
+                    serviceIdsFilter.values.length === 0 &&
+                    !searchKeyword;
+
+                if (useCompactApprovedCache) {
+                    const now = Date.now();
+                    if (
+                        publicCompactApprovedVenuesCache.data &&
+                        now - publicCompactApprovedVenuesCache.timestamp < PUBLIC_VENUES_COMPACT_CACHE_TTL_MS
+                    ) {
+                        return res.json(publicCompactApprovedVenuesCache.data);
+                    }
+                }
+
                 const compactMetadataSelect = 'NULL::jsonb AS metadata';
 
                 const fullMetadataSelect = 'venues.metadata';
@@ -1081,6 +1124,13 @@ async function generateWardIdFromName(name) {
             `,
                     values
                 );
+
+                if (useCompactApprovedCache) {
+                    publicCompactApprovedVenuesCache = {
+                        timestamp: Date.now(),
+                        data: result.rows
+                    };
+                }
 
                 res.json(result.rows);
             } catch (err) {
@@ -2248,6 +2298,59 @@ async function generateWardIdFromName(name) {
                     });
                 }
 
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
+        async function getAdminVenueDetail(req, res) {
+            const venueId = Number(req.params.venueId);
+
+            if (!Number.isFinite(venueId)) {
+                return res.status(400).json({ message: 'Invalid venue id' });
+            }
+
+            try {
+                const result = await pool.query(
+                    `
+                        SELECT
+                            venues.id,
+                            venues.name,
+                            venues.title,
+                            venues.address,
+                            venues.description,
+                            venues.phone,
+                            venues.latitude,
+                            venues.longitude,
+                            venues.ward_id,
+                            wards.name AS ward_name,
+                            venues.category_id,
+                            place_categories.name AS category_name,
+                            place_categories.slug AS category_slug,
+                            venues.cover_image_url,
+                            venues.business_license_image_url,
+                            venues.metadata,
+                            venues.status::text AS status,
+                            venues.submitted_at,
+                            venues.approved_at,
+                            venues.rejected_at,
+                            venues.rejection_reason,
+                            venues.created_at,
+                            venues.updated_at
+                        FROM venues
+                        LEFT JOIN wards ON wards.ward_id = venues.ward_id
+                        LEFT JOIN place_categories ON place_categories.id = venues.category_id
+                        WHERE venues.id = $1
+                        LIMIT 1
+                    `,
+                    [venueId]
+                );
+
+                if (!result.rows.length) {
+                    return res.status(404).json({ message: 'Venue not found' });
+                }
+
+                return res.json(result.rows[0]);
+            } catch (error) {
                 return res.status(500).json({ message: error.message });
             }
         }
@@ -3504,6 +3607,7 @@ async function generateWardIdFromName(name) {
         registerVersionedRoute('patch', '/admin/merchant-services/:serviceId', authenticateRequest, requireAdminRole, updateAdminMerchantService);
         registerVersionedRoute('delete', '/admin/merchant-services/:serviceId', authenticateRequest, requireAdminRole, deleteAdminMerchantService);
         registerVersionedRoute('get', '/admin/venues', authenticateRequest, requireAdminRole, listAdminVenues);
+        registerVersionedRoute('get', '/admin/venues/:venueId', authenticateRequest, requireAdminRole, getAdminVenueDetail);
         registerVersionedRoute('patch', '/admin/venues/:venueId/moderation', authenticateRequest, requireAdminRole, moderateVenueSubmission);
         registerVersionedRoute('get', '/admin/venues/:venueId/reviews', authenticateRequest, requireAdminRole, listAdminVenueReviews);
         registerVersionedRoute('post', '/admin/venues/:venueId/message', authenticateRequest, requireAdminRole, sendAdminVenueModerationMessage);

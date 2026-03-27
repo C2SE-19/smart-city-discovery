@@ -34,6 +34,9 @@ const userLocationIcon = L.divIcon({
   iconAnchor: [11, 11],
 });
 
+const FALLBACK_VENUE_IMAGE =
+  'https://images.unsplash.com/photo-1469474968028-56623f02e42e?auto=format&fit=crop&w=900&q=80';
+
 function hashCategoryId(value) {
   const text = String(value || 'default');
   let hash = 0;
@@ -46,7 +49,7 @@ function hashCategoryId(value) {
 }
 
 function buildCategoryIcon(categoryId, emoji) {
-  const palette = ['#0f766e', '#ca8a04', '#1d4ed8', '#be185d', '#9333ea', '#0891b2', '#b45309'];
+  const palette = ['#0f766e', '#ca8a04', '#be185d', '#9333ea', '#b45309', '#65a30d', '#9a3412'];
   const normalizedEmoji = typeof emoji === 'string' && emoji.trim() ? emoji.trim() : '📍';
   const color = palette[hashCategoryId(categoryId) % palette.length];
   const cacheKey = `${categoryId}-${normalizedEmoji}`;
@@ -64,6 +67,23 @@ function buildCategoryIcon(categoryId, emoji) {
   }
 
   return markerCache.get(cacheKey);
+}
+
+function resolveVenuePopupImage(venue) {
+  const imageCandidates = [
+    venue?.cover_image_url,
+    venue?.coverImageUrl,
+    venue?.image,
+  ];
+
+  for (const candidate of imageCandidates) {
+    const normalized = typeof candidate === 'string' ? candidate.trim() : '';
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return FALLBACK_VENUE_IMAGE;
 }
 
 function renderStars(rating) {
@@ -90,6 +110,7 @@ function MapViewportController({ center, zoom }) {
 function CityMapPage() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
+  const [venuesLoading, setVenuesLoading] = useState(true);
   const [error, setError] = useState('');
   const [wardOptions, setWardOptions] = useState([]);
   const [categoryOptions, setCategoryOptions] = useState([]);
@@ -242,11 +263,11 @@ function CityMapPage() {
     let mounted = true;
 
     async function loadVenues() {
-      setLoading(true);
+      setVenuesLoading(true);
       setError('');
 
       try {
-        const venueData = await fetchVenues(filterParams);
+        const venueData = await fetchVenues({ ...filterParams, compact: 'true' });
 
         if (!mounted) {
           return;
@@ -262,7 +283,7 @@ function CityMapPage() {
         setVenues([]);
       } finally {
         if (mounted) {
-          setLoading(false);
+          setVenuesLoading(false);
         }
       }
     }
@@ -271,6 +292,31 @@ function CityMapPage() {
 
     return () => {
       mounted = false;
+    };
+  }, [filterParams]);
+
+  useEffect(() => {
+    let pollingInFlight = false;
+
+    const intervalId = window.setInterval(async () => {
+      if (pollingInFlight) {
+        return;
+      }
+
+      pollingInFlight = true;
+
+      try {
+        const liveVenueData = await fetchVenues({ ...filterParams, compact: 'true', live: 'true' });
+        setVenues(normalizeVenues(liveVenueData));
+      } catch {
+        // Keep current map data if one polling cycle fails.
+      } finally {
+        pollingInFlight = false;
+      }
+    }, 8000);
+
+    return () => {
+      window.clearInterval(intervalId);
     };
   }, [filterParams]);
 
@@ -462,6 +508,7 @@ function CityMapPage() {
                   >
                     <Popup>
                       <div className="city-map-popup">
+                        <img src={resolveVenuePopupImage(venue)} alt={resolveVenueName(venue)} className="city-map-popup-image" loading="lazy" />
                         <strong>{resolveVenueName(venue)}</strong>
                         <span>{venue.address || 'Address not available'}</span>
                         <span>{resolveWardName(venue)} • {resolveVenueCategoryName(venue)}</span>
@@ -492,8 +539,8 @@ function CityMapPage() {
               <span>{currentPosition ? 'Location enabled' : 'Location unavailable'}</span>
             </div>
 
-            {loading ? <div className="city-map-overlay">Loading map data...</div> : null}
-            {!loading && error ? <div className="city-map-overlay is-error">{error}</div> : null}
+            {loading || venuesLoading ? <div className="city-map-overlay">Loading map data...</div> : null}
+            {!loading && !venuesLoading && error ? <div className="city-map-overlay is-error">{error}</div> : null}
           </div>
         </div>
 
