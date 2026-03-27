@@ -87,7 +87,10 @@ function OverviewCityMapCard() {
       setError('');
 
       try {
-        const [wardData, venueData] = await Promise.all([fetchWards(), fetchVenues({ status: 'approved' })]);
+        const [wardData, venueData] = await Promise.all([
+          fetchWards(),
+          fetchVenues({ status: 'approved', compact: 'true' }),
+        ]);
 
         if (!mounted) {
           return;
