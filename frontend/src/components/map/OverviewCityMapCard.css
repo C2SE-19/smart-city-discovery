@@ -1,0 +1,112 @@
+.overview-city-shell {
+  width: min(100%, 960px);
+  display: grid;
+  gap: 12px;
+}
+
+.overview-city-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.overview-city-toolbar span {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(43, 98, 109, 0.2);
+  background: rgba(247, 252, 251, 0.9);
+  color: #355963;
+  font-size: 0.76rem;
+  letter-spacing: 0.01em;
+}
+
+.overview-city-canvas {
+  position: relative;
+  min-height: 420px;
+  border-radius: 22px;
+  overflow: hidden;
+  border: 1px solid rgba(37, 80, 92, 0.16);
+  box-shadow: 0 24px 40px rgba(24, 60, 76, 0.12);
+}
+
+.overview-city-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(7, 22, 33, 0.34);
+  color: #fff;
+  backdrop-filter: blur(3px);
+  z-index: 500;
+}
+
+.overview-city-overlay.is-error {
+  background: rgba(103, 32, 36, 0.5);
+}
+
+.overview-city-link {
+  justify-self: end;
+  padding: 10px 16px;
+  border-radius: 10px;
+  border: 1px solid rgba(37, 80, 92, 0.2);
+  background: linear-gradient(135deg, #fef5df 0%, #f3f8f7 100%);
+  color: #2c4e57;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.overview-city-popup {
+  display: grid;
+  gap: 4px;
+  min-width: 210px;
+}
+
+.overview-city-popup strong {
+  font-size: 0.92rem;
+  color: #1d3640;
+}
+
+.overview-city-popup span {
+  color: #3f5560;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.overview-city-ward-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #24434b;
+}
+
+.overview-city-pin span {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 2px solid #fff;
+  box-shadow: 0 5px 12px rgba(17, 33, 41, 0.24);
+  font-size: 14px;
+}
+
+.overview-city-user-pin span {
+  width: 20px;
+  height: 20px;
+  display: inline-block;
+  border-radius: 999px;
+  background: radial-gradient(circle at center, #60a5fa 30%, #2563eb 100%);
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 5px rgba(37, 99, 235, 0.18);
+}
+
+@media (max-width: 720px) {
+  .overview-city-canvas {
+    min-height: 340px;
+  }
+
+  .overview-city-link {
+    justify-self: stretch;
+  }
+}
