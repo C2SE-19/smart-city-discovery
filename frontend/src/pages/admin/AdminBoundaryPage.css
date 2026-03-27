@@ -42,6 +42,12 @@
   background: rgba(56, 210, 172, 0.14);
 }
 
+.admin-map-message.warning {
+  color: #7a4a02;
+  border: 1px solid rgba(122, 74, 2, 0.24);
+  background: rgba(245, 188, 79, 0.2);
+}
+
 .admin-map-message.error {
   color: #9c2732;
   border: 1px solid rgba(156, 39, 50, 0.26);
@@ -658,6 +664,56 @@
   box-shadow: 0 0 0 1px rgba(12, 33, 43, 0.14);
 }
 
+.category-icon-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  display: inline-grid;
+  place-items: center;
+  font-size: 0.84rem;
+  background: rgba(21, 94, 99, 0.12);
+  border: 1px solid rgba(21, 94, 99, 0.2);
+}
+
+.admin-category-input-row {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.admin-category-icon-picker-btn {
+  border: 1px solid rgba(21, 94, 99, 0.22);
+  border-radius: 10px;
+  height: 38px;
+  background: rgba(255, 255, 255, 0.9);
+  font-size: 1rem;
+}
+
+.admin-category-icon-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  border: 1px solid rgba(21, 94, 99, 0.18);
+  border-radius: 10px;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.admin-category-icon-option {
+  border: 1px solid rgba(21, 94, 99, 0.2);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 1rem;
+  line-height: 1;
+  height: 34px;
+}
+
+.admin-category-icon-option.is-active {
+  border-color: rgba(242, 95, 41, 0.55);
+  background: rgba(255, 241, 233, 0.95);
+}
+
 .admin-map-popup {
   min-width: 190px;
   display: grid;
@@ -791,12 +847,24 @@
 }
 
 .admin-venue-pin span {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 16px;
   height: 16px;
   border-radius: 50%;
   border: 2px solid #fff;
   box-shadow: 0 5px 12px rgba(0, 0, 0, 0.26);
+}
+
+.admin-venue-pin-category-icon span {
+  width: 20px;
+  height: 20px;
+}
+
+.admin-venue-pin-category-icon span b {
+  font-size: 0.68rem;
+  line-height: 1;
 }
 
 .admin-venue-pin-approved span {
