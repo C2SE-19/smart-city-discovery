@@ -13,6 +13,11 @@ export async function createVenueRequest(payload) {
   return response.data;
 }
 
+export async function fetchVenueDetails(venueId) {
+  const response = await apiClient.get(`/venues/${venueId}`);
+  return response.data;
+}
+
 export async function detectWardRequest(payload) {
   const response = await apiClient.post('/gis/detect-ward', payload);
   return response.data;

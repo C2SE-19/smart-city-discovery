@@ -643,13 +643,13 @@ async function generateWardIdFromName(name) {
                 };
             }
 
-        const poolMax = Number(process.env.PG_POOL_MAX || 2);
+        const poolMax = Number(process.env.PG_POOL_MAX || 8);
         const poolIdleTimeoutMs = Number(process.env.PG_IDLE_TIMEOUT_MS || 10000);
         const poolConnectionTimeoutMs = Number(process.env.PG_CONNECTION_TIMEOUT_MS || 60000);
 
         const pool = new Pool({
             connectionString: process.env.DATABASE_URL,
-            max: Number.isFinite(poolMax) && poolMax > 0 ? poolMax : 2,
+            max: Number.isFinite(poolMax) && poolMax > 0 ? poolMax : 8,
             idleTimeoutMillis: Number.isFinite(poolIdleTimeoutMs) && poolIdleTimeoutMs > 0 ? poolIdleTimeoutMs : 10000,
             connectionTimeoutMillis: Number.isFinite(poolConnectionTimeoutMs) && poolConnectionTimeoutMs > 0 ? poolConnectionTimeoutMs : 60000,
             ssl: {
@@ -657,7 +657,7 @@ async function generateWardIdFromName(name) {
             }
         });
         console.log('ℹ️ PostgreSQL pool config:', {
-            max: Number.isFinite(poolMax) && poolMax > 0 ? poolMax : 2,
+            max: Number.isFinite(poolMax) && poolMax > 0 ? poolMax : 8,
             idleTimeoutMillis: Number.isFinite(poolIdleTimeoutMs) && poolIdleTimeoutMs > 0 ? poolIdleTimeoutMs : 10000,
             connectionTimeoutMillis: Number.isFinite(poolConnectionTimeoutMs) && poolConnectionTimeoutMs > 0 ? poolConnectionTimeoutMs : 60000
         });
@@ -947,6 +947,7 @@ async function generateWardIdFromName(name) {
             try {
                 const statusFilter = normalizeStatusList(req.query.status);
                 const effectiveStatuses = statusFilter.length ? statusFilter : ['approved'];
+                const compactMode = ['1', 'true', 'yes'].includes(String(req.query.compact || '').trim().toLowerCase());
                 const categoryId = normalizeCategoryId(req.query.categoryId);
                 const categoryIdsFilter = parsePositiveIntegerList(req.query.categoryIds);
                 const serviceIdsFilter = parsePositiveIntegerList(req.query.serviceIds);
@@ -1028,6 +1029,27 @@ async function generateWardIdFromName(name) {
                     `);
                 }
 
+                const compactMetadataSelect = 'NULL::jsonb AS metadata';
+
+                const fullMetadataSelect = 'venues.metadata';
+                const metadataSelect = compactMode ? compactMetadataSelect : `${fullMetadataSelect} AS metadata`;
+                const businessLicenseSelect = compactMode
+                    ? 'NULL::text AS business_license_image_url'
+                    : 'venues.business_license_image_url';
+                const moderationColumnsSelect = compactMode
+                    ? `
+                    NULL::timestamptz AS submitted_at,
+                    venues.approved_at,
+                    NULL::timestamptz AS rejected_at,
+                    NULL::text AS rejection_reason,
+                `
+                    : `
+                    venues.submitted_at,
+                    venues.approved_at,
+                    venues.rejected_at,
+                    venues.rejection_reason,
+                `;
+
                 const result = await pool.query(
                     `
                 SELECT
@@ -1045,13 +1067,10 @@ async function generateWardIdFromName(name) {
                     place_categories.name AS category_name,
                     place_categories.slug AS category_slug,
                     venues.cover_image_url,
-                    venues.business_license_image_url,
-                    venues.metadata,
+                    ${businessLicenseSelect},
+                    ${metadataSelect},
                     venues.status::text AS status,
-                    venues.submitted_at,
-                    venues.approved_at,
-                    venues.rejected_at,
-                    venues.rejection_reason,
+                    ${moderationColumnsSelect}
                     venues.created_at,
                     venues.updated_at
                 FROM venues
@@ -1882,11 +1901,36 @@ async function generateWardIdFromName(name) {
 
         async function listAdminWards(req, res) {
             try {
+                const wardColumnsResult = await pool.query(
+                    `
+                        SELECT column_name
+                        FROM information_schema.columns
+                        WHERE table_schema = 'public' AND table_name = 'wards'
+                    `
+                );
+
+                const wardColumns = new Set(wardColumnsResult.rows.map((row) => row.column_name));
+
+                if (!wardColumns.size) {
+                    return res.json([]);
+                }
+
+                const hasWardColumn = (columnName) => wardColumns.has(columnName);
+                const wardColumnOrNull = (columnName, alias = columnName) =>
+                    hasWardColumn(columnName) ? `${columnName} AS ${alias}` : `NULL AS ${alias}`;
+
                 const result = await pool.query(
                     `
-                SELECT ward_id, name, boundary, description, is_active, created_at, updated_at
+                SELECT
+                    ${wardColumnOrNull('ward_id')},
+                    ${wardColumnOrNull('name')},
+                    ${wardColumnOrNull('boundary')},
+                    ${wardColumnOrNull('description')},
+                    ${hasWardColumn('is_active') ? 'is_active' : 'true AS is_active'},
+                    ${wardColumnOrNull('created_at')},
+                    ${wardColumnOrNull('updated_at')}
                 FROM wards
-                ORDER BY name ASC
+                ORDER BY ${hasWardColumn('name') ? 'name' : 'ward_id'} ASC
             `
                 );
 
@@ -2008,6 +2052,7 @@ async function generateWardIdFromName(name) {
 
         async function listAdminVenues(req, res) {
             const statusFilter = normalizeStatusList(req.query.status);
+            const summaryMode = ['1', 'true', 'yes'].includes(String(req.query.summary || '').trim().toLowerCase());
             const wardId = String(req.query.wardId || '').trim();
             const categoryId = normalizeCategoryId(req.query.categoryId);
 
@@ -2015,58 +2060,120 @@ async function generateWardIdFromName(name) {
                 return res.status(400).json({ message: 'categoryId must be a positive integer' });
             }
 
-            const values = [];
-            const whereConditions = [];
-
-            if (statusFilter.length) {
-                values.push(statusFilter);
-                whereConditions.push(`venues.status::text = ANY($${values.length}::text[])`);
-            }
-
-            if (wardId) {
-                values.push(wardId);
-                whereConditions.push(`venues.ward_id = $${values.length}`);
-            }
-
-            if (categoryId !== null) {
-                values.push(categoryId);
-                whereConditions.push(`venues.category_id = $${values.length}`);
-            }
-
-            const whereClause = whereConditions.length ? `WHERE ${whereConditions.join(' AND ')}` : '';
-
             try {
+                const [venueColumnsResult, wardColumnsResult, placeCategoryColumnsResult] = await Promise.all([
+                    pool.query(
+                        `
+                            SELECT column_name
+                            FROM information_schema.columns
+                            WHERE table_schema = 'public' AND table_name = 'venues'
+                        `
+                    ),
+                    pool.query(
+                        `
+                            SELECT column_name
+                            FROM information_schema.columns
+                            WHERE table_schema = 'public' AND table_name = 'wards'
+                        `
+                    ),
+                    pool.query(
+                        `
+                            SELECT column_name
+                            FROM information_schema.columns
+                            WHERE table_schema = 'public' AND table_name = 'place_categories'
+                        `
+                    )
+                ]);
+
+                const venueColumns = new Set(venueColumnsResult.rows.map((row) => row.column_name));
+                const wardColumns = new Set(wardColumnsResult.rows.map((row) => row.column_name));
+                const placeCategoryColumns = new Set(placeCategoryColumnsResult.rows.map((row) => row.column_name));
+
+                if (!venueColumns.size) {
+                    return res.json([]);
+                }
+
+                const hasVenueColumn = (columnName) => venueColumns.has(columnName);
+                const hasWardColumn = (columnName) => wardColumns.has(columnName);
+                const hasPlaceCategoryColumn = (columnName) => placeCategoryColumns.has(columnName);
+
+                const values = [];
+                const whereConditions = [];
+
+                if (statusFilter.length && hasVenueColumn('status')) {
+                    values.push(statusFilter);
+                    whereConditions.push(`venues.status::text = ANY($${values.length}::text[])`);
+                }
+
+                if (wardId && hasVenueColumn('ward_id')) {
+                    values.push(wardId);
+                    whereConditions.push(`venues.ward_id = $${values.length}`);
+                }
+
+                if (categoryId !== null && hasVenueColumn('category_id')) {
+                    values.push(categoryId);
+                    whereConditions.push(`venues.category_id = $${values.length}`);
+                }
+
+                const whereClause = whereConditions.length ? `WHERE ${whereConditions.join(' AND ')}` : '';
+                const canJoinWards = hasVenueColumn('ward_id') && hasWardColumn('ward_id');
+                const canJoinPlaceCategories = hasVenueColumn('category_id') && hasPlaceCategoryColumn('id');
+
+                const venueColumnOrNull = (columnName, alias = columnName) =>
+                    hasVenueColumn(columnName) ? `venues.${columnName} AS ${alias}` : `NULL AS ${alias}`;
+
+                const statusColumn = hasVenueColumn('status')
+                    ? 'venues.status::text AS status'
+                    : `'pending'::text AS status`;
+                const wardNameColumn = canJoinWards && hasWardColumn('name') ? 'wards.name AS ward_name' : 'NULL AS ward_name';
+                const categoryNameColumn =
+                    canJoinPlaceCategories && hasPlaceCategoryColumn('name')
+                        ? 'place_categories.name AS category_name'
+                        : 'NULL AS category_name';
+                const categorySlugColumn =
+                    canJoinPlaceCategories && hasPlaceCategoryColumn('slug')
+                        ? 'place_categories.slug AS category_slug'
+                        : 'NULL AS category_slug';
+                const businessLicenseColumn = summaryMode
+                    ? 'NULL::text AS business_license_image_url'
+                    : venueColumnOrNull('business_license_image_url');
+                const metadataColumn = summaryMode ? 'NULL::jsonb AS metadata' : venueColumnOrNull('metadata');
+
+                const orderSubmittedAt = hasVenueColumn('submitted_at') ? 'venues.submitted_at' : 'NULL';
+                const orderCreatedAt = hasVenueColumn('created_at') ? 'venues.created_at' : 'NULL';
+                const orderId = hasVenueColumn('id') ? 'venues.id' : '0';
+
                 const result = await pool.query(
                     `
                 SELECT
-                    venues.id,
-                    venues.name,
-                    venues.title,
-                    venues.address,
-                    venues.description,
-                    venues.phone,
-                    venues.latitude,
-                    venues.longitude,
-                    venues.ward_id,
-                    wards.name AS ward_name,
-                    venues.category_id,
-                    place_categories.name AS category_name,
-                    place_categories.slug AS category_slug,
-                    venues.cover_image_url,
-                    venues.business_license_image_url,
-                    venues.metadata,
-                    venues.status::text AS status,
-                    venues.submitted_at,
-                    venues.approved_at,
-                    venues.rejected_at,
-                    venues.rejection_reason,
-                    venues.created_at,
-                    venues.updated_at
+                    ${venueColumnOrNull('id')},
+                    ${venueColumnOrNull('name')},
+                    ${venueColumnOrNull('title')},
+                    ${venueColumnOrNull('address')},
+                    ${venueColumnOrNull('description')},
+                    ${venueColumnOrNull('phone')},
+                    ${venueColumnOrNull('latitude')},
+                    ${venueColumnOrNull('longitude')},
+                    ${venueColumnOrNull('ward_id')},
+                    ${wardNameColumn},
+                    ${venueColumnOrNull('category_id')},
+                    ${categoryNameColumn},
+                    ${categorySlugColumn},
+                    ${venueColumnOrNull('cover_image_url')},
+                    ${businessLicenseColumn},
+                    ${metadataColumn},
+                    ${statusColumn},
+                    ${venueColumnOrNull('submitted_at')},
+                    ${venueColumnOrNull('approved_at')},
+                    ${venueColumnOrNull('rejected_at')},
+                    ${venueColumnOrNull('rejection_reason')},
+                    ${venueColumnOrNull('created_at')},
+                    ${venueColumnOrNull('updated_at')}
                 FROM venues
-                LEFT JOIN wards ON wards.ward_id = venues.ward_id
-                LEFT JOIN place_categories ON place_categories.id = venues.category_id
+                ${canJoinWards ? 'LEFT JOIN wards ON wards.ward_id = venues.ward_id' : ''}
+                ${canJoinPlaceCategories ? 'LEFT JOIN place_categories ON place_categories.id = venues.category_id' : ''}
                 ${whereClause}
-                ORDER BY COALESCE(venues.submitted_at, venues.created_at) DESC, venues.id DESC
+                ORDER BY COALESCE(${orderSubmittedAt}, ${orderCreatedAt}) DESC, ${orderId} DESC
             `,
                     values
                 );

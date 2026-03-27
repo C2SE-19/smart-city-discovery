@@ -20,6 +20,7 @@ import {
   updateAdminPlaceCategory,
   upsertAdminWard,
 } from '../../services/api/adminMapApi';
+import { fetchVenueDetails } from '../../services/api/venuesApi';
 import './AdminBoundaryPage.css';
 
 const DEFAULT_CENTER = [16.0471, 108.2068];
@@ -496,10 +497,29 @@ function wait(ms) {
 
 async function fetchAdminVenuesWithRetry(maxAttempts = 3) {
   let lastError = null;
+  const venueParams = { status: 'pending,approved', summary: 'true' };
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
-      return await fetchAdminVenues();
+      return await fetchAdminVenues(venueParams);
+    } catch (error) {
+      lastError = error;
+
+      if (attempt < maxAttempts) {
+        await wait(350 * attempt);
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+async function fetchAdminWardsWithRetry(maxAttempts = 3) {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await fetchAdminWards();
     } catch (error) {
       lastError = error;
 
@@ -544,6 +564,7 @@ function AdminBoundaryPage() {
   const [selectedVenueReviews, setSelectedVenueReviews] = useState([]);
   const [isLoadingSelectedVenueReviews, setIsLoadingSelectedVenueReviews] = useState(false);
   const [selectedVenueReviewsError, setSelectedVenueReviewsError] = useState('');
+  const [selectedVenueDetail, setSelectedVenueDetail] = useState(null);
   const [adminVenueMessage, setAdminVenueMessage] = useState('');
   const [adminVenueAttachments, setAdminVenueAttachments] = useState([]);
   const [sendingVenueMessageId, setSendingVenueMessageId] = useState(null);
@@ -615,10 +636,21 @@ function AdminBoundaryPage() {
     return approvedVenues;
   }, [activeMode, pendingModeVenues, categoryModeVenues, serviceModeVenues, approvedVenues]);
 
-  const selectedVenue = useMemo(
+  const selectedVenueSummary = useMemo(
     () => pendingModeVenues.find((venue) => Number(venue.id) === Number(selectedVenueId)) || null,
     [pendingModeVenues, selectedVenueId]
   );
+  const selectedVenue = useMemo(() => {
+    if (!selectedVenueSummary) {
+      return null;
+    }
+
+    if (Number(selectedVenueDetail?.id) === Number(selectedVenueSummary.id)) {
+      return { ...selectedVenueSummary, ...selectedVenueDetail };
+    }
+
+    return selectedVenueSummary;
+  }, [selectedVenueSummary, selectedVenueDetail]);
   const selectedWard = useMemo(
     () => wards.find((ward) => ward.ward_id === selectedWardId) || null,
     [wards, selectedWardId]
@@ -696,9 +728,12 @@ function AdminBoundaryPage() {
     setLoadWarning('');
 
     try {
-      const [wardResult, venueResult, categoryResult, serviceResult] = await Promise.allSettled([
-        fetchAdminWards(),
+      const [wardResult, venueResult] = await Promise.allSettled([
+        fetchAdminWardsWithRetry(),
         fetchAdminVenuesWithRetry(),
+      ]);
+
+      const [categoryResult, serviceResult] = await Promise.allSettled([
         fetchAdminPlaceCategories(),
         fetchAdminMerchantServices(),
       ]);
@@ -716,8 +751,7 @@ function AdminBoundaryPage() {
       if (venueResult.status === 'fulfilled') {
         setVenues(Array.isArray(venueResult.value) ? venueResult.value : []);
       } else {
-        setVenues([]);
-        optionalFailures.push('venues');
+        // Keep previously loaded venues if a transient request fails during startup.
       }
 
       if (categoryResult.status === 'fulfilled') {
@@ -749,7 +783,7 @@ function AdminBoundaryPage() {
   }
 
   async function refreshWardsAndVenues() {
-    const [wardData, venueData] = await Promise.all([fetchAdminWards(), fetchAdminVenuesWithRetry()]);
+    const [wardData, venueData] = await Promise.all([fetchAdminWardsWithRetry(), fetchAdminVenuesWithRetry()]);
     setWards(wardData);
     setVenues(venueData);
   }
@@ -819,6 +853,7 @@ function AdminBoundaryPage() {
     setSelectedVenueReviewSort('newest');
     setSelectedVenueReviews([]);
     setSelectedVenueReviewsError('');
+    setSelectedVenueDetail(null);
     setAdminVenueMessage('');
 
     setAdminVenueAttachments((currentAttachments) => {
@@ -830,6 +865,36 @@ function AdminBoundaryPage() {
 
       return [];
     });
+  }, [activeMode, selectedVenueId]);
+
+  useEffect(() => {
+    if (activeMode !== 'pending' || !selectedVenueId) {
+      return;
+    }
+
+    let isMounted = true;
+
+    async function loadSelectedVenueDetail() {
+      try {
+        const detail = await fetchVenueDetails(selectedVenueId);
+
+        if (!isMounted) {
+          return;
+        }
+
+        setSelectedVenueDetail(detail || null);
+      } catch {
+        if (isMounted) {
+          setSelectedVenueDetail(null);
+        }
+      }
+    }
+
+    loadSelectedVenueDetail();
+
+    return () => {
+      isMounted = false;
+    };
   }, [activeMode, selectedVenueId]);
 
   useEffect(() => {
@@ -879,7 +944,15 @@ function AdminBoundaryPage() {
       return;
     }
 
+    let pollingInFlight = false;
+
     const intervalId = window.setInterval(async () => {
+      if (pollingInFlight) {
+        return;
+      }
+
+      pollingInFlight = true;
+
       try {
         const freshVenues = await fetchAdminVenuesWithRetry(2);
         setVenues(freshVenues);
@@ -887,8 +960,10 @@ function AdminBoundaryPage() {
         setLoadWarning((currentWarning) => (/venue/i.test(String(currentWarning || '')) ? '' : currentWarning));
       } catch {
         // Polling failures should be silent to avoid disrupting moderation workflow.
+      } finally {
+        pollingInFlight = false;
       }
-    }, 8000);
+    }, 12000);
 
     return () => {
       window.clearInterval(intervalId);
