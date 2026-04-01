@@ -648,14 +648,16 @@ async function generateWardIdFromName(name) {
         const poolConnectionTimeoutMs = Number(process.env.PG_CONNECTION_TIMEOUT_MS || 60000);
 
         const pool = new Pool({
-            connectionString: process.env.DATABASE_URL,
-            max: Number.isFinite(poolMax) && poolMax > 0 ? poolMax : 8,
-            idleTimeoutMillis: Number.isFinite(poolIdleTimeoutMs) && poolIdleTimeoutMs > 0 ? poolIdleTimeoutMs : 10000,
-            connectionTimeoutMillis: Number.isFinite(poolConnectionTimeoutMs) && poolConnectionTimeoutMs > 0 ? poolConnectionTimeoutMs : 60000,
-            ssl: {
-                rejectUnauthorized: false
-            }
-        });
+  host: 'localhost',
+  port: 5433,
+  user: 'root',
+  password: 'password123',
+  database: 'smartcity_db',
+  max: poolMax,
+  idleTimeoutMillis: poolIdleTimeoutMs,
+  connectionTimeoutMillis: poolConnectionTimeoutMs,
+  ssl: false
+});
         console.log('ℹ️ PostgreSQL pool config:', {
             max: Number.isFinite(poolMax) && poolMax > 0 ? poolMax : 8,
             idleTimeoutMillis: Number.isFinite(poolIdleTimeoutMs) && poolIdleTimeoutMs > 0 ? poolIdleTimeoutMs : 10000,
