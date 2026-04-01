@@ -1,7 +1,17 @@
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 const { Pool } = require('pg');
-const env = require('./env');
 
-const pool = new Pool(env.database);
+const pool = new Pool({
+  host: 'localhost',
+  port: 5433,
+  user: 'root',
+  password: 'password123',
+  database: 'smartcity_db',
+
+  // 👇 BẮT BUỘC thêm dòng này
+  ssl: false,
+  sslmode: 'disable'
+});
 
 async function query(text, params = []) {
   return pool.query(text, params);
@@ -17,3 +27,4 @@ module.exports = {
   query,
   verifyConnection
 };
+console.log(env.database);

@@ -6,11 +6,13 @@ require('dotenv').config();
 
 async function runMigration() {
   const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: {
-      rejectUnauthorized: false
-    }
-  });
+  host: 'localhost',
+  port: 5433,
+  user: 'root',
+  password: 'password123',
+  database: 'smartcity_db',
+  ssl: false
+});
 
   try {
     const migrationFiles = [
