@@ -57,8 +57,45 @@ export async function fetchVenueDetails(venueId) {
 export async function fetchVenueReviews(venueId, params = {}) {
   const response = await apiClient.get(`/venues/${venueId}/reviews`, {
     params,
+export async function fetchVenueCommunityBundle(venueId) {
+  const response = await apiClient.get(`/venues/${venueId}/community`);
+  return response.data;
+}
+
+export async function fetchVenueOpeningHoursRealtime(venueId) {
+  const response = await apiClient.get(`/venues/${venueId}/opening-hours`);
+  return response.data;
+}
+
+export async function createVenueReview(venueId, payload) {
+  const response = await apiClient.post(`/venues/${venueId}/reviews`, payload, {
+    headers: {
+      'Content-Type': 'multipart/form-data'
+    }
   });
 
+  return response.data;
+}
+
+export async function toggleVenueReviewLike(venueId, reviewId) {
+  const response = await apiClient.post(`/venues/${venueId}/reviews/${reviewId}/like`);
+  return response.data;
+}
+
+export async function createVenueReviewReply(venueId, reviewId, payload) {
+  const isFormData = typeof FormData !== 'undefined' && payload instanceof FormData;
+  const response = await apiClient.post(`/venues/${venueId}/reviews/${reviewId}/replies`, payload, isFormData
+    ? {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    }
+    : undefined);
+  return response.data;
+}
+
+export async function deleteVenueReview(venueId, reviewId) {
+  const response = await apiClient.delete(`/venues/${venueId}/reviews/${reviewId}`);
   return response.data;
 }
 

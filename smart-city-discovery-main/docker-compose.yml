@@ -1,0 +1,16 @@
+services:
+  postgres-postgis:
+    image: postgis/postgis:16-3.4      # Nâng cấp lên bản 16 ở đây
+    container_name: smart_city_db
+    restart: always
+    environment:
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: password123
+      POSTGRES_DB: smartcity_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
