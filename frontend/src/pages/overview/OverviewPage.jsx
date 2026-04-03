@@ -623,11 +623,12 @@ function OverviewPage() {
   };
 
   const handleExploreVenue = (venue) => {
-    navigate('/discovery', {
-      state: {
-        focusVenueId: venue.id
-      }
-    });
+    if (!venue?.id) {
+      navigate('/discovery');
+      return;
+    }
+
+    navigate(`/venues/${venue.id}`);
   };
 
   const registerSliderRef = (sectionId) => (node) => {
