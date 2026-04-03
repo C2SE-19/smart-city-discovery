@@ -57,12 +57,29 @@ apiClient.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error?.config;
+    const statusCode = Number(error?.response?.status);
+
+    // Auto-logout on 403 (user account suspended/blocked/paused)
+    // Any 403 means user status is not active
+    if (statusCode === 403) {
+      // Clear auth from localStorage
+      console.log('🔴 403 detected - clearing auth and redirecting to login');
+      console.log('Response message:', error?.response?.data?.message);
+      localStorage.removeItem('auth');
+      localStorage.removeItem('user');
+      localStorage.removeItem('token');
+      
+      // Redirect to login with message
+      const message = error?.response?.data?.message || 'Tài khoản của bạn không còn hoạt động.';
+      console.log('Redirecting to login with message:', message);
+      window.location.href = `/login?error=${encodeURIComponent(message)}`;
+      return Promise.reject(error);
+    }
 
     if (!originalRequest || originalRequest.__baseFallbackRetried) {
       return Promise.reject(error);
     }
 
-    const statusCode = Number(error?.response?.status);
     const hasResponse = Boolean(error?.response);
     const shouldAttemptFallback = !hasResponse || statusCode === 404 || statusCode === 405;
 
