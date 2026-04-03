@@ -65,15 +65,12 @@ function extractBearerToken(req) {
     return authorizationHeader.slice(7).trim();
 }
 
-async function authenticateRequest(req, res, next) {
-    const authHeader = req.headers.authorization || '';
-    console.log('authenticateRequest header:', authHeader);
 function resolveJwtUserId(payload) {
     const rawUserId = payload?.sub ?? payload?.id ?? payload?.userId ?? payload?.user_id ?? null;
     return rawUserId === null || rawUserId === undefined ? null : String(rawUserId).trim();
 }
 
-function authenticateRequest(req, res, next) {
+async function authenticateRequest(req, res, next) {
     const token = extractBearerToken(req);
 
     if (!token) {
