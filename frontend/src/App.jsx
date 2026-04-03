@@ -118,6 +118,7 @@ function App() {
 
         <Route path={APP_ROUTES.LOGIN} element={<LoginPage />} />
         <Route path={APP_ROUTES.REGISTER} element={<RegisterPage />} />
+        <Route path={APP_ROUTES.CITY_MAP} element={<CityMapPage />} />
 
         <Route element={<WorkspaceLayout />}>
           <Route path={APP_ROUTES.DISCOVERY} element={<DiscoveryPage />} />
