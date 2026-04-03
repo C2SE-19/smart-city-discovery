@@ -2227,6 +2227,82 @@ async function generateWardIdFromName(name) {
             }
         }
 
+        async function listPublicVenueReviews(req, res) {
+            const venueId = Number(req.params.venueId);
+            const sort = String(req.query.sort || 'newest').trim().toLowerCase();
+            const limit = normalizePaginationValue(req.query.limit, 20, { min: 1, max: 100 });
+
+            if (!Number.isFinite(venueId)) {
+                return res.status(400).json({ message: 'Invalid venue id' });
+            }
+
+            const sortClauseByType = {
+                newest: 'r.created_at DESC, r.id DESC',
+                oldest: 'r.created_at ASC, r.id ASC',
+                rating_high: 'r.rating DESC, r.created_at DESC',
+                rating_low: 'r.rating ASC, r.created_at DESC'
+            };
+
+            const sortClause = sortClauseByType[sort] || sortClauseByType.newest;
+
+            try {
+                const venueResult = await pool.query(
+                    `
+                        SELECT id, status::text AS status
+                        FROM venues
+                        WHERE id = $1
+                        LIMIT 1
+                    `,
+                    [venueId]
+                );
+
+                if (!venueResult.rows.length) {
+                    return res.status(404).json({ message: 'Venue not found' });
+                }
+
+                if (String(venueResult.rows[0].status || '').toLowerCase() !== 'approved') {
+                    return res.status(404).json({ message: 'Venue not found' });
+                }
+
+                const reviewResult = await pool.query(
+                    `
+                        SELECT
+                            r.id,
+                            r.rating,
+                            r.comment,
+                            r.author_profile_id,
+                            r.created_at,
+                            r.updated_at,
+                            COALESCE(p.full_name, p.display_name, p.username, 'Anonymous') AS author_name
+                        FROM reviews AS r
+                        LEFT JOIN profiles AS p ON p.id = r.author_profile_id
+                        WHERE r.venue_id = $1
+                        ORDER BY ${sortClause}
+                        LIMIT $2
+                    `,
+                    [venueId, limit]
+                );
+
+                return res.json({
+                    items: reviewResult.rows,
+                    total: reviewResult.rows.length,
+                    sort,
+                    limit
+                });
+            } catch (error) {
+                if (['42P01', '42703', '42883'].includes(error?.code)) {
+                    return res.json({
+                        items: [],
+                        total: 0,
+                        sort,
+                        limit
+                    });
+                }
+
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
         // API 2: Receive venue coordinates, use AI to detect Ward and save to Database
         async function createVenueSubmission(req, res) {
             const {
@@ -4620,6 +4696,8 @@ async function generateWardIdFromName(name) {
         registerVersionedRoute('get', '/merchant-services', listPublicMerchantServices);
         registerVersionedRoute('get', '/feedback/types', listPublicFeedbackTypes);
         registerVersionedRoute('get', '/venues', listPublicVenues);
+        registerVersionedRoute('get', '/venues/:venueId', authenticateOptional, getVenueDetails);
+        registerVersionedRoute('get', '/venues/:venueId/reviews', listPublicVenueReviews);
         registerVersionedRoute('get', '/venues/:venueId', getVenueDetails);
         registerVersionedRoute('get', '/venues/:venueId/community', authenticateOptional, getVenueCommunityBundle);
         registerVersionedRoute('get', '/venues/:venueId/opening-hours', getVenueOpeningHoursRealtime);
