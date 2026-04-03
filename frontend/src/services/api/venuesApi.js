@@ -57,6 +57,10 @@ export async function fetchVenueDetails(venueId) {
 export async function fetchVenueReviews(venueId, params = {}) {
   const response = await apiClient.get(`/venues/${venueId}/reviews`, {
     params,
+  });
+  return response.data;
+}
+
 export async function fetchVenueCommunityBundle(venueId) {
   const response = await apiClient.get(`/venues/${venueId}/community`);
   return response.data;
