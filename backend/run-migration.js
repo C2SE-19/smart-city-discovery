@@ -28,7 +28,8 @@ async function runMigration() {
       '20260323_feedback_management_extensions.sql',
       '20260321_create_user_favorites.sql',
       '20260322_create_merchant_services.sql',
-      '20260318_enable_public_rls_baseline.sql'
+      '20260318_enable_public_rls_baseline.sql',
+      '20260403_add_user_status_fields.sql'
     ];
 
     for (const migrationFile of migrationFiles) {

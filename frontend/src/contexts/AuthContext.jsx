@@ -99,11 +99,53 @@ export function AuthProvider({ children }) {
           });
         }
       } catch (error) {
-        // Silent: keep existing user if refresh fails.
+        const status = error?.response?.status;
+        if (status === 401 || status === 403) {
+          console.log('AuthContext: token invalid or user paused/blocked, logging out');
+          setUser(null);
+          setToken('');
+          localStorage.removeItem(AUTH_STORAGE_KEY);
+          window.location.assign('/login');
+          return;
+        }
+
+        // Silent: keep existing user if refresh fails for other reasons.
       }
     };
 
-    fetchProfile();
+    const fetchSelfAndStartPolling = async () => {
+      await fetchProfile();
+      const intervalId = setInterval(async () => {
+        try {
+          await axios.get(`${apiUrl}/auth/verify`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+        } catch (error) {
+          const status = error?.response?.status;
+          if (status === 401 || status === 403) {
+            console.log('AuthContext: verify token failed, logout now');
+            setUser(null);
+            setToken('');
+            localStorage.removeItem(AUTH_STORAGE_KEY);
+            window.location.assign('/login');
+          }
+        }
+      }, 2000); 
+
+      return intervalId;
+    };
+
+    let intervalId = null;
+
+    (async () => {
+      intervalId = await fetchSelfAndStartPolling();
+    })();
+
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
   }, [token]);
 
   const value = useMemo(

@@ -13,6 +13,7 @@ import translations from "../../constants/translations";
 import { ROLES } from "../../constants/roles";
 import { APP_ROUTES } from "../../constants/routes";
 import authService from "../../services/authService";
+import { apiClient } from "../../services/api/client";
 
 export default function LoginPage() {
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
@@ -36,6 +37,17 @@ export default function LoginPage() {
 
     return APP_ROUTES.HOME;
   };
+
+  // Check URL for error message from logout redirect
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const errorMsg = params.get('error');
+    if (errorMsg) {
+      setError(decodeURIComponent(errorMsg));
+      // Clean up URL
+      window.history.replaceState({}, document.title, '/login');
+    }
+  }, []);
 
   // Load Facebook SDK
   useEffect(() => {
@@ -74,6 +86,36 @@ export default function LoginPage() {
     };
   }, []);
 
+  // Check auth status on component mount - verify user is still active
+  useEffect(() => {
+    const verifyAuthStatus = async () => {
+      try {
+        const authData = localStorage.getItem('auth');
+        console.log('🔍 Verifying auth on login page load, auth data:', !!authData);
+        if (!authData) return; // No auth token, stay on login page
+
+        // Call verify endpoint to check if token is valid and user is still active
+        // If 403 (paused/blocked), axios interceptor will auto-logout and redirect
+        console.log('📞 Calling /auth/verify endpoint...');
+        await apiClient.get('/auth/verify');
+        
+        console.log('✅ Auth verified - user is active, redirecting to dashboard');
+        // If we get here, auth is valid - redirect to dashboard
+        const user = JSON.parse(localStorage.getItem('user'));
+        navigate(getRedirectPathByRole(user?.role));
+      } catch (err) {
+        // 403 handled by axios interceptor (auto-logout and redirect)
+        // Any other error: stay on login page
+        console.log('⚠️ Auth verification error (expected if not logged in):', err?.response?.status);
+        if (err?.response?.status !== 403) {
+          console.log('Auth verification check complete');
+        }
+      }
+    };
+
+    verifyAuthStatus();
+  }, [navigate]);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
@@ -82,7 +124,6 @@ export default function LoginPage() {
     if (!username.trim() || !password.trim()) {
       const errorMsg = "Please enter username and password";
       setError(errorMsg);
-      alert(errorMsg);
       return;
     }
 
@@ -97,9 +138,9 @@ export default function LoginPage() {
       authLogin(response.user, response.token);
       navigate(getRedirectPathByRole(response?.user?.role));
     } catch (err) {
-      const errorMsg = err.response?.data?.message || "Login failed. Please try again.";
+      // authService throws err.response.data directly
+      const errorMsg = err?.message || err?.data?.message || "Login failed. Please try again.";
       setError(errorMsg);
-      alert(errorMsg);
       setLoading(false);
     }
   };
@@ -174,6 +215,21 @@ export default function LoginPage() {
           <img src={logo} className="logo" />
 
           <form onSubmit={handleSubmit}>
+            {error && (
+              <div style={{
+                color: '#991b1b',
+                fontSize: '14px',
+                marginBottom: '15px',
+                padding: '12px',
+                backgroundColor: '#fee2e2',
+                borderRadius: '8px',
+                borderLeft: '4px solid #dc2626',
+                fontWeight: '500'
+              }}>
+                {error}
+              </div>
+            )}
+
             <label>{t.auth.username}</label>
             <div className="input-group">
               <FaUser className="input-icon" />
