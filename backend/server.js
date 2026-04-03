@@ -65,7 +65,9 @@ function extractBearerToken(req) {
     return authorizationHeader.slice(7).trim();
 }
 
-function authenticateRequest(req, res, next) {
+async function authenticateRequest(req, res, next) {
+    const authHeader = req.headers.authorization || '';
+    console.log('authenticateRequest header:', authHeader);
     const token = extractBearerToken(req);
 
     if (!token) {
@@ -74,6 +76,7 @@ function authenticateRequest(req, res, next) {
 
     try {
         const payload = jwt.verify(token, jwtSecret);
+        console.log('authenticateRequest payload:', payload);
 
         req.authUser = {
             id: payload.sub,
@@ -87,14 +90,100 @@ function authenticateRequest(req, res, next) {
             role: payload.role
         };
 
+        const statusResult = await pool.query(
+            'SELECT status, pause_until, blocked_reason FROM users WHERE id = $1',
+            [payload.sub]
+        );
+
+        if (statusResult.rows.length === 0) {
+            return res.status(401).json({ message: 'Account not found' });
+        }
+
+        const user = statusResult.rows[0];
+        const status = (user.status || 'active').toLowerCase();
+
+        if (status === 'blocked') {
+            const reason = user.blocked_reason || 'Vi phạm điều khoản sử dụng.';
+            return res.status(403).json({ message: `Tài khoản đã bị khóa vĩnh viễn: ${reason}` });
+        }
+
+        if (status === 'paused') {
+            const pauseUntil = user.pause_until ? new Date(user.pause_until) : null;
+            const now = new Date();
+
+            if (pauseUntil && pauseUntil > now) {
+                return res.status(403).json({ message: `Tài khoản đang bị tạm dừng đến ${pauseUntil.toLocaleString()}` });
+            }
+
+            await pool.query(`UPDATE users SET status = 'active', pause_until = NULL WHERE id = $1`, [payload.sub]);
+        }
+
         return next();
     } catch (error) {
+        console.error('authenticateRequest error:', error);
         return res.status(401).json({ message: 'Invalid or expired token' });
     }
 }
 
 function getAuthToken(req) {
     return extractBearerToken(req) || null;
+}
+
+// Middleware to check if user account is active (not paused or blocked)
+async function checkUserStatus(req, res, next) {
+    try {
+        if (!req.user || !req.user.id) {
+            console.log('⚠️ checkUserStatus: User not found in request');
+            return res.status(401).json({ message: 'User not found in request' });
+        }
+
+        const userId = req.user.id;
+        console.log('🔍 checkUserStatus: Checking user:', userId);
+        const result = await pool.query(
+            'SELECT status, pause_until, blocked_reason FROM users WHERE id = $1',
+            [userId]
+        );
+
+        if (result.rows.length === 0) {
+            console.log('⚠️ checkUserStatus: User account not found:', userId);
+            return res.status(404).json({ message: 'User account not found' });
+        }
+
+        const user = result.rows[0];
+        const status = (user.status || 'active').toLowerCase();
+        console.log('📊 checkUserStatus: User status:', status, 'pause_until:', user.pause_until);
+
+        if (status === 'blocked') {
+            const reason = user.blocked_reason || 'Tài khoản đã bị khóa';
+            console.log('🔴 checkUserStatus: User is BLOCKED -', reason);
+            return res.status(403).json({ message: `Tài khoản đã bị khóa vĩnh viễn: ${reason}` });
+        }
+
+        if (status === 'paused') {
+            const pauseUntil = user.pause_until ? new Date(user.pause_until) : null;
+            const now = new Date();
+
+            if (pauseUntil && pauseUntil > now) {
+                console.log('🟡 checkUserStatus: User is PAUSED until', pauseUntil.toLocaleString());
+                return res.status(403).json({ 
+                    message: `Tài khoản đang bị tạm dừng đến ${pauseUntil.toLocaleString()}. Vui lòng thử lại sau.` 
+                });
+            }
+
+            // If pause expired, auto-restore to active
+            console.log('✅ checkUserStatus: Pause expired, restoring to active');
+            await pool.query(
+                `UPDATE users SET status = 'active', pause_until = NULL WHERE id = $1`,
+                [userId]
+            );
+        }
+
+        console.log('✅ checkUserStatus: User is ACTIVE, proceeding');
+        return next();
+    } catch (err) {
+        console.error('checkUserStatus error:', err);
+        return res.status(500).json({ message: 'Server error checking account status' });
+    }
 }
 
 function authenticateOptional(req, res, next) {
@@ -137,10 +226,262 @@ function requireAdminRole(req, res, next) {
 
 function requireAuth(req, res, next) {
     if (!req.user?.id) {
-        return res.status(401).json({ message: 'B???n c???n ????ng nh???p ????? th???c hi???n thao t??c n??y.' });
+        return res.status(401).json({ message: 'Bạn cần đăng nhập để thực hiện thao tác này.' });
     }
 
     return next();
+}
+
+async function listAdminUsers(req, res) {
+    try {
+        const searchTerm = (req.query.q || '').trim().toLowerCase();
+        const roleFilter = (req.query.role || '').trim().toLowerCase();
+
+        const conditions = [];
+        const params = [];
+
+        if (searchTerm) {
+            conditions.push(
+                `(LOWER(fullname) LIKE $${params.length + 1} OR LOWER(username) LIKE $${params.length + 2} OR LOWER(email) LIKE $${params.length + 3})`
+            );
+            const wildcard = `%${searchTerm}%`;
+            params.push(wildcard, wildcard, wildcard);
+        }
+
+        if (roleFilter && roleFilter !== 'all') {
+            conditions.push(`role = $${params.length + 1}`);
+            params.push(roleFilter);
+        }
+
+        const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+        const query = `
+            SELECT id, fullname, username, email, phone, address, role, gender, status, pause_until, blocked_reason, updated_at
+            FROM users
+            ${whereClause}
+            ORDER BY CASE WHEN role = 'admin' THEN 0 ELSE 1 END, updated_at DESC
+        `;
+
+        const result = await pool.query(query, params);
+
+        return res.json({ success: true, users: result.rows });
+    } catch (err) {
+        console.error('Admin list users error:', err);
+        return res.status(500).json({ message: 'Server error', details: err.message });
+    }
+}
+
+async function createAdminUser(req, res) {
+    const { fullname, username, email, password, phone, address, role, gender } = req.body;
+
+    if (!fullname || !username || !email || !password || !phone || !address) {
+        return res.status(400).json({ message: 'Vui lòng cung cấp đầy đủ thông tin.' });
+    }
+
+    const emailRegex = /^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$/;
+    if (!emailRegex.test(email)) {
+        return res.status(400).json({ message: 'Email không hợp lệ' });
+    }
+
+    const phoneRegex = /^\d{9,15}$/;
+    if (!phoneRegex.test(phone)) {
+        return res.status(400).json({ message: 'Số điện thoại phải là 9-15 chữ số' });
+    }
+
+    const passwordErrors = [];
+    if (password.length < 8) passwordErrors.push('ít nhất 8 ký tự');
+    if (!/[A-Z]/.test(password)) passwordErrors.push('1 chữ hoa');
+    if (!/[a-z]/.test(password)) passwordErrors.push('1 chữ thường');
+    if (!/[0-9]/.test(password)) passwordErrors.push('1 chữ số');
+    if (!/[!@#\$%\^&\*]/.test(password)) passwordErrors.push('1 ký tự đặc biệt (!@#$%^&*)');
+
+    if (passwordErrors.length > 0) {
+        return res.status(400).json({ message: `Mật khẩu phải có ${passwordErrors.join(', ')}` });
+    }
+
+    try {
+        const existingEmail = await pool.query('SELECT 1 FROM users WHERE LOWER(email) = LOWER($1)', [email]);
+        if (existingEmail.rows.length > 0) {
+            return res.status(400).json({ message: 'Email đã tồn tại' });
+        }
+
+        const existingUsername = await pool.query('SELECT 1 FROM users WHERE LOWER(username) = LOWER($1)', [username]);
+        if (existingUsername.rows.length > 0) {
+            return res.status(400).json({ message: 'Username đã tồn tại' });
+        }
+
+        const existingPhone = await pool.query('SELECT 1 FROM users WHERE phone = $1', [phone]);
+        if (existingPhone.rows.length > 0) {
+            return res.status(400).json({ message: 'Số điện thoại đã tồn tại' });
+        }
+
+        const existingAddress = await pool.query('SELECT 1 FROM users WHERE LOWER(address) = LOWER($1)', [address]);
+        if (existingAddress.rows.length > 0) {
+            return res.status(400).json({ message: 'Địa chỉ đã tồn tại' });
+        }
+
+        const hashedPassword = await bcryptjs.hash(password, 10);
+
+        const newRole = role && ['admin', 'merchant', 'user'].includes(role.toLowerCase()) ? role.toLowerCase() : 'user';
+
+        const query = `
+            INSERT INTO users (fullname, username, email, password, phone, address, role, gender)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            RETURNING id, fullname, username, email, phone, address, role, gender, status, pause_until;
+        `;
+
+        const insertResult = await pool.query(query, [fullname, username, email, hashedPassword, phone, address, newRole, gender]);
+        const createdUser = insertResult.rows[0];
+
+        return res.status(201).json({ message: 'User tạo thành công', user: createdUser });
+    } catch (err) {
+        console.error('Create admin user error:', err);
+        return res.status(500).json({ message: 'Server error', details: err.message });
+    }
+}
+
+async function updateAdminUserRole(req, res) {
+    const userId = req.params.userId;
+    const { role, fullname, username, email, password, phone, address, gender, status, blocked_reason, pause_until } = req.body;
+
+    if (!userId || typeof userId !== 'string') {
+        return res.status(400).json({ message: 'Invalid user ID.' });
+    }
+
+    if (role && !['admin', 'merchant', 'user'].includes(role.toLowerCase())) {
+        return res.status(400).json({ message: 'Invalid role value.' });
+    }
+
+    if (status && !['active', 'paused', 'blocked'].includes(status.toLowerCase())) {
+        return res.status(400).json({ message: 'Invalid status value.' });
+    }
+
+    if (role && (!fullname || !email)) {
+        return res.status(400).json({ message: 'fullname and email are required to update role.' });
+    }
+
+    const updates = [];
+    const params = [];
+
+    if (role) {
+        updates.push(`role = $${params.length + 1}`);
+        params.push(role.toLowerCase());
+    }
+    if (fullname) {
+        updates.push(`fullname = $${params.length + 1}`);
+        params.push(fullname);
+    }
+    if (username) {
+        updates.push(`username = $${params.length + 1}`);
+        params.push(username);
+    }
+    if (email) {
+        updates.push(`email = $${params.length + 1}`);
+        params.push(email);
+    }
+    if (typeof phone !== 'undefined') {
+        updates.push(`phone = $${params.length + 1}`);
+        params.push(phone || null);
+    }
+    if (typeof address !== 'undefined') {
+        updates.push(`address = $${params.length + 1}`);
+        params.push(address || null);
+    }
+    if (typeof gender !== 'undefined') {
+        updates.push(`gender = $${params.length + 1}`);
+        params.push(gender || null);
+    }
+    if (status) {
+        updates.push(`status = $${params.length + 1}`);
+        params.push(status.toLowerCase());
+    }
+    if (password) {
+        const passwordErrors = [];
+        if (password.length < 8) passwordErrors.push('ít nhất 8 ký tự');
+        if (!/[A-Z]/.test(password)) passwordErrors.push('1 chữ hoa');
+        if (!/[a-z]/.test(password)) passwordErrors.push('1 chữ thường');
+        if (!/[0-9]/.test(password)) passwordErrors.push('1 chữ số');
+        if (!/[!@#\$%\^&\*]/.test(password)) passwordErrors.push('1 ký tự đặc biệt (!@#$%^&*)');
+
+        if (passwordErrors.length > 0) {
+            return res.status(400).json({ message: `Mật khẩu phải có ${passwordErrors.join(', ')}` });
+        }
+
+        const hashedPassword = await bcryptjs.hash(password, 10);
+        updates.push(`password = $${params.length + 1}`);
+        params.push(hashedPassword);
+    }
+    
+    // Handle blocked_reason - either explicitly sent or auto-clear when status = 'active'
+    const hasBlockedReasonInRequest = 'blocked_reason' in req.body;
+    if (hasBlockedReasonInRequest) {
+        updates.push(`blocked_reason = $${params.length + 1}`);
+        params.push(blocked_reason); // Can be null to clear
+    } else if (status && status.toLowerCase() === 'active') {
+        // Auto-clear when changing to active (if not explicitly sent)
+        updates.push(`blocked_reason = NULL`);
+    }
+    
+    // Handle pause_until - either explicitly sent or auto-clear when status = 'active'
+    const hasPauseUntilInRequest = 'pause_until' in req.body;
+    if (hasPauseUntilInRequest) {
+        updates.push(`pause_until = $${params.length + 1}`);
+        params.push(pause_until); // Can be null to clear
+    } else if (status && status.toLowerCase() === 'active') {
+        // Auto-clear when changing to active (if not explicitly sent)
+        updates.push(`pause_until = NULL`);
+    } else if (pause_until && !status) {
+        // If pause_until sent but status not sent, auto-set to paused
+        updates.push(`pause_until = $${params.length + 1}`);
+        params.push(pause_until);
+        updates.push(`status = 'paused'`);
+    }
+
+    if (!updates.length) {
+        return res.status(400).json({ message: 'At least one field is required to update.' });
+    }
+
+    const sql = `UPDATE users SET ${updates.join(', ')}, updated_at = current_timestamp WHERE id = $${params.length + 1} RETURNING id, fullname, username, email, phone, address, role, gender, status, pause_until, blocked_reason`;
+    params.push(userId);
+
+    try {
+        const result = await pool.query(sql, params);
+
+        if (!result.rows.length) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        return res.json({ success: true, user: result.rows[0] });
+    } catch (err) {
+        console.error('Admin update user role error:', err);
+        return res.status(500).json({ message: 'Server error' });
+    }
+}
+
+async function deleteAdminUserById(req, res) {
+    const userId = req.params.userId;
+
+    if (!userId || typeof userId !== 'string') {
+        return res.status(400).json({ message: 'Invalid user ID.' });
+    }
+
+    try {
+        const result = await pool.query(
+            `DELETE FROM users
+             WHERE id = $1
+             RETURNING id`,
+            [userId]
+        );
+
+        if (!result.rows.length) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        return res.json({ success: true, message: 'User deleted successfully' });
+    } catch (err) {
+        console.error('Admin delete user error:', err);
+        return res.status(500).json({ message: 'Server error' });
+    }
 }
 
 function normalizeStatusList(statusInput) {
@@ -3619,6 +3960,12 @@ async function generateWardIdFromName(name) {
         registerVersionedRoute('post', '/admin/feedback/reports/:feedbackId/reply', authenticateRequest, requireAdminRole, replyAdminFeedbackReport);
         registerVersionedRoute('delete', '/admin/feedback/reports/:feedbackId', authenticateRequest, requireAdminRole, deleteAdminFeedbackReport);
 
+        registerVersionedRoute('get', '/users', authenticateRequest, requireAdminRole, listAdminUsers);
+        registerVersionedRoute('get', '/admin/users', authenticateRequest, checkUserStatus, requireAdminRole, listAdminUsers);
+        registerVersionedRoute('post', '/admin/users', authenticateRequest, checkUserStatus, requireAdminRole, createAdminUser);
+        registerVersionedRoute('put', '/admin/users/:userId', authenticateRequest, checkUserStatus, requireAdminRole, updateAdminUserRole);
+        registerVersionedRoute('delete', '/admin/users/:userId', authenticateRequest, checkUserStatus, requireAdminRole, deleteAdminUserById);
+
         // ==========================================
         // REGISTRATION AND LOGIN APIS
         // ==========================================
@@ -3714,6 +4061,24 @@ async function generateWardIdFromName(name) {
                     return res.status(401).json({ message: 'Incorrect password' });
                 }
 
+                const status = (user.status || 'active').toLowerCase();
+                const pauseUntil = user.pause_until ? new Date(user.pause_until) : null;
+                const now = new Date();
+
+                if (status === 'blocked') {
+                    const reason = user.blocked_reason || 'Vi phạm điều khoản sử dụng.';
+                    return res.status(403).json({ message: `Tài khoản đã bị khóa vĩnh viễn: ${reason}` });
+                }
+
+                if (status === 'paused') {
+                    if (pauseUntil && pauseUntil > now) {
+                        return res.status(403).json({ message: `Tài khoản đang bị tạm dừng đến ${pauseUntil.toLocaleString()}` });
+                    }
+
+                    // Nếu tạm dừng hết hạn, khôi phục active
+                    await pool.query(`UPDATE users SET status = 'active', pause_until = NULL WHERE id = $1`, [user.id]);
+                }
+
                 const userRole = normalizeRole(user.role);
                 const accessToken = generateAccessToken({
                     id: user.id,
@@ -3740,11 +4105,36 @@ async function generateWardIdFromName(name) {
             }
         });
 
+        // Verify auth endpoint - checks if token is valid and user is still active
+        app.get('/api/auth/verify', authenticateRequest, checkUserStatus, (req, res) => {
+            res.json({ 
+                success: true, 
+                message: 'Token is valid',
+                user: {
+                    id: req.user?.id,
+                    email: req.user?.email,
+                    role: req.user?.role
+                }
+            });
+        });
+
+        app.get('/api/v1/auth/verify', authenticateRequest, checkUserStatus, (req, res) => {
+            res.json({ 
+                success: true, 
+                message: 'Token is valid',
+                user: {
+                    id: req.user?.id,
+                    email: req.user?.email,
+                    role: req.user?.role
+                }
+            });
+        });
+
         // ==========================================
         // USER PROFILE APIS
         // ==========================================
 
-        app.get('/api/users/profile', authenticateOptional, async (req, res) => {
+        app.get('/api/users/profile', authenticateRequest, checkUserStatus, async (req, res) => {
             try {
                 const userId = req.user?.id;
                 const email = req.query?.email;
@@ -3793,7 +4183,7 @@ async function generateWardIdFromName(name) {
             }
         });
 
-        app.put('/api/users/profile', authenticateOptional, requireAuth, async (req, res) => {
+        app.put('/api/users/profile', authenticateRequest, checkUserStatus, requireAuth, async (req, res) => {
             const userId = req.user.id;
             const { fullname, email, phone, birthDate, address, gender, bio } = req.body;
 
