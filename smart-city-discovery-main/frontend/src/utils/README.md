@@ -1,0 +1,1 @@
+Shared utility scaffold placeholder.
