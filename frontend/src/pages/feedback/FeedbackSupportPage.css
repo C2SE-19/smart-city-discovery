@@ -39,6 +39,23 @@
   color: #0f1f2a;
 }
 
+.feedback-back-btn {
+  border: 1px solid rgba(16, 37, 48, 0.16);
+  background: #ffffff;
+  color: #102530;
+  border-radius: 999px;
+  padding: 8px 14px;
+  margin: 0 0 12px;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.theme-dark .feedback-back-btn {
+  background: #122433;
+  color: #e8f0f6;
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
 .theme-dark .feedback-header {
   color: #e8f0f6;
 }
