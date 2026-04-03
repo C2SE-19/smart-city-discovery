@@ -1,4 +1,5 @@
 require('dotenv').config();
+console.log("DB_HOST:", process.env.DB_HOST);
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
@@ -648,15 +649,11 @@ async function generateWardIdFromName(name) {
         const poolConnectionTimeoutMs = Number(process.env.PG_CONNECTION_TIMEOUT_MS || 60000);
 
         const pool = new Pool({
-  host: 'localhost',
-  port: 5433,
-  user: 'root',
-  password: 'password123',
-  database: 'smartcity_db',
-  max: poolMax,
-  idleTimeoutMillis: poolIdleTimeoutMs,
-  connectionTimeoutMillis: poolConnectionTimeoutMs,
-  ssl: false
+  host: process.env.DB_HOST,
+  port: process.env.DB_PORT,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
 });
         console.log('ℹ️ PostgreSQL pool config:', {
             max: Number.isFinite(poolMax) && poolMax > 0 ? poolMax : 8,
