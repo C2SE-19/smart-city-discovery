@@ -11,6 +11,7 @@ import RoleGuard from './components/auth/RoleGuard';
 import OverviewPage from './pages/overview/OverviewPage';
 import LandingInfoPage from './LandingInfoPage';
 import DiscoveryPage from './pages/discovery/DiscoveryPage';
+import VenueDetailPage from './pages/discovery/VenueDetailPage';
 import CityMapPage from './pages/map/CityMapPage';
 import AdminDashboardPage from './pages/admin/AdminDashboardPage';
 import AdminBoundaryPage from './pages/admin/AdminBoundaryPage';
@@ -111,11 +112,13 @@ function App() {
           <Route path={APP_ROUTES.TERMS} element={<TermsPage />} />
           <Route path={APP_ROUTES.FEEDBACK} element={<FeedbackSupportPage />} />
           <Route path={APP_ROUTES.CITY_MAP} element={<CityMapPage />} />
+          <Route path={APP_ROUTES.VENUE_DETAIL} element={<VenueDetailPage />} />
           <Route path="/profile" element={<ProfilePage />} />
         </Route>
 
         <Route path={APP_ROUTES.LOGIN} element={<LoginPage />} />
         <Route path={APP_ROUTES.REGISTER} element={<RegisterPage />} />
+        <Route path={APP_ROUTES.CITY_MAP} element={<CityMapPage />} />
 
         <Route element={<WorkspaceLayout />}>
           <Route path={APP_ROUTES.DISCOVERY} element={<DiscoveryPage />} />
