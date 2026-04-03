@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import Cropper from 'react-easy-crop';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -93,6 +93,7 @@ function ProfilePage() {
   const { language } = useLanguage();
   const { user, token, loading: authLoading, updateUser } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const { theme } = useTheme();
   const t = translations[language];
   const copy = COPY[language] || COPY.vi;
@@ -244,6 +245,7 @@ function ProfilePage() {
   const [avatarCrop, setAvatarCrop] = useState({ x: 0, y: 0 });
   const [avatarZoom, setAvatarZoom] = useState(1);
   const [avatarCroppedArea, setAvatarCroppedArea] = useState(null);
+  const menuIdSet = useMemo(() => new Set(MenuItems.map((item) => item.id)), [MenuItems]);
 
   const apiUrl = useMemo(
     () => import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api',
@@ -251,6 +253,13 @@ function ProfilePage() {
   );
 
   const apiBase = useMemo(() => apiUrl.replace(/\/api\/v1$|\/api$/i, ''), [apiUrl]);
+
+  useEffect(() => {
+    const requestedMenu = location.state?.activeMenu;
+    if (requestedMenu && menuIdSet.has(requestedMenu)) {
+      setActiveMenu(requestedMenu);
+    }
+  }, [location.state, menuIdSet]);
 
   useEffect(() => {
     if (user?.avatarUrl && user.avatarUrl !== avatarUrl) {
