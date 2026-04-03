@@ -65,6 +65,11 @@ function extractBearerToken(req) {
     return authorizationHeader.slice(7).trim();
 }
 
+function resolveJwtUserId(payload) {
+    const rawUserId = payload?.sub ?? payload?.id ?? payload?.userId ?? payload?.user_id ?? null;
+    return rawUserId === null || rawUserId === undefined ? null : String(rawUserId).trim();
+}
+
 function authenticateRequest(req, res, next) {
     const token = extractBearerToken(req);
 
@@ -74,15 +79,20 @@ function authenticateRequest(req, res, next) {
 
     try {
         const payload = jwt.verify(token, jwtSecret);
+        const resolvedUserId = resolveJwtUserId(payload);
+
+        if (!resolvedUserId) {
+            return res.status(401).json({ message: 'Invalid token payload' });
+        }
 
         req.authUser = {
-            id: payload.sub,
+            id: resolvedUserId,
             email: payload.email,
             role: normalizeRole(payload.role)
         };
 
         req.user = {
-            id: payload.sub,
+            id: resolvedUserId,
             email: payload.email,
             role: payload.role
         };
@@ -106,15 +116,20 @@ function authenticateOptional(req, res, next) {
 
     try {
         const payload = jwt.verify(token, jwtSecret);
+        const resolvedUserId = resolveJwtUserId(payload);
+
+        if (!resolvedUserId) {
+            return next();
+        }
 
         req.authUser = {
-            id: payload.sub,
+            id: resolvedUserId,
             email: payload.email,
             role: normalizeRole(payload.role)
         };
 
         req.user = {
-            id: payload.sub,
+            id: resolvedUserId,
             email: payload.email,
             role: payload.role
         };
@@ -123,6 +138,43 @@ function authenticateOptional(req, res, next) {
     } catch (error) {
         return res.status(401).json({ message: 'Invalid or expired token' });
     }
+}
+
+function authenticateOptionalLenient(req, _res, next) {
+    const token = getAuthToken(req);
+
+    if (!token) {
+        return next();
+    }
+
+    try {
+        const payload = jwt.verify(token, jwtSecret);
+        const resolvedUserId = resolveJwtUserId(payload);
+
+        if (!resolvedUserId) {
+            req.authUser = null;
+            req.user = null;
+            return next();
+        }
+
+        req.authUser = {
+            id: resolvedUserId,
+            email: payload.email,
+            role: normalizeRole(payload.role)
+        };
+
+        req.user = {
+            id: resolvedUserId,
+            email: payload.email,
+            role: payload.role
+        };
+    } catch (_error) {
+        // Bỏ qua token lỗi với các endpoint cho phép khách, ví dụ gửi bình luận công khai.
+        req.authUser = null;
+        req.user = null;
+    }
+
+    return next();
 }
 
 function requireAdminRole(req, res, next) {
@@ -237,6 +289,39 @@ function normalizeNullableText(value) {
     return trimmed === '' ? null : trimmed;
 }
 
+const REVIEW_BLOCKED_TERMS = ['địt', 'đụ', 'dm', 'dcm', 'đéo', 'cặc', 'lồn', 'đĩ', 'vcl'];
+
+function normalizeReviewModerationText(value) {
+    return String(value || '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function findBlockedReviewTerm(value) {
+    const normalized = normalizeReviewModerationText(value);
+
+    if (!normalized) {
+        return null;
+    }
+
+    for (const term of REVIEW_BLOCKED_TERMS) {
+        const normalizedTerm = normalizeReviewModerationText(term);
+        if (!normalizedTerm) {
+            continue;
+        }
+
+        if (normalized.includes(normalizedTerm)) {
+            return term;
+        }
+    }
+
+    return null;
+}
+
 const PLACE_CATEGORY_ICON_OPTIONS = [
     '🍽️', '☕', '🍜', '🥐', '🍸', '🍰', '🛍️', '🎯', '🏞️', '📍',
     '🍔', '🍕', '🍣', '🍖', '🥗', '🍦', '🧋', '🍺', '🍷', '🥘',
@@ -283,6 +368,57 @@ const WEEKLY_SCHEDULE_DAYS = [
     { key: 'saturday', label: 'Saturday' },
     { key: 'sunday', label: 'Sunday' }
 ];
+
+const VENUE_OPENING_TIMEZONE = 'Asia/Ho_Chi_Minh';
+
+function normalizeVenueMetadataObject(metadata) {
+    if (metadata && typeof metadata === 'object' && !Array.isArray(metadata)) {
+        return metadata;
+    }
+
+    if (typeof metadata === 'string') {
+        try {
+            const parsed = JSON.parse(metadata);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                return parsed;
+            }
+        } catch (_error) {
+            return {};
+        }
+    }
+
+    return {};
+}
+
+function getZonedNowSnapshot(now = new Date(), timeZone = VENUE_OPENING_TIMEZONE) {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone,
+        weekday: 'long',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+    });
+
+    const parts = formatter.formatToParts(now);
+    const valueByType = new Map(parts.map((part) => [part.type, part.value]));
+    const weekdayRaw = String(valueByType.get('weekday') || '').toLowerCase();
+    const hour = Number(valueByType.get('hour'));
+    const minute = Number(valueByType.get('minute'));
+    const todayKeyByWeekday = {
+        monday: 'monday',
+        tuesday: 'tuesday',
+        wednesday: 'wednesday',
+        thursday: 'thursday',
+        friday: 'friday',
+        saturday: 'saturday',
+        sunday: 'sunday'
+    };
+
+    return {
+        nowMinutes: (Number.isFinite(hour) ? hour : 0) * 60 + (Number.isFinite(minute) ? minute : 0),
+        todayKey: todayKeyByWeekday[weekdayRaw] || 'monday'
+    };
+}
 
 function normalizeWeeklyScheduleInput(scheduleInput, options = {}) {
     const fallbackStart = String(options.fallbackStart || '').trim();
@@ -350,6 +486,106 @@ function normalizeWeeklyScheduleInput(scheduleInput, options = {}) {
     return {
         value: normalized,
         error: null
+    };
+}
+
+function toMinutesFromHHmm(value) {
+    const normalized = String(value || '').trim();
+
+    if (!/^\d{2}:\d{2}$/.test(normalized)) {
+        return null;
+    }
+
+    const [hourText, minuteText] = normalized.split(':');
+    const hour = Number(hourText);
+    const minute = Number(minuteText);
+
+    if (!Number.isInteger(hour) || !Number.isInteger(minute)) {
+        return null;
+    }
+
+    if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+        return null;
+    }
+
+    return hour * 60 + minute;
+}
+
+function extractVenueWeeklySchedule(metadata) {
+    const normalizedMetadata = normalizeVenueMetadataObject(metadata);
+    const source =
+        normalizedMetadata && typeof normalizedMetadata.weeklySchedule === 'object' && !Array.isArray(normalizedMetadata.weeklySchedule)
+            ? normalizedMetadata.weeklySchedule
+            : null;
+
+    if (!source) {
+        return [];
+    }
+
+    return WEEKLY_SCHEDULE_DAYS.map((day) => {
+        const daySchedule = source[day.key] || {};
+        const start = String(daySchedule.start || '').trim();
+        const end = String(daySchedule.end || '').trim();
+        const off = Boolean(daySchedule.off) || start === 'OFF' || end === 'OFF';
+
+        return {
+            key: day.key,
+            label: day.label,
+            open: off ? 'OFF' : start || 'N/A',
+            close: off ? 'OFF' : end || 'N/A',
+            off
+        };
+    });
+}
+
+function buildVenueRealtimeOpeningPayload(metadata, now = new Date()) {
+    const weeklySchedule = extractVenueWeeklySchedule(metadata);
+
+    if (!weeklySchedule.length) {
+        return {
+            timezone: VENUE_OPENING_TIMEZONE,
+            serverTime: now.toISOString(),
+            current: {
+                dayKey: null,
+                dayLabel: null,
+                isOpen: false,
+                start: 'N/A',
+                end: 'N/A'
+            },
+            weeklySchedule: []
+        };
+    }
+
+    const zonedNow = getZonedNowSnapshot(now, VENUE_OPENING_TIMEZONE);
+    const todayKey = zonedNow.todayKey;
+    const nowMinutes = zonedNow.nowMinutes;
+
+    const weeklyScheduleWithFlags = weeklySchedule.map((item) => ({
+        ...item,
+        isToday: item.key === todayKey
+    }));
+
+    const todaySchedule = weeklyScheduleWithFlags.find((item) => item.key === todayKey) || weeklyScheduleWithFlags[0];
+    const startMinutes = toMinutesFromHHmm(todaySchedule.open);
+    const endMinutes = toMinutesFromHHmm(todaySchedule.close);
+    const isOpenNow =
+        !todaySchedule.off &&
+        startMinutes !== null &&
+        endMinutes !== null &&
+        nowMinutes >= startMinutes &&
+        nowMinutes < endMinutes;
+
+    return {
+        timezone: VENUE_OPENING_TIMEZONE,
+        serverTime: now.toISOString(),
+        current: {
+            dayKey: todaySchedule.key,
+            dayLabel: todaySchedule.label,
+            isOpen: isOpenNow,
+            start: todaySchedule.open,
+            end: todaySchedule.close
+        },
+        weeklySchedule: weeklyScheduleWithFlags
     };
 }
 
@@ -687,6 +923,129 @@ async function generateWardIdFromName(name) {
             // Ignore if place_categories table does not exist yet.
         });
 
+        pool.query(
+            `
+                CREATE TABLE IF NOT EXISTS venue_public_reviews (
+                    id BIGSERIAL PRIMARY KEY,
+                    venue_id INT NOT NULL REFERENCES venues(id) ON DELETE CASCADE,
+                    user_id TEXT NULL,
+                    author_name TEXT,
+                    title TEXT,
+                    comment TEXT NOT NULL,
+                    rating INTEGER CHECK (rating BETWEEN 1 AND 5),
+                    image_urls JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                ALTER TABLE IF EXISTS venue_public_reviews
+                ALTER COLUMN rating DROP NOT NULL
+            `
+        ).catch(() => {
+            // Ignore if table does not exist yet or schema not ready.
+        });
+
+        pool.query(
+            `
+                ALTER TABLE IF EXISTS venue_public_reviews
+                ALTER COLUMN user_id TYPE TEXT USING user_id::text
+            `
+        ).catch(() => {
+            // Ignore if table does not exist yet or schema not ready.
+        });
+
+        pool.query(
+            `
+                CREATE INDEX IF NOT EXISTS idx_venue_public_reviews_venue_id
+                ON venue_public_reviews (venue_id, created_at DESC)
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                CREATE TABLE IF NOT EXISTS venue_review_likes (
+                    review_id BIGINT NOT NULL REFERENCES venue_public_reviews(id) ON DELETE CASCADE,
+                    user_id TEXT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (review_id, user_id)
+                )
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                CREATE INDEX IF NOT EXISTS idx_venue_review_likes_review
+                ON venue_review_likes (review_id)
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                CREATE TABLE IF NOT EXISTS venue_review_replies (
+                    id BIGSERIAL PRIMARY KEY,
+                    review_id BIGINT NOT NULL REFERENCES venue_public_reviews(id) ON DELETE CASCADE,
+                    user_id TEXT NOT NULL,
+                    author_name TEXT NOT NULL,
+                    rating INTEGER NULL CHECK (rating BETWEEN 1 AND 5),
+                    title TEXT,
+                    content TEXT NOT NULL,
+                    image_urls JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                CREATE INDEX IF NOT EXISTS idx_venue_review_replies_review
+                ON venue_review_replies (review_id, created_at ASC)
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                ALTER TABLE IF EXISTS venue_review_replies
+                ADD COLUMN IF NOT EXISTS rating INTEGER NULL CHECK (rating BETWEEN 1 AND 5)
+            `
+        ).catch(() => {
+            // Ignore if table does not exist yet or schema not ready.
+        });
+
+        pool.query(
+            `
+                ALTER TABLE IF EXISTS venue_review_replies
+                ADD COLUMN IF NOT EXISTS title TEXT
+            `
+        ).catch(() => {
+            // Ignore if table does not exist yet or schema not ready.
+        });
+
+        pool.query(
+            `
+                ALTER TABLE IF EXISTS venue_review_replies
+                ADD COLUMN IF NOT EXISTS image_urls JSONB NOT NULL DEFAULT '[]'::jsonb
+            `
+        ).catch(() => {
+            // Ignore if table does not exist yet or schema not ready.
+        });
+
         // ==========================================
         // FEEDBACK SUPPORT
         // ==========================================
@@ -698,6 +1057,11 @@ async function generateWardIdFromName(name) {
         const feedbackReplyUploadDir = path.join(feedbackUploadDir, 'admin-replies');
         if (!fs.existsSync(feedbackReplyUploadDir)) {
             fs.mkdirSync(feedbackReplyUploadDir, { recursive: true });
+        }
+
+        const venueReviewUploadDir = path.join(__dirname, 'uploads', 'reviews');
+        if (!fs.existsSync(venueReviewUploadDir)) {
+            fs.mkdirSync(venueReviewUploadDir, { recursive: true });
         }
 
         const feedbackStorage = multer.diskStorage({
@@ -768,6 +1132,27 @@ async function generateWardIdFromName(name) {
                     cb(null, true);
                 } else {
                     cb(new Error('Only image attachments are supported for venue moderation messages'));
+                }
+            }
+        });
+
+        const venueReviewStorage = multer.diskStorage({
+            destination: venueReviewUploadDir,
+            filename: (_req, file, cb) => {
+                const safeName = file.originalname.replace(/\s+/g, '-');
+                cb(null, `${Date.now()}-review-${safeName}`);
+            }
+        });
+
+        const uploadVenueReview = multer({
+            storage: venueReviewStorage,
+            limits: { fileSize: 8 * 1024 * 1024, files: 6 },
+            fileFilter: (_req, file, cb) => {
+                const allowed = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+                if (allowed.includes(file.mimetype)) {
+                    cb(null, true);
+                } else {
+                    cb(new Error('Only image files are supported for review attachments'));
                 }
             }
         });
@@ -1192,6 +1577,651 @@ async function generateWardIdFromName(name) {
                 }
 
                 return res.json(venue);
+            } catch (error) {
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
+        async function getPublicVenueForDetail(venueId, isAdmin) {
+            const result = await pool.query(
+                `
+                SELECT
+                    venues.id,
+                    venues.name,
+                    venues.title,
+                    venues.address,
+                    venues.description,
+                    venues.phone,
+                    venues.latitude,
+                    venues.longitude,
+                    venues.ward_id,
+                    wards.name AS ward_name,
+                    venues.category_id,
+                    place_categories.name AS category_name,
+                    place_categories.slug AS category_slug,
+                    venues.cover_image_url,
+                    venues.metadata,
+                    venues.average_rating,
+                    venues.total_reviews,
+                    venues.status::text AS status,
+                    venues.created_at,
+                    venues.updated_at
+                FROM venues
+                LEFT JOIN wards ON wards.ward_id = venues.ward_id
+                LEFT JOIN place_categories ON place_categories.id = venues.category_id
+                WHERE venues.id = $1
+                LIMIT 1
+            `,
+                [venueId]
+            );
+
+            if (!result.rows.length) {
+                return null;
+            }
+
+            const venue = result.rows[0];
+            if (!isAdmin && String(venue.status || '').toLowerCase() !== 'approved') {
+                return null;
+            }
+
+            return venue;
+        }
+
+        async function getVenueCommunityBundle(req, res) {
+            const venueId = Number(req.params.venueId);
+            let venue = null;
+            const currentUserId = String(req.user?.id || '').trim();
+
+            if (!Number.isFinite(venueId)) {
+                return res.status(400).json({ message: 'Invalid venue id' });
+            }
+
+            try {
+                const isAdmin = normalizeRole(req.authUser?.role) === 'admin';
+                venue = await getPublicVenueForDetail(venueId, isAdmin);
+
+                if (!venue) {
+                    return res.status(404).json({ message: 'Venue not found' });
+                }
+
+                const reviewsResult = await pool.query(
+                    `
+                        SELECT
+                            reviews.id,
+                            reviews.venue_id,
+                            reviews.user_id,
+                            reviews.author_name,
+                            reviews.title,
+                            reviews.comment,
+                            reviews.rating,
+                            reviews.image_urls,
+                            reviews.created_at,
+                            reviews.updated_at,
+                            COALESCE(like_stats.like_count, 0)::int AS like_count,
+                            COALESCE(reply_stats.reply_count, 0)::int AS reply_count,
+                            CASE
+                                WHEN $2::text = '' THEN false
+                                WHEN liked.review_id IS NULL THEN false
+                                ELSE true
+                            END AS liked_by_me
+                        FROM venue_public_reviews AS reviews
+                        LEFT JOIN (
+                            SELECT review_id, COUNT(*)::int AS like_count
+                            FROM venue_review_likes
+                            GROUP BY review_id
+                        ) AS like_stats ON like_stats.review_id = reviews.id
+                        LEFT JOIN (
+                            SELECT review_id, COUNT(*)::int AS reply_count
+                            FROM venue_review_replies
+                            GROUP BY review_id
+                        ) AS reply_stats ON reply_stats.review_id = reviews.id
+                        LEFT JOIN venue_review_likes AS liked
+                            ON liked.review_id = reviews.id
+                           AND liked.user_id = $2
+                        WHERE reviews.venue_id = $1
+                        ORDER BY reviews.created_at DESC, reviews.id DESC
+                    `,
+                    [venueId, currentUserId]
+                );
+
+                const statsResult = await pool.query(
+                    `
+                        SELECT
+                            COALESCE(AVG(rating)::numeric(10,2), 0) AS average_rating,
+                            COUNT(*)::int AS total_reviews
+                        FROM venue_public_reviews
+                        WHERE venue_id = $1
+                    `,
+                    [venueId]
+                );
+
+                const reviewIds = reviewsResult.rows.map((review) => Number(review.id)).filter((id) => Number.isInteger(id));
+                let repliesByReviewId = new Map();
+
+                if (reviewIds.length) {
+                    const repliesResult = await pool.query(
+                        `
+                            SELECT
+                                id,
+                                review_id,
+                                user_id,
+                                author_name,
+                                rating,
+                                title,
+                                content,
+                                image_urls,
+                                created_at,
+                                updated_at
+                            FROM venue_review_replies
+                            WHERE review_id = ANY($1::bigint[])
+                            ORDER BY created_at ASC, id ASC
+                        `,
+                        [reviewIds]
+                    );
+
+                    repliesByReviewId = repliesResult.rows.reduce((acc, reply) => {
+                        const reviewId = Number(reply.review_id);
+                        if (!acc.has(reviewId)) {
+                            acc.set(reviewId, []);
+                        }
+
+                        acc.get(reviewId).push({
+                            id: reply.id,
+                            reviewId,
+                            userId: reply.user_id,
+                            authorName: reply.author_name || 'Ẩn danh',
+                            rating: Number(reply.rating || 0),
+                            title: reply.title || '',
+                            content: reply.content || '',
+                            imageUrls: Array.isArray(reply.image_urls)
+                                ? reply.image_urls.map((item) => String(item || '').trim()).filter(Boolean)
+                                : [],
+                            createdAt: reply.created_at,
+                            updatedAt: reply.updated_at,
+                            canDelete: currentUserId && String(reply.user_id || '') === currentUserId
+                        });
+
+                        return acc;
+                    }, new Map());
+                }
+
+                const reviewRows = reviewsResult.rows.map((review) => {
+                    const imageUrls = Array.isArray(review.image_urls)
+                        ? review.image_urls.map((item) => String(item || '').trim()).filter(Boolean)
+                        : [];
+
+                    const normalizedReviewId = Number(review.id);
+
+                    return {
+                        id: review.id,
+                        venueId: review.venue_id,
+                        userId: review.user_id,
+                        authorName: review.author_name || 'Ẩn danh',
+                        title: review.title || '',
+                        comment: review.comment || '',
+                        rating: Number(review.rating || 0),
+                        imageUrls,
+                        likeCount: Number(review.like_count || 0),
+                        replyCount: Number(review.reply_count || 0),
+                        likedByMe: Boolean(review.liked_by_me),
+                        canDelete: currentUserId && String(review.user_id || '') === currentUserId,
+                        replies: repliesByReviewId.get(normalizedReviewId) || [],
+                        createdAt: review.created_at,
+                        updatedAt: review.updated_at
+                    };
+                });
+
+                const reviewImages = [...new Set(reviewRows.flatMap((review) => review.imageUrls || []))];
+                const stats = {
+                    averageRating:
+                        Number(statsResult.rows[0]?.average_rating || 0) || Number(venue.average_rating || 0) || 0,
+                    totalReviews: Number(statsResult.rows[0]?.total_reviews || 0) || Number(venue.total_reviews || 0) || 0
+                };
+
+                return res.json({
+                    venue,
+                    stats,
+                    reviews: reviewRows,
+                    reviewImages
+                });
+            } catch (error) {
+                if (error?.code === '42P01') {
+                    return res.json({
+                        venue,
+                        stats: {
+                            averageRating: Number(venue?.average_rating || 0),
+                            totalReviews: Number(venue?.total_reviews || 0)
+                        },
+                        reviews: [],
+                        reviewImages: []
+                    });
+                }
+
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
+        async function getVenueOpeningHoursRealtime(req, res) {
+            const venueId = Number(req.params.venueId);
+
+            if (!Number.isFinite(venueId)) {
+                return res.status(400).json({ message: 'Invalid venue id' });
+            }
+
+            try {
+                const isAdmin = normalizeRole(req.authUser?.role) === 'admin';
+                const venue = await getPublicVenueForDetail(venueId, isAdmin);
+
+                if (!venue) {
+                    return res.status(404).json({ message: 'Venue not found' });
+                }
+
+                const metadata = normalizeVenueMetadataObject(venue.metadata);
+
+                const realtimePayload = buildVenueRealtimeOpeningPayload(metadata, new Date());
+
+                return res.json({
+                    venueId,
+                    ...realtimePayload
+                });
+            } catch (error) {
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
+        function submitVenueReview(req, res) {
+            uploadVenueReview.array('images', 6)(req, res, async (uploadErr) => {
+                if (uploadErr) {
+                    return res.status(400).json({ message: uploadErr.message || 'Upload failed' });
+                }
+
+                const uploadedFiles = Array.isArray(req.files) ? req.files : [];
+                const cleanupUploadedFiles = () => {
+                    uploadedFiles.forEach((file) => {
+                        if (file?.filename) {
+                            safeDeleteUploadedFile(`/uploads/reviews/${file.filename}`);
+                        }
+                    });
+                };
+
+                const venueId = Number(req.params.venueId);
+                const rawRating = String(req.body.rating || '').trim();
+                const title = String(req.body.title || '').trim();
+                const comment = String(req.body.comment || '').trim();
+                const userId = String(req.user?.id || '').trim();
+                let rating = null;
+
+                if (!userId) {
+                    cleanupUploadedFiles();
+                    return res.status(401).json({ message: 'Bạn cần đăng nhập để bình luận.' });
+                }
+
+                if (!Number.isFinite(venueId)) {
+                    cleanupUploadedFiles();
+                    return res.status(400).json({ message: 'Invalid venue id' });
+                }
+
+                if (rawRating) {
+                    const parsedRating = Number(rawRating);
+                    if (!Number.isInteger(parsedRating) || parsedRating < 1 || parsedRating > 5) {
+                        cleanupUploadedFiles();
+                        return res.status(400).json({ message: 'rating must be an integer between 1 and 5' });
+                    }
+
+                    rating = parsedRating;
+                }
+
+                if (!comment) {
+                    cleanupUploadedFiles();
+                    return res.status(400).json({ message: 'comment is required' });
+                }
+
+                if (findBlockedReviewTerm(`${title} ${comment}`)) {
+                    cleanupUploadedFiles();
+                    return res.status(400).json({ message: 'Nội dung bình luận chứa từ ngữ không phù hợp.' });
+                }
+
+                try {
+                    const venueResult = await pool.query(
+                        `
+                            SELECT id, status::text AS status
+                            FROM venues
+                            WHERE id = $1
+                            LIMIT 1
+                        `,
+                        [venueId]
+                    );
+
+                    if (!venueResult.rows.length) {
+                        cleanupUploadedFiles();
+                        return res.status(404).json({ message: 'Venue not found' });
+                    }
+
+                    if (String(venueResult.rows[0].status || '').toLowerCase() !== 'approved') {
+                        cleanupUploadedFiles();
+                        return res.status(404).json({ message: 'Venue not found' });
+                    }
+
+                    const userResult = await pool.query(
+                        `
+                            SELECT id, fullname, username
+                            FROM users
+                            WHERE id::text = $1
+                            LIMIT 1
+                        `,
+                        [userId]
+                    );
+
+                    const authorName =
+                        userResult.rows[0]?.fullname || userResult.rows[0]?.username || req.authUser?.email || 'Người dùng';
+                    const imageUrls = uploadedFiles.map((file) => `/uploads/reviews/${file.filename}`);
+
+                    const insertResult = await pool.query(
+                        `
+                            INSERT INTO venue_public_reviews (
+                                venue_id,
+                                user_id,
+                                author_name,
+                                title,
+                                comment,
+                                rating,
+                                image_urls,
+                                updated_at
+                            )
+                            VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, NOW())
+                            RETURNING id, venue_id, user_id, author_name, title, comment, rating, image_urls, created_at, updated_at
+                        `,
+                        [venueId, userId, authorName, title || null, comment, rating, JSON.stringify(imageUrls)]
+                    );
+
+                    const statsResult = await pool.query(
+                        `
+                            SELECT
+                                COALESCE(AVG(rating)::numeric(10,2), 0) AS average_rating,
+                                COUNT(*)::int AS total_reviews
+                            FROM venue_public_reviews
+                            WHERE venue_id = $1
+                        `,
+                        [venueId]
+                    );
+
+                    const created = insertResult.rows[0];
+
+                    return res.status(201).json({
+                        message: 'Review submitted successfully',
+                        review: {
+                            id: created.id,
+                            venueId: created.venue_id,
+                            userId: created.user_id,
+                            authorName: created.author_name,
+                            title: created.title || '',
+                            comment: created.comment,
+                            rating: created.rating === null ? null : Number(created.rating || 0),
+                            imageUrls: Array.isArray(created.image_urls) ? created.image_urls : [],
+                            createdAt: created.created_at,
+                            updatedAt: created.updated_at
+                        },
+                        stats: {
+                            averageRating: Number(statsResult.rows[0]?.average_rating || 0),
+                            totalReviews: Number(statsResult.rows[0]?.total_reviews || 0)
+                        }
+                    });
+                } catch (error) {
+                    cleanupUploadedFiles();
+                    return res.status(500).json({ message: error.message });
+                }
+            });
+        }
+
+        async function toggleVenueReviewLike(req, res) {
+            const venueId = normalizeNullableNumber(req.params.venueId);
+            const reviewId = normalizeNullableNumber(req.params.reviewId);
+            const userId = String(req.user?.id || '').trim();
+
+            if (Number.isNaN(venueId) || venueId === null || Number.isNaN(reviewId) || reviewId === null) {
+                return res.status(400).json({ message: 'venueId/reviewId không hợp lệ.' });
+            }
+
+            if (!userId) {
+                return res.status(401).json({ message: 'Bạn cần đăng nhập để thích bình luận.' });
+            }
+
+            try {
+                const reviewResult = await pool.query(
+                    `
+                        SELECT id
+                        FROM venue_public_reviews
+                        WHERE id = $1 AND venue_id = $2
+                        LIMIT 1
+                    `,
+                    [reviewId, venueId]
+                );
+
+                if (!reviewResult.rows.length) {
+                    return res.status(404).json({ message: 'Không tìm thấy bình luận.' });
+                }
+
+                const existingLike = await pool.query(
+                    `
+                        SELECT 1
+                        FROM venue_review_likes
+                        WHERE review_id = $1 AND user_id = $2
+                        LIMIT 1
+                    `,
+                    [reviewId, userId]
+                );
+
+                let liked = false;
+
+                if (existingLike.rows.length) {
+                    await pool.query(
+                        `
+                            DELETE FROM venue_review_likes
+                            WHERE review_id = $1 AND user_id = $2
+                        `,
+                        [reviewId, userId]
+                    );
+                } else {
+                    await pool.query(
+                        `
+                            INSERT INTO venue_review_likes (review_id, user_id)
+                            VALUES ($1, $2)
+                            ON CONFLICT (review_id, user_id) DO NOTHING
+                        `,
+                        [reviewId, userId]
+                    );
+                    liked = true;
+                }
+
+                const countResult = await pool.query(
+                    `
+                        SELECT COUNT(*)::int AS like_count
+                        FROM venue_review_likes
+                        WHERE review_id = $1
+                    `,
+                    [reviewId]
+                );
+
+                return res.json({
+                    success: true,
+                    reviewId,
+                    liked,
+                    likeCount: Number(countResult.rows[0]?.like_count || 0)
+                });
+            } catch (error) {
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
+        function createVenueReviewReply(req, res) {
+            uploadVenueReview.array('images', 6)(req, res, async (uploadErr) => {
+                if (uploadErr) {
+                    return res.status(400).json({ message: uploadErr.message || 'Upload failed' });
+                }
+
+                const uploadedFiles = Array.isArray(req.files) ? req.files : [];
+                const cleanupUploadedFiles = () => {
+                    uploadedFiles.forEach((file) => {
+                        if (file?.filename) {
+                            safeDeleteUploadedFile(`/uploads/reviews/${file.filename}`);
+                        }
+                    });
+                };
+
+                const venueId = normalizeNullableNumber(req.params.venueId);
+                const reviewId = normalizeNullableNumber(req.params.reviewId);
+                const userId = String(req.user?.id || '').trim();
+                const content = String(req.body?.content || '').trim();
+                const title = String(req.body?.title || '').trim();
+                const rawRating = String(req.body?.rating || '').trim();
+                let rating = null;
+
+                if (Number.isNaN(venueId) || venueId === null || Number.isNaN(reviewId) || reviewId === null) {
+                    cleanupUploadedFiles();
+                    return res.status(400).json({ message: 'venueId/reviewId không hợp lệ.' });
+                }
+
+                if (!userId) {
+                    cleanupUploadedFiles();
+                    return res.status(401).json({ message: 'Bạn cần đăng nhập để thảo luận.' });
+                }
+
+                if (!content) {
+                    cleanupUploadedFiles();
+                    return res.status(400).json({ message: 'Nội dung thảo luận không được để trống.' });
+                }
+
+                if (rawRating) {
+                    const parsedRating = Number(rawRating);
+                    if (!Number.isInteger(parsedRating) || parsedRating < 1 || parsedRating > 5) {
+                        cleanupUploadedFiles();
+                        return res.status(400).json({ message: 'Số sao phải từ 1 đến 5.' });
+                    }
+
+                    rating = parsedRating;
+                }
+
+                if (findBlockedReviewTerm(`${title} ${content}`)) {
+                    cleanupUploadedFiles();
+                    return res.status(400).json({ message: 'Nội dung thảo luận chứa từ ngữ không phù hợp.' });
+                }
+
+                try {
+                    const reviewResult = await pool.query(
+                        `
+                            SELECT id
+                            FROM venue_public_reviews
+                            WHERE id = $1 AND venue_id = $2
+                            LIMIT 1
+                        `,
+                        [reviewId, venueId]
+                    );
+
+                    if (!reviewResult.rows.length) {
+                        cleanupUploadedFiles();
+                        return res.status(404).json({ message: 'Không tìm thấy bình luận.' });
+                    }
+
+                    const userResult = await pool.query(
+                        `
+                            SELECT fullname, username
+                            FROM users
+                            WHERE id::text = $1
+                            LIMIT 1
+                        `,
+                        [userId]
+                    );
+
+                    const authorName = userResult.rows[0]?.fullname || userResult.rows[0]?.username || req.authUser?.email || 'Người dùng';
+                    const imageUrls = uploadedFiles.map((file) => `/uploads/reviews/${file.filename}`);
+
+                    const insertResult = await pool.query(
+                        `
+                            INSERT INTO venue_review_replies (review_id, user_id, author_name, rating, title, content, image_urls, updated_at)
+                            VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, NOW())
+                            RETURNING id, review_id, user_id, author_name, rating, title, content, image_urls, created_at, updated_at
+                        `,
+                        [reviewId, userId, authorName, rating, title || null, content, JSON.stringify(imageUrls)]
+                    );
+
+                    const countResult = await pool.query(
+                        `
+                            SELECT COUNT(*)::int AS reply_count
+                            FROM venue_review_replies
+                            WHERE review_id = $1
+                        `,
+                        [reviewId]
+                    );
+
+                    const created = insertResult.rows[0];
+
+                    return res.status(201).json({
+                        success: true,
+                        reply: {
+                            id: created.id,
+                            reviewId: created.review_id,
+                            userId: created.user_id,
+                            authorName: created.author_name,
+                            rating: Number(created.rating || 0),
+                            title: created.title || '',
+                            content: created.content,
+                            imageUrls: Array.isArray(created.image_urls) ? created.image_urls : [],
+                            createdAt: created.created_at,
+                            updatedAt: created.updated_at,
+                            canDelete: true
+                        },
+                        replyCount: Number(countResult.rows[0]?.reply_count || 0)
+                    });
+                } catch (error) {
+                    cleanupUploadedFiles();
+                    return res.status(500).json({ message: error.message });
+                }
+            });
+        }
+
+        async function deleteVenueReview(req, res) {
+            const venueId = normalizeNullableNumber(req.params.venueId);
+            const reviewId = normalizeNullableNumber(req.params.reviewId);
+            const userId = String(req.user?.id || '').trim();
+
+            if (Number.isNaN(venueId) || venueId === null || Number.isNaN(reviewId) || reviewId === null) {
+                return res.status(400).json({ message: 'venueId/reviewId không hợp lệ.' });
+            }
+
+            if (!userId) {
+                return res.status(401).json({ message: 'Bạn cần đăng nhập để xóa bình luận.' });
+            }
+
+            try {
+                const reviewResult = await pool.query(
+                    `
+                        SELECT id, user_id
+                        FROM venue_public_reviews
+                        WHERE id = $1 AND venue_id = $2
+                        LIMIT 1
+                    `,
+                    [reviewId, venueId]
+                );
+
+                if (!reviewResult.rows.length) {
+                    return res.status(404).json({ message: 'Không tìm thấy bình luận.' });
+                }
+
+                const ownerId = String(reviewResult.rows[0].user_id || '').trim();
+
+                if (!ownerId || ownerId !== userId) {
+                    return res.status(403).json({ message: 'Bạn chỉ có thể xóa bình luận của chính mình.' });
+                }
+
+                await pool.query(
+                    `
+                        DELETE FROM venue_public_reviews
+                        WHERE id = $1 AND venue_id = $2
+                    `,
+                    [reviewId, venueId]
+                );
+
+                return res.json({ success: true, deletedReviewId: reviewId });
             } catch (error) {
                 return res.status(500).json({ message: error.message });
             }
@@ -3590,7 +4620,13 @@ async function generateWardIdFromName(name) {
         registerVersionedRoute('get', '/merchant-services', listPublicMerchantServices);
         registerVersionedRoute('get', '/feedback/types', listPublicFeedbackTypes);
         registerVersionedRoute('get', '/venues', listPublicVenues);
-        registerVersionedRoute('get', '/venues/:venueId', authenticateRequest, getVenueDetails);
+        registerVersionedRoute('get', '/venues/:venueId', getVenueDetails);
+        registerVersionedRoute('get', '/venues/:venueId/community', authenticateOptional, getVenueCommunityBundle);
+        registerVersionedRoute('get', '/venues/:venueId/opening-hours', getVenueOpeningHoursRealtime);
+        registerVersionedRoute('post', '/venues/:venueId/reviews', authenticateOptional, requireAuth, submitVenueReview);
+        registerVersionedRoute('post', '/venues/:venueId/reviews/:reviewId/like', authenticateOptional, requireAuth, toggleVenueReviewLike);
+        registerVersionedRoute('post', '/venues/:venueId/reviews/:reviewId/replies', authenticateOptional, requireAuth, createVenueReviewReply);
+        registerVersionedRoute('delete', '/venues/:venueId/reviews/:reviewId', authenticateOptional, requireAuth, deleteVenueReview);
         registerVersionedRoute('post', '/venues', createVenueSubmission);
         registerVersionedRoute('post', '/feedback', authenticateOptional, submitFeedbackReport);
 
@@ -4016,7 +5052,7 @@ async function generateWardIdFromName(name) {
         // USER FAVORITES APIS
         // ==========================================
 
-        app.get('/api/users/favorites', authenticateOptional, requireAuth, async (req, res) => {
+        const getUserFavoritesHandler = async (req, res) => {
             const userId = req.user.id;
 
             try {
@@ -4037,26 +5073,32 @@ async function generateWardIdFromName(name) {
                 console.error('Favorites fetch error:', err);
                 res.status(500).json({ message: 'Server error' });
             }
-        });
+        };
 
-        app.post('/api/users/favorites/toggle', authenticateOptional, requireAuth, async (req, res) => {
+        registerVersionedRoute('get', '/users/favorites', authenticateOptional, requireAuth, getUserFavoritesHandler);
+        app.get('/users/favorites', authenticateOptional, requireAuth, getUserFavoritesHandler);
+
+        const toggleUserFavoriteHandler = async (req, res) => {
             const userId = req.user.id;
             const { itemId, itemType, name, image, price, description } = req.body;
 
             try {
-                if (!itemId || !itemType) {
+                const normalizedItemId = String(itemId ?? req.body?.id ?? '').trim();
+                const normalizedItemType = String(itemType || req.body?.type || 'place').trim().toLowerCase();
+
+                if (!normalizedItemId || !normalizedItemType) {
                     return res.status(400).json({ message: 'Missing item information.' });
                 }
 
                 const existing = await pool.query(
                     'SELECT id FROM user_favorites WHERE user_id = $1 AND item_id = $2 AND item_type = $3',
-                    [userId, String(itemId), String(itemType)]
+                    [userId, normalizedItemId, normalizedItemType]
                 );
 
                 if (existing.rows.length > 0) {
                     await pool.query(
                         'DELETE FROM user_favorites WHERE user_id = $1 AND item_id = $2 AND item_type = $3',
-                        [userId, String(itemId), String(itemType)]
+                        [userId, normalizedItemId, normalizedItemType]
                     );
                     return res.json({ success: true, favorited: false });
                 }
@@ -4066,8 +5108,8 @@ async function generateWardIdFromName(name) {
              VALUES ($1, $2, $3, $4, $5, $6, $7)`,
                     [
                         userId,
-                        String(itemId),
-                        String(itemType),
+                        normalizedItemId,
+                        normalizedItemType,
                         name || null,
                         image || null,
                         price || null,
@@ -4080,7 +5122,10 @@ async function generateWardIdFromName(name) {
                 console.error('Favorites toggle error:', err);
                 res.status(500).json({ message: 'Server error' });
             }
-        });
+        };
+
+        registerVersionedRoute('post', '/users/favorites/toggle', authenticateOptional, requireAuth, toggleUserFavoriteHandler);
+        app.post('/users/favorites/toggle', authenticateOptional, requireAuth, toggleUserFavoriteHandler);
 
         // ==========================================
         // GOOGLE OAUTH

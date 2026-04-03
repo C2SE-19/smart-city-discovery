@@ -1,0 +1,165 @@
+.ward-page {
+  padding: 18px;
+  background: linear-gradient(180deg, #fff9f1 0%, #f5e9d6 100%);
+  min-height: 100vh;
+  color: #2c1a0f;
+}
+
+.ward-breadcrumb {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: #8a7a66;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.ward-breadcrumb a {
+  color: #f47932;
+  text-decoration: none;
+}
+
+.ward-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #fffaf3;
+  border-radius: 14px;
+  padding: 14px 16px;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.08);
+}
+
+.ward-count {
+  margin: 0;
+  color: #8a7a66;
+  font-weight: 700;
+}
+
+.ward-filter {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.ward-filter select {
+  border-radius: 10px;
+  padding: 8px 10px;
+  border: 1px solid #f2c082;
+  background: #fffaf3;
+  font-weight: 700;
+}
+
+.ward-grid {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.ward-card {
+  background: #fffaf3;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid #f2c082;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.08);
+  cursor: pointer;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.ward-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 28px rgba(0, 0, 0, 0.12);
+}
+
+.ward-card-media {
+  position: relative;
+  height: 160px;
+  overflow: hidden;
+}
+
+.ward-card-media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.ward-card-heart {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  background: rgba(0, 0, 0, 0.24);
+  color: #fff;
+  width: 38px;
+  height: 38px;
+  border-radius: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  cursor: pointer;
+  backdrop-filter: blur(2px);
+  font-size: 1rem;
+  transition: transform 0.12s ease, background 0.12s ease;
+}
+
+.ward-card-heart.is-active {
+  background: rgba(233, 79, 55, 0.9);
+  border-color: #fff4ec;
+}
+
+.ward-card-heart:hover {
+  transform: translateY(-1px);
+}
+
+.ward-card-body {
+  padding: 12px 14px 14px;
+}
+
+.ward-card-body h3 {
+  margin: 0 0 6px;
+}
+
+.ward-card-address {
+  margin: 0 0 10px;
+  color: #6b604f;
+  font-weight: 600;
+}
+
+.ward-card-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-weight: 700;
+}
+
+.ward-chip {
+  background: #f5e6ce;
+  padding: 6px 10px;
+  border-radius: 999px;
+}
+
+.ward-chip.muted {
+  background: rgba(74, 144, 226, 0.16);
+  color: #2f5f99;
+
+[data-theme='dark'] .ward-card {
+  background: #181820;
+  border-color: #2f2f3a;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.5);
+}
+
+[data-theme='dark'] .ward-card-heart {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+[data-theme='dark'] .ward-card-heart.is-active {
+  background: rgba(255, 126, 83, 0.9);
+  border-color: #fff0e5;
+}
+}
+
+.ward-status {
+  margin-top: 20px;
+  font-weight: 700;
+}
