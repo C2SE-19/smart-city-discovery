@@ -1,6 +1,10 @@
 .city-map-fullscreen-page {
-  width: 100%;
-  min-height: 100vh;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 9999;
   background:
     radial-gradient(circle at 14% 8%, rgba(11, 74, 84, 0.16), transparent 36%),
     radial-gradient(circle at 92% 12%, rgba(219, 152, 55, 0.14), transparent 40%),

@@ -58,6 +58,7 @@ export async function fetchVenueReviews(venueId, params = {}) {
   const response = await apiClient.get(`/venues/${venueId}/reviews`, {
     params,
   });
+
   return response.data;
 }
 
