@@ -1258,18 +1258,17 @@ async function generateWardIdFromName(name) {
                 };
             }
 
-        const pool = new Pool(buildDatabasePoolConfig());
-        const poolMax = Number(process.env.PG_POOL_MAX || 8);
-        const poolIdleTimeoutMs = Number(process.env.PG_IDLE_TIMEOUT_MS || 10000);
-        const poolConnectionTimeoutMs = Number(process.env.PG_CONNECTION_TIMEOUT_MS || 60000);
+                const poolMax = Number(process.env.PG_POOL_MAX || 8);
+                const poolIdleTimeoutMs = Number(process.env.PG_IDLE_TIMEOUT_MS || 10000);
+                const poolConnectionTimeoutMs = Number(process.env.PG_CONNECTION_TIMEOUT_MS || 60000);
 
-        const pool = new Pool({
-  host: process.env.DB_HOST,
-  port: process.env.DB_PORT,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-});
+                const pool = new Pool({
+                        ...buildDatabasePoolConfig(),
+                        max: Number.isFinite(poolMax) && poolMax > 0 ? poolMax : 8,
+                        idleTimeoutMillis: Number.isFinite(poolIdleTimeoutMs) && poolIdleTimeoutMs > 0 ? poolIdleTimeoutMs : 10000,
+                        connectionTimeoutMillis:
+                                Number.isFinite(poolConnectionTimeoutMs) && poolConnectionTimeoutMs > 0 ? poolConnectionTimeoutMs : 60000
+                });
         console.log('ℹ️ PostgreSQL pool config:', {
             max: Number.isFinite(poolMax) && poolMax > 0 ? poolMax : 8,
             idleTimeoutMillis: Number.isFinite(poolIdleTimeoutMs) && poolIdleTimeoutMs > 0 ? poolIdleTimeoutMs : 10000,
@@ -1741,7 +1740,6 @@ async function generateWardIdFromName(name) {
                     : isAdmin && statusFilter.length
                       ? statusFilter
                       : ['approved'];
-                const effectiveStatuses = statusFilter.length ? statusFilter : ['approved'];
                 const compactMode = ['1', 'true', 'yes'].includes(String(req.query.compact || '').trim().toLowerCase());
                 const liveMode = ['1', 'true', 'yes'].includes(String(req.query.live || '').trim().toLowerCase());
                 const categoryId = normalizeCategoryId(req.query.categoryId);
@@ -2647,38 +2645,7 @@ async function generateWardIdFromName(name) {
             try {
                 const venueResult = await pool.query(
                     `
-                SELECT
-                    venues.id,
-                    venues.name,
-                    venues.title,
-                    venues.address,
-                    venues.description,
-                    venues.phone,
-                    venues.latitude,
-                    venues.longitude,
-                    venues.ward_id,
-                    wards.name AS ward_name,
-                    venues.category_id,
-                    place_categories.name AS category_name,
-                    place_categories.slug AS category_slug,
-                    venues.cover_image_url,
-                    venues.business_license_image_url,
-                    venues.metadata,
-                    venues.submitted_by_user_id,
-                    venues.status::text AS status,
-                    venues.submitted_at,
-                    venues.approved_at,
-                    venues.rejected_at,
-                    venues.rejection_reason,
-                    venues.created_at,
-                    venues.updated_at
-                FROM venues
-                LEFT JOIN wards ON wards.ward_id = venues.ward_id
-                LEFT JOIN place_categories ON place_categories.id = venues.category_id
-                WHERE venues.id = $1
-                LIMIT 1
-            `,
-                        SELECT id, status::text AS status
+                        SELECT id, submitted_by_user_id, status::text AS status
                         FROM venues
                         WHERE id = $1
                         LIMIT 1
@@ -2690,14 +2657,13 @@ async function generateWardIdFromName(name) {
                     return res.status(404).json({ message: 'Venue not found' });
                 }
 
-                const venue = result.rows[0];
+                const venue = venueResult.rows[0];
                 const isAdmin = normalizeRole(req.authUser?.role) === 'admin';
                 const requesterId = req.authUser?.id ? String(req.authUser.id).trim() : '';
                 const venueOwnerId = venue.submitted_by_user_id ? String(venue.submitted_by_user_id).trim() : '';
                 const isOwner = Boolean(requesterId && venueOwnerId && requesterId === venueOwnerId);
 
                 if (!isAdmin && !isOwner && String(venue.status || '').toLowerCase() !== 'approved') {
-                if (String(venueResult.rows[0].status || '').toLowerCase() !== 'approved') {
                     return res.status(404).json({ message: 'Venue not found' });
                 }
 
@@ -5068,19 +5034,15 @@ async function generateWardIdFromName(name) {
         registerVersionedRoute('get', '/merchant-services', listPublicMerchantServices);
         registerVersionedRoute('get', '/feedback/types', listPublicFeedbackTypes);
         registerVersionedRoute('get', '/venues', authenticateOptional, listPublicVenues);
-        registerVersionedRoute('get', '/venues/:venueId', authenticateRequest, getVenueDetails);
-        registerVersionedRoute('post', '/venues', authenticateRequest, createVenueSubmission);
-        registerVersionedRoute('get', '/venues', listPublicVenues);
         registerVersionedRoute('get', '/venues/:venueId', authenticateOptional, getVenueDetails);
+        registerVersionedRoute('post', '/venues', authenticateRequest, createVenueSubmission);
         registerVersionedRoute('get', '/venues/:venueId/reviews', listPublicVenueReviews);
-        registerVersionedRoute('get', '/venues/:venueId', getVenueDetails);
         registerVersionedRoute('get', '/venues/:venueId/community', authenticateOptional, getVenueCommunityBundle);
         registerVersionedRoute('get', '/venues/:venueId/opening-hours', getVenueOpeningHoursRealtime);
         registerVersionedRoute('post', '/venues/:venueId/reviews', authenticateOptional, requireAuth, submitVenueReview);
         registerVersionedRoute('post', '/venues/:venueId/reviews/:reviewId/like', authenticateOptional, requireAuth, toggleVenueReviewLike);
         registerVersionedRoute('post', '/venues/:venueId/reviews/:reviewId/replies', authenticateOptional, requireAuth, createVenueReviewReply);
         registerVersionedRoute('delete', '/venues/:venueId/reviews/:reviewId', authenticateOptional, requireAuth, deleteVenueReview);
-        registerVersionedRoute('post', '/venues', createVenueSubmission);
         registerVersionedRoute('post', '/feedback', authenticateOptional, submitFeedbackReport);
 
         registerVersionedRoute('get', '/admin/wards', authenticateRequest, requireAdminRole, listAdminWards);
