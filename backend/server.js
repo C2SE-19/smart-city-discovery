@@ -15,7 +15,8 @@ const { supabaseAdmin } = require('./src/lib/supabase');
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Initialize Google OAuth2 Client
@@ -334,6 +335,44 @@ function normalizePaginationValue(value, fallback, { min = 1, max = 100 } = {}) 
     return Math.min(Math.max(parsed, min), max);
 }
 
+function shouldUseDatabaseSsl() {
+    const sslValue = String(process.env.DB_SSL || process.env.PGSSLMODE || '').trim().toLowerCase();
+
+    if (['false', '0', 'disable', 'off', 'no'].includes(sslValue)) {
+        return false;
+    }
+
+    if (['true', '1', 'require', 'on', 'yes'].includes(sslValue)) {
+        return true;
+    }
+
+    // Default to no SSL for local/self-hosted development to avoid connection failures.
+    return false;
+}
+
+function buildDatabasePoolConfig() {
+    const connectionString = String(process.env.DATABASE_URL || '').trim();
+    const config = connectionString
+        ? {
+              connectionString
+          }
+        : {
+              host: process.env.DB_HOST || '127.0.0.1',
+              port: Number(process.env.DB_PORT) || 5432,
+              user: process.env.DB_USER || 'postgres',
+              password: String(process.env.DB_PASSWORD ?? ''),
+              database: process.env.DB_NAME || 'postgres'
+          };
+
+    if (shouldUseDatabaseSsl()) {
+        config.ssl = {
+            rejectUnauthorized: false
+        };
+    }
+
+    return config;
+}
+
 function resolveUploadPathFromUrl(fileUrl) {
     if (!fileUrl || typeof fileUrl !== 'string') {
         return null;
@@ -527,12 +566,7 @@ async function generateWardIdFromName(name) {
                 };
             }
 
-        const pool = new Pool({
-            connectionString: process.env.DATABASE_URL,
-            ssl: {
-                rejectUnauthorized: false
-            }
-        });
+        const pool = new Pool(buildDatabasePoolConfig());
         pool.query('SELECT NOW()', (err, res) => {
             if (err) {
                 console.error('❌ Database connection failed:', err);
@@ -786,13 +820,26 @@ async function generateWardIdFromName(name) {
         async function listPublicVenues(req, res) {
             try {
                 const statusFilter = normalizeStatusList(req.query.status);
-                const effectiveStatuses = statusFilter.length ? statusFilter : ['approved'];
+                const isMineRequest = String(req.query.mine || '').trim().toLowerCase() === 'true';
+                const requesterId = req.authUser?.id ? String(req.authUser.id).trim() : '';
+                const isAdmin = normalizeRole(req.authUser?.role) === 'admin';
+                const effectiveStatuses = isMineRequest
+                    ? statusFilter.length
+                        ? statusFilter
+                        : ['approved', 'pending', 'rejected']
+                    : isAdmin && statusFilter.length
+                      ? statusFilter
+                      : ['approved'];
                 const categoryId = normalizeCategoryId(req.query.categoryId);
                 const categoryIdsFilter = parsePositiveIntegerList(req.query.categoryIds);
                 const serviceIdsFilter = parsePositiveIntegerList(req.query.serviceIds);
                 const wardIdsFilter = parseTextList(req.query.wardIds);
                 const singleWardId = normalizeNullableText(req.query.wardId);
                 const searchKeyword = String(req.query.q ?? req.query.search ?? '').trim().toLowerCase();
+
+                if (isMineRequest && !requesterId) {
+                    return res.status(401).json({ message: 'Missing authentication token' });
+                }
 
                 if (Number.isNaN(categoryId)) {
                     return res.status(400).json({ message: 'categoryId must be a positive integer' });
@@ -824,6 +871,11 @@ async function generateWardIdFromName(name) {
 
                 const values = [effectiveStatuses];
                 const whereConditions = ['venues.status::text = ANY($1::text[])'];
+
+                if (isMineRequest) {
+                    values.push(requesterId);
+                    whereConditions.push(`venues.submitted_by_user_id = $${values.length}`);
+                }
 
                 if (effectiveCategoryIds.length) {
                     values.push(effectiveCategoryIds);
@@ -887,6 +939,7 @@ async function generateWardIdFromName(name) {
                     venues.cover_image_url,
                     venues.business_license_image_url,
                     venues.metadata,
+                    venues.submitted_by_user_id,
                     venues.status::text AS status,
                     venues.submitted_at,
                     venues.approved_at,
@@ -936,6 +989,7 @@ async function generateWardIdFromName(name) {
                     venues.cover_image_url,
                     venues.business_license_image_url,
                     venues.metadata,
+                    venues.submitted_by_user_id,
                     venues.status::text AS status,
                     venues.submitted_at,
                     venues.approved_at,
@@ -958,8 +1012,11 @@ async function generateWardIdFromName(name) {
 
                 const venue = result.rows[0];
                 const isAdmin = normalizeRole(req.authUser?.role) === 'admin';
+                const requesterId = req.authUser?.id ? String(req.authUser.id).trim() : '';
+                const venueOwnerId = venue.submitted_by_user_id ? String(venue.submitted_by_user_id).trim() : '';
+                const isOwner = Boolean(requesterId && venueOwnerId && requesterId === venueOwnerId);
 
-                if (!isAdmin && String(venue.status || '').toLowerCase() !== 'approved') {
+                if (!isAdmin && !isOwner && String(venue.status || '').toLowerCase() !== 'approved') {
                     return res.status(404).json({ message: 'Venue not found' });
                 }
 
@@ -995,6 +1052,11 @@ async function generateWardIdFromName(name) {
             const normalizedCategoryName = String(category || '').trim();
             const normalizedMetadata = metadata && typeof metadata === 'object' ? { ...metadata } : {};
             const requestedServiceIds = normalizeServiceIds(normalizedMetadata.selectedServices);
+            const submitterUserId = req.authUser?.id ? String(req.authUser.id).trim() : '';
+
+            if (!submitterUserId) {
+                return res.status(401).json({ message: 'Missing authentication token' });
+            }
 
             if (!normalizedMetadata.category && normalizedCategoryName) {
                 normalizedMetadata.category = normalizedCategoryName;
@@ -1116,6 +1178,7 @@ async function generateWardIdFromName(name) {
                     cover_image_url,
                     business_license_image_url,
                     metadata,
+                    submitted_by_user_id,
                     status,
                     submitted_at,
                     updated_at
@@ -1133,6 +1196,7 @@ async function generateWardIdFromName(name) {
                     $10,
                     $11,
                     $12,
+                    $13,
                     'pending',
                     now(),
                     now()
@@ -1151,7 +1215,8 @@ async function generateWardIdFromName(name) {
                         resolvedCategoryId,
                         String(coverImageUrl || '').trim() || null,
                         String(businessLicenseImageUrl || '').trim() || null,
-                        normalizedMetadata
+                        normalizedMetadata,
+                        submitterUserId
                     ]
                 );
 
@@ -1174,6 +1239,7 @@ async function generateWardIdFromName(name) {
                     venues.cover_image_url,
                     venues.business_license_image_url,
                     venues.metadata,
+                    venues.submitted_by_user_id,
                     venues.status::text AS status,
                     venues.submitted_at,
                     venues.created_at,
@@ -1807,22 +1873,65 @@ async function generateWardIdFromName(name) {
 
             try {
                 if (action === 'reject') {
-                    const deleteResult = await pool.query(
+                    const normalizedRejectionReason = normalizeNullableText(req.body.rejectionReason);
+                    const result = await pool.query(
                         `
-                          DELETE FROM venues
+                          UPDATE venues
+                          SET
+                              status = 'rejected',
+                              rejected_at = now(),
+                              approved_at = NULL,
+                              rejection_reason = $3,
+                              reviewed_by = $2,
+                              updated_at = now()
                           WHERE id = $1
                           RETURNING id
                       `,
-                        [venueId]
+                        [venueId, reviewer, normalizedRejectionReason]
                     );
 
-                    if (!deleteResult.rows.length) {
+                    if (!result.rows.length) {
                         return res.status(404).json({ message: 'Venue submission not found' });
                     }
 
+                    const details = await pool.query(
+                        `
+                SELECT
+                    venues.id,
+                    venues.name,
+                    venues.title,
+                    venues.address,
+                    venues.description,
+                    venues.phone,
+                    venues.latitude,
+                    venues.longitude,
+                    venues.ward_id,
+                    wards.name AS ward_name,
+                    venues.category_id,
+                    place_categories.name AS category_name,
+                    place_categories.slug AS category_slug,
+                    venues.cover_image_url,
+                    venues.business_license_image_url,
+                    venues.metadata,
+                    venues.status::text AS status,
+                    venues.submitted_at,
+                    venues.approved_at,
+                    venues.rejected_at,
+                    venues.rejection_reason,
+                    venues.created_at,
+                    venues.updated_at
+                FROM venues
+                LEFT JOIN wards ON wards.ward_id = venues.ward_id
+                LEFT JOIN place_categories ON place_categories.id = venues.category_id
+                WHERE venues.id = $1
+                LIMIT 1
+            `,
+                        [venueId]
+                    );
+
                     return res.json({
-                        message: 'Venue rejected and removed successfully',
-                        deletedVenueId: deleteResult.rows[0].id
+                        message: 'Venue rejected successfully',
+                        venue: details.rows[0]
                     });
                 }
 
@@ -2741,9 +2850,9 @@ async function generateWardIdFromName(name) {
         registerVersionedRoute('get', '/place-categories', listPublicPlaceCategories);
         registerVersionedRoute('get', '/merchant-services', listPublicMerchantServices);
         registerVersionedRoute('get', '/feedback/types', listPublicFeedbackTypes);
-        registerVersionedRoute('get', '/venues', listPublicVenues);
+        registerVersionedRoute('get', '/venues', authenticateOptional, listPublicVenues);
         registerVersionedRoute('get', '/venues/:venueId', authenticateRequest, getVenueDetails);
-        registerVersionedRoute('post', '/venues', createVenueSubmission);
+        registerVersionedRoute('post', '/venues', authenticateRequest, createVenueSubmission);
         registerVersionedRoute('post', '/feedback', authenticateOptional, submitFeedbackReport);
 
         registerVersionedRoute('get', '/admin/wards', authenticateRequest, requireAdminRole, listAdminWards);
