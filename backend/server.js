@@ -829,6 +829,28 @@ function normalizeWeeklyScheduleInput(scheduleInput, options = {}) {
     };
 }
 
+function mapWeeklyOpenHoursToWeeklySchedule(source) {
+    if (!source || typeof source !== 'object' || Array.isArray(source)) {
+        return null;
+    }
+
+    return WEEKLY_SCHEDULE_DAYS.reduce((accumulator, day) => {
+        const dayValue = source?.[day.key] || {};
+        const start = String(dayValue?.openTime ?? '').trim();
+        const end = String(dayValue?.closeTime ?? '').trim();
+        const off = Boolean(dayValue?.isClosed) || start.toUpperCase() === 'OFF' || end.toUpperCase() === 'OFF';
+
+        accumulator[day.key] = {
+            day: day.label,
+            start: off ? 'OFF' : start,
+            end: off ? 'OFF' : end,
+            off
+        };
+
+        return accumulator;
+    }, {});
+}
+
 function toMinutesFromHHmm(value) {
     const normalized = String(value || '').trim();
 
@@ -853,19 +875,31 @@ function toMinutesFromHHmm(value) {
 
 function extractVenueWeeklySchedule(metadata) {
     const normalizedMetadata = normalizeVenueMetadataObject(metadata);
-    const source =
+    const canonicalSource =
         normalizedMetadata && typeof normalizedMetadata.weeklySchedule === 'object' && !Array.isArray(normalizedMetadata.weeklySchedule)
             ? normalizedMetadata.weeklySchedule
             : null;
 
-    if (!source) {
+    const legacySource =
+        normalizedMetadata && typeof normalizedMetadata.weeklyOpenHours === 'object' && !Array.isArray(normalizedMetadata.weeklyOpenHours)
+            ? mapWeeklyOpenHoursToWeeklySchedule(normalizedMetadata.weeklyOpenHours)
+            : null;
+
+    const source = canonicalSource || legacySource;
+
+    const fallbackStart = String(normalizedMetadata.startTime || '').trim();
+    const fallbackEnd = String(normalizedMetadata.endTime || '').trim();
+    const hasFallbackRange =
+        /^\d{2}:\d{2}$/.test(fallbackStart) && /^\d{2}:\d{2}$/.test(fallbackEnd) && fallbackStart < fallbackEnd;
+
+    if (!source && !hasFallbackRange) {
         return [];
     }
 
     return WEEKLY_SCHEDULE_DAYS.map((day) => {
         const daySchedule = source[day.key] || {};
-        const start = String(daySchedule.start || '').trim();
-        const end = String(daySchedule.end || '').trim();
+        const start = String(daySchedule.start || '').trim() || (hasFallbackRange ? fallbackStart : '');
+        const end = String(daySchedule.end || '').trim() || (hasFallbackRange ? fallbackEnd : '');
         const off = Boolean(daySchedule.off) || start === 'OFF' || end === 'OFF';
 
         return {
@@ -2816,6 +2850,40 @@ async function generateWardIdFromName(name) {
                 } else {
                     normalizedMetadata.selectedServices = [];
                     normalizedMetadata.selectedServiceNames = [];
+                }
+
+                const metadataStartTime = String(normalizedMetadata.startTime || '').trim();
+                const metadataEndTime = String(normalizedMetadata.endTime || '').trim();
+                const hasCanonicalWeeklySchedule =
+                    normalizedMetadata.weeklySchedule &&
+                    typeof normalizedMetadata.weeklySchedule === 'object' &&
+                    !Array.isArray(normalizedMetadata.weeklySchedule);
+                const hasLegacyWeeklyOpenHours =
+                    normalizedMetadata.weeklyOpenHours &&
+                    typeof normalizedMetadata.weeklyOpenHours === 'object' &&
+                    !Array.isArray(normalizedMetadata.weeklyOpenHours);
+                const hasGlobalTimeRange =
+                    /^\d{2}:\d{2}$/.test(metadataStartTime) &&
+                    /^\d{2}:\d{2}$/.test(metadataEndTime) &&
+                    metadataStartTime < metadataEndTime;
+
+                if (hasCanonicalWeeklySchedule || hasLegacyWeeklyOpenHours || hasGlobalTimeRange) {
+                    const weeklyScheduleCandidate = hasCanonicalWeeklySchedule
+                        ? normalizedMetadata.weeklySchedule
+                        : hasLegacyWeeklyOpenHours
+                          ? mapWeeklyOpenHoursToWeeklySchedule(normalizedMetadata.weeklyOpenHours)
+                          : null;
+
+                    const normalizedScheduleResult = normalizeWeeklyScheduleInput(weeklyScheduleCandidate, {
+                        fallbackStart: metadataStartTime,
+                        fallbackEnd: metadataEndTime
+                    });
+
+                    if (normalizedScheduleResult.error) {
+                        return res.status(400).json({ message: normalizedScheduleResult.error });
+                    }
+
+                    normalizedMetadata.weeklySchedule = normalizedScheduleResult.value;
                 }
 
                 const duplicateLocationResult = await pool.query(
