@@ -2,6 +2,36 @@ const gisService = require('../gis/gis.service');
 const { createHttpError } = require('../../shared/http-errors');
 const venuesRepository = require('./venues.repository');
 
+function normalizeVenueMetadata(metadata) {
+  if (metadata && typeof metadata === 'object' && !Array.isArray(metadata)) {
+    return metadata;
+  }
+
+  if (typeof metadata === 'string') {
+    try {
+      const parsed = JSON.parse(metadata);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch {
+      return {};
+    }
+  }
+
+  return {};
+}
+
+function normalizeVenueRecord(venue) {
+  if (!venue || typeof venue !== 'object') {
+    return null;
+  }
+
+  return {
+    ...venue,
+    metadata: normalizeVenueMetadata(venue.metadata)
+  };
+}
+
 function normalizeVenuePayload(payload) {
   const name = String(payload.name || '').trim();
   const address = String(payload.address || '').trim() || 'Chua co dia chi';
@@ -25,7 +55,12 @@ function normalizeVenuePayload(payload) {
 }
 
 async function listVenues() {
-  return venuesRepository.findAllVenues();
+  const venues = await venuesRepository.findAllVenues();
+  if (!Array.isArray(venues)) {
+    return [];
+  }
+
+  return venues.map((venue) => normalizeVenueRecord(venue)).filter(Boolean);
 }
 
 async function createVenue(payload) {
@@ -43,7 +78,7 @@ async function createVenue(payload) {
   return {
     message: 'Venue created successfully',
     detectedWard: detection.detectedWard,
-    venue
+    venue: normalizeVenueRecord(venue)
   };
 }
 
