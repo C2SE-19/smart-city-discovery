@@ -8,6 +8,7 @@ import { fetchPlaceCategories } from '../../services/api/placeCategoriesApi';
 import { fetchMerchantServices } from '../../services/api/merchantServicesApi';
 import { fetchWards } from '../../services/api/wardsApi';
 import { fetchVenues } from '../../services/api/venuesApi';
+import OverviewCityMapCard from '../../components/map/OverviewCityMapCard';
 import './OverviewPage.css';
 
 const FALLBACK_VENUE_IMAGE =
@@ -371,7 +372,7 @@ function OverviewPage() {
       try {
         const [categoryData, wardData, serviceData] = await Promise.all([
           fetchPlaceCategories(),
-          fetchWards(),
+          fetchWards({ summary: 'true' }),
           fetchMerchantServices()
         ]);
 
@@ -422,7 +423,7 @@ function OverviewPage() {
       setVenues([]);
 
       try {
-        const venueData = await fetchVenues(venueParams);
+        const venueData = await fetchVenues({ ...venueParams, compact: 'true' });
 
         if (!isMounted) {
           return;
@@ -447,6 +448,31 @@ function OverviewPage() {
 
     return () => {
       isMounted = false;
+    };
+  }, [venueParams]);
+
+  useEffect(() => {
+    let pollingInFlight = false;
+
+    const intervalId = window.setInterval(async () => {
+      if (pollingInFlight) {
+        return;
+      }
+
+      pollingInFlight = true;
+
+      try {
+        const liveVenueData = await fetchVenues({ ...venueParams, compact: 'true', live: 'true' });
+        setVenues(Array.isArray(liveVenueData) ? liveVenueData : []);
+      } catch {
+        // Keep currently rendered venue list on transient polling errors.
+      } finally {
+        pollingInFlight = false;
+      }
+    }, 8000);
+
+    return () => {
+      window.clearInterval(intervalId);
     };
   }, [venueParams]);
 
@@ -597,11 +623,12 @@ function OverviewPage() {
   };
 
   const handleExploreVenue = (venue) => {
-    navigate('/discovery', {
-      state: {
-        focusVenueId: venue.id
-      }
-    });
+    if (!venue?.id) {
+      navigate('/discovery');
+      return;
+    }
+
+    navigate(`/venues/${venue.id}`);
   };
 
   const registerSliderRef = (sectionId) => (node) => {
@@ -1048,23 +1075,7 @@ function OverviewPage() {
             <span />
           </div>
 
-          <div className="overview-map-frame">
-            <iframe
-              title="Da Nang map"
-              src="https://www.google.com/maps?q=Da%20Nang%20Vietnam&z=12&output=embed"
-              loading="lazy"
-              referrerPolicy="no-referrer-when-downgrade"
-            />
-          </div>
-
-          <a
-            className="overview-map-link"
-            href="https://www.google.com/maps/place/Da+Nang,+Vietnam/"
-            target="_blank"
-            rel="noreferrer"
-          >
-            View larger map
-          </a>
+          <OverviewCityMapCard />
         </section>
       )}
     </div>

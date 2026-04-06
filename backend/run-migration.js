@@ -1,3 +1,4 @@
+require('dotenv').config();
 const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
@@ -43,6 +44,13 @@ function buildDatabasePoolConfig() {
 
 async function runMigration() {
   const pool = new Pool(buildDatabasePoolConfig());
+  const pool = new Pool({
+  host: process.env.DB_HOST,
+  port: process.env.DB_PORT,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+});
 
   try {
     const migrationFiles = [
@@ -60,6 +68,7 @@ async function runMigration() {
       '20260322_create_merchant_services.sql',
       '20260318_enable_public_rls_baseline.sql',
       '20260406_add_venues_submitter_user_id.sql'
+      '20260403_add_user_status_fields.sql'
     ];
 
     for (const migrationFile of migrationFiles) {

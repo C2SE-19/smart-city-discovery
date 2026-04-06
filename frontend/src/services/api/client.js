@@ -1,6 +1,27 @@
 import axios from 'axios';
 
-const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api/v1';
+const DEFAULT_API_BASE_URL = 'http://localhost:5000/api';
+
+function normalizeBaseUrl(value) {
+  const trimmed = String(value || '').trim();
+  return trimmed.replace(/\/+$/, '');
+}
+
+function resolveFallbackBaseUrl(baseUrl) {
+  const normalized = normalizeBaseUrl(baseUrl);
+
+  if (/\/api\/v1$/i.test(normalized)) {
+    return normalized.replace(/\/api\/v1$/i, '/api');
+  }
+
+  if (/\/api$/i.test(normalized)) {
+    return `${normalized}/v1`;
+  }
+
+  return '';
+}
+
+const baseURL = normalizeBaseUrl(import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL);
 
 export const apiClient = axios.create({
   baseURL,
@@ -30,6 +51,54 @@ apiClient.interceptors.request.use(
     return config;
   },
   (error) => Promise.reject(error)
+);
+
+apiClient.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error?.config;
+    const statusCode = Number(error?.response?.status);
+
+    // Auto-logout on 403 (user account suspended/blocked/paused)
+    // Any 403 means user status is not active
+    if (statusCode === 403) {
+      // Clear auth from localStorage
+      console.log('🔴 403 detected - clearing auth and redirecting to login');
+      console.log('Response message:', error?.response?.data?.message);
+      localStorage.removeItem('auth');
+      localStorage.removeItem('user');
+      localStorage.removeItem('token');
+      
+      // Redirect to login with message
+      const message = error?.response?.data?.message || 'Tài khoản của bạn không còn hoạt động.';
+      console.log('Redirecting to login with message:', message);
+      window.location.href = `/login?error=${encodeURIComponent(message)}`;
+      return Promise.reject(error);
+    }
+
+    if (!originalRequest || originalRequest.__baseFallbackRetried) {
+      return Promise.reject(error);
+    }
+
+    const hasResponse = Boolean(error?.response);
+    const shouldAttemptFallback = !hasResponse || statusCode === 404 || statusCode === 405;
+
+    if (!shouldAttemptFallback) {
+      return Promise.reject(error);
+    }
+
+    const currentBaseUrl = normalizeBaseUrl(originalRequest.baseURL || apiClient.defaults.baseURL);
+    const fallbackBaseUrl = resolveFallbackBaseUrl(currentBaseUrl);
+
+    if (!fallbackBaseUrl || fallbackBaseUrl === currentBaseUrl) {
+      return Promise.reject(error);
+    }
+
+    originalRequest.__baseFallbackRetried = true;
+    originalRequest.baseURL = fallbackBaseUrl;
+
+    return apiClient.request(originalRequest);
+  }
 );
 
 export default apiClient;

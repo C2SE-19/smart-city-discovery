@@ -1,7 +1,9 @@
 import apiClient from './client';
 
 export async function fetchAdminWards() {
-  const response = await apiClient.get('/admin/wards');
+  const response = await apiClient.get('/admin/wards', {
+    timeout: 30000,
+  });
   return response.data;
 }
 
@@ -18,6 +20,15 @@ export async function deleteAdminWard(wardId) {
 export async function fetchAdminVenues(params = {}) {
   const response = await apiClient.get('/admin/venues', {
     params,
+    timeout: 30000,
+  });
+
+  return response.data;
+}
+
+export async function fetchAdminVenueDetail(venueId) {
+  const response = await apiClient.get(`/admin/venues/${venueId}`, {
+    timeout: 30000,
   });
 
   return response.data;

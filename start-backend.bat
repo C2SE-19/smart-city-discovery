@@ -1,0 +1,15 @@
+@echo off
+cd /d D:\CAP2code\smart-city-discovery\backend
+
+set DB_HOST=10.50.1.19
+set DB_PORT=5433
+set DB_USER=root
+set DB_PASSWORD=password123
+set DB_NAME=smartcity_db
+
+echo Running database migrations...
+node run-migration.js
+
+echo.
+echo Starting backend server...
+node server.js

@@ -84,7 +84,89 @@ const updateProfile = async (req, res) => {
   }
 };
 
+const getAllUsers = async (req, res) => {
+  try {
+    const users = await usersService.getAllUsers();
+
+    res.json({
+      success: true,
+      users: users.map((user) => ({
+        id: user.id,
+        fullname: user.fullname,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+        created_at: user.created_at,
+        updated_at: user.updated_at
+      }))
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+const updateUserById = async (req, res) => {
+  try {
+    const userId = Number(req.params.id);
+    const { fullname, email, role } = req.body;
+
+    if (!userId || Number.isNaN(userId)) {
+      return res.status(400).json({ success: false, message: 'Invalid user id' });
+    }
+
+    if (!fullname || !email || !role) {
+      return res.status(400).json({ success: false, message: 'fullname, email, and role are required' });
+    }
+
+    const updatedUser = await usersService.updateUser(userId, { fullname, email, role });
+
+    if (!updatedUser) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    res.json({
+      success: true,
+      user: {
+        id: updatedUser.id,
+        fullname: updatedUser.fullname,
+        username: updatedUser.username,
+        email: updatedUser.email,
+        role: updatedUser.role,
+        updated_at: updatedUser.updated_at
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const deleteUser = async (req, res) => {
+  try {
+    const userId = Number(req.params.id);
+
+    if (!userId || Number.isNaN(userId)) {
+      return res.status(400).json({ success: false, message: 'Invalid user id' });
+    }
+
+    const deleted = await usersService.deleteUser(userId);
+
+    if (!deleted) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    res.json({ success: true, message: 'User deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 module.exports = {
   getProfile,
-  updateProfile
+  updateProfile,
+  getAllUsers,
+  updateUserById,
+  deleteUser
 };
