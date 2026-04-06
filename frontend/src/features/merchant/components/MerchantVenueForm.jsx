@@ -9,41 +9,37 @@ import { fetchMerchantServices } from '../../../services/api/merchantServicesApi
 import { fetchWards } from '../../../services/api/wardsApi';
 import '../styles/MerchantVenueForm.css';
 
-const WEEKLY_SCHEDULE_DAYS = [
-  { key: 'monday', label: 'Monday', shortLabel: 'Mon' },
-  { key: 'tuesday', label: 'Tuesday', shortLabel: 'Tue' },
-  { key: 'wednesday', label: 'Wednesday', shortLabel: 'Wed' },
-  { key: 'thursday', label: 'Thursday', shortLabel: 'Thu' },
-  { key: 'friday', label: 'Friday', shortLabel: 'Fri' },
-  { key: 'saturday', label: 'Saturday', shortLabel: 'Sat' },
-  { key: 'sunday', label: 'Sunday', shortLabel: 'Sun' }
+const WEEK_DAYS = [
+  { key: 'monday', label: 'Mon' },
+  { key: 'tuesday', label: 'Tue' },
+  { key: 'wednesday', label: 'Wed' },
+  { key: 'thursday', label: 'Thu' },
+  { key: 'friday', label: 'Fri' },
+  { key: 'saturday', label: 'Sat' },
+  { key: 'sunday', label: 'Sun' }
 ];
 
-const TIME_OPTIONS = (() => {
-  const values = [];
-  for (let hour = 0; hour < 24; hour += 1) {
-    for (let minute = 0; minute < 60; minute += 30) {
-      const hourText = String(hour).padStart(2, '0');
-      const minuteText = String(minute).padStart(2, '0');
-      values.push(`${hourText}:${minuteText}`);
-    }
-  }
-  return values;
-})();
-
-function buildDefaultWeeklySchedule() {
-  return WEEKLY_SCHEDULE_DAYS.reduce((result, day) => {
-    result[day.key] = {
-      start: '09:00',
-      end: '21:00',
-      off: false
+function buildDefaultWeeklyOpenHours() {
+  return WEEK_DAYS.reduce((accumulator, day) => {
+    accumulator[day.key] = {
+      isClosed: false,
+      openTime: '',
+      closeTime: ''
     };
 
-    return result;
+    return accumulator;
+  }, {});
+}
+
+function buildDefaultWeeklyOverrideMap() {
+  return WEEK_DAYS.reduce((accumulator, day) => {
+    accumulator[day.key] = false;
+    return accumulator;
   }, {});
 }
 
 function MerchantVenueForm() {
+  const [activeWeekDay, setActiveWeekDay] = useState(WEEK_DAYS[0].key);
   const [formData, setFormData] = useState({
     venueName: '',
     category: '',
@@ -52,15 +48,17 @@ function MerchantVenueForm() {
     latitude: null,
     longitude: null,
     phone: '',
-    contactEmail: '',
     minPrice: '',
     maxPrice: '',
-    weeklySchedule: buildDefaultWeeklySchedule(),
+    startTime: '',
+    endTime: '',
+    weeklyOpenHours: buildDefaultWeeklyOpenHours(),
     description: '',
     selectedServices: [],
     images: [],
     businessLicense: null
   });
+  const [weeklyManualOverrides, setWeeklyManualOverrides] = useState(buildDefaultWeeklyOverrideMap());
 
   const [isLocationPickerOpen, setIsLocationPickerOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -76,7 +74,51 @@ function MerchantVenueForm() {
   const [wardsLoading, setWardsLoading] = useState(true);
   const [wardLoadError, setWardLoadError] = useState('');
   const [isResubmitLocked, setIsResubmitLocked] = useState(false);
-  const [activeScheduleDayKey, setActiveScheduleDayKey] = useState(WEEKLY_SCHEDULE_DAYS[0].key);
+
+  const handleWeeklyHoursChange = (dayKey, field, value) => {
+    unlockResubmitIfNeeded();
+    setWeeklyManualOverrides((prev) => ({
+      ...prev,
+      [dayKey]: true
+    }));
+
+    setFormData((prev) => {
+      const currentDay = prev.weeklyOpenHours?.[dayKey] || {
+        isClosed: false,
+        openTime: '',
+        closeTime: ''
+      };
+
+      const nextDay = {
+        ...currentDay,
+        [field]: value
+      };
+
+      if (field === 'isClosed' && value === true) {
+        nextDay.openTime = '';
+        nextDay.closeTime = '';
+      }
+
+      return {
+        ...prev,
+        weeklyOpenHours: {
+          ...prev.weeklyOpenHours,
+          [dayKey]: nextDay
+        }
+      };
+    });
+
+    if (submitStatus?.type === 'success') {
+      setSubmitStatus(null);
+    }
+  };
+
+  const activeWeekDayConfig = WEEK_DAYS.find((day) => day.key === activeWeekDay) || WEEK_DAYS[0];
+  const activeDaySchedule = formData.weeklyOpenHours?.[activeWeekDayConfig.key] || {
+    isClosed: false,
+    openTime: '',
+    closeTime: ''
+  };
 
   useEffect(() => {
     async function loadPlaceCategories() {
@@ -181,61 +223,46 @@ function MerchantVenueForm() {
 
     unlockResubmitIfNeeded();
 
-    setFormData((prev) => ({
-      ...prev,
-      [name]: value
-    }));
+    setFormData((prev) => {
+      const nextFormData = {
+        ...prev,
+        [name]: value
+      };
+
+      const isGlobalHoursField = name === 'startTime' || name === 'endTime';
+
+      if (isGlobalHoursField && nextFormData.startTime && nextFormData.endTime) {
+        nextFormData.weeklyOpenHours = WEEK_DAYS.reduce((accumulator, day) => {
+          const daySchedule = prev.weeklyOpenHours?.[day.key] || {
+            isClosed: false,
+            openTime: '',
+            closeTime: ''
+          };
+
+          const shouldPreserveManualDay = Boolean(weeklyManualOverrides[day.key]);
+
+          if (shouldPreserveManualDay || daySchedule.isClosed) {
+            accumulator[day.key] = daySchedule;
+            return accumulator;
+          }
+
+          accumulator[day.key] = {
+            ...daySchedule,
+            openTime: nextFormData.startTime,
+            closeTime: nextFormData.endTime
+          };
+
+          return accumulator;
+        }, {});
+      }
+
+      return nextFormData;
+    });
     // Clear error for this field when user starts typing
     if (formErrors[name]) {
       setFormErrors((prev) => ({
         ...prev,
         [name]: ''
-      }));
-    }
-
-    if (submitStatus?.type === 'success') {
-      setSubmitStatus(null);
-    }
-  };
-
-  const handleScheduleChange = (dayKey, field, value) => {
-    unlockResubmitIfNeeded();
-
-    setFormData((prev) => {
-      const currentSchedule = prev.weeklySchedule?.[dayKey] || { start: '09:00', end: '21:00', off: false };
-      const nextSchedule = { ...currentSchedule };
-
-      if (value === 'OFF') {
-        nextSchedule.start = 'OFF';
-        nextSchedule.end = 'OFF';
-        nextSchedule.off = true;
-      } else {
-        nextSchedule[field] = value;
-
-        if (currentSchedule.off) {
-          nextSchedule.off = false;
-          if (nextSchedule.start === 'OFF') {
-            nextSchedule.start = '09:00';
-          }
-          if (nextSchedule.end === 'OFF') {
-            nextSchedule.end = '21:00';
-          }
-        }
-      }
-
-      return {
-        ...prev,
-        weeklySchedule: {
-          ...prev.weeklySchedule,
-          [dayKey]: nextSchedule
-        }
-      };
-    });
-
-    if (formErrors[dayKey]) {
-      setFormErrors((prev) => ({
-        ...prev,
-        [dayKey]: ''
       }));
     }
 
@@ -262,11 +289,6 @@ function MerchantVenueForm() {
       errors.wardId = 'Selected ward is not available';
     }
     if (!formData.phone.trim()) errors.phone = 'Phone number is required';
-    if (!formData.contactEmail.trim()) {
-      errors.contactEmail = 'Email is required';
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.contactEmail.trim())) {
-      errors.contactEmail = 'Please provide a valid email address';
-    }
     if (!formData.businessLicense) errors.businessLicense = 'Business license is required';
     
     // Location picking is mandatory
@@ -290,23 +312,35 @@ function MerchantVenueForm() {
       }
     }
 
-    WEEKLY_SCHEDULE_DAYS.forEach((day) => {
-      const schedule = formData.weeklySchedule?.[day.key];
-      const start = String(schedule?.start || '').trim();
-      const end = String(schedule?.end || '').trim();
-      const isOff = Boolean(schedule?.off) || start === 'OFF' || end === 'OFF';
+    // Operating hours validation
+    if (formData.startTime && formData.endTime) {
+      if (formData.startTime >= formData.endTime) {
+        errors.endTime = 'End time must be after start time';
+      }
+    }
 
-      if (isOff) {
+    // Weekly open hours validation
+    WEEK_DAYS.forEach((day) => {
+      const daySchedule = formData.weeklyOpenHours?.[day.key] || {};
+
+      if (daySchedule.isClosed) {
         return;
       }
 
-      if (!start || !end) {
-        errors[day.key] = `${day.label} requires both start and end time, or select Off`;
+      const hasOpen = Boolean(daySchedule.openTime);
+      const hasClose = Boolean(daySchedule.closeTime);
+
+      if (!hasOpen && !hasClose) {
         return;
       }
 
-      if (start >= end) {
-        errors[day.key] = `${day.label} end time must be later than start time`;
+      if (!hasOpen || !hasClose) {
+        errors.weeklyOpenHours = 'Each opened day must include both open and close times';
+        return;
+      }
+
+      if (daySchedule.openTime >= daySchedule.closeTime) {
+        errors.weeklyOpenHours = 'Weekly OpenHours: close time must be after open time';
       }
     });
 
@@ -428,7 +462,6 @@ function MerchantVenueForm() {
         longitude: formData.longitude,
         description: formData.description,
         phone: formData.phone,
-        contactEmail: formData.contactEmail.trim(),
         coverImageUrl,
         businessLicenseImageUrl,
         metadata: {
@@ -436,21 +469,11 @@ function MerchantVenueForm() {
           categoryName: selectedCategory?.name || '',
           wardId: selectedWard?.ward_id || null,
           wardName: selectedWard?.name || null,
-          contactEmail: formData.contactEmail.trim(),
           minPrice: formData.minPrice ? Number(formData.minPrice) : null,
           maxPrice: formData.maxPrice ? Number(formData.maxPrice) : null,
-          weeklySchedule: WEEKLY_SCHEDULE_DAYS.reduce((result, day) => {
-            const schedule = formData.weeklySchedule?.[day.key] || {};
-            const isOff = Boolean(schedule.off) || schedule.start === 'OFF' || schedule.end === 'OFF';
-            result[day.key] = {
-              day: day.label,
-              start: isOff ? 'OFF' : schedule.start,
-              end: isOff ? 'OFF' : schedule.end,
-              off: isOff
-            };
-
-            return result;
-          }, {}),
+          startTime: formData.startTime || null,
+          endTime: formData.endTime || null,
+          weeklyOpenHours: formData.weeklyOpenHours,
           selectedServices: formData.selectedServices,
           imagesCount: formData.images.length,
           galleryImages: galleryImageUrls
@@ -473,16 +496,17 @@ function MerchantVenueForm() {
           latitude: null,
           longitude: null,
           phone: '',
-          contactEmail: '',
           minPrice: '',
           maxPrice: '',
-          weeklySchedule: buildDefaultWeeklySchedule(),
+          startTime: '',
+          endTime: '',
+          weeklyOpenHours: buildDefaultWeeklyOpenHours(),
           description: '',
           selectedServices: [],
           images: [],
           businessLicense: null
         });
-        setActiveScheduleDayKey(WEEKLY_SCHEDULE_DAYS[0].key);
+        setWeeklyManualOverrides(buildDefaultWeeklyOverrideMap());
         setFormErrors({});
         setSubmitStatus(null);
       }, 3500);
@@ -583,23 +607,6 @@ function MerchantVenueForm() {
           </div>
 
           <div className="form-group">
-            <label htmlFor="contactEmail">
-              Contact Email <span className="required">*</span>
-              {formErrors.contactEmail && <span className="error-text"> - {formErrors.contactEmail}</span>}
-            </label>
-            <input
-              type="email"
-              id="contactEmail"
-              name="contactEmail"
-              value={formData.contactEmail}
-              onChange={handleInputChange}
-              placeholder="e.g., venue-owner@gmail.com"
-              required
-              className={`form-input ${formErrors.contactEmail ? 'input-error' : ''}`}
-            />
-          </div>
-
-          <div className="form-group">
             <label htmlFor="description">Description</label>
             <textarea
               id="description"
@@ -665,84 +672,105 @@ function MerchantVenueForm() {
             )}
           </div>
 
-          <div className="schedule-block">
-            <h3>Weekly Opening Hours</h3>
-            <p className="section-hint">Set opening and closing time for each day. Select Off to mark a closed day.</p>
+          <div className="form-row">
+            <div className="form-group">
+              <label htmlFor="startTime">Start Time</label>
+              <input
+                type="time"
+                id="startTime"
+                name="startTime"
+                value={formData.startTime}
+                onChange={handleInputChange}
+                className="form-input"
+              />
+            </div>
 
-            <div className="schedule-day-tabs" role="tablist" aria-label="Weekly opening days">
-              {WEEKLY_SCHEDULE_DAYS.map((day) => {
-                const schedule = formData.weeklySchedule?.[day.key] || { start: '09:00', end: '21:00', off: false };
-                const isOff = Boolean(schedule.off) || schedule.start === 'OFF';
+            <div className="form-group">
+              <label htmlFor="endTime">
+                End Time
+                {formErrors.endTime && <span className="error-text"> - {formErrors.endTime}</span>}
+              </label>
+              <input
+                type="time"
+                id="endTime"
+                name="endTime"
+                value={formData.endTime}
+                onChange={handleInputChange}
+                className={`form-input ${formErrors.endTime ? 'input-error' : ''}`}
+              />
+            </div>
+          </div>
+
+          <div className="weekly-open-hours-card">
+            <div className="weekly-open-hours-header">
+              <h4>Weekly Opening Hours</h4>
+              <p>Set opening and closing time for each day. Select Off to mark a closed day.</p>
+              {formErrors.weeklyOpenHours ? <p className="error-text">{formErrors.weeklyOpenHours}</p> : null}
+            </div>
+
+            <div className="weekly-open-hours-tabs">
+              {WEEK_DAYS.map((day) => {
+                const daySchedule = formData.weeklyOpenHours?.[day.key] || {
+                  isClosed: false,
+                  openTime: '',
+                  closeTime: ''
+                };
+                const isActive = day.key === activeWeekDay;
 
                 return (
                   <button
                     key={day.key}
                     type="button"
-                    role="tab"
-                    aria-selected={activeScheduleDayKey === day.key}
-                    className={`schedule-day-tab ${activeScheduleDayKey === day.key ? 'is-active' : ''}`.trim()}
-                    onClick={() => setActiveScheduleDayKey(day.key)}
+                    className={`weekly-open-hours-tab ${isActive ? 'active' : ''}`}
+                    onClick={() => setActiveWeekDay(day.key)}
                   >
-                    <span>{day.shortLabel}</span>
-                    <small>{isOff ? 'Off' : 'Open'}</small>
+                    <span className="tab-day-label">{day.label}</span>
+                    <span className={`tab-day-status ${daySchedule.isClosed ? 'closed' : 'open'}`}>
+                      {daySchedule.isClosed ? 'Off' : 'Open'}
+                    </span>
                   </button>
                 );
               })}
             </div>
 
-            {(() => {
-              const activeDay = WEEKLY_SCHEDULE_DAYS.find((day) => day.key === activeScheduleDayKey) || WEEKLY_SCHEDULE_DAYS[0];
-              const schedule = formData.weeklySchedule?.[activeDay.key] || { start: '09:00', end: '21:00', off: false };
-              const isOff = Boolean(schedule.off) || schedule.start === 'OFF';
+            <div className="weekly-open-hours-editor">
+              <div className="weekly-open-hours-editor-header">
+                <h5>{activeWeekDayConfig.label === 'Mon' ? 'Monday' : activeWeekDayConfig.label === 'Tue' ? 'Tuesday' : activeWeekDayConfig.label === 'Wed' ? 'Wednesday' : activeWeekDayConfig.label === 'Thu' ? 'Thursday' : activeWeekDayConfig.label === 'Fri' ? 'Friday' : activeWeekDayConfig.label === 'Sat' ? 'Saturday' : 'Sunday'}</h5>
+                <button
+                  type="button"
+                  className={`day-open-toggle ${activeDaySchedule.isClosed ? 'closed' : 'open'}`}
+                  onClick={() => handleWeeklyHoursChange(activeWeekDayConfig.key, 'isClosed', !activeDaySchedule.isClosed)}
+                >
+                  {activeDaySchedule.isClosed ? 'Off' : 'Open'}
+                </button>
+              </div>
 
-              return (
-                <div className="schedule-editor" role="tabpanel" aria-label={`${activeDay.label} schedule`}>
-                  <div className="schedule-editor-header">
-                    <strong>{activeDay.label}</strong>
-                    <span className="schedule-status">{isOff ? 'Closed' : 'Open'}</span>
-                  </div>
-
-                  <div className="schedule-editor-grid">
-                    <div className="schedule-input-wrap">
-                      <label htmlFor={`${activeDay.key}-start`} className="schedule-label">Start</label>
-                      <select
-                        id={`${activeDay.key}-start`}
-                        value={isOff ? 'OFF' : schedule.start}
-                        onChange={(event) => handleScheduleChange(activeDay.key, 'start', event.target.value)}
-                        className={`form-input ${formErrors[activeDay.key] ? 'input-error' : ''}`}
-                      >
-                        <option value="OFF">Off</option>
-                        {TIME_OPTIONS.map((timeValue) => (
-                          <option key={`${activeDay.key}-start-${timeValue}`} value={timeValue}>
-                            {timeValue}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div className="schedule-input-wrap">
-                      <label htmlFor={`${activeDay.key}-end`} className="schedule-label">End</label>
-                      <select
-                        id={`${activeDay.key}-end`}
-                        value={isOff ? 'OFF' : schedule.end}
-                        onChange={(event) => handleScheduleChange(activeDay.key, 'end', event.target.value)}
-                        className={`form-input ${formErrors[activeDay.key] ? 'input-error' : ''}`}
-                        disabled={isOff}
-                      >
-                        <option value="OFF">Off</option>
-                        {TIME_OPTIONS.map((timeValue) => (
-                          <option key={`${activeDay.key}-end-${timeValue}`} value={timeValue}>
-                            {timeValue}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  {formErrors[activeDay.key] ? <p className="error-text schedule-error">{formErrors[activeDay.key]}</p> : null}
+              <div className="weekly-open-hours-editor-grid">
+                <div className="form-group">
+                  <label htmlFor={`open-${activeWeekDayConfig.key}`}>Start</label>
+                  <input
+                    id={`open-${activeWeekDayConfig.key}`}
+                    type="time"
+                    value={activeDaySchedule.openTime}
+                    disabled={activeDaySchedule.isClosed}
+                    onChange={(event) => handleWeeklyHoursChange(activeWeekDayConfig.key, 'openTime', event.target.value)}
+                    className="form-input"
+                  />
                 </div>
-              );
-            })()}
+
+                <div className="form-group">
+                  <label htmlFor={`close-${activeWeekDayConfig.key}`}>End</label>
+                  <input
+                    id={`close-${activeWeekDayConfig.key}`}
+                    type="time"
+                    value={activeDaySchedule.closeTime}
+                    disabled={activeDaySchedule.isClosed}
+                    onChange={(event) => handleWeeklyHoursChange(activeWeekDayConfig.key, 'closeTime', event.target.value)}
+                    className="form-input"
+                  />
+                </div>
+              </div>
+            </div>
           </div>
 
           <div className="form-row">
