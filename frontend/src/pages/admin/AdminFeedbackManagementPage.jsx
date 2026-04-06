@@ -19,6 +19,8 @@ const REPORT_STATUS_OPTIONS = [
   { value: 'in_progress', label: 'In Progress' },
   { value: 'replied', label: 'Replied' },
   { value: 'closed', label: 'Closed' },
+  { value: 'venue_report', label: 'Venue Report' },
+  { value: 'review_report', label: 'Review Report' },
 ];
 
 const STATUS_LABELS = {
@@ -453,8 +455,15 @@ function AdminFeedbackManagementPage() {
       });
 
       const deliveredTo = replyResult?.deliveredTo || selectedReport?.contact_email || 'recipient';
-      setReplyNoticeType('success');
-      setReplyNotice(`Reply sent successfully to ${deliveredTo}.`);
+      if (replyResult?.emailSent === false) {
+        setReplyNoticeType('error');
+        setReplyNotice(
+          `Reply was saved for report and targeted to ${deliveredTo}, but email delivery failed (Gmail auth).`
+        );
+      } else {
+        setReplyNoticeType('success');
+        setReplyNotice(`Reply sent successfully to ${deliveredTo}.`);
+      }
 
       setReplyMessage('');
       setReplyAttachment(null);
@@ -484,11 +493,25 @@ function AdminFeedbackManagementPage() {
   };
 
   const handleDeleteReport = async () => {
-    if (!selectedReport?.id) {
+    const reportToDelete = selectedReport || selectedSummary;
+
+    if (!reportToDelete?.id) {
       return;
     }
 
-    const confirmed = window.confirm(`Delete feedback report #${selectedReport.id}?`);
+    const reportTypeCode = String(reportToDelete?.feedback_type_code || '').trim().toLowerCase();
+    const shouldDeleteTarget = reportTypeCode === 'review_report' || reportTypeCode === 'venue_report';
+    const deleteTargetLabel = reportTypeCode === 'review_report'
+      ? 'review/comment'
+      : reportTypeCode === 'venue_report'
+        ? 'venue/place'
+        : 'reported target';
+
+    const confirmed = window.confirm(
+      shouldDeleteTarget
+        ? `Delete feedback report #${reportToDelete.id} and permanently delete the related ${deleteTargetLabel}?`
+        : `Delete feedback report #${reportToDelete.id}?`
+    );
     if (!confirmed) {
       return;
     }
@@ -497,7 +520,19 @@ function AdminFeedbackManagementPage() {
       setReplyNotice('');
       setReplyNoticeType('');
       setDetailError('');
-      await deleteAdminFeedbackReport(selectedReport.id);
+
+      const result = await deleteAdminFeedbackReport(reportToDelete.id, {
+        deleteTarget: shouldDeleteTarget,
+      });
+
+      if (result?.deletedTarget) {
+        setReplyNoticeType('success');
+        setReplyNotice(`Report deleted. Related ${deleteTargetLabel} was deleted successfully.`);
+      } else {
+        setReplyNoticeType('success');
+        setReplyNotice('Report deleted successfully.');
+      }
+
       await loadReports();
     } catch (error) {
       setDetailError(error?.response?.data?.message || 'Failed to delete report.');
@@ -585,6 +620,12 @@ function AdminFeedbackManagementPage() {
     const userAttachmentRawUrl = activeReport?.attachment_url || '';
     const userAttachmentUrl = toUploadedFileUrl(userAttachmentRawUrl);
     const canPreviewUserAttachment = isImageAttachmentUrl(userAttachmentRawUrl);
+    const activeReportTypeCode = String(activeReport?.feedback_type_code || '').trim().toLowerCase();
+    const deleteReportButtonLabel = activeReportTypeCode === 'review_report'
+      ? 'Delete Report + Review'
+      : activeReportTypeCode === 'venue_report'
+        ? 'Delete Report + Venue'
+        : 'Delete Report';
 
     return (
     <section className="admin-feedback-workspace">
@@ -750,7 +791,7 @@ function AdminFeedbackManagementPage() {
                     {replySubmitting ? 'Sending...' : 'Reply Report'}
                   </button>
                   <button type="button" className="danger" onClick={handleDeleteReport}>
-                    Delete Report
+                    {deleteReportButtonLabel}
                   </button>
                 </div>
                 {replyNotice ? (
