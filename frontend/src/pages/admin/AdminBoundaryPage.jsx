@@ -1165,7 +1165,7 @@ function AdminBoundaryPage() {
     const confirmationMessage =
       action === 'approve'
         ? `Approve post "${venueDisplayName}"? This will add this location to the approved map.`
-        : `Reject post "${venueDisplayName}"? This will permanently remove this location from the database.`;
+        : `Reject post "${venueDisplayName}"? This will keep the record and mark it as rejected.`;
 
     const shouldProceed = window.confirm(confirmationMessage);
 
@@ -1185,19 +1185,18 @@ function AdminBoundaryPage() {
         rejectionReason,
       });
 
-      if (action === 'reject') {
-        const deletedVenueId = Number(response.deletedVenueId ?? venueId);
-
-        setVenues((currentVenues) => currentVenues.filter((item) => Number(item.id) !== deletedVenueId));
-        setRejectReasons((currentReasons) => ({
-          ...currentReasons,
-          [venueId]: '',
-        }));
-      } else if (response.venue) {
+      if (response.venue) {
         const updatedVenue = response.venue;
         setVenues((currentVenues) =>
           currentVenues.map((item) => (Number(item.id) === Number(updatedVenue.id) ? updatedVenue : item))
         );
+      }
+
+      if (action === 'reject') {
+        setRejectReasons((currentReasons) => ({
+          ...currentReasons,
+          [venueId]: '',
+        }));
       }
 
       setOperationMessage(response.message || 'Moderation status updated.');

@@ -9,7 +9,37 @@ import { fetchMerchantServices } from '../../../services/api/merchantServicesApi
 import { fetchWards } from '../../../services/api/wardsApi';
 import '../styles/MerchantVenueForm.css';
 
+const WEEK_DAYS = [
+  { key: 'monday', label: 'Mon' },
+  { key: 'tuesday', label: 'Tue' },
+  { key: 'wednesday', label: 'Wed' },
+  { key: 'thursday', label: 'Thu' },
+  { key: 'friday', label: 'Fri' },
+  { key: 'saturday', label: 'Sat' },
+  { key: 'sunday', label: 'Sun' }
+];
+
+function buildDefaultWeeklyOpenHours() {
+  return WEEK_DAYS.reduce((accumulator, day) => {
+    accumulator[day.key] = {
+      isClosed: false,
+      openTime: '',
+      closeTime: ''
+    };
+
+    return accumulator;
+  }, {});
+}
+
+function buildDefaultWeeklyOverrideMap() {
+  return WEEK_DAYS.reduce((accumulator, day) => {
+    accumulator[day.key] = false;
+    return accumulator;
+  }, {});
+}
+
 function MerchantVenueForm() {
+  const [activeWeekDay, setActiveWeekDay] = useState(WEEK_DAYS[0].key);
   const [formData, setFormData] = useState({
     venueName: '',
     category: '',
@@ -22,11 +52,13 @@ function MerchantVenueForm() {
     maxPrice: '',
     startTime: '',
     endTime: '',
+    weeklyOpenHours: buildDefaultWeeklyOpenHours(),
     description: '',
     selectedServices: [],
     images: [],
     businessLicense: null
   });
+  const [weeklyManualOverrides, setWeeklyManualOverrides] = useState(buildDefaultWeeklyOverrideMap());
 
   const [isLocationPickerOpen, setIsLocationPickerOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -42,6 +74,51 @@ function MerchantVenueForm() {
   const [wardsLoading, setWardsLoading] = useState(true);
   const [wardLoadError, setWardLoadError] = useState('');
   const [isResubmitLocked, setIsResubmitLocked] = useState(false);
+
+  const handleWeeklyHoursChange = (dayKey, field, value) => {
+    unlockResubmitIfNeeded();
+    setWeeklyManualOverrides((prev) => ({
+      ...prev,
+      [dayKey]: true
+    }));
+
+    setFormData((prev) => {
+      const currentDay = prev.weeklyOpenHours?.[dayKey] || {
+        isClosed: false,
+        openTime: '',
+        closeTime: ''
+      };
+
+      const nextDay = {
+        ...currentDay,
+        [field]: value
+      };
+
+      if (field === 'isClosed' && value === true) {
+        nextDay.openTime = '';
+        nextDay.closeTime = '';
+      }
+
+      return {
+        ...prev,
+        weeklyOpenHours: {
+          ...prev.weeklyOpenHours,
+          [dayKey]: nextDay
+        }
+      };
+    });
+
+    if (submitStatus?.type === 'success') {
+      setSubmitStatus(null);
+    }
+  };
+
+  const activeWeekDayConfig = WEEK_DAYS.find((day) => day.key === activeWeekDay) || WEEK_DAYS[0];
+  const activeDaySchedule = formData.weeklyOpenHours?.[activeWeekDayConfig.key] || {
+    isClosed: false,
+    openTime: '',
+    closeTime: ''
+  };
 
   useEffect(() => {
     async function loadPlaceCategories() {
@@ -146,10 +223,41 @@ function MerchantVenueForm() {
 
     unlockResubmitIfNeeded();
 
-    setFormData((prev) => ({
-      ...prev,
-      [name]: value
-    }));
+    setFormData((prev) => {
+      const nextFormData = {
+        ...prev,
+        [name]: value
+      };
+
+      const isGlobalHoursField = name === 'startTime' || name === 'endTime';
+
+      if (isGlobalHoursField && nextFormData.startTime && nextFormData.endTime) {
+        nextFormData.weeklyOpenHours = WEEK_DAYS.reduce((accumulator, day) => {
+          const daySchedule = prev.weeklyOpenHours?.[day.key] || {
+            isClosed: false,
+            openTime: '',
+            closeTime: ''
+          };
+
+          const shouldPreserveManualDay = Boolean(weeklyManualOverrides[day.key]);
+
+          if (shouldPreserveManualDay || daySchedule.isClosed) {
+            accumulator[day.key] = daySchedule;
+            return accumulator;
+          }
+
+          accumulator[day.key] = {
+            ...daySchedule,
+            openTime: nextFormData.startTime,
+            closeTime: nextFormData.endTime
+          };
+
+          return accumulator;
+        }, {});
+      }
+
+      return nextFormData;
+    });
     // Clear error for this field when user starts typing
     if (formErrors[name]) {
       setFormErrors((prev) => ({
@@ -210,6 +318,31 @@ function MerchantVenueForm() {
         errors.endTime = 'End time must be after start time';
       }
     }
+
+    // Weekly open hours validation
+    WEEK_DAYS.forEach((day) => {
+      const daySchedule = formData.weeklyOpenHours?.[day.key] || {};
+
+      if (daySchedule.isClosed) {
+        return;
+      }
+
+      const hasOpen = Boolean(daySchedule.openTime);
+      const hasClose = Boolean(daySchedule.closeTime);
+
+      if (!hasOpen && !hasClose) {
+        return;
+      }
+
+      if (!hasOpen || !hasClose) {
+        errors.weeklyOpenHours = 'Each opened day must include both open and close times';
+        return;
+      }
+
+      if (daySchedule.openTime >= daySchedule.closeTime) {
+        errors.weeklyOpenHours = 'Weekly OpenHours: close time must be after open time';
+      }
+    });
 
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
@@ -340,6 +473,7 @@ function MerchantVenueForm() {
           maxPrice: formData.maxPrice ? Number(formData.maxPrice) : null,
           startTime: formData.startTime || null,
           endTime: formData.endTime || null,
+          weeklyOpenHours: formData.weeklyOpenHours,
           selectedServices: formData.selectedServices,
           imagesCount: formData.images.length,
           galleryImages: galleryImageUrls
@@ -366,11 +500,13 @@ function MerchantVenueForm() {
           maxPrice: '',
           startTime: '',
           endTime: '',
+          weeklyOpenHours: buildDefaultWeeklyOpenHours(),
           description: '',
           selectedServices: [],
           images: [],
           businessLicense: null
         });
+        setWeeklyManualOverrides(buildDefaultWeeklyOverrideMap());
         setFormErrors({});
         setSubmitStatus(null);
       }, 3500);
@@ -562,6 +698,78 @@ function MerchantVenueForm() {
                 onChange={handleInputChange}
                 className={`form-input ${formErrors.endTime ? 'input-error' : ''}`}
               />
+            </div>
+          </div>
+
+          <div className="weekly-open-hours-card">
+            <div className="weekly-open-hours-header">
+              <h4>Weekly Opening Hours</h4>
+              <p>Set opening and closing time for each day. Select Off to mark a closed day.</p>
+              {formErrors.weeklyOpenHours ? <p className="error-text">{formErrors.weeklyOpenHours}</p> : null}
+            </div>
+
+            <div className="weekly-open-hours-tabs">
+              {WEEK_DAYS.map((day) => {
+                const daySchedule = formData.weeklyOpenHours?.[day.key] || {
+                  isClosed: false,
+                  openTime: '',
+                  closeTime: ''
+                };
+                const isActive = day.key === activeWeekDay;
+
+                return (
+                  <button
+                    key={day.key}
+                    type="button"
+                    className={`weekly-open-hours-tab ${isActive ? 'active' : ''}`}
+                    onClick={() => setActiveWeekDay(day.key)}
+                  >
+                    <span className="tab-day-label">{day.label}</span>
+                    <span className={`tab-day-status ${daySchedule.isClosed ? 'closed' : 'open'}`}>
+                      {daySchedule.isClosed ? 'Off' : 'Open'}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="weekly-open-hours-editor">
+              <div className="weekly-open-hours-editor-header">
+                <h5>{activeWeekDayConfig.label === 'Mon' ? 'Monday' : activeWeekDayConfig.label === 'Tue' ? 'Tuesday' : activeWeekDayConfig.label === 'Wed' ? 'Wednesday' : activeWeekDayConfig.label === 'Thu' ? 'Thursday' : activeWeekDayConfig.label === 'Fri' ? 'Friday' : activeWeekDayConfig.label === 'Sat' ? 'Saturday' : 'Sunday'}</h5>
+                <button
+                  type="button"
+                  className={`day-open-toggle ${activeDaySchedule.isClosed ? 'closed' : 'open'}`}
+                  onClick={() => handleWeeklyHoursChange(activeWeekDayConfig.key, 'isClosed', !activeDaySchedule.isClosed)}
+                >
+                  {activeDaySchedule.isClosed ? 'Off' : 'Open'}
+                </button>
+              </div>
+
+              <div className="weekly-open-hours-editor-grid">
+                <div className="form-group">
+                  <label htmlFor={`open-${activeWeekDayConfig.key}`}>Start</label>
+                  <input
+                    id={`open-${activeWeekDayConfig.key}`}
+                    type="time"
+                    value={activeDaySchedule.openTime}
+                    disabled={activeDaySchedule.isClosed}
+                    onChange={(event) => handleWeeklyHoursChange(activeWeekDayConfig.key, 'openTime', event.target.value)}
+                    className="form-input"
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor={`close-${activeWeekDayConfig.key}`}>End</label>
+                  <input
+                    id={`close-${activeWeekDayConfig.key}`}
+                    type="time"
+                    value={activeDaySchedule.closeTime}
+                    disabled={activeDaySchedule.isClosed}
+                    onChange={(event) => handleWeeklyHoursChange(activeWeekDayConfig.key, 'closeTime', event.target.value)}
+                    className="form-input"
+                  />
+                </div>
+              </div>
             </div>
           </div>
 

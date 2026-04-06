@@ -8,6 +8,17 @@ export async function fetchVenues(params = {}) {
   return response.data;
 }
 
+export async function fetchMyVenueSubmissions(params = {}) {
+  const response = await apiClient.get('/venues', {
+    params: {
+      mine: true,
+      ...params,
+    },
+  });
+
+  return response.data;
+}
+
 export async function createVenueRequest(payload) {
   const response = await apiClient.post('/venues', payload);
   return response.data;

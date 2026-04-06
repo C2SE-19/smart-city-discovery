@@ -279,6 +279,124 @@
   border-left: 3px solid #1bcf8e;
 }
 
+.weekly-open-hours-card {
+  margin-top: 6px;
+  border: 1px solid rgba(21, 94, 99, 0.16);
+  border-radius: 16px;
+  padding: 18px;
+  background: rgba(250, 253, 253, 0.8);
+}
+
+.weekly-open-hours-header {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.weekly-open-hours-header h4 {
+  margin: 0;
+  font-size: 1rem;
+  color: #102530;
+  font-weight: 800;
+}
+
+.weekly-open-hours-header p {
+  margin: 0;
+  color: rgba(16, 37, 48, 0.52);
+  font-size: 0.95rem;
+}
+
+.weekly-open-hours-tabs {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.weekly-open-hours-tab {
+  border: 2px solid rgba(21, 94, 99, 0.14);
+  background: #f8fcfc;
+  border-radius: 14px;
+  color: #1d3f47;
+  padding: 10px 8px;
+  cursor: pointer;
+  display: grid;
+  gap: 3px;
+  justify-items: center;
+  transition: all 220ms ease;
+}
+
+.weekly-open-hours-tab:hover {
+  border-color: rgba(242, 95, 41, 0.45);
+}
+
+.weekly-open-hours-tab.active {
+  border-color: rgba(242, 95, 41, 0.5);
+  background: rgba(242, 95, 41, 0.1);
+}
+
+.tab-day-label {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.tab-day-status {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #5d7a82;
+}
+
+.tab-day-status.closed {
+  color: #8f5f67;
+}
+
+.weekly-open-hours-editor {
+  border: 1px solid rgba(21, 94, 99, 0.14);
+  border-radius: 14px;
+  padding: 14px;
+  background: #fbfefe;
+}
+
+.weekly-open-hours-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.weekly-open-hours-editor-header h5 {
+  margin: 0;
+  font-size: 1rem;
+  color: #1b3b44;
+}
+
+.day-open-toggle {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+
+.day-open-toggle.open {
+  color: #2d6874;
+  background: #dbeef2;
+  border-color: #b7dbe2;
+}
+
+.day-open-toggle.closed {
+  color: #9b4e58;
+  background: #f9e3e7;
+  border-color: #efc1c9;
+}
+
+.weekly-open-hours-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
 .form-actions {
   display: flex;
   gap: 16px;
@@ -437,6 +555,14 @@
   .form-row {
     grid-template-columns: 1fr;
     gap: 16px;
+  }
+
+  .weekly-open-hours-tabs {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .weekly-open-hours-editor-grid {
+    grid-template-columns: 1fr;
   }
 
   .address-input-group {
