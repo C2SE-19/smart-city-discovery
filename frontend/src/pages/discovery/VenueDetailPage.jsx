@@ -151,16 +151,40 @@ function resolveCoverImage(venue) {
 
 function resolveWeeklySchedule(venue) {
 	const metadata = normalizeVenueMetadata(venue?.metadata);
-	const source =
+	const canonicalSource =
 		metadata.weeklySchedule && typeof metadata.weeklySchedule === 'object' && !Array.isArray(metadata.weeklySchedule)
 			? metadata.weeklySchedule
 			: null;
 
-	if (source) {
+	const legacySource =
+		metadata.weeklyOpenHours && typeof metadata.weeklyOpenHours === 'object' && !Array.isArray(metadata.weeklyOpenHours)
+			? WEEK_DAYS.reduce((accumulator, day) => {
+				const legacyDay = metadata.weeklyOpenHours?.[day.key] || {};
+				const openTime = String(legacyDay.openTime || '').trim();
+				const closeTime = String(legacyDay.closeTime || '').trim();
+				const isOff = Boolean(legacyDay.isClosed) || openTime.toUpperCase() === 'OFF' || closeTime.toUpperCase() === 'OFF';
+
+				accumulator[day.key] = {
+					start: isOff ? 'OFF' : openTime,
+					end: isOff ? 'OFF' : closeTime,
+					off: isOff
+				};
+
+				return accumulator;
+			}, {})
+			: null;
+
+	const source = canonicalSource || legacySource;
+	const fallbackStart = String(metadata.startTime || '').trim();
+	const fallbackEnd = String(metadata.endTime || '').trim();
+	const hasFallbackRange =
+		/^\d{2}:\d{2}$/.test(fallbackStart) && /^\d{2}:\d{2}$/.test(fallbackEnd) && fallbackStart < fallbackEnd;
+
+	if (source || hasFallbackRange) {
 		return WEEK_DAYS.map((day) => {
 			const item = source[day.key] || {};
-			const start = String(item.start || '').trim();
-			const end = String(item.end || '').trim();
+			const start = String(item.start || '').trim() || (hasFallbackRange ? fallbackStart : '');
+			const end = String(item.end || '').trim() || (hasFallbackRange ? fallbackEnd : '');
 			const off = Boolean(item.off) || start === 'OFF' || end === 'OFF';
 
 			return {
