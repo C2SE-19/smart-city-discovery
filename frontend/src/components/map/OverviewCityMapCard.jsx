@@ -214,6 +214,13 @@ function OverviewCityMapCard() {
 
   const mapCenter = useMemo(() => mapCenterFromWards(wards), [wards]);
   const previewVenues = useMemo(() => venues.slice(0, 320), [venues]);
+  const handleOpenLargeMap = () => {
+    const params = new URLSearchParams();
+    params.set('lat', String(Number(DEFAULT_CITY_CENTER[0])));
+    params.set('lng', String(Number(DEFAULT_CITY_CENTER[1])));
+    params.set('mapZoom', '13');
+    navigate(`${APP_ROUTES.CITY_MAP}?${params.toString()}`);
+  };
 
   return (
     <div className="overview-city-shell">
@@ -286,7 +293,7 @@ function OverviewCityMapCard() {
       <button
         type="button"
         className="overview-city-link"
-        onClick={() => navigate(APP_ROUTES.CITY_MAP)}
+        onClick={handleOpenLargeMap}
       >
         View larger map
       </button>

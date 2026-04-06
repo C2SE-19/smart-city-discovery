@@ -1,5 +1,7 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { useLanguage } from '../../contexts/LanguageContext';
+import { useTheme } from '../../contexts/ThemeContext';
 import { APP_ROUTES } from '../../constants/routes';
 import './AdminLayout.css';
 
@@ -70,17 +72,49 @@ function NotificationGlyph() {
   );
 }
 
-const adminNavigation = [
-  { label: 'Dashboard', path: APP_ROUTES.ADMIN_DASHBOARD, icon: 'dashboard' },
-  { label: 'User Management', path: APP_ROUTES.ADMIN_USERS, icon: 'users' },
-  { label: 'Map Management', path: APP_ROUTES.ADMIN_BOUNDARIES, icon: 'map' },
-  { label: 'Reports & Revenue', path: APP_ROUTES.ADMIN_REPORTS, icon: 'payments' },
-  { label: 'Ad Packages', path: APP_ROUTES.ADMIN_APPROVALS, icon: 'packages' },
-  { label: 'Feedback & Support', path: APP_ROUTES.ADMIN_FEEDBACK, icon: 'feedback' },
-];
-
 function AdminLayout() {
   const { user, logout } = useAuth();
+  const { language, changeLanguage } = useLanguage();
+  const { theme, toggleTheme } = useTheme();
+  const i18n = {
+    vi: {
+      dashboard: 'Bảng điều khiển',
+      users: 'Quản lý người dùng',
+      map: 'Quản lý bản đồ',
+      reports: 'Báo cáo & doanh thu',
+      packages: 'Gói quảng cáo',
+      feedback: 'Phản hồi & hỗ trợ',
+      logout: 'Đăng xuất',
+      role: 'Quản trị viên',
+      language: 'Ngôn ngữ',
+      dark: 'Tối',
+      light: 'Sáng',
+      notifications: 'Thông báo',
+    },
+    en: {
+      dashboard: 'Dashboard',
+      users: 'User Management',
+      map: 'Map Management',
+      reports: 'Reports & Revenue',
+      packages: 'Ad Packages',
+      feedback: 'Feedback & Support',
+      logout: 'Log out',
+      role: 'Administrator',
+      language: 'Language',
+      dark: 'Dark',
+      light: 'Light',
+      notifications: 'Notifications',
+    },
+  };
+  const t = i18n[language] || i18n.vi;
+  const adminNavigation = [
+    { label: t.dashboard, path: APP_ROUTES.ADMIN_DASHBOARD, icon: 'dashboard' },
+    { label: t.users, path: APP_ROUTES.ADMIN_USERS, icon: 'users' },
+    { label: t.map, path: APP_ROUTES.ADMIN_BOUNDARIES, icon: 'map' },
+    { label: t.reports, path: APP_ROUTES.ADMIN_REPORTS, icon: 'payments' },
+    { label: t.packages, path: APP_ROUTES.ADMIN_APPROVALS, icon: 'packages' },
+    { label: t.feedback, path: APP_ROUTES.ADMIN_FEEDBACK, icon: 'feedback' },
+  ];
   const displayName = user?.fullName || user?.fullname || 'Administrator';
   const avatarUrl =
     user?.avatarUrl ||
@@ -100,7 +134,7 @@ function AdminLayout() {
               <img src={avatarUrl} alt={displayName} className="admin-sidebar-user-avatar" />
               <div>
                 <strong>{displayName}</strong>
-                <span>Administrator</span>
+                <span>{t.role}</span>
               </div>
             </div>
           </div>
@@ -125,7 +159,7 @@ function AdminLayout() {
 
           <div className="admin-sidebar-footer">
             <button type="button" className="admin-logout-button" onClick={logout}>
-              Log out
+              {t.logout}
             </button>
           </div>
         </div>
@@ -134,7 +168,19 @@ function AdminLayout() {
       <main className="admin-main">
         <header className="admin-topbar">
           <div className="admin-topbar-actions">
-            <button type="button" className="admin-notification-button" aria-label="Notifications">
+            <label className="admin-lang-wrap">
+              <span>{t.language}</span>
+              <select value={language} onChange={(event) => changeLanguage(event.target.value)}>
+                <option value="vi">Tiếng Việt</option>
+                <option value="en">English</option>
+              </select>
+            </label>
+
+            <button type="button" className="admin-theme-btn" onClick={toggleTheme}>
+              {theme === 'light' ? `🌙 ${t.dark}` : `☀️ ${t.light}`}
+            </button>
+
+            <button type="button" className="admin-notification-button" aria-label={t.notifications}>
               <span className="admin-notification-icon" aria-hidden="true">
                 <NotificationGlyph />
               </span>
