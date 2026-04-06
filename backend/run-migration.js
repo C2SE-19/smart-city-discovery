@@ -3,8 +3,6 @@ const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
 
-require('dotenv').config();
-
 function shouldUseDatabaseSsl() {
   const sslValue = String(process.env.DB_SSL || process.env.PGSSLMODE || '').trim().toLowerCase();
 
@@ -44,35 +42,36 @@ function buildDatabasePoolConfig() {
 
 async function runMigration() {
   const pool = new Pool(buildDatabasePoolConfig());
-  const pool = new Pool({
-  host: process.env.DB_HOST,
-  port: process.env.DB_PORT,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-});
 
   try {
     const migrationFiles = [
       '20260311_complete_project_schema.sql',
       '20260313_create_users_table.sql',
-      '20260316_admin_map_management_schema.sql',
-      '20260317_place_categories_schema.sql',
-      '20260316_add_admin_role_and_seed_admin.sql',
       '20260316_add_admin_role_and_seed_admin.sql',
       '20260316_add_user_profile_fields.sql',
+      '20260316_admin_map_management_schema.sql',
       '20260317_cleanup_nan_profile_fields.sql',
+      '20260317_place_categories_schema.sql',
+      '20260318_enable_public_rls_baseline.sql',
+      '20260320_add_user_avatar_url.sql',
       '20260320_create_feedbacks_table.sql',
-      '20260323_feedback_management_extensions.sql',
       '20260321_create_user_favorites.sql',
       '20260322_create_merchant_services.sql',
-      '20260318_enable_public_rls_baseline.sql',
+      '20260323_feedback_management_extensions.sql',
+      '20260325_add_icon_to_place_categories.sql',
+      '20260403_add_user_status_fields.sql',
       '20260406_add_venues_submitter_user_id.sql'
-      '20260403_add_user_status_fields.sql'
     ];
 
-    for (const migrationFile of migrationFiles) {
+    const uniqueMigrationFiles = [...new Set(migrationFiles)];
+
+    for (const migrationFile of uniqueMigrationFiles) {
       const migrationPath = path.join(__dirname, 'database/migrations', migrationFile);
+      if (!fs.existsSync(migrationPath)) {
+        console.warn(`⚠️  Migration file not found, skipping: ${migrationFile}`);
+        continue;
+      }
+
       const sql = fs.readFileSync(migrationPath, 'utf8');
 
       console.log(`Executing migration: ${migrationFile}`);
