@@ -279,114 +279,122 @@
   border-left: 3px solid #1bcf8e;
 }
 
-.schedule-block {
-  display: grid;
-  gap: 12px;
-  margin-bottom: 16px;
+.weekly-open-hours-card {
+  margin-top: 6px;
+  border: 1px solid rgba(21, 94, 99, 0.16);
+  border-radius: 16px;
+  padding: 18px;
+  background: rgba(250, 253, 253, 0.8);
 }
 
-.schedule-block h3 {
+.weekly-open-hours-header {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.weekly-open-hours-header h4 {
   margin: 0;
   font-size: 1rem;
   color: #102530;
+  font-weight: 800;
 }
 
-.schedule-grid {
-  display: grid;
-  gap: 10px;
+.weekly-open-hours-header p {
+  margin: 0;
+  color: rgba(16, 37, 48, 0.52);
+  font-size: 0.95rem;
 }
 
-.schedule-day-tabs {
+.weekly-open-hours-tabs {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 8px;
+  gap: 10px;
+  margin-bottom: 14px;
 }
 
-.schedule-day-tab {
-  border: 1px solid rgba(21, 94, 99, 0.2);
-  background: rgba(255, 255, 255, 0.9);
-  border-radius: 10px;
-  padding: 10px 6px;
+.weekly-open-hours-tab {
+  border: 2px solid rgba(21, 94, 99, 0.14);
+  background: #f8fcfc;
+  border-radius: 14px;
+  color: #1d3f47;
+  padding: 10px 8px;
+  cursor: pointer;
   display: grid;
-  gap: 2px;
+  gap: 3px;
   justify-items: center;
-  color: #21414a;
-  transition: all 200ms ease;
+  transition: all 220ms ease;
 }
 
-.schedule-day-tab span {
-  font-size: 0.84rem;
+.weekly-open-hours-tab:hover {
+  border-color: rgba(242, 95, 41, 0.45);
+}
+
+.weekly-open-hours-tab.active {
+  border-color: rgba(242, 95, 41, 0.5);
+  background: rgba(242, 95, 41, 0.1);
+}
+
+.tab-day-label {
+  font-size: 1rem;
   font-weight: 700;
 }
 
-.schedule-day-tab small {
-  font-size: 0.7rem;
-  color: #56747c;
+.tab-day-status {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #5d7a82;
 }
 
-.schedule-day-tab:hover {
-  transform: translateY(-1px);
-  border-color: rgba(242, 95, 41, 0.36);
+.tab-day-status.closed {
+  color: #8f5f67;
 }
 
-.schedule-day-tab.is-active {
-  border-color: rgba(242, 95, 41, 0.58);
-  background: rgba(255, 240, 232, 0.92);
-  color: #a94a25;
+.weekly-open-hours-editor {
+  border: 1px solid rgba(21, 94, 99, 0.14);
+  border-radius: 14px;
+  padding: 14px;
+  background: #fbfefe;
 }
 
-.schedule-editor {
-  border: 1px solid rgba(21, 94, 99, 0.12);
-  border-radius: 12px;
-  padding: 12px;
-  background: rgba(248, 251, 252, 0.85);
-  display: grid;
-  gap: 12px;
-}
-
-.schedule-editor-header {
+.weekly-open-hours-editor-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  margin-bottom: 12px;
 }
 
-.schedule-editor-header strong {
-  color: #173a43;
-  font-size: 0.94rem;
+.weekly-open-hours-editor-header h5 {
+  margin: 0;
+  font-size: 1rem;
+  color: #1b3b44;
 }
 
-.schedule-editor-grid {
+.day-open-toggle {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+
+.day-open-toggle.open {
+  color: #2d6874;
+  background: #dbeef2;
+  border-color: #b7dbe2;
+}
+
+.day-open-toggle.closed {
+  color: #9b4e58;
+  background: #f9e3e7;
+  border-color: #efc1c9;
+}
+
+.weekly-open-hours-editor-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.schedule-input-wrap {
-  display: grid;
-  gap: 6px;
-}
-
-.schedule-label {
-  font-size: 0.8rem;
-  color: #355862;
-  font-weight: 600;
-}
-
-.schedule-status {
-  align-self: center;
-  justify-self: end;
-  border-radius: 999px;
-  border: 1px solid rgba(21, 94, 99, 0.2);
-  padding: 5px 10px;
-  font-size: 0.75rem;
-  color: #1f5360;
-  background: rgba(232, 245, 246, 0.9);
-}
-
-.schedule-error {
-  grid-column: 1 / -1;
-  margin: 0;
+  gap: 12px;
 }
 
 .form-actions {
@@ -549,6 +557,14 @@
     gap: 16px;
   }
 
+  .weekly-open-hours-tabs {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .weekly-open-hours-editor-grid {
+    grid-template-columns: 1fr;
+  }
+
   .address-input-group {
     flex-direction: column;
     align-items: stretch;
@@ -566,18 +582,6 @@
   .btn-submit {
     padding: 14px 24px;
     font-size: 1rem;
-  }
-
-  .schedule-status {
-    justify-self: start;
-  }
-
-  .schedule-day-tabs {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-
-  .schedule-editor-grid {
-    grid-template-columns: 1fr;
   }
 
   .form-actions {

@@ -16,7 +16,8 @@ const { supabaseAdmin } = require('./src/lib/supabase');
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Initialize Google OAuth2 Client
@@ -1026,6 +1027,44 @@ function normalizePaginationValue(value, fallback, { min = 1, max = 100 } = {}) 
     return Math.min(Math.max(parsed, min), max);
 }
 
+function shouldUseDatabaseSsl() {
+    const sslValue = String(process.env.DB_SSL || process.env.PGSSLMODE || '').trim().toLowerCase();
+
+    if (['false', '0', 'disable', 'off', 'no'].includes(sslValue)) {
+        return false;
+    }
+
+    if (['true', '1', 'require', 'on', 'yes'].includes(sslValue)) {
+        return true;
+    }
+
+    // Default to no SSL for local/self-hosted development to avoid connection failures.
+    return false;
+}
+
+function buildDatabasePoolConfig() {
+    const connectionString = String(process.env.DATABASE_URL || '').trim();
+    const config = connectionString
+        ? {
+              connectionString
+          }
+        : {
+              host: process.env.DB_HOST || '127.0.0.1',
+              port: Number(process.env.DB_PORT) || 5432,
+              user: process.env.DB_USER || 'postgres',
+              password: String(process.env.DB_PASSWORD ?? ''),
+              database: process.env.DB_NAME || 'postgres'
+          };
+
+    if (shouldUseDatabaseSsl()) {
+        config.ssl = {
+            rejectUnauthorized: false
+        };
+    }
+
+    return config;
+}
+
 function resolveUploadPathFromUrl(fileUrl) {
     if (!fileUrl || typeof fileUrl !== 'string') {
         return null;
@@ -1219,6 +1258,7 @@ async function generateWardIdFromName(name) {
                 };
             }
 
+        const pool = new Pool(buildDatabasePoolConfig());
         const poolMax = Number(process.env.PG_POOL_MAX || 8);
         const poolIdleTimeoutMs = Number(process.env.PG_IDLE_TIMEOUT_MS || 10000);
         const poolConnectionTimeoutMs = Number(process.env.PG_CONNECTION_TIMEOUT_MS || 60000);
@@ -1691,6 +1731,16 @@ async function generateWardIdFromName(name) {
         async function listPublicVenues(req, res) {
             try {
                 const statusFilter = normalizeStatusList(req.query.status);
+                const isMineRequest = String(req.query.mine || '').trim().toLowerCase() === 'true';
+                const requesterId = req.authUser?.id ? String(req.authUser.id).trim() : '';
+                const isAdmin = normalizeRole(req.authUser?.role) === 'admin';
+                const effectiveStatuses = isMineRequest
+                    ? statusFilter.length
+                        ? statusFilter
+                        : ['approved', 'pending', 'rejected']
+                    : isAdmin && statusFilter.length
+                      ? statusFilter
+                      : ['approved'];
                 const effectiveStatuses = statusFilter.length ? statusFilter : ['approved'];
                 const compactMode = ['1', 'true', 'yes'].includes(String(req.query.compact || '').trim().toLowerCase());
                 const liveMode = ['1', 'true', 'yes'].includes(String(req.query.live || '').trim().toLowerCase());
@@ -1700,6 +1750,10 @@ async function generateWardIdFromName(name) {
                 const wardIdsFilter = parseTextList(req.query.wardIds);
                 const singleWardId = normalizeNullableText(req.query.wardId);
                 const searchKeyword = String(req.query.q ?? req.query.search ?? '').trim().toLowerCase();
+
+                if (isMineRequest && !requesterId) {
+                    return res.status(401).json({ message: 'Missing authentication token' });
+                }
 
                 if (Number.isNaN(categoryId)) {
                     return res.status(400).json({ message: 'categoryId must be a positive integer' });
@@ -1731,6 +1785,11 @@ async function generateWardIdFromName(name) {
 
                 const values = [effectiveStatuses];
                 const whereConditions = ['venues.status::text = ANY($1::text[])'];
+
+                if (isMineRequest) {
+                    values.push(requesterId);
+                    whereConditions.push(`venues.submitted_by_user_id = $${values.length}`);
+                }
 
                 if (effectiveCategoryIds.length) {
                     values.push(effectiveCategoryIds);
@@ -1888,6 +1947,7 @@ async function generateWardIdFromName(name) {
                     venues.cover_image_url,
                     venues.business_license_image_url,
                     venues.metadata,
+                    venues.submitted_by_user_id,
                     venues.status::text AS status,
                     venues.submitted_at,
                     venues.approved_at,
@@ -2587,6 +2647,37 @@ async function generateWardIdFromName(name) {
             try {
                 const venueResult = await pool.query(
                     `
+                SELECT
+                    venues.id,
+                    venues.name,
+                    venues.title,
+                    venues.address,
+                    venues.description,
+                    venues.phone,
+                    venues.latitude,
+                    venues.longitude,
+                    venues.ward_id,
+                    wards.name AS ward_name,
+                    venues.category_id,
+                    place_categories.name AS category_name,
+                    place_categories.slug AS category_slug,
+                    venues.cover_image_url,
+                    venues.business_license_image_url,
+                    venues.metadata,
+                    venues.submitted_by_user_id,
+                    venues.status::text AS status,
+                    venues.submitted_at,
+                    venues.approved_at,
+                    venues.rejected_at,
+                    venues.rejection_reason,
+                    venues.created_at,
+                    venues.updated_at
+                FROM venues
+                LEFT JOIN wards ON wards.ward_id = venues.ward_id
+                LEFT JOIN place_categories ON place_categories.id = venues.category_id
+                WHERE venues.id = $1
+                LIMIT 1
+            `,
                         SELECT id, status::text AS status
                         FROM venues
                         WHERE id = $1
@@ -2599,6 +2690,13 @@ async function generateWardIdFromName(name) {
                     return res.status(404).json({ message: 'Venue not found' });
                 }
 
+                const venue = result.rows[0];
+                const isAdmin = normalizeRole(req.authUser?.role) === 'admin';
+                const requesterId = req.authUser?.id ? String(req.authUser.id).trim() : '';
+                const venueOwnerId = venue.submitted_by_user_id ? String(venue.submitted_by_user_id).trim() : '';
+                const isOwner = Boolean(requesterId && venueOwnerId && requesterId === venueOwnerId);
+
+                if (!isAdmin && !isOwner && String(venue.status || '').toLowerCase() !== 'approved') {
                 if (String(venueResult.rows[0].status || '').toLowerCase() !== 'approved') {
                     return res.status(404).json({ message: 'Venue not found' });
                 }
@@ -2655,7 +2753,6 @@ async function generateWardIdFromName(name) {
                 longitude,
                 description,
                 phone,
-                contactEmail,
                 coverImageUrl,
                 businessLicenseImageUrl,
                 metadata
@@ -2669,23 +2766,11 @@ async function generateWardIdFromName(name) {
             const normalizedCategoryName = String(category || '').trim();
             const normalizedMetadata = metadata && typeof metadata === 'object' ? { ...metadata } : {};
             const requestedServiceIds = normalizeServiceIds(normalizedMetadata.selectedServices);
-            const normalizedContactEmail = normalizeNullableText(contactEmail ?? normalizedMetadata.contactEmail);
+            const submitterUserId = req.authUser?.id ? String(req.authUser.id).trim() : '';
 
-            if (!normalizedContactEmail || !isValidEmail(normalizedContactEmail)) {
-                return res.status(400).json({ message: 'A valid contactEmail is required' });
+            if (!submitterUserId) {
+                return res.status(401).json({ message: 'Missing authentication token' });
             }
-
-            const normalizedScheduleResult = normalizeWeeklyScheduleInput(normalizedMetadata.weeklySchedule, {
-                fallbackStart: normalizeNullableText(normalizedMetadata.startTime),
-                fallbackEnd: normalizeNullableText(normalizedMetadata.endTime)
-            });
-
-            if (normalizedScheduleResult.error) {
-                return res.status(400).json({ message: normalizedScheduleResult.error });
-            }
-
-            normalizedMetadata.contactEmail = normalizedContactEmail;
-            normalizedMetadata.weeklySchedule = normalizedScheduleResult.value;
 
             if (!normalizedMetadata.category && normalizedCategoryName) {
                 normalizedMetadata.category = normalizedCategoryName;
@@ -2807,6 +2892,7 @@ async function generateWardIdFromName(name) {
                     cover_image_url,
                     business_license_image_url,
                     metadata,
+                    submitted_by_user_id,
                     status,
                     submitted_at,
                     updated_at
@@ -2824,6 +2910,7 @@ async function generateWardIdFromName(name) {
                     $10,
                     $11,
                     $12,
+                    $13,
                     'pending',
                     now(),
                     now()
@@ -2842,7 +2929,8 @@ async function generateWardIdFromName(name) {
                         resolvedCategoryId,
                         String(coverImageUrl || '').trim() || null,
                         String(businessLicenseImageUrl || '').trim() || null,
-                        normalizedMetadata
+                        normalizedMetadata,
+                        submitterUserId
                     ]
                 );
 
@@ -2865,6 +2953,7 @@ async function generateWardIdFromName(name) {
                     venues.cover_image_url,
                     venues.business_license_image_url,
                     venues.metadata,
+                    venues.submitted_by_user_id,
                     venues.status::text AS status,
                     venues.submitted_at,
                     venues.created_at,
@@ -3988,7 +4077,6 @@ async function generateWardIdFromName(name) {
         async function moderateVenueSubmission(req, res) {
             const venueId = Number(req.params.venueId);
             const action = String(req.body.action || '').trim().toLowerCase();
-            const rejectionReason = String(req.body.rejectionReason || '').trim();
 
             if (!Number.isFinite(venueId)) {
                 return res.status(400).json({ message: 'Invalid venue id' });
@@ -4002,120 +4090,65 @@ async function generateWardIdFromName(name) {
 
             try {
                 if (action === 'reject') {
-                    const venueResult = await pool.query(
+                    const normalizedRejectionReason = normalizeNullableText(req.body.rejectionReason);
+                    const result = await pool.query(
                         `
-                            SELECT
-                                venues.id,
-                                venues.name,
-                                venues.title,
-                                venues.address,
-                                venues.phone,
-                                venues.metadata,
-                                wards.name AS ward_name,
-                                place_categories.name AS category_name
-                            FROM venues
-                            LEFT JOIN wards ON wards.ward_id = venues.ward_id
-                            LEFT JOIN place_categories ON place_categories.id = venues.category_id
-                            WHERE venues.id = $1
-                            LIMIT 1
-                        `,
-                        [venueId]
-                    );
-
-                    if (!venueResult.rows.length) {
-                        return res.status(404).json({ message: 'Venue submission not found' });
-                    }
-
-                    const rejectedVenue = venueResult.rows[0];
-                    const venueMetadata =
-                        rejectedVenue.metadata && typeof rejectedVenue.metadata === 'object' && !Array.isArray(rejectedVenue.metadata)
-                            ? rejectedVenue.metadata
-                            : {};
-
-                    const recipientEmail = normalizeNullableText(venueMetadata.contactEmail || venueMetadata.email);
-
-                    if (rejectionReason && isValidEmail(recipientEmail) && feedbackReplyTransporter && feedbackReplySmtpUser) {
-                        const venueName = String(rejectedVenue.title || rejectedVenue.name || '').trim() || `Venue #${rejectedVenue.id}`;
-                        const mailFrom = `${feedbackReplyFromName} <${feedbackReplyFromEmail || feedbackReplySmtpUser}>`;
-
-                        const plainTextBody = [
-                            'Smart City Discovery - Venue Submission Rejected',
-                            '',
-                            `Venue: ${venueName}`,
-                            `Venue ID: ${rejectedVenue.id}`,
-                            `Address: ${rejectedVenue.address || 'Not provided'}`,
-                            `Ward: ${rejectedVenue.ward_name || 'Not provided'}`,
-                            `Category: ${rejectedVenue.category_name || 'Not provided'}`,
-                            `Phone: ${rejectedVenue.phone || 'Not provided'}`,
-                            '',
-                            'Rejection Reason:',
-                            rejectionReason,
-                            '',
-                            `Reviewed by: ${reviewer}`,
-                            '',
-                            'You can revise your submission and submit again later.',
-                            '',
-                            'Best regards,',
-                            'Smart City Discovery Admin'
-                        ].join('\n');
-
-                        const htmlBody = `
-                            <div style="margin:0;padding:0;background:#f5f7fb;font-family:Segoe UI,Arial,sans-serif;color:#1f2937;">
-                                <div style="max-width:680px;margin:0 auto;padding:24px 16px;">
-                                    <div style="background:#ffffff;border:1px solid #e4e8f1;border-radius:14px;overflow:hidden;box-shadow:0 10px 28px rgba(23,33,79,0.08);">
-                                        <div style="padding:18px 22px;background:linear-gradient(135deg,#b91c1c,#dc2626);color:#ffffff;">
-                                            <p style="margin:0;font-size:12px;letter-spacing:.08em;text-transform:uppercase;opacity:.88;">Smart City Discovery Admin</p>
-                                            <h2 style="margin:8px 0 0;font-size:22px;line-height:1.3;">Venue Submission Rejected</h2>
-                                        </div>
-                                        <div style="padding:20px 22px 24px;">
-                                            <p style="margin:0 0 14px;font-size:14px;color:#334155;">Hello merchant,</p>
-                                            <p style="margin:0 0 18px;font-size:14px;line-height:1.7;color:#334155;">Your venue submission has been rejected after admin review.</p>
-
-                                            <div style="margin:0 0 18px;padding:14px;border:1px solid #e4e8f1;border-radius:10px;background:#f8faff;">
-                                                <p style="margin:0 0 8px;font-size:13px;color:#475569;"><strong>Venue:</strong> ${escapeHtml(venueName)}</p>
-                                                <p style="margin:0 0 8px;font-size:13px;color:#475569;"><strong>Venue ID:</strong> #${rejectedVenue.id}</p>
-                                                <p style="margin:0 0 8px;font-size:13px;color:#475569;"><strong>Address:</strong> ${escapeHtml(rejectedVenue.address || 'Not provided')}</p>
-                                                <p style="margin:0 0 8px;font-size:13px;color:#475569;"><strong>Ward:</strong> ${escapeHtml(rejectedVenue.ward_name || 'Not provided')}</p>
-                                                <p style="margin:0 0 8px;font-size:13px;color:#475569;"><strong>Category:</strong> ${escapeHtml(rejectedVenue.category_name || 'Not provided')}</p>
-                                                <p style="margin:0;font-size:13px;color:#475569;"><strong>Phone:</strong> ${escapeHtml(rejectedVenue.phone || 'Not provided')}</p>
-                                            </div>
-
-                                            <h3 style="margin:0 0 8px;font-size:15px;color:#1e293b;">Rejection Reason</h3>
-                                            <div style="margin:0 0 10px;padding:12px;border-radius:10px;background:#fef2f2;border:1px solid #fecaca;font-size:14px;line-height:1.65;color:#991b1b;">${formatMultilineHtml(rejectionReason)}</div>
-                                            <p style="margin:0 0 18px;font-size:12px;color:#64748b;"><strong>Reviewed by:</strong> ${escapeHtml(reviewer)}</p>
-
-                                            <p style="margin:0;font-size:13px;color:#64748b;">You can revise your venue information and submit again later.<br /><br />Best regards,<br /><strong>Smart City Discovery Admin</strong></p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        `;
-
-                        await feedbackReplyTransporter.sendMail({
-                            from: mailFrom,
-                            to: recipientEmail,
-                            subject: 'Venue Submission Rejected',
-                            text: plainTextBody,
-                            html: htmlBody
-                        });
-                    }
-
-                    const deleteResult = await pool.query(
-                        `
-                          DELETE FROM venues
+                          UPDATE venues
+                          SET
+                              status = 'rejected',
+                              rejected_at = now(),
+                              approved_at = NULL,
+                              rejection_reason = $3,
+                              reviewed_by = $2,
+                              updated_at = now()
                           WHERE id = $1
                           RETURNING id
                       `,
-                        [venueId]
+                        [venueId, reviewer, normalizedRejectionReason]
                     );
 
-                    if (!deleteResult.rows.length) {
+                    if (!result.rows.length) {
                         return res.status(404).json({ message: 'Venue submission not found' });
                     }
 
+                    const details = await pool.query(
+                        `
+                SELECT
+                    venues.id,
+                    venues.name,
+                    venues.title,
+                    venues.address,
+                    venues.description,
+                    venues.phone,
+                    venues.latitude,
+                    venues.longitude,
+                    venues.ward_id,
+                    wards.name AS ward_name,
+                    venues.category_id,
+                    place_categories.name AS category_name,
+                    place_categories.slug AS category_slug,
+                    venues.cover_image_url,
+                    venues.business_license_image_url,
+                    venues.metadata,
+                    venues.status::text AS status,
+                    venues.submitted_at,
+                    venues.approved_at,
+                    venues.rejected_at,
+                    venues.rejection_reason,
+                    venues.created_at,
+                    venues.updated_at
+                FROM venues
+                LEFT JOIN wards ON wards.ward_id = venues.ward_id
+                LEFT JOIN place_categories ON place_categories.id = venues.category_id
+                WHERE venues.id = $1
+                LIMIT 1
+            `,
+                        [venueId]
+                    );
+
                     return res.json({
-                        message: 'Venue rejected and removed successfully',
-                        deletedVenueId: deleteResult.rows[0].id
+                        message: 'Venue rejected successfully',
+                        venue: details.rows[0]
                     });
                 }
 
@@ -5034,6 +5067,9 @@ async function generateWardIdFromName(name) {
         registerVersionedRoute('get', '/place-categories', listPublicPlaceCategories);
         registerVersionedRoute('get', '/merchant-services', listPublicMerchantServices);
         registerVersionedRoute('get', '/feedback/types', listPublicFeedbackTypes);
+        registerVersionedRoute('get', '/venues', authenticateOptional, listPublicVenues);
+        registerVersionedRoute('get', '/venues/:venueId', authenticateRequest, getVenueDetails);
+        registerVersionedRoute('post', '/venues', authenticateRequest, createVenueSubmission);
         registerVersionedRoute('get', '/venues', listPublicVenues);
         registerVersionedRoute('get', '/venues/:venueId', authenticateOptional, getVenueDetails);
         registerVersionedRoute('get', '/venues/:venueId/reviews', listPublicVenueReviews);
@@ -5061,8 +5097,6 @@ async function generateWardIdFromName(name) {
         registerVersionedRoute('get', '/admin/venues', authenticateRequest, requireAdminRole, listAdminVenues);
         registerVersionedRoute('get', '/admin/venues/:venueId', authenticateRequest, requireAdminRole, getAdminVenueDetail);
         registerVersionedRoute('patch', '/admin/venues/:venueId/moderation', authenticateRequest, requireAdminRole, moderateVenueSubmission);
-        registerVersionedRoute('get', '/admin/venues/:venueId/reviews', authenticateRequest, requireAdminRole, listAdminVenueReviews);
-        registerVersionedRoute('post', '/admin/venues/:venueId/message', authenticateRequest, requireAdminRole, sendAdminVenueModerationMessage);
         registerVersionedRoute('get', '/admin/feedback/types', authenticateRequest, requireAdminRole, listAdminFeedbackTypes);
         registerVersionedRoute('post', '/admin/feedback/types', authenticateRequest, requireAdminRole, createAdminFeedbackType);
         registerVersionedRoute('patch', '/admin/feedback/types/:typeId', authenticateRequest, requireAdminRole, updateAdminFeedbackType);

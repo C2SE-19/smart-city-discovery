@@ -5,7 +5,45 @@ const path = require('path');
 
 require('dotenv').config();
 
+function shouldUseDatabaseSsl() {
+  const sslValue = String(process.env.DB_SSL || process.env.PGSSLMODE || '').trim().toLowerCase();
+
+  if (['false', '0', 'disable', 'off', 'no'].includes(sslValue)) {
+    return false;
+  }
+
+  if (['true', '1', 'require', 'on', 'yes'].includes(sslValue)) {
+    return true;
+  }
+
+  return false;
+}
+
+function buildDatabasePoolConfig() {
+  const connectionString = String(process.env.DATABASE_URL || '').trim();
+  const config = connectionString
+    ? {
+        connectionString,
+      }
+    : {
+        host: process.env.DB_HOST || '127.0.0.1',
+        port: Number(process.env.DB_PORT) || 5432,
+        user: process.env.DB_USER || 'postgres',
+        password: String(process.env.DB_PASSWORD ?? ''),
+        database: process.env.DB_NAME || 'postgres',
+      };
+
+  if (shouldUseDatabaseSsl()) {
+    config.ssl = {
+      rejectUnauthorized: false,
+    };
+  }
+
+  return config;
+}
+
 async function runMigration() {
+  const pool = new Pool(buildDatabasePoolConfig());
   const pool = new Pool({
   host: process.env.DB_HOST,
   port: process.env.DB_PORT,
@@ -29,6 +67,7 @@ async function runMigration() {
       '20260321_create_user_favorites.sql',
       '20260322_create_merchant_services.sql',
       '20260318_enable_public_rls_baseline.sql',
+      '20260406_add_venues_submitter_user_id.sql'
       '20260403_add_user_status_fields.sql'
     ];
 
