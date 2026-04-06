@@ -31,6 +31,38 @@ const login = async (req, res) => {
       });
     }
 
+    // Check account status
+    const status = (user.status || 'active').toLowerCase();
+
+    if (status === 'blocked') {
+      const reason = user.blocked_reason || 'Vi phạm điều khoản sử dụng.';
+      return res.status(403).json({
+        success: false,
+        message: `Tài khoản đã bị khóa vĩnh viễn: ${reason}`
+      });
+    }
+
+    if (status === 'paused') {
+      const pauseUntil = user.pause_until ? new Date(user.pause_until) : null;
+      const now = new Date();
+
+      if (pauseUntil && pauseUntil > now) {
+        return res.status(403).json({
+          success: false,
+          message: `Tài khoản đang bị tạm dừng đến ${pauseUntil.toLocaleString()}. Vui lòng liên hệ quản trị để mở sớm hơn.`
+        });
+      }
+
+      // Auto-activate if pause window has expired.
+      if (!pauseUntil || pauseUntil <= now) {
+        await usersService.updateUser(user.id, {
+          status: 'active',
+          pauseUntil: null,
+          blockedReason: null
+        });
+      }
+    }
+
     res.json({
       success: true,
       user: {
