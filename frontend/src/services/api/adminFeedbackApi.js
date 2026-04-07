@@ -33,6 +33,11 @@ export async function fetchAdminFeedbackReportDetail(feedbackId) {
   return response.data;
 }
 
+export async function checkAdminFeedbackSmtpHealth() {
+  const response = await apiClient.get('/admin/feedback/smtp-health');
+  return response.data;
+}
+
 export async function sendAdminFeedbackReply(feedbackId, { replyMessage, status, attachment }) {
   const formData = new FormData();
   formData.append('replyMessage', replyMessage || '');
@@ -46,7 +51,11 @@ export async function sendAdminFeedbackReply(feedbackId, { replyMessage, status,
   return response.data;
 }
 
-export async function deleteAdminFeedbackReport(feedbackId) {
-  const response = await apiClient.delete(`/admin/feedback/reports/${feedbackId}`);
+export async function deleteAdminFeedbackReport(feedbackId, { deleteTarget = false } = {}) {
+  const response = await apiClient.delete(`/admin/feedback/reports/${feedbackId}`, {
+    params: {
+      deleteTarget: deleteTarget ? 'true' : undefined,
+    },
+  });
   return response.data;
 }

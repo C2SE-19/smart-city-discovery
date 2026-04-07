@@ -111,7 +111,6 @@ function App() {
           />
           <Route path={APP_ROUTES.TERMS} element={<TermsPage />} />
           <Route path={APP_ROUTES.FEEDBACK} element={<FeedbackSupportPage />} />
-          <Route path={APP_ROUTES.CITY_MAP} element={<CityMapPage />} />
           <Route path={APP_ROUTES.VENUE_DETAIL} element={<VenueDetailPage />} />
           <Route path="/profile" element={<ProfilePage />} />
         </Route>
@@ -166,3 +165,4 @@ function App() {
 }
 
 export default App;
+
