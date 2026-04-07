@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { GeoJSON, MapContainer, Marker, TileLayer, Tooltip, useMap, useMapEvents } from 'react-leaflet';
+import { GeoJSON, MapContainer, Marker, Pane, TileLayer, Tooltip, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { fetchWards } from '../../../services/api/wardsApi';
@@ -164,6 +164,13 @@ function LocationPickerModal({ isOpen, onClose, onLocationSelect, defaultLocatio
                 attribution="&copy; OpenStreetMap contributors &copy; CARTO"
                 url="https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png"
               />
+
+              <Pane name="location-picker-road-labels" style={{ zIndex: 460, pointerEvents: 'none' }}>
+                <TileLayer
+                  attribution="&copy; OpenStreetMap contributors &copy; CARTO"
+                  url="https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png"
+                />
+              </Pane>
 
               {wards.map((ward) => {
                 const polygonBoundary = toPolygonBoundaryFeatureCollection(ward.boundary);

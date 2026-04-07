@@ -103,6 +103,16 @@ function normalizeComparableText(value) {
   return String(value || '').trim();
 }
 
+function normalizeSearchText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D')
+    .toLowerCase()
+    .trim();
+}
+
 function canonicalizeJsonValue(value) {
   if (Array.isArray(value)) {
     return value.map((item) => canonicalizeJsonValue(item));
@@ -446,7 +456,7 @@ function wait(ms) {
 
 async function fetchAdminVenuesWithRetry(maxAttempts = 3) {
   let lastError = null;
-  const venueParams = { status: 'pending,approved', summary: 'true' };
+  const venueParams = { status: 'pending,approved' };
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
@@ -520,6 +530,15 @@ function AdminBoundaryPage() {
 
   const [mapCenter, setMapCenter] = useState(DEFAULT_CENTER);
   const [mapZoom, setMapZoom] = useState(DEFAULT_ZOOM);
+  const [isPendingFilterPanelOpen, setIsPendingFilterPanelOpen] = useState(false);
+  const [pendingSearchInput, setPendingSearchInput] = useState('');
+  const [selectedPendingCategoryIds, setSelectedPendingCategoryIds] = useState([]);
+  const [selectedPendingWardIds, setSelectedPendingWardIds] = useState([]);
+  const [selectedPendingServiceIds, setSelectedPendingServiceIds] = useState([]);
+  const [appliedPendingSearch, setAppliedPendingSearch] = useState('');
+  const [appliedPendingCategoryIds, setAppliedPendingCategoryIds] = useState([]);
+  const [appliedPendingWardIds, setAppliedPendingWardIds] = useState([]);
+  const [appliedPendingServiceIds, setAppliedPendingServiceIds] = useState([]);
 
   const [wardForm, setWardForm] = useState({
     name: '',
@@ -531,10 +550,6 @@ function AdminBoundaryPage() {
   const [isCategoryIconPickerOpen, setIsCategoryIconPickerOpen] = useState(false);
   const [serviceNameInput, setServiceNameInput] = useState('');
 
-  const pendingVenues = useMemo(
-    () => venues.filter((venue) => String(venue.status || '').toLowerCase() === 'pending'),
-    [venues]
-  );
   const pendingModeVenues = useMemo(
     () => venues.filter((venue) => String(venue.status || '').toLowerCase() !== 'rejected'),
     [venues]
@@ -542,6 +557,15 @@ function AdminBoundaryPage() {
   const approvedVenues = useMemo(
     () => venues.filter((venue) => String(venue.status || '').toLowerCase() === 'approved'),
     [venues]
+  );
+  const serviceNameById = useMemo(
+    () =>
+      new Map(
+        merchantServices
+          .map((service) => [Number(service.id), String(service.name || '').trim()])
+          .filter(([serviceId, serviceName]) => Number.isInteger(serviceId) && serviceId > 0 && Boolean(serviceName))
+      ),
+    [merchantServices]
   );
   const usageEligibleVenues = useMemo(
     () => venues.filter((venue) => String(venue.status || '').toLowerCase() !== 'rejected'),
@@ -565,9 +589,23 @@ function AdminBoundaryPage() {
           return true;
         }
 
-        return extractVenueServiceIds(venue).includes(Number(selectedServiceId));
+        const targetServiceId = Number(selectedServiceId);
+        const matchedById = extractVenueServiceIds(venue).includes(targetServiceId);
+
+        if (matchedById) {
+          return true;
+        }
+
+        const targetServiceName = normalizeSearchText(serviceNameById.get(targetServiceId));
+        if (!targetServiceName) {
+          return false;
+        }
+
+        return resolveVenueServiceNames(venue, serviceNameById)
+          .map((serviceName) => normalizeSearchText(serviceName))
+          .includes(targetServiceName);
       }),
-    [approvedVenues, selectedServiceId]
+    [approvedVenues, selectedServiceId, serviceNameById]
   );
   const visibleVenues = useMemo(() => {
     if (activeMode === 'pending') {
@@ -585,9 +623,88 @@ function AdminBoundaryPage() {
     return approvedVenues;
   }, [activeMode, pendingModeVenues, categoryModeVenues, serviceModeVenues, approvedVenues]);
 
+  const normalizedAppliedPendingSearch = useMemo(
+    () => normalizeSearchText(appliedPendingSearch),
+    [appliedPendingSearch]
+  );
+
+  const pendingFilteredVenues = useMemo(() => {
+    return pendingModeVenues.filter((venue) => {
+      const categoryId = Number(venue.category_id);
+      const wardId = String(venue.ward_id || '');
+      const venueServiceIds = extractVenueServiceIds(venue);
+
+      if (appliedPendingCategoryIds.length && !appliedPendingCategoryIds.includes(categoryId)) {
+        return false;
+      }
+
+      if (appliedPendingWardIds.length && !appliedPendingWardIds.includes(wardId)) {
+        return false;
+      }
+
+      if (
+        appliedPendingServiceIds.length &&
+        !appliedPendingServiceIds.some((serviceId) => {
+          if (venueServiceIds.includes(serviceId)) {
+            return true;
+          }
+
+          const targetServiceName = normalizeSearchText(serviceNameById.get(Number(serviceId)));
+          if (!targetServiceName) {
+            return false;
+          }
+
+          return resolveVenueServiceNames(venue, serviceNameById)
+            .map((serviceName) => normalizeSearchText(serviceName))
+            .includes(targetServiceName);
+        })
+      ) {
+        return false;
+      }
+
+      if (!normalizedAppliedPendingSearch) {
+        return true;
+      }
+
+      const venueSearchSource = [
+        venue.title,
+        venue.name,
+        venue.address,
+        venue.ward_name,
+        venue.ward_id,
+        venue.category_name,
+        venue.description,
+        venue.phone,
+        ...resolveVenueServiceNames(venue, serviceNameById),
+      ]
+        .filter(Boolean)
+        .join(' ');
+
+      return normalizeSearchText(venueSearchSource).includes(normalizedAppliedPendingSearch);
+    });
+  }, [
+    pendingModeVenues,
+    appliedPendingCategoryIds,
+    appliedPendingWardIds,
+    appliedPendingServiceIds,
+    normalizedAppliedPendingSearch,
+    serviceNameById,
+  ]);
+
+  const pendingQueueVenues = useMemo(
+    () => pendingFilteredVenues.filter((venue) => String(venue.status || '').toLowerCase() === 'pending'),
+    [pendingFilteredVenues]
+  );
+
+  const pendingActiveFilterCount =
+    appliedPendingCategoryIds.length +
+    appliedPendingWardIds.length +
+    appliedPendingServiceIds.length +
+    (appliedPendingSearch ? 1 : 0);
+
   const selectedVenueSummary = useMemo(
-    () => pendingModeVenues.find((venue) => Number(venue.id) === Number(selectedVenueId)) || null,
-    [pendingModeVenues, selectedVenueId]
+    () => pendingFilteredVenues.find((venue) => Number(venue.id) === Number(selectedVenueId)) || null,
+    [pendingFilteredVenues, selectedVenueId]
   );
   const selectedVenue = useMemo(() => {
     if (!selectedVenueSummary) {
@@ -621,26 +738,31 @@ function AdminBoundaryPage() {
       ),
     [placeCategories]
   );
-  const serviceNameById = useMemo(
-    () =>
-      new Map(
-        merchantServices
-          .map((service) => [Number(service.id), String(service.name || '').trim()])
-          .filter(([serviceId, serviceName]) => Number.isInteger(serviceId) && serviceId > 0 && Boolean(serviceName))
-      ),
-    [merchantServices]
-  );
   const serviceUsageCountById = useMemo(() => {
     const countById = new Map();
 
     usageEligibleVenues.forEach((venue) => {
-      extractVenueServiceIds(venue).forEach((serviceId) => {
-        countById.set(serviceId, (countById.get(serviceId) || 0) + 1);
+      const venueServiceIds = new Set(extractVenueServiceIds(venue));
+      const venueServiceNames = new Set(
+        resolveVenueServiceNames(venue, serviceNameById).map((serviceName) => normalizeSearchText(serviceName))
+      );
+
+      merchantServices.forEach((service) => {
+        const serviceId = Number(service.id);
+        const serviceName = normalizeSearchText(service.name);
+
+        if (!Number.isInteger(serviceId) || serviceId <= 0) {
+          return;
+        }
+
+        if (venueServiceIds.has(serviceId) || (serviceName && venueServiceNames.has(serviceName))) {
+          countById.set(serviceId, (countById.get(serviceId) || 0) + 1);
+        }
       });
     });
 
     return countById;
-  }, [usageEligibleVenues]);
+  }, [usageEligibleVenues, merchantServices, serviceNameById]);
   const categoryUsageCountById = useMemo(() => {
     const countById = new Map();
 
@@ -755,14 +877,14 @@ function AdminBoundaryPage() {
       return;
     }
 
-    if (!pendingModeVenues.length) {
+    if (!pendingFilteredVenues.length) {
       setSelectedVenueId(null);
       setIsSubmissionDetailClosed(false);
       return;
     }
 
     const hasSelectedVenue = selectedVenueId
-      ? pendingModeVenues.some((venue) => Number(venue.id) === Number(selectedVenueId))
+      ? pendingFilteredVenues.some((venue) => Number(venue.id) === Number(selectedVenueId))
       : false;
 
     if (!hasSelectedVenue) {
@@ -774,10 +896,10 @@ function AdminBoundaryPage() {
     }
 
     if (!hasSelectedVenue) {
-      const fallbackVenueId = pendingVenues[0]?.id ?? pendingModeVenues[0]?.id ?? null;
+      const fallbackVenueId = pendingQueueVenues[0]?.id ?? pendingFilteredVenues[0]?.id ?? null;
       setSelectedVenueId(fallbackVenueId);
     }
-  }, [activeMode, pendingModeVenues, pendingVenues, selectedVenueId, isSubmissionDetailClosed]);
+  }, [activeMode, pendingFilteredVenues, pendingQueueVenues, selectedVenueId, isSubmissionDetailClosed]);
 
   useEffect(() => {
     if (activeMode !== 'pending' || !selectedVenue) {
@@ -1011,9 +1133,10 @@ function AdminBoundaryPage() {
     setError('');
     setOperationMessage('');
     setIsSubmissionDetailClosed(false);
+    setIsPendingFilterPanelOpen(false);
 
     if (mode === 'pending') {
-      const fallbackVenueId = pendingVenues[0]?.id ?? pendingModeVenues[0]?.id ?? null;
+      const fallbackVenueId = pendingQueueVenues[0]?.id ?? pendingFilteredVenues[0]?.id ?? null;
       setSelectedVenueId(fallbackVenueId);
     }
 
@@ -1022,6 +1145,116 @@ function AdminBoundaryPage() {
       setSelectedServiceId(firstService.id);
       setServiceNameInput(firstService.name || '');
     }
+  }
+
+  const togglePendingSelection = (setter) => (value) => {
+    setter((current) =>
+      current.includes(value) ? current.filter((item) => item !== value) : [...current, value]
+    );
+  };
+
+  function applyPendingFilters() {
+    const nextAppliedSearch = pendingSearchInput.trim();
+    const normalizedNextSearch = normalizeSearchText(nextAppliedSearch);
+
+    setAppliedPendingSearch(nextAppliedSearch);
+    setAppliedPendingCategoryIds(selectedPendingCategoryIds);
+    setAppliedPendingWardIds(selectedPendingWardIds);
+    setAppliedPendingServiceIds(selectedPendingServiceIds);
+    setIsPendingFilterPanelOpen(false);
+
+    if (selectedPendingWardIds.length) {
+      const selectedWards = wards.filter((ward) => selectedPendingWardIds.includes(String(ward.ward_id)));
+      const selectedCenters = selectedWards.map((ward) => extractBoundaryCenter(ward.boundary)).filter(Boolean);
+
+      if (selectedCenters.length) {
+        const sum = selectedCenters.reduce(
+          (result, center) => ({ lat: result.lat + center[0], lng: result.lng + center[1] }),
+          { lat: 0, lng: 0 }
+        );
+        setMapCenter([sum.lat / selectedCenters.length, sum.lng / selectedCenters.length]);
+        setMapZoom(selectedCenters.length === 1 ? 14 : 13);
+        return;
+      }
+    }
+
+    const nextFilteredVenues = pendingModeVenues.filter((venue) => {
+      const categoryId = Number(venue.category_id);
+      const wardId = String(venue.ward_id || '');
+      const venueServiceIds = extractVenueServiceIds(venue);
+
+      if (selectedPendingCategoryIds.length && !selectedPendingCategoryIds.includes(categoryId)) {
+        return false;
+      }
+
+      if (selectedPendingWardIds.length && !selectedPendingWardIds.includes(wardId)) {
+        return false;
+      }
+
+      if (
+        selectedPendingServiceIds.length &&
+        !selectedPendingServiceIds.some((serviceId) => {
+          if (venueServiceIds.includes(serviceId)) {
+            return true;
+          }
+
+          const targetServiceName = normalizeSearchText(serviceNameById.get(Number(serviceId)));
+          if (!targetServiceName) {
+            return false;
+          }
+
+          return resolveVenueServiceNames(venue, serviceNameById)
+            .map((serviceName) => normalizeSearchText(serviceName))
+            .includes(targetServiceName);
+        })
+      ) {
+        return false;
+      }
+
+      if (!normalizedNextSearch) {
+        return true;
+      }
+
+      const venueSearchSource = [
+        venue.title,
+        venue.name,
+        venue.address,
+        venue.ward_name,
+        venue.ward_id,
+        venue.category_name,
+        venue.description,
+        venue.phone,
+        ...resolveVenueServiceNames(venue, serviceNameById),
+      ]
+        .filter(Boolean)
+        .join(' ');
+
+      return normalizeSearchText(venueSearchSource).includes(normalizedNextSearch);
+    });
+
+    const firstFilterMatch = nextFilteredVenues[0];
+    if (firstFilterMatch) {
+      const latitude = Number(firstFilterMatch.latitude);
+      const longitude = Number(firstFilterMatch.longitude);
+
+      if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+        setMapCenter([latitude, longitude]);
+        setMapZoom(13);
+      }
+    }
+  }
+
+  function clearPendingFilters() {
+    setPendingSearchInput('');
+    setSelectedPendingCategoryIds([]);
+    setSelectedPendingWardIds([]);
+    setSelectedPendingServiceIds([]);
+    setAppliedPendingSearch('');
+    setAppliedPendingCategoryIds([]);
+    setAppliedPendingWardIds([]);
+    setAppliedPendingServiceIds([]);
+    setMapCenter(DEFAULT_CENTER);
+    setMapZoom(DEFAULT_ZOOM);
   }
 
   function loadWardToEditor(ward) {
@@ -1507,11 +1740,11 @@ function AdminBoundaryPage() {
         <div className="admin-list-panel">
           <header>
             <h3>Pending Queue</h3>
-            <p>{pendingVenues.length} waiting submission(s)</p>
+            <p>{pendingQueueVenues.length} waiting submission(s)</p>
           </header>
 
           <div className="admin-scroll-list">
-            {pendingVenues.map((venue) => (
+            {pendingQueueVenues.map((venue) => (
               <button
                 key={venue.id}
                 type="button"
@@ -1524,7 +1757,11 @@ function AdminBoundaryPage() {
               </button>
             ))}
 
-            {!pendingVenues.length ? <p className="admin-empty-note">No pending posts right now.</p> : null}
+            {!pendingQueueVenues.length ? (
+              <p className="admin-empty-note">
+                {pendingActiveFilterCount ? 'No pending posts match your filters.' : 'No pending posts right now.'}
+              </p>
+            ) : null}
           </div>
         </div>
       );
@@ -2105,7 +2342,7 @@ function AdminBoundaryPage() {
                 );
               })}
 
-              {visibleVenues
+              {(activeMode === 'pending' ? pendingFilteredVenues : visibleVenues)
                 .filter((venue) => Number.isFinite(Number(venue.latitude)) && Number.isFinite(Number(venue.longitude)))
                 .map((venue) => (
                   <Marker
@@ -2142,6 +2379,121 @@ function AdminBoundaryPage() {
                   </Marker>
                 ))}
             </MapContainer>
+
+            {activeMode === 'pending' ? (
+              <div className="admin-pending-map-controls">
+                <button
+                  type="button"
+                  className="admin-pending-filter-toggle"
+                  onClick={() => setIsPendingFilterPanelOpen((current) => !current)}
+                >
+                  Filters {pendingActiveFilterCount ? `(${pendingActiveFilterCount})` : ''}
+                </button>
+              </div>
+            ) : null}
+
+            {activeMode === 'pending' && isPendingFilterPanelOpen ? (
+              <section className="admin-pending-filter-panel" role="region" aria-label="Pending map filters">
+                <header>
+                  <h3>Map filters</h3>
+                  <button
+                    type="button"
+                    onClick={() => setIsPendingFilterPanelOpen(false)}
+                    aria-label="Close pending filters"
+                  >
+                    ×
+                  </button>
+                </header>
+
+                <p>Choose Place Categories, Ward Naming, and Services Offered, then press Search.</p>
+
+                <label className="admin-pending-search-field">
+                  <span>Search keyword</span>
+                  <input
+                    type="text"
+                    value={pendingSearchInput}
+                    placeholder="Venue, address, ward, or service"
+                    onChange={(event) => setPendingSearchInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        applyPendingFilters();
+                      }
+                    }}
+                  />
+                </label>
+
+                <div className="admin-pending-filter-row">
+                  <div className="admin-pending-filter-group">
+                    <h4>Place Categories</h4>
+                    <div className="admin-pending-filter-list">
+                      {placeCategories.map((category) => {
+                        const categoryId = Number(category.id);
+                        const checked = selectedPendingCategoryIds.includes(categoryId);
+
+                        return (
+                          <label key={`pending-category-${categoryId}`}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => togglePendingSelection(setSelectedPendingCategoryIds)(categoryId)}
+                            />
+                            <span>{category.icon || DEFAULT_PLACE_CATEGORY_ICON} {category.name}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="admin-pending-filter-group">
+                    <h4>Ward Naming</h4>
+                    <div className="admin-pending-filter-list">
+                      {wards.map((ward) => {
+                        const wardId = String(ward.ward_id);
+                        const checked = selectedPendingWardIds.includes(wardId);
+
+                        return (
+                          <label key={`pending-ward-${wardId}`}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => togglePendingSelection(setSelectedPendingWardIds)(wardId)}
+                            />
+                            <span>{ward.name}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="admin-pending-filter-group">
+                    <h4>Services Offered - Merchant</h4>
+                    <div className="admin-pending-filter-list">
+                      {merchantServices.map((service) => {
+                        const serviceId = Number(service.id);
+                        const checked = selectedPendingServiceIds.includes(serviceId);
+
+                        return (
+                          <label key={`pending-service-${serviceId}`}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => togglePendingSelection(setSelectedPendingServiceIds)(serviceId)}
+                            />
+                            <span>{service.name}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="admin-pending-filter-actions">
+                  <button type="button" className="apply" onClick={applyPendingFilters}>Search</button>
+                  <button type="button" className="clear" onClick={clearPendingFilters}>Clear</button>
+                </div>
+              </section>
+            ) : null}
 
             {loading ? <div className="admin-map-overlay">Loading map management data...</div> : null}
           </section>
