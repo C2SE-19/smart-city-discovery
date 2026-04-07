@@ -1826,66 +1826,68 @@ function CityMapPage() {
               />
             </label>
 
-            <div className="city-map-filter-group">
-              <h3>Place Categories</h3>
-              <div className="city-map-filter-list">
-                {categories.map((category) => {
-                  const categoryId = Number(category.id);
-                  const checked = selectedCategoryIds.includes(categoryId);
+            <div className="city-map-filter-row">
+              <div className="city-map-filter-group">
+                <h3>Place Categories</h3>
+                <div className="city-map-filter-list">
+                  {categories.map((category) => {
+                    const categoryId = Number(category.id);
+                    const checked = selectedCategoryIds.includes(categoryId);
 
-                  return (
-                    <label key={`category-${categoryId}`}>
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleSelection(setSelectedCategoryIds)(categoryId)}
-                      />
-                      <span>{category.icon || '📍'} {category.name}</span>
-                    </label>
-                  );
-                })}
+                    return (
+                      <label key={`category-${categoryId}`}>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleSelection(setSelectedCategoryIds)(categoryId)}
+                        />
+                        <span>{category.icon || '📍'} {category.name}</span>
+                      </label>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
 
-            <div className="city-map-filter-group">
-              <h3>Ward Naming</h3>
-              <div className="city-map-filter-list">
-                {wards.map((ward) => {
-                  const wardId = String(ward.ward_id);
-                  const checked = selectedWardIds.includes(wardId);
+              <div className="city-map-filter-group">
+                <h3>Ward Naming</h3>
+                <div className="city-map-filter-list">
+                  {wards.map((ward) => {
+                    const wardId = String(ward.ward_id);
+                    const checked = selectedWardIds.includes(wardId);
 
-                  return (
-                    <label key={`ward-${wardId}`}>
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleSelection(setSelectedWardIds)(wardId)}
-                      />
-                      <span>{ward.name}</span>
-                    </label>
-                  );
-                })}
+                    return (
+                      <label key={`ward-${wardId}`}>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleSelection(setSelectedWardIds)(wardId)}
+                        />
+                        <span>{ward.name}</span>
+                      </label>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
 
-            <div className="city-map-filter-group">
-              <h3>Services Offered</h3>
-              <div className="city-map-filter-list">
-                {services.map((service) => {
-                  const serviceId = Number(service.id);
-                  const checked = selectedServiceIds.includes(serviceId);
+              <div className="city-map-filter-group">
+                <h3>Services Offered - Merchant</h3>
+                <div className="city-map-filter-list">
+                  {services.map((service) => {
+                    const serviceId = Number(service.id);
+                    const checked = selectedServiceIds.includes(serviceId);
 
-                  return (
-                    <label key={`service-${serviceId}`}>
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => toggleSelection(setSelectedServiceIds)(serviceId)}
-                      />
-                      <span>{service.name}</span>
-                    </label>
-                  );
-                })}
+                    return (
+                      <label key={`service-${serviceId}`}>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleSelection(setSelectedServiceIds)(serviceId)}
+                        />
+                        <span>{service.name}</span>
+                      </label>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
