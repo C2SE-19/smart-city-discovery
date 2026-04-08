@@ -629,6 +629,165 @@ function normalizeNullableText(value) {
     return trimmed === '' ? null : trimmed;
 }
 
+const USER_PREFERENCE_AGE_RANGES = [
+    { key: '13_17', label: '13-17' },
+    { key: '18_24', label: '18-24' },
+    { key: '25_34', label: '25-34' },
+    { key: '35_49', label: '35-49' },
+    { key: '50_plus', label: '50+' }
+];
+
+const USER_PREFERENCE_GENDERS = [
+    { key: 'male', label: 'Male' },
+    { key: 'female', label: 'Female' },
+    { key: 'non_binary', label: 'Non-binary' },
+    { key: 'prefer_not_to_say', label: 'Prefer not to say' }
+];
+
+const USER_PREFERENCE_TIME_WINDOWS = [
+    { key: 'morning', label: 'Morning' },
+    { key: 'noon', label: 'Noon' },
+    { key: 'afternoon', label: 'Afternoon' },
+    { key: 'evening', label: 'Evening' },
+    { key: 'late_night', label: 'Late night' }
+];
+
+const USER_PREFERENCE_INTERESTS_BY_AGE = {
+    '13_17': [
+        { key: 'street_food', label: 'Street food' },
+        { key: 'bubble_tea', label: 'Bubble tea' },
+        { key: 'instagram_spots', label: 'Instagram spots' },
+        { key: 'arcades', label: 'Arcades & games' },
+        { key: 'parks', label: 'Parks' },
+        { key: 'cinema', label: 'Cinema' },
+        { key: 'sports', label: 'Sports activities' }
+    ],
+    '18_24': [
+        { key: 'nightlife', label: 'Nightlife' },
+        { key: 'live_music', label: 'Live music' },
+        { key: 'cafes', label: 'Cafes' },
+        { key: 'street_food', label: 'Street food' },
+        { key: 'adventure', label: 'Adventure' },
+        { key: 'photography', label: 'Photography' },
+        { key: 'fitness', label: 'Fitness' }
+    ],
+    '25_34': [
+        { key: 'specialty_coffee', label: 'Specialty coffee' },
+        { key: 'fine_dining', label: 'Fine dining' },
+        { key: 'family_spots', label: 'Family spots' },
+        { key: 'wellness', label: 'Wellness' },
+        { key: 'networking', label: 'Networking places' },
+        { key: 'cultural_sites', label: 'Cultural sites' },
+        { key: 'weekend_getaways', label: 'Weekend getaways' }
+    ],
+    '35_49': [
+        { key: 'family_friendly', label: 'Family friendly' },
+        { key: 'local_cuisine', label: 'Local cuisine' },
+        { key: 'heritage', label: 'Heritage places' },
+        { key: 'wellness', label: 'Wellness' },
+        { key: 'business_lunch', label: 'Business lunch' },
+        { key: 'shopping', label: 'Shopping' },
+        { key: 'nature_walks', label: 'Nature walks' }
+    ],
+    '50_plus': [
+        { key: 'quiet_cafes', label: 'Quiet cafes' },
+        { key: 'traditional_food', label: 'Traditional food' },
+        { key: 'scenic_walks', label: 'Scenic walks' },
+        { key: 'spiritual_sites', label: 'Spiritual sites' },
+        { key: 'cultural_sites', label: 'Cultural sites' },
+        { key: 'health_friendly', label: 'Health-friendly places' },
+        { key: 'gardens', label: 'Gardens' }
+    ]
+};
+
+const USER_PREFERENCE_AGE_RANGE_SET = new Set(USER_PREFERENCE_AGE_RANGES.map((item) => item.key));
+const USER_PREFERENCE_GENDER_SET = new Set(USER_PREFERENCE_GENDERS.map((item) => item.key));
+const USER_PREFERENCE_TIME_WINDOW_SET = new Set(USER_PREFERENCE_TIME_WINDOWS.map((item) => item.key));
+const USER_PREFERENCE_INTEREST_MAP = Object.values(USER_PREFERENCE_INTERESTS_BY_AGE)
+    .flat()
+    .reduce((map, item) => {
+        map[item.key] = item.label;
+        return map;
+    }, {});
+const USER_PREFERENCE_INTEREST_SET_BY_AGE = Object.entries(USER_PREFERENCE_INTERESTS_BY_AGE).reduce(
+    (accumulator, [ageRangeKey, interests]) => {
+        accumulator[ageRangeKey] = new Set(interests.map((item) => item.key));
+        return accumulator;
+    },
+    {}
+);
+
+const USER_PREFERENCE_INTEREST_KEYWORDS = {
+    street_food: ['street food', 'food market', 'food court', 'hawker', 'am thuc duong pho', 'an vat', 'quan an vat', 'cho dem'],
+    bubble_tea: ['bubble tea', 'milk tea', 'tea shop', 'tra sua'],
+    instagram_spots: ['instagram', 'photo spot', 'check-in', 'scenic', 'viewpoint', 'check in', 'song ao', 'view dep'],
+    arcades: ['arcade', 'game center', 'bowling', 'vr game', 'khu vui choi', 'choi game'],
+    parks: ['park', 'green space', 'playground', 'cong vien'],
+    cinema: ['cinema', 'movie', 'theater', 'rap phim', 'rap chieu phim'],
+    sports: ['sport', 'stadium', 'court', 'climbing', 'the thao', 'san bong', 'gym'],
+    nightlife: ['bar', 'club', 'nightlife', 'cocktail', 'pub', 'quan nhau', 'beer club', 'karaoke'],
+    live_music: ['live music', 'acoustic', 'dj', 'concert', 'nhac song', 'music lounge'],
+    cafes: ['cafe', 'coffee', 'espresso', 'tea room', 'ca phe', 'quan cafe'],
+    adventure: ['adventure', 'hiking', 'zipline', 'outdoor', 'mao hiem', 'trekking'],
+    photography: ['photography', 'photo', 'landmark', 'gallery', 'chup anh'],
+    fitness: ['gym', 'fitness', 'workout', 'yoga', 'phong tap'],
+    specialty_coffee: ['specialty coffee', 'single origin', 'brew bar', 'ca phe dac san'],
+    fine_dining: ['fine dining', 'premium', 'chef', 'tasting menu', 'nha hang cao cap'],
+    family_spots: ['family', 'kids', 'child-friendly', 'gia dinh', 'tre em'],
+    wellness: ['wellness', 'spa', 'massage', 'relax', 'thu gian'],
+    networking: ['coworking', 'meeting', 'workspace', 'business', 'van phong', 'hop nhom'],
+    cultural_sites: ['museum', 'cultural', 'heritage', 'art', 'bao tang', 'van hoa'],
+    weekend_getaways: ['weekend', 'resort', 'escape', 'staycation', 'nghi duong'],
+    family_friendly: ['family', 'child-friendly', 'kids', 'gia dinh', 'tre em'],
+    local_cuisine: ['local cuisine', 'traditional', 'authentic', 'dac san dia phuong'],
+    heritage: ['heritage', 'historic', 'history', 'di tich'],
+    business_lunch: ['business lunch', 'meeting', 'private room', 'an trua cong viec'],
+    shopping: ['shopping', 'mall', 'boutique', 'market', 'mua sam', 'trung tam thuong mai'],
+    nature_walks: ['nature', 'walk', 'trail', 'garden', 'di bo', 'duong dao'],
+    quiet_cafes: ['quiet', 'calm', 'peaceful', 'cafe', 'yen tinh'],
+    traditional_food: ['traditional', 'local dish', 'authentic', 'mon truyen thong'],
+    scenic_walks: ['scenic', 'riverside', 'view', 'walk', 'canh dep'],
+    spiritual_sites: ['temple', 'pagoda', 'church', 'spiritual', 'chua', 'nha tho', 'tam linh'],
+    health_friendly: ['healthy', 'low sugar', 'light meal', 'vegetarian', 'an lanh manh', 'it duong'],
+    gardens: ['garden', 'botanical', 'flower', 'vuon hoa']
+};
+
+const USER_PREFERENCE_TIME_KEYWORDS = {
+    morning: ['breakfast', 'morning', 'sunrise', 'early', 'buoi sang', 'sang som'],
+    noon: ['lunch', 'noon', 'midday', 'buoi trua', 'an trua'],
+    afternoon: ['afternoon', 'tea time', 'sunset', 'buoi chieu'],
+    evening: ['dinner', 'evening', 'night view', 'buoi toi', 'an toi'],
+    late_night: ['late night', 'open 24/7', 'nightlife', 'after midnight', 'khuya', 'dem']
+};
+
+const USER_PREFERENCE_ADULT_KEYWORDS = [
+    'bar', 'club', 'cocktail', 'nightlife', 'pub',
+    'beer', 'beer club', 'lounge', 'karaoke',
+    'quan nhau', 'nhau', 'bia', 'ruou'
+];
+const USER_PREFERENCE_FAMILY_KEYWORDS = [
+    'family', 'kids', 'park', 'museum', 'garden',
+    'library', 'book', 'playground',
+    'gia dinh', 'tre em', 'cong vien', 'khu vui choi', 'thu vien', 'bao tang', 'nha sach'
+];
+const USER_PREFERENCE_TEEN_FRIENDLY_KEYWORDS = [
+    'playground', 'theme park', 'amusement', 'arcade', 'library', 'book',
+    'park', 'museum', 'cinema', 'sports',
+    'khu vui choi', 'cong vien', 'thu vien', 'bao tang', 'nha sach', 'rap phim', 'the thao'
+];
+
+function normalizePreferenceStringList(input) {
+    if (!Array.isArray(input)) {
+        return [];
+    }
+
+    return [...new Set(
+        input
+            .map((item) => String(item || '').trim().toLowerCase())
+            .filter(Boolean)
+    )];
+}
+
 const REVIEW_BLOCKED_TERMS = ['địt', 'đụ', 'dm', 'dcm', 'đéo', 'cặc', 'lồn', 'đĩ', 'vcl'];
 
 function normalizeReviewModerationText(value) {
@@ -1682,6 +1841,34 @@ async function generateWardIdFromName(name) {
             // Ignore if table does not exist yet or schema not ready.
         });
 
+        pool.query(
+            `
+                CREATE TABLE IF NOT EXISTS user_ai_preferences (
+                    user_id TEXT PRIMARY KEY,
+                    age_range_key TEXT NOT NULL,
+                    preferred_gender TEXT NOT NULL,
+                    preferred_times TEXT[] NOT NULL DEFAULT '{}'::text[],
+                    interests TEXT[] NOT NULL DEFAULT '{}'::text[],
+                    onboarding_completed BOOLEAN NOT NULL DEFAULT true,
+                    last_known_latitude DOUBLE PRECISION,
+                    last_known_longitude DOUBLE PRECISION,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                CREATE INDEX IF NOT EXISTS idx_user_ai_preferences_updated_at
+                ON user_ai_preferences (updated_at DESC)
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
         // ==========================================
         // FEEDBACK SUPPORT
         // ==========================================
@@ -2122,6 +2309,281 @@ async function generateWardIdFromName(name) {
         async function resolveVenueReviewStatsByVenueId(venueId) {
             const statsByVenueId = await resolveVenueReviewStatsMapByVenueIds([venueId]);
             return statsByVenueId.get(Number(venueId)) || null;
+        }
+
+        function buildUserPreferenceOptionsPayload() {
+            return {
+                ageRanges: USER_PREFERENCE_AGE_RANGES,
+                genders: USER_PREFERENCE_GENDERS,
+                visitTimes: USER_PREFERENCE_TIME_WINDOWS,
+                interestsByAgeRange: USER_PREFERENCE_INTERESTS_BY_AGE
+            };
+        }
+
+        function mapUserPreferenceRow(row) {
+            if (!row) {
+                return null;
+            }
+
+            const latitudeValue = Number(row.last_known_latitude);
+            const longitudeValue = Number(row.last_known_longitude);
+
+            return {
+                userId: String(row.user_id || ''),
+                ageRangeKey: String(row.age_range_key || '').trim(),
+                preferredGender: String(row.preferred_gender || '').trim(),
+                preferredTimes: normalizePreferenceStringList(row.preferred_times),
+                interests: normalizePreferenceStringList(row.interests),
+                onboardingCompleted: Boolean(row.onboarding_completed),
+                lastKnownLatitude: Number.isFinite(latitudeValue) ? latitudeValue : null,
+                lastKnownLongitude: Number.isFinite(longitudeValue) ? longitudeValue : null,
+                createdAt: row.created_at || null,
+                updatedAt: row.updated_at || null
+            };
+        }
+
+        async function getUserPreferenceRecordByUserId(userId) {
+            const result = await pool.query(
+                `
+                    SELECT
+                        user_id,
+                        age_range_key,
+                        preferred_gender,
+                        preferred_times,
+                        interests,
+                        onboarding_completed,
+                        last_known_latitude,
+                        last_known_longitude,
+                        created_at,
+                        updated_at
+                    FROM user_ai_preferences
+                    WHERE user_id = $1
+                    LIMIT 1
+                `,
+                [String(userId || '').trim()]
+            );
+
+            return mapUserPreferenceRow(result.rows[0] || null);
+        }
+
+        function normalizeRecommendationText(value) {
+            return String(value || '')
+                .toLowerCase()
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .replace(/[^a-z0-9\s]/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+        }
+
+        function countKeywordHits(text, keywords = []) {
+            const normalizedText = normalizeRecommendationText(text);
+            if (!normalizedText) {
+                return 0;
+            }
+
+            return [...new Set(keywords.map((keyword) => normalizeRecommendationText(keyword)).filter(Boolean))]
+                .reduce((count, keyword) => (normalizedText.includes(keyword) ? count + 1 : count), 0);
+        }
+
+        function computeDistanceKm(fromLatitude, fromLongitude, toLatitude, toLongitude) {
+            const lat1 = Number(fromLatitude);
+            const lon1 = Number(fromLongitude);
+            const lat2 = Number(toLatitude);
+            const lon2 = Number(toLongitude);
+
+            if (![lat1, lon1, lat2, lon2].every((value) => Number.isFinite(value))) {
+                return null;
+            }
+
+            const earthRadiusKm = 6371;
+            const toRadians = (degrees) => (degrees * Math.PI) / 180;
+            const deltaLat = toRadians(lat2 - lat1);
+            const deltaLon = toRadians(lon2 - lon1);
+            const a =
+                Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2)
+                + Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2))
+                * Math.sin(deltaLon / 2) * Math.sin(deltaLon / 2);
+
+            return 2 * earthRadiusKm * Math.asin(Math.sqrt(a));
+        }
+
+        function buildVenueRecommendationText(venue) {
+            const metadata = normalizeVenueMetadataObject(venue.metadata);
+            const serviceNames = normalizeStringArray(metadata.selectedServiceNames).join(' ');
+
+            return [
+                venue.name,
+                venue.title,
+                venue.description,
+                venue.address,
+                venue.category_name,
+                venue.ward_name,
+                serviceNames
+            ]
+                .map((item) => String(item || '').trim())
+                .filter(Boolean)
+                .join(' ');
+        }
+
+        function scoreVenueByUserPreference(venue, preference, userLatitude, userLongitude) {
+            const text = buildVenueRecommendationText(venue);
+            const ageRangeKey = preference.ageRangeKey;
+            const interestKeys = preference.interests;
+            const visitTimes = preference.preferredTimes;
+
+            let interestScore = 0;
+            let timeScore = 0;
+            let ageScore = 0;
+            let genderScore = 0;
+            let nearbyScore = 0;
+
+            const matchedInterestLabels = [];
+            const matchedTimeLabels = [];
+            let ageReason = '';
+
+            interestKeys.forEach((interestKey) => {
+                const interestKeywords = [
+                    ...(USER_PREFERENCE_INTEREST_KEYWORDS[interestKey] || []),
+                    USER_PREFERENCE_INTEREST_MAP[interestKey] || interestKey
+                ];
+                const hits = countKeywordHits(text, interestKeywords);
+
+                if (hits > 0) {
+                    interestScore += 1 + Math.min(hits, 2) * 0.2;
+                    matchedInterestLabels.push(USER_PREFERENCE_INTEREST_MAP[interestKey] || interestKey);
+                }
+            });
+
+            visitTimes.forEach((timeWindowKey) => {
+                const timeKeywords = USER_PREFERENCE_TIME_KEYWORDS[timeWindowKey] || [];
+                const hits = countKeywordHits(text, timeKeywords);
+                if (hits > 0) {
+                    timeScore += 0.6 + Math.min(hits, 2) * 0.15;
+                    const label = USER_PREFERENCE_TIME_WINDOWS.find((item) => item.key === timeWindowKey)?.label || timeWindowKey;
+                    matchedTimeLabels.push(label);
+                }
+            });
+
+            const adultHits = countKeywordHits(text, USER_PREFERENCE_ADULT_KEYWORDS);
+            const familyHits = countKeywordHits(text, USER_PREFERENCE_FAMILY_KEYWORDS);
+            const teenFriendlyHits = countKeywordHits(text, USER_PREFERENCE_TEEN_FRIENDLY_KEYWORDS);
+
+            if (ageRangeKey === '13_17' && adultHits > 0) {
+                return {
+                    score: -100,
+                    distanceKm: null,
+                    reasons: ['Filtered by age safety rule']
+                };
+            }
+
+            if (ageRangeKey === '13_17') {
+                ageScore += teenFriendlyHits * 1.4;
+                ageScore += familyHits * 0.45;
+                ageReason = 'Age fit: under-18 friendly';
+            } else if (ageRangeKey === '18_24') {
+                ageScore += adultHits * 1.05;
+                ageScore += familyHits * 0.1;
+                ageReason = 'Age fit: young adult';
+            } else if (ageRangeKey === '25_34') {
+                ageScore += adultHits * 0.8;
+                ageScore += familyHits * 0.2;
+                ageReason = 'Age fit: adult lifestyle';
+            } else if (ageRangeKey === '35_49' || ageRangeKey === '50_plus') {
+                ageScore += familyHits * 0.4;
+                ageScore -= adultHits * 0.25;
+                ageReason = 'Age fit: family and comfort';
+            }
+
+            if (preference.preferredGender === 'female' || preference.preferredGender === 'non_binary') {
+                const comfortHits = countKeywordHits(text, [
+                    'family', 'cafe', 'park', 'museum', 'wellness', 'community',
+                    'cong vien', 'thu vien', 'bao tang', 'yen tinh'
+                ]);
+                genderScore += comfortHits * 0.18;
+                genderScore -= adultHits * 0.08;
+            }
+
+            const distanceKm = computeDistanceKm(userLatitude, userLongitude, venue.latitude, venue.longitude);
+            if (Number.isFinite(distanceKm)) {
+                nearbyScore = Math.max(0, 1.2 - distanceKm / 12);
+            }
+
+            const ratingValue = Number(venue.average_rating || venue.averageRating || 0);
+            const ratingScore = Number.isFinite(ratingValue)
+                ? Math.max(0, Math.min(1, ratingValue / 5)) * 0.6
+                : 0;
+
+            const score =
+                interestScore * 2.2
+                + timeScore * 1.3
+                + ageScore
+                + genderScore
+                + nearbyScore * 2.1
+                + ratingScore;
+
+            const reasons = [];
+            if (matchedInterestLabels.length) {
+                reasons.push(`Matches interests: ${matchedInterestLabels.slice(0, 2).join(', ')}`);
+            }
+            if (matchedTimeLabels.length) {
+                reasons.push(`Fits your time: ${matchedTimeLabels.slice(0, 2).join(', ')}`);
+            }
+            if (ageReason) {
+                reasons.push(ageReason);
+            }
+            if (Number.isFinite(distanceKm)) {
+                reasons.push(`Nearby: ${distanceKm.toFixed(1)} km`);
+            }
+
+            return {
+                score,
+                distanceKm: Number.isFinite(distanceKm) ? Number(distanceKm.toFixed(2)) : null,
+                reasons
+            };
+        }
+
+        function diversifyRecommendedVenues(scoredVenues, limit) {
+            const groupedByCategory = new Map();
+
+            scoredVenues.forEach((item) => {
+                const categoryKey = item.category_id ? String(item.category_id) : 'uncategorized';
+                if (!groupedByCategory.has(categoryKey)) {
+                    groupedByCategory.set(categoryKey, []);
+                }
+                groupedByCategory.get(categoryKey).push(item);
+            });
+
+            const categoryOrder = [...groupedByCategory.keys()].sort((firstKey, secondKey) => {
+                const firstScore = groupedByCategory.get(firstKey)?.[0]?.recommendationScore || 0;
+                const secondScore = groupedByCategory.get(secondKey)?.[0]?.recommendationScore || 0;
+                return secondScore - firstScore;
+            });
+
+            const selected = [];
+            while (selected.length < limit) {
+                let pushedInThisRound = false;
+
+                for (const categoryKey of categoryOrder) {
+                    const bucket = groupedByCategory.get(categoryKey);
+                    if (!bucket || !bucket.length) {
+                        continue;
+                    }
+
+                    selected.push(bucket.shift());
+                    pushedInThisRound = true;
+
+                    if (selected.length >= limit) {
+                        break;
+                    }
+                }
+
+                if (!pushedInThisRound) {
+                    break;
+                }
+            }
+
+            return selected;
         }
 
         async function listPublicWards(req, res) {
@@ -6667,6 +7129,307 @@ async function generateWardIdFromName(name) {
                 res.status(500).json({ message: 'Server error' });
             }
         });
+
+        const getUserPreferenceOptionsHandler = (_req, res) => {
+            return res.json(buildUserPreferenceOptionsPayload());
+        };
+
+        const getUserPreferenceHandler = async (req, res) => {
+            const userId = String(req.user?.id || '').trim();
+
+            if (!userId) {
+                return res.status(401).json({ message: 'Unauthorized' });
+            }
+
+            try {
+                const preference = await getUserPreferenceRecordByUserId(userId);
+
+                return res.json({
+                    success: true,
+                    preference,
+                    preferencesCompleted: Boolean(preference?.onboardingCompleted),
+                    options: buildUserPreferenceOptionsPayload()
+                });
+            } catch (error) {
+                if (isUndefinedTableError(error)) {
+                    return res.status(500).json({
+                        message: 'User preference schema is missing. Please run backend migrations.'
+                    });
+                }
+
+                return res.status(500).json({ message: error.message });
+            }
+        };
+
+        const saveUserPreferenceHandler = async (req, res) => {
+            const userId = String(req.user?.id || '').trim();
+            const ageRangeKey = String(req.body?.ageRangeKey || '').trim();
+            const preferredGender = String(req.body?.preferredGender || '').trim();
+            const preferredTimes = normalizePreferenceStringList(req.body?.preferredTimes);
+            const interests = normalizePreferenceStringList(req.body?.interests);
+            const latitudeInput = req.body?.latitude;
+            const longitudeInput = req.body?.longitude;
+
+            if (!userId) {
+                return res.status(401).json({ message: 'Unauthorized' });
+            }
+
+            if (!USER_PREFERENCE_AGE_RANGE_SET.has(ageRangeKey)) {
+                return res.status(400).json({ message: 'Invalid age range.' });
+            }
+
+            if (!USER_PREFERENCE_GENDER_SET.has(preferredGender)) {
+                return res.status(400).json({ message: 'Invalid preferred gender.' });
+            }
+
+            if (!preferredTimes.length || preferredTimes.some((item) => !USER_PREFERENCE_TIME_WINDOW_SET.has(item))) {
+                return res.status(400).json({ message: 'Please select at least one valid preferred time.' });
+            }
+
+            const allowedInterestSet = USER_PREFERENCE_INTEREST_SET_BY_AGE[ageRangeKey] || new Set();
+            if (!interests.length || interests.some((item) => !allowedInterestSet.has(item))) {
+                return res.status(400).json({ message: 'Selected interests are not valid for the chosen age range.' });
+            }
+
+            let latitude = null;
+            let longitude = null;
+            const hasLatitudeInput = latitudeInput !== undefined && latitudeInput !== null && latitudeInput !== '';
+            const hasLongitudeInput = longitudeInput !== undefined && longitudeInput !== null && longitudeInput !== '';
+
+            if (hasLatitudeInput || hasLongitudeInput) {
+                latitude = Number(latitudeInput);
+                longitude = Number(longitudeInput);
+
+                if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
+                    return res.status(400).json({ message: 'Invalid latitude value.' });
+                }
+
+                if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+                    return res.status(400).json({ message: 'Invalid longitude value.' });
+                }
+            }
+
+            try {
+                const result = await pool.query(
+                    `
+                        INSERT INTO user_ai_preferences (
+                            user_id,
+                            age_range_key,
+                            preferred_gender,
+                            preferred_times,
+                            interests,
+                            onboarding_completed,
+                            last_known_latitude,
+                            last_known_longitude,
+                            updated_at
+                        )
+                        VALUES ($1, $2, $3, $4::text[], $5::text[], true, $6, $7, NOW())
+                        ON CONFLICT (user_id)
+                        DO UPDATE SET
+                            age_range_key = EXCLUDED.age_range_key,
+                            preferred_gender = EXCLUDED.preferred_gender,
+                            preferred_times = EXCLUDED.preferred_times,
+                            interests = EXCLUDED.interests,
+                            onboarding_completed = true,
+                            last_known_latitude = COALESCE(EXCLUDED.last_known_latitude, user_ai_preferences.last_known_latitude),
+                            last_known_longitude = COALESCE(EXCLUDED.last_known_longitude, user_ai_preferences.last_known_longitude),
+                            updated_at = NOW()
+                        RETURNING
+                            user_id,
+                            age_range_key,
+                            preferred_gender,
+                            preferred_times,
+                            interests,
+                            onboarding_completed,
+                            last_known_latitude,
+                            last_known_longitude,
+                            created_at,
+                            updated_at
+                    `,
+                    [userId, ageRangeKey, preferredGender, preferredTimes, interests, latitude, longitude]
+                );
+
+                return res.json({
+                    success: true,
+                    message: 'Preferences saved successfully.',
+                    preference: mapUserPreferenceRow(result.rows[0] || null)
+                });
+            } catch (error) {
+                if (isUndefinedTableError(error)) {
+                    return res.status(500).json({
+                        message: 'User preference schema is missing. Please run backend migrations.'
+                    });
+                }
+
+                return res.status(500).json({ message: error.message });
+            }
+        };
+
+        const listUserRecommendationsHandler = async (req, res) => {
+            const userId = String(req.user?.id || '').trim();
+            const limit = normalizePaginationValue(req.query?.limit, 12, { min: 4, max: 24 });
+            const latitudeQuery = req.query?.latitude;
+            const longitudeQuery = req.query?.longitude;
+
+            if (!userId) {
+                return res.status(401).json({ message: 'Unauthorized' });
+            }
+
+            const hasLatitudeQuery = latitudeQuery !== undefined && latitudeQuery !== null && latitudeQuery !== '';
+            const hasLongitudeQuery = longitudeQuery !== undefined && longitudeQuery !== null && longitudeQuery !== '';
+
+            if (hasLatitudeQuery !== hasLongitudeQuery) {
+                return res.status(400).json({ message: 'latitude and longitude must be provided together.' });
+            }
+
+            let requestLatitude = null;
+            let requestLongitude = null;
+
+            if (hasLatitudeQuery && hasLongitudeQuery) {
+                requestLatitude = Number(latitudeQuery);
+                requestLongitude = Number(longitudeQuery);
+
+                if (!Number.isFinite(requestLatitude) || requestLatitude < -90 || requestLatitude > 90) {
+                    return res.status(400).json({ message: 'Invalid latitude value.' });
+                }
+
+                if (!Number.isFinite(requestLongitude) || requestLongitude < -180 || requestLongitude > 180) {
+                    return res.status(400).json({ message: 'Invalid longitude value.' });
+                }
+            }
+
+            try {
+                const preference = await getUserPreferenceRecordByUserId(userId);
+
+                if (!preference || !preference.onboardingCompleted) {
+                    return res.json({
+                        success: true,
+                        preferencesCompleted: false,
+                        recommendations: []
+                    });
+                }
+
+                const effectiveLatitude = Number.isFinite(requestLatitude)
+                    ? requestLatitude
+                    : preference.lastKnownLatitude;
+                const effectiveLongitude = Number.isFinite(requestLongitude)
+                    ? requestLongitude
+                    : preference.lastKnownLongitude;
+
+                if (Number.isFinite(requestLatitude) && Number.isFinite(requestLongitude)) {
+                    await pool.query(
+                        `
+                            UPDATE user_ai_preferences
+                            SET
+                                last_known_latitude = $2,
+                                last_known_longitude = $3,
+                                updated_at = NOW()
+                            WHERE user_id = $1
+                        `,
+                        [userId, requestLatitude, requestLongitude]
+                    );
+                }
+
+                const venueResult = await pool.query(
+                    `
+                        SELECT
+                            venues.id,
+                            venues.name,
+                            venues.title,
+                            venues.address,
+                            venues.description,
+                            venues.latitude,
+                            venues.longitude,
+                            venues.ward_id,
+                            wards.name AS ward_name,
+                            venues.category_id,
+                            place_categories.name AS category_name,
+                            venues.cover_image_url,
+                            venues.metadata,
+                            venues.average_rating,
+                            venues.total_reviews,
+                            venues.status::text AS status,
+                            venues.created_at,
+                            venues.updated_at
+                        FROM venues
+                        LEFT JOIN wards ON wards.ward_id = venues.ward_id
+                        LEFT JOIN place_categories ON place_categories.id = venues.category_id
+                        WHERE venues.status::text = 'approved'
+                        ORDER BY COALESCE(venues.approved_at, venues.created_at) DESC, venues.id DESC
+                        LIMIT 300
+                    `
+                );
+
+                const scoredVenues = venueResult.rows
+                    .map((row) => normalizeVenueCoordinates(row))
+                    .map((venue) => {
+                        const scoring = scoreVenueByUserPreference(
+                            venue,
+                            preference,
+                            effectiveLatitude,
+                            effectiveLongitude
+                        );
+
+                        return {
+                            ...venue,
+                            recommendationScore: Number(scoring.score.toFixed(4)),
+                            distanceKm: scoring.distanceKm,
+                            recommendationReasons: scoring.reasons
+                        };
+                    })
+                    .filter((venue) => venue.recommendationScore > 0.15)
+                    .sort((first, second) => {
+                        if (second.recommendationScore !== first.recommendationScore) {
+                            return second.recommendationScore - first.recommendationScore;
+                        }
+
+                        const secondRating = Number(second.average_rating || 0);
+                        const firstRating = Number(first.average_rating || 0);
+                        return secondRating - firstRating;
+                    });
+
+                const diversifiedVenues = diversifyRecommendedVenues(scoredVenues, limit).map((venue) => ({
+                    id: venue.id,
+                    name: venue.name,
+                    title: venue.title,
+                    address: venue.address,
+                    description: venue.description,
+                    latitude: venue.latitude,
+                    longitude: venue.longitude,
+                    ward_id: venue.ward_id,
+                    ward_name: venue.ward_name,
+                    category_id: venue.category_id,
+                    category_name: venue.category_name,
+                    cover_image_url: venue.cover_image_url,
+                    metadata: venue.metadata,
+                    average_rating: venue.average_rating,
+                    total_reviews: venue.total_reviews,
+                    recommendationScore: venue.recommendationScore,
+                    distanceKm: venue.distanceKm,
+                    recommendationReasons: venue.recommendationReasons
+                }));
+
+                return res.json({
+                    success: true,
+                    preferencesCompleted: true,
+                    preference,
+                    recommendations: diversifiedVenues
+                });
+            } catch (error) {
+                if (isUndefinedTableError(error)) {
+                    return res.status(500).json({
+                        message: 'User preference schema is missing. Please run backend migrations.'
+                    });
+                }
+
+                return res.status(500).json({ message: error.message });
+            }
+        };
+
+        registerVersionedRoute('get', '/users/preferences/options', getUserPreferenceOptionsHandler);
+        registerVersionedRoute('get', '/users/preferences', authenticateRequest, checkUserStatus, requireAuth, getUserPreferenceHandler);
+        registerVersionedRoute('put', '/users/preferences', authenticateRequest, checkUserStatus, requireAuth, saveUserPreferenceHandler);
+        registerVersionedRoute('get', '/users/recommendations', authenticateRequest, checkUserStatus, requireAuth, listUserRecommendationsHandler);
 
         app.put('/api/users/password', authenticateOptional, requireAuth, async (req, res) => {
             const userId = req.user.id;

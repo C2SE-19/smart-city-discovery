@@ -268,6 +268,22 @@ function normalizeSearchText(value) {
     .trim();
 }
 
+function normalizeExactSearchText(value) {
+  return String(value || '').toLowerCase().trim();
+}
+
+function hasVietnameseToneMarks(value) {
+  return /[\u0300\u0301\u0303\u0309\u0323]/.test(String(value || '').normalize('NFD'));
+}
+
+function normalizeVietnameseToneInsensitive(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300\u0301\u0303\u0309\u0323]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
 function normalizeImageUrlList(value) {
   if (!Array.isArray(value)) {
     return [];
@@ -553,7 +569,13 @@ function CityMapPage() {
   );
 
   const selectedWardSet = useMemo(() => new Set(appliedWardIds), [appliedWardIds]);
+  const exactAppliedSearch = useMemo(() => normalizeExactSearchText(appliedSearch), [appliedSearch]);
+  const toneInsensitiveAppliedSearch = useMemo(
+    () => normalizeVietnameseToneInsensitive(appliedSearch),
+    [appliedSearch]
+  );
   const normalizedAppliedSearch = useMemo(() => normalizeSearchText(appliedSearch), [appliedSearch]);
+  const appliedSearchHasTone = useMemo(() => hasVietnameseToneMarks(appliedSearch), [appliedSearch]);
   const venueReportAttachmentPreview = useMemo(() => {
     const attachment = venueReportForm.attachment;
     if (!attachment || !String(attachment.type || '').startsWith('image/')) {
@@ -696,10 +718,31 @@ function CityMapPage() {
       return venuesWithValidCoordinates;
     }
 
-    return venuesWithValidCoordinates.filter((venue) =>
-      normalizeSearchText(resolveVenueName(venue)).includes(normalizedAppliedSearch)
-    );
-  }, [venues, normalizedAppliedSearch]);
+    if (appliedSearchHasTone) {
+      return venuesWithValidCoordinates.filter((venue) =>
+        normalizeExactSearchText(resolveVenueName(venue)).includes(exactAppliedSearch)
+      );
+    }
+
+    return venuesWithValidCoordinates.filter((venue) => {
+      const venueName = resolveVenueName(venue);
+      const exactName = normalizeExactSearchText(venueName);
+      const toneInsensitiveName = normalizeVietnameseToneInsensitive(venueName);
+      const asciiName = normalizeSearchText(venueName);
+
+      return (
+        exactName.includes(exactAppliedSearch)
+        || toneInsensitiveName.includes(toneInsensitiveAppliedSearch)
+        || asciiName.includes(normalizedAppliedSearch)
+      );
+    });
+  }, [
+    venues,
+    appliedSearchHasTone,
+    exactAppliedSearch,
+    toneInsensitiveAppliedSearch,
+    normalizedAppliedSearch,
+  ]);
 
   const safeMapCenter = useMemo(() => {
     const lat = Number(mapCenter?.[0]);
@@ -1801,7 +1844,11 @@ function CityMapPage() {
         </div>
 
         {isFilterPanelOpen ? (
-          <section className="city-map-filter-panel" role="region" aria-label="Map filters">
+          <section
+            className={`city-map-filter-panel ${selectedVenue ? 'has-detail-sheet' : ''}`.trim()}
+            role="region"
+            aria-label="Map filters"
+          >
             <header>
               <h2>Map filters</h2>
               <button type="button" onClick={() => setIsFilterPanelOpen(false)} aria-label="Close filters">

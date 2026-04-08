@@ -60,7 +60,8 @@ async function runMigration() {
       '20260323_feedback_management_extensions.sql',
       '20260325_add_icon_to_place_categories.sql',
       '20260403_add_user_status_fields.sql',
-      '20260406_add_venues_submitter_user_id.sql'
+      '20260406_add_venues_submitter_user_id.sql',
+      '20260408_create_user_ai_preferences.sql'
     ];
 
     const uniqueMigrationFiles = [...new Set(migrationFiles)];

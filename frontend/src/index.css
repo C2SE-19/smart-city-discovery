@@ -44,12 +44,14 @@
 
 html {
   scroll-behavior: smooth;
+  overflow-x: hidden;
 }
 
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  overflow-x: hidden;
   color: var(--color-text);
   background: var(--surface-base);
   transition: background-color 0.25s ease, color 0.25s ease;
@@ -73,4 +75,5 @@ button {
 
 #root {
   min-height: 100vh;
+  overflow-x: hidden;
 }
