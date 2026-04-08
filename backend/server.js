@@ -6942,26 +6942,35 @@ async function generateWardIdFromName(name) {
         // ==========================================
         // GOOGLE OAUTH
         // ==========================================
-        app.post('/api/auth/google', async (req, res) => {
+        registerVersionedRoute('post', '/auth/google', async (req, res) => {
             try {
-                const { token } = req.body;
+                const idToken = req.body?.token || req.body?.credential;
 
-                if (!token) {
+                if (!process.env.GOOGLE_CLIENT_ID) {
+                    return res.status(500).json({ message: 'Google OAuth is not configured on server' });
+                }
+
+                if (!idToken) {
                     return res.status(400).json({ message: 'Token is required' });
                 }
 
                 // Verify Google ID Token
                 const ticket = await googleClient.verifyIdToken({
-                    idToken: token,
+                    idToken,
                     audience: process.env.GOOGLE_CLIENT_ID
                 });
 
                 const payload = ticket.getPayload();
                 const email = payload.email;
                 const name = payload.name;
+                const emailVerified = payload.email_verified === true;
 
                 if (!email) {
                     return res.status(400).json({ message: 'Failed to get email from Google' });
+                }
+
+                if (!emailVerified) {
+                    return res.status(400).json({ message: 'Google email is not verified' });
                 }
 
                 // Check if user exists
@@ -6969,7 +6978,7 @@ async function generateWardIdFromName(name) {
 
                 if (user.rows.length === 0) {
                     // Create new user from Google
-                    const username = email.split('@')[0] + '_' + Math.random().toString(36).substring(7);
+                    const username = `${email.split('@')[0]}_${Math.random().toString(36).substring(2, 8)}`;
                     const hashedPassword = await bcryptjs.hash(Math.random().toString(), 10);
 
                     const insertQuery = `
@@ -6981,6 +6990,23 @@ async function generateWardIdFromName(name) {
 
                 const userData = user.rows[0];
                 const userRole = normalizeRole(userData.role);
+                const status = (userData.status || 'active').toLowerCase();
+
+                if (status === 'blocked') {
+                    const reason = userData.blocked_reason || 'Vi pham dieu khoan su dung.';
+                    return res.status(403).json({ message: `Tai khoan da bi khoa vinh vien: ${reason}` });
+                }
+
+                if (status === 'paused') {
+                    const pauseUntil = userData.pause_until ? new Date(userData.pause_until) : null;
+                    const now = new Date();
+
+                    if (pauseUntil && pauseUntil > now) {
+                        return res.status(403).json({ message: `Tai khoan dang bi tam dung den ${pauseUntil.toLocaleString()}` });
+                    }
+
+                    await pool.query(`UPDATE users SET status = 'active', pause_until = NULL WHERE id = $1`, [userData.id]);
+                }
 
                 // Generate JWT token
                 const jwtToken = generateAccessToken({
@@ -6990,6 +7016,7 @@ async function generateWardIdFromName(name) {
                 });
 
                 res.json({
+                    success: true,
                     message: 'Login with Google successful!',
                     token: jwtToken,
                     user: {
