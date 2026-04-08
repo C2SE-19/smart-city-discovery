@@ -101,6 +101,11 @@
   box-shadow: 0 18px 34px rgba(8, 31, 39, 0.19);
 }
 
+.city-map-filter-panel.has-detail-sheet {
+  right: 460px;
+  width: auto;
+}
+
 .city-map-filter-panel header {
   display: flex;
   align-items: center;
@@ -1282,6 +1287,10 @@
   .city-map-detail-placeholder {
     width: min(380px, calc(100% - 40px));
   }
+
+  .city-map-filter-panel.has-detail-sheet {
+    right: 420px;
+  }
 }
 
 @media (max-width: 860px) {
@@ -1302,6 +1311,11 @@
     left: 12px;
     width: calc(100% - 24px);
     max-height: 48vh;
+  }
+
+  .city-map-filter-panel.has-detail-sheet {
+    right: 12px;
+    width: calc(100% - 24px);
   }
 
   .city-map-detail-sheet,
