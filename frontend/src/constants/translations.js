@@ -103,6 +103,19 @@ const translations = {
       common: 'General rules',
       poster: 'Rules for place/content owners',
       user: 'Rules for users'
+    },
+    globalUi: {
+      language: 'Language',
+      theme: 'Theme',
+      light: 'Light',
+      dark: 'Dark',
+      switchToLight: 'Switch to light mode',
+      switchToDark: 'Switch to dark mode'
+    },
+    mapPage: {
+      backToHome: 'Back to Home',
+      title: 'City Map Explorer',
+      subtitle: 'Explore wards and approved places with live filtering.'
     }
   },
   vi: {
@@ -209,6 +222,19 @@ const translations = {
       common: 'Quy định chung',
       poster: 'Quy định cho người đăng địa điểm / nội dung',
       user: 'Quy định cho người sử dụng nền tảng'
+    },
+    globalUi: {
+      language: 'Ngôn ngữ',
+      theme: 'Giao diện',
+      light: 'Sáng',
+      dark: 'Tối',
+      switchToLight: 'Chuyển sang chế độ sáng',
+      switchToDark: 'Chuyển sang chế độ tối'
+    },
+    mapPage: {
+      backToHome: 'Về trang chủ',
+      title: 'Bản đồ thành phố',
+      subtitle: 'Khám phá phường và địa điểm đã duyệt với bộ lọc thời gian thực.'
     }
   }
 };

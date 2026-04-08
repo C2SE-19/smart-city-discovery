@@ -3,6 +3,22 @@ import apiClient from './client';
 const venuesCache = new Map();
 const venuesInFlight = new Map();
 const VENUES_CACHE_TTL_MS = 8000;
+const venueDetailCache = new Map();
+const venueDetailInFlight = new Map();
+const venueCommunityCache = new Map();
+const venueCommunityInFlight = new Map();
+const VENUE_DETAIL_CACHE_TTL_MS = 15000;
+const VENUE_COMMUNITY_CACHE_TTL_MS = 8000;
+
+function invalidateVenueScopedCaches(venueId) {
+  const cacheKey = String(venueId || '').trim();
+  if (!cacheKey) {
+    return;
+  }
+
+  venueDetailCache.delete(cacheKey);
+  venueCommunityCache.delete(cacheKey);
+}
 
 function buildVenuesCacheKey(params = {}) {
   const normalized = Object.keys(params)
@@ -61,8 +77,30 @@ export async function createVenueRequest(payload) {
 }
 
 export async function fetchVenueDetails(venueId) {
-  const response = await apiClient.get(`/venues/${venueId}`);
-  return response.data;
+  const cacheKey = String(venueId || '').trim();
+  const now = Date.now();
+  const cached = venueDetailCache.get(cacheKey);
+
+  if (cached && now - cached.timestamp < VENUE_DETAIL_CACHE_TTL_MS) {
+    return cached.data;
+  }
+
+  if (venueDetailInFlight.has(cacheKey)) {
+    return venueDetailInFlight.get(cacheKey);
+  }
+
+  const request = apiClient
+    .get(`/venues/${venueId}`)
+    .then((response) => {
+      venueDetailCache.set(cacheKey, { data: response.data, timestamp: Date.now() });
+      return response.data;
+    })
+    .finally(() => {
+      venueDetailInFlight.delete(cacheKey);
+    });
+
+  venueDetailInFlight.set(cacheKey, request);
+  return request;
 }
 
 export async function fetchVenueReviews(venueId, params = {}) {
@@ -74,8 +112,30 @@ export async function fetchVenueReviews(venueId, params = {}) {
 }
 
 export async function fetchVenueCommunityBundle(venueId) {
-  const response = await apiClient.get(`/venues/${venueId}/community`);
-  return response.data;
+  const cacheKey = String(venueId || '').trim();
+  const now = Date.now();
+  const cached = venueCommunityCache.get(cacheKey);
+
+  if (cached && now - cached.timestamp < VENUE_COMMUNITY_CACHE_TTL_MS) {
+    return cached.data;
+  }
+
+  if (venueCommunityInFlight.has(cacheKey)) {
+    return venueCommunityInFlight.get(cacheKey);
+  }
+
+  const request = apiClient
+    .get(`/venues/${venueId}/community`)
+    .then((response) => {
+      venueCommunityCache.set(cacheKey, { data: response.data, timestamp: Date.now() });
+      return response.data;
+    })
+    .finally(() => {
+      venueCommunityInFlight.delete(cacheKey);
+    });
+
+  venueCommunityInFlight.set(cacheKey, request);
+  return request;
 }
 
 export async function fetchVenueOpeningHoursRealtime(venueId) {
@@ -90,11 +150,14 @@ export async function createVenueReview(venueId, payload) {
     }
   });
 
+  invalidateVenueScopedCaches(venueId);
+
   return response.data;
 }
 
 export async function toggleVenueReviewLike(venueId, reviewId) {
   const response = await apiClient.post(`/venues/${venueId}/reviews/${reviewId}/like`);
+  invalidateVenueScopedCaches(venueId);
   return response.data;
 }
 
@@ -107,11 +170,30 @@ export async function createVenueReviewReply(venueId, reviewId, payload) {
       }
     }
     : undefined);
+  invalidateVenueScopedCaches(venueId);
+  return response.data;
+}
+
+export async function toggleVenueReviewReplyLike(venueId, reviewId, replyId) {
+  const response = await apiClient.post(`/venues/${venueId}/reviews/${reviewId}/replies/${replyId}/like`);
+  invalidateVenueScopedCaches(venueId);
   return response.data;
 }
 
 export async function deleteVenueReview(venueId, reviewId) {
   const response = await apiClient.delete(`/venues/${venueId}/reviews/${reviewId}`);
+  invalidateVenueScopedCaches(venueId);
+  return response.data;
+}
+
+export async function updateVenueReview(venueId, reviewId, payload) {
+  const response = await apiClient.patch(`/venues/${venueId}/reviews/${reviewId}`, payload, {
+    headers: {
+      'Content-Type': 'multipart/form-data'
+    }
+  });
+
+  invalidateVenueScopedCaches(venueId);
   return response.data;
 }
 

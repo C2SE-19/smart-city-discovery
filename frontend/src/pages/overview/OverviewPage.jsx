@@ -49,6 +49,16 @@ function normalizeVenueMetadata(metadata) {
   return {};
 }
 
+function normalizeSearchText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D')
+    .toLowerCase()
+    .trim();
+}
+
 function getVenueImage(venue) {
   return (
     venue.cover_image_url ||
@@ -249,17 +259,29 @@ function OverviewPage() {
       params.serviceIds = appliedServiceIds.join(',');
     }
 
-    if (submittedSearch.trim()) {
-      params.q = submittedSearch.trim();
+    return params;
+  }, [appliedCategoryIds, appliedWardIds, appliedServiceIds]);
+
+  const normalizedSubmittedSearch = useMemo(
+    () => normalizeSearchText(submittedSearch),
+    [submittedSearch]
+  );
+
+  const displayedVenues = useMemo(() => {
+    if (!normalizedSubmittedSearch) {
+      return venues;
     }
 
-    return params;
-  }, [appliedCategoryIds, appliedWardIds, appliedServiceIds, submittedSearch]);
+    return venues.filter((venue) => {
+      const venueName = venue.name || venue.title || '';
+      return normalizeSearchText(venueName).includes(normalizedSubmittedSearch);
+    });
+  }, [venues, normalizedSubmittedSearch]);
 
   const categorySections = useMemo(() => {
     const groupedByCategory = new Map();
 
-    venues.forEach((venue) => {
+    displayedVenues.forEach((venue) => {
       const categoryId = getVenueCategoryId(venue);
 
       if (categoryId === null) {
@@ -312,11 +334,11 @@ function OverviewPage() {
     });
 
     return visibleSections;
-  }, [categories, venues, selectedCategoryIds]);
+  }, [categories, displayedVenues, selectedCategoryIds]);
 
   const uncategorizedVenues = useMemo(
-    () => venues.filter((venue) => getVenueCategoryId(venue) === null),
-    [venues]
+    () => displayedVenues.filter((venue) => getVenueCategoryId(venue) === null),
+    [displayedVenues]
   );
 
   const activeFilterCount =
@@ -332,11 +354,11 @@ function OverviewPage() {
   const isSearchMode = searchTriggered;
 
   const searchPageSize = 8;
-  const totalSearchPages = Math.max(1, Math.ceil(venues.length / searchPageSize));
+  const totalSearchPages = Math.max(1, Math.ceil(displayedVenues.length / searchPageSize));
   const pagedSearchVenues = useMemo(() => {
     const start = (searchPage - 1) * searchPageSize;
-    return venues.slice(start, start + searchPageSize);
-  }, [venues, searchPage]);
+    return displayedVenues.slice(start, start + searchPageSize);
+  }, [displayedVenues, searchPage]);
 
   useEffect(() => {
     const fetchFavorites = async () => {
@@ -909,7 +931,7 @@ function OverviewPage() {
             <h2>Search Results</h2>
             <span />
             <p className="overview-section-subcopy">
-              Results for "{submittedSearch.trim()}" ({venues.length})
+              Results for "{submittedSearch.trim()}" ({displayedVenues.length})
             </p>
           </div>
 
