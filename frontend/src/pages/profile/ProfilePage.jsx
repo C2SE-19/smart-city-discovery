@@ -7,6 +7,8 @@ import { useTheme } from '../../contexts/ThemeContext';
 import translations from '../../constants/translations';
 import { APP_ROUTES } from '../../constants/routes';
 import axios from 'axios';
+import UserPreferenceWizard from '../../components/preferences/UserPreferenceWizard';
+import { fetchUserPreferences } from '../../services/api/userPreferencesApi';
 import './ProfilePage.css';
 
 const COPY = {
@@ -35,12 +37,9 @@ const COPY = {
     labels: {
       name: 'Họ và tên',
       email: 'Email',
-      gender: 'Giới tính',
       phone: 'Số điện thoại',
-      birthDate: 'Ngày sinh',
       address: 'Địa chỉ'
     },
-    genderOptions: ['Nam', 'Nữ', 'Khác'],
     loading: 'Đang tải thông tin...',
     edit: '✎ Chỉnh sửa',
     save: 'Lưu',
@@ -73,12 +72,9 @@ const COPY = {
     labels: {
       name: 'Full name',
       email: 'Email',
-      gender: 'Gender',
       phone: 'Phone',
-      birthDate: 'Date of birth',
       address: 'Address'
     },
-    genderOptions: ['Male', 'Female', 'Other'],
     loading: 'Loading profile...',
     edit: '✎ Edit',
     save: 'Save',
@@ -112,7 +108,6 @@ function ProfilePage() {
           },
           placeholders: {
             phone: 'Nhập số điện thoại',
-            birthDate: 'DD/MM/YYYY',
             currentPassword: 'Nhập mật khẩu hiện tại',
             newPassword: 'Ít nhất 8 ký tự',
             confirmPassword: 'Nhập lại mật khẩu mới'
@@ -122,6 +117,7 @@ function ProfilePage() {
             hide: 'Ẩn',
             showPasswordForm: 'Thay đổi mật khẩu',
             hidePasswordForm: 'Ẩn đổi mật khẩu',
+            editInterests: 'Edit interests',
             removeFavorite: 'Bỏ yêu thích',
             confirm: 'Có',
             decline: 'Không'
@@ -135,7 +131,6 @@ function ProfilePage() {
             nameRequired: 'Vui lòng nhập họ tên.',
             emailInvalid: 'Email không đúng định dạng.',
             phoneInvalid: 'Số điện thoại không đúng định dạng.',
-            birthInvalid: 'Ngày sinh phải theo định dạng DD/MM/YYYY.',
             passwordRequired:
               'Vui lòng nhập đầy đủ mật khẩu hiện tại, mật khẩu mới và xác nhận.',
             passwordLength: 'Mật khẩu mới phải có ít nhất 8 ký tự.',
@@ -161,7 +156,6 @@ function ProfilePage() {
           },
           placeholders: {
             phone: 'Enter phone number',
-            birthDate: 'DD/MM/YYYY',
             currentPassword: 'Enter current password',
             newPassword: 'At least 8 characters',
             confirmPassword: 'Re-enter new password'
@@ -171,6 +165,7 @@ function ProfilePage() {
             hide: 'Hide',
             showPasswordForm: 'Change password',
             hidePasswordForm: 'Hide password form',
+            editInterests: 'Edit interests',
             removeFavorite: 'Remove favorite',
             confirm: 'Yes',
             decline: 'No'
@@ -184,7 +179,6 @@ function ProfilePage() {
             nameRequired: 'Please enter your full name.',
             emailInvalid: 'Invalid email format.',
             phoneInvalid: 'Invalid phone format.',
-            birthInvalid: 'Date of birth must be DD/MM/YYYY.',
             passwordRequired: 'Please enter current password, new password, and confirmation.',
             passwordLength: 'New password must be at least 8 characters.',
             passwordUpper: 'New password must include at least 1 uppercase letter (A-Z).',
@@ -212,9 +206,7 @@ function ProfilePage() {
     name: '',
     email: '',
     phone: '',
-    birthDate: '',
     address: '',
-    gender: 'Nam',
     bio: ''
   });
 
@@ -245,6 +237,8 @@ function ProfilePage() {
   const [avatarCrop, setAvatarCrop] = useState({ x: 0, y: 0 });
   const [avatarZoom, setAvatarZoom] = useState(1);
   const [avatarCroppedArea, setAvatarCroppedArea] = useState(null);
+  const [preferenceWizardOpen, setPreferenceWizardOpen] = useState(false);
+  const [userPreference, setUserPreference] = useState(null);
   const menuIdSet = useMemo(() => new Set(MenuItems.map((item) => item.id)), [MenuItems]);
 
   const apiUrl = useMemo(
@@ -277,6 +271,27 @@ function ProfilePage() {
     return `${apiBase}${resolved}`;
   }, [avatarUrl, apiBase, formData.avatarUrl, user?.avatarUrl, user?.avatar_url]);
 
+  const loadUserPreferences = useCallback(async () => {
+    if (!token) {
+      setUserPreference(null);
+      return null;
+    }
+
+    try {
+      const response = await fetchUserPreferences();
+      const preference = response?.preference || null;
+      setUserPreference(preference);
+      return preference;
+    } catch (preferenceError) {
+      console.error('Failed to fetch preferences:', preferenceError);
+      return null;
+    }
+  }, [token]);
+
+  useEffect(() => {
+    loadUserPreferences();
+  }, [loadUserPreferences]);
+
   // Fetch user profile on mount
   useEffect(() => {
     if (authLoading) {
@@ -302,9 +317,7 @@ function ProfilePage() {
           name: userData.fullname || user?.fullname || '',
           email: userData.email || user?.email || '',
           phone: userData.phone || '',
-          birthDate: userData.birthDate || '',
           address: userData.address || '',
-          gender: userData.gender || 'Nam',
           bio: userData.bio || '',
           avatarUrl: userData.avatarUrl || userData.avatar_url || ''
         };
@@ -321,12 +334,10 @@ function ProfilePage() {
         console.error('Failed to fetch profile:', err);
         // Use fallback data from auth context
         const fallbackData = {
-          name: user?.fullname || 'Nguyễn Hữu Lộc',
+          name: user?.fullname || 'User',
           email: user?.email || '',
           phone: '',
-          birthDate: '',
           address: '',
-          gender: 'Nam',
           bio: '',
           avatarUrl: user?.avatarUrl || ''
         };
@@ -417,11 +428,6 @@ function ProfilePage() {
       }
     }
 
-    const birthDateValue = (data.birthDate || '').trim();
-    if (birthDateValue && !/^\d{2}\/\d{2}\/\d{4}$/.test(birthDateValue)) {
-      return 'Ngày sinh phải theo định dạng DD/MM/YYYY.';
-    }
-
     return '';
   };
 
@@ -469,11 +475,6 @@ function ProfilePage() {
     const phoneValue = (data.phone || '').trim();
     if (phoneValue && (!/^\d+$/.test(phoneValue) || phoneValue.length !== 10)) {
       return ui.messages.phoneInvalid;
-    }
-
-    const birthDateValue = (data.birthDate || '').trim();
-    if (birthDateValue && !/^\d{2}\/\d{2}\/\d{4}$/.test(birthDateValue)) {
-      return ui.messages.birthInvalid;
     }
 
     return '';
@@ -533,9 +534,7 @@ function ProfilePage() {
           fullname: editData.name,
           email: editData.email,
           phone: editData.phone,
-          birthDate: editData.birthDate,
           address: editData.address,
-          gender: editData.gender,
           bio: editData.bio
         },
         {
@@ -582,6 +581,24 @@ function ProfilePage() {
     setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
     setShowPasswordForm(false);
     setPasswordVisibility({ current: false, next: false, confirm: false });
+  };
+
+  const handleOpenPreferenceWizard = async () => {
+    setError('');
+    setSuccessMessage('');
+
+    if (!userPreference) {
+      await loadUserPreferences();
+    }
+
+    setPreferenceWizardOpen(true);
+  };
+
+  const handlePreferenceSaved = (savedPreference) => {
+    setUserPreference(savedPreference || null);
+    setSuccessMessage('Preferences updated successfully.');
+    setError('');
+    setTimeout(() => setSuccessMessage(''), 1200);
   };
 
   const handleConfirmRemoveFavorite = async () => {
@@ -791,16 +808,25 @@ function ProfilePage() {
             <div className="profile-content-header">
               <h2>{copy.headings.personal}</h2>
               {!isEditing && (
-                <button
-                  className="btn-edit"
-                  onClick={() => {
-                    setIsEditing(true);
-                    setSuccessMessage('');
-                    setError('');
-                  }}
-                >
-                  {copy.edit}
-                </button>
+                <div className="profile-content-actions">
+                  <button
+                    type="button"
+                    className="btn-edit btn-edit-secondary"
+                    onClick={handleOpenPreferenceWizard}
+                  >
+                    {ui.actions.editInterests}
+                  </button>
+                  <button
+                    className="btn-edit"
+                    onClick={() => {
+                      setIsEditing(true);
+                      setSuccessMessage('');
+                      setError('');
+                    }}
+                  >
+                    {copy.edit}
+                  </button>
+                </div>
               )}
             </div>
 
@@ -818,18 +844,8 @@ function ProfilePage() {
                 </div>
                 <div className="info-row">
                   <div className="info-group">
-                    <label>{copy.labels.gender}</label>
-                    <p>{formData.gender}</p>
-                  </div>
-                  <div className="info-group">
                     <label>{copy.labels.phone}</label>
                     <p>{maskedPhone}</p>
-                  </div>
-                </div>
-                <div className="info-row">
-                  <div className="info-group">
-                    <label>{copy.labels.birthDate}</label>
-                    <p>{formData.birthDate}</p>
                   </div>
                   <div className="info-group">
                     <label>{copy.labels.address}</label>
@@ -867,19 +883,6 @@ function ProfilePage() {
 
                 <div className="form-row">
                   <div className="form-group">
-                    <label htmlFor="gender">{copy.labels.gender}</label>
-                    <select
-                      id="gender"
-                      name="gender"
-                      value={editData.gender}
-                      onChange={handleInputChange}
-                    >
-                      {copy.genderOptions.map((g) => (
-                        <option key={g} value={g}>{g}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="form-group">
                     <label htmlFor="phone">{copy.labels.phone}</label>
                     <input
                       type="tel"
@@ -890,20 +893,6 @@ function ProfilePage() {
                       inputMode="numeric"
                       pattern="[0-9]*"
                       placeholder={ui.placeholders.phone}
-                    />
-                  </div>
-                </div>
-
-                <div className="form-row">
-                  <div className="form-group">
-                    <label htmlFor="birthDate">{copy.labels.birthDate}</label>
-                    <input
-                      type="text"
-                      id="birthDate"
-                      name="birthDate"
-                      value={editData.birthDate}
-                      onChange={handleInputChange}
-                      placeholder={ui.placeholders.birthDate}
                     />
                   </div>
                   <div className="form-group">
@@ -1154,7 +1143,7 @@ function ProfilePage() {
           </div>
           <div className="user-info">
             <h1 className="user-name">
-              {user?.fullname || 'Nguyễn Hữu Lộc'}
+              {user?.fullname || 'User'}
               <span className="verify-badge">✓</span>
             </h1>
           </div>
@@ -1171,10 +1160,10 @@ function ProfilePage() {
             {avatarMenuOpen && (
               <div className="avatar-menu-dropdown">
                 <button type="button" onClick={handleOpenAvatarPicker}>
-                  Thêm avatar
+                  Add avatar
                 </button>
                 <button type="button" onClick={handleEditAvatar}>
-                  Chỉnh sửa avatar
+                  Edit avatar
                 </button>
               </div>
             )}
@@ -1186,7 +1175,7 @@ function ProfilePage() {
         <div className="avatar-crop-overlay" role="dialog" aria-modal="true">
           <div className="avatar-crop-modal">
             <div className="avatar-crop-header">
-              <h3>Cắt ảnh đại diện</h3>
+              <h3>Crop avatar</h3>
               <button type="button" className="avatar-crop-close" onClick={() => setAvatarCropOpen(false)}>
                 ×
               </button>
@@ -1214,10 +1203,10 @@ function ProfilePage() {
               />
               <div className="avatar-crop-actions">
                 <button type="button" className="btn-cancel" onClick={() => setAvatarCropOpen(false)}>
-                  Hủy
+                  Cancel
                 </button>
                 <button type="button" className="btn-save" onClick={handleUploadCroppedAvatar} disabled={avatarUploading}>
-                  Lưu ảnh
+                  Save avatar
                 </button>
               </div>
             </div>
@@ -1264,6 +1253,14 @@ function ProfilePage() {
           {renderContent()}
         </main>
       </div>
+
+      <UserPreferenceWizard
+        isOpen={preferenceWizardOpen}
+        onClose={() => setPreferenceWizardOpen(false)}
+        onSaved={handlePreferenceSaved}
+        initialPreference={userPreference}
+        title="Update your interests"
+      />
     </div>
   );
 }

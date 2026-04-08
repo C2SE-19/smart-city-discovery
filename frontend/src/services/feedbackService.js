@@ -12,6 +12,7 @@ export async function submitFeedback({
   contactEmail,
   contactPhone,
   attachment,
+  metadata,
 }) {
   const formData = new FormData();
   if (feedbackTypeId !== undefined && feedbackTypeId !== null && feedbackTypeId !== '') {
@@ -24,6 +25,9 @@ export async function submitFeedback({
   if (contactEmail) formData.append('contactEmail', contactEmail);
   if (contactPhone) formData.append('contactPhone', contactPhone);
   if (attachment) formData.append('attachment', attachment);
+  if (metadata && typeof metadata === 'object') {
+    formData.append('metadata', JSON.stringify(metadata));
+  }
 
   const response = await apiClient.post('/feedback', formData, {
     headers: { 'Content-Type': 'multipart/form-data' }

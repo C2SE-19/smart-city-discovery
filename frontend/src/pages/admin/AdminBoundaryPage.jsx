@@ -12,11 +12,9 @@ import {
   fetchAdminMerchantServices,
   fetchAdminVenueDetail,
   fetchAdminPlaceCategories,
-  fetchAdminVenueReviews,
   fetchAdminVenues,
   fetchAdminWards,
   moderateAdminVenue,
-  sendAdminVenueModerationMessage,
   updateAdminMerchantService,
   updateAdminPlaceCategory,
   upsertAdminWard,
@@ -103,6 +101,16 @@ function slugifyText(name) {
 
 function normalizeComparableText(value) {
   return String(value || '').trim();
+}
+
+function normalizeSearchText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D')
+    .toLowerCase()
+    .trim();
 }
 
 function canonicalizeJsonValue(value) {
@@ -406,55 +414,6 @@ function extractVenueGalleryImages(venue) {
   return [...new Set(merged)];
 }
 
-function extractVenueContactEmail(venue) {
-  const metadata = normalizeVenueMetadata(venue?.metadata);
-  const emailCandidates = [metadata.contactEmail, metadata.email, venue?.email].map((value) =>
-    typeof value === 'string' ? value.trim() : ''
-  );
-
-  return emailCandidates.find((email) => Boolean(email)) || '';
-}
-
-function extractVenueWeeklySchedule(venue) {
-  const metadata = normalizeVenueMetadata(venue?.metadata);
-  const weeklySchedule =
-    metadata.weeklySchedule && typeof metadata.weeklySchedule === 'object' && !Array.isArray(metadata.weeklySchedule)
-      ? metadata.weeklySchedule
-      : null;
-
-  if (weeklySchedule) {
-    return VENUE_WEEK_DAYS.map((day) => {
-      const daySchedule = weeklySchedule[day.key] || {};
-      const start = String(daySchedule.start || '').trim();
-      const end = String(daySchedule.end || '').trim();
-      const isOff = Boolean(daySchedule.off) || start === 'OFF' || end === 'OFF';
-
-      return {
-        key: day.key,
-        label: day.label,
-        start: isOff ? 'OFF' : start || 'Not set',
-        end: isOff ? 'OFF' : end || 'Not set',
-        off: isOff,
-      };
-    });
-  }
-
-  const fallbackStart = String(metadata.startTime || '').trim();
-  const fallbackEnd = String(metadata.endTime || '').trim();
-
-  if (!fallbackStart || !fallbackEnd) {
-    return [];
-  }
-
-  return VENUE_WEEK_DAYS.map((day) => ({
-    key: day.key,
-    label: day.label,
-    start: fallbackStart,
-    end: fallbackEnd,
-    off: false,
-  }));
-}
-
 function formatCurrencyVnd(value) {
   const amount = Number(value);
 
@@ -497,7 +456,7 @@ function wait(ms) {
 
 async function fetchAdminVenuesWithRetry(maxAttempts = 3) {
   let lastError = null;
-  const venueParams = { status: 'pending,approved', summary: 'true' };
+  const venueParams = { status: 'pending,approved' };
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
@@ -571,6 +530,15 @@ function AdminBoundaryPage() {
 
   const [mapCenter, setMapCenter] = useState(DEFAULT_CENTER);
   const [mapZoom, setMapZoom] = useState(DEFAULT_ZOOM);
+  const [isPendingFilterPanelOpen, setIsPendingFilterPanelOpen] = useState(false);
+  const [pendingSearchInput, setPendingSearchInput] = useState('');
+  const [selectedPendingCategoryIds, setSelectedPendingCategoryIds] = useState([]);
+  const [selectedPendingWardIds, setSelectedPendingWardIds] = useState([]);
+  const [selectedPendingServiceIds, setSelectedPendingServiceIds] = useState([]);
+  const [appliedPendingSearch, setAppliedPendingSearch] = useState('');
+  const [appliedPendingCategoryIds, setAppliedPendingCategoryIds] = useState([]);
+  const [appliedPendingWardIds, setAppliedPendingWardIds] = useState([]);
+  const [appliedPendingServiceIds, setAppliedPendingServiceIds] = useState([]);
 
   const [wardForm, setWardForm] = useState({
     name: '',
@@ -582,10 +550,6 @@ function AdminBoundaryPage() {
   const [isCategoryIconPickerOpen, setIsCategoryIconPickerOpen] = useState(false);
   const [serviceNameInput, setServiceNameInput] = useState('');
 
-  const pendingVenues = useMemo(
-    () => venues.filter((venue) => String(venue.status || '').toLowerCase() === 'pending'),
-    [venues]
-  );
   const pendingModeVenues = useMemo(
     () => venues.filter((venue) => String(venue.status || '').toLowerCase() !== 'rejected'),
     [venues]
@@ -593,6 +557,15 @@ function AdminBoundaryPage() {
   const approvedVenues = useMemo(
     () => venues.filter((venue) => String(venue.status || '').toLowerCase() === 'approved'),
     [venues]
+  );
+  const serviceNameById = useMemo(
+    () =>
+      new Map(
+        merchantServices
+          .map((service) => [Number(service.id), String(service.name || '').trim()])
+          .filter(([serviceId, serviceName]) => Number.isInteger(serviceId) && serviceId > 0 && Boolean(serviceName))
+      ),
+    [merchantServices]
   );
   const usageEligibleVenues = useMemo(
     () => venues.filter((venue) => String(venue.status || '').toLowerCase() !== 'rejected'),
@@ -616,9 +589,23 @@ function AdminBoundaryPage() {
           return true;
         }
 
-        return extractVenueServiceIds(venue).includes(Number(selectedServiceId));
+        const targetServiceId = Number(selectedServiceId);
+        const matchedById = extractVenueServiceIds(venue).includes(targetServiceId);
+
+        if (matchedById) {
+          return true;
+        }
+
+        const targetServiceName = normalizeSearchText(serviceNameById.get(targetServiceId));
+        if (!targetServiceName) {
+          return false;
+        }
+
+        return resolveVenueServiceNames(venue, serviceNameById)
+          .map((serviceName) => normalizeSearchText(serviceName))
+          .includes(targetServiceName);
       }),
-    [approvedVenues, selectedServiceId]
+    [approvedVenues, selectedServiceId, serviceNameById]
   );
   const visibleVenues = useMemo(() => {
     if (activeMode === 'pending') {
@@ -636,9 +623,88 @@ function AdminBoundaryPage() {
     return approvedVenues;
   }, [activeMode, pendingModeVenues, categoryModeVenues, serviceModeVenues, approvedVenues]);
 
+  const normalizedAppliedPendingSearch = useMemo(
+    () => normalizeSearchText(appliedPendingSearch),
+    [appliedPendingSearch]
+  );
+
+  const pendingFilteredVenues = useMemo(() => {
+    return pendingModeVenues.filter((venue) => {
+      const categoryId = Number(venue.category_id);
+      const wardId = String(venue.ward_id || '');
+      const venueServiceIds = extractVenueServiceIds(venue);
+
+      if (appliedPendingCategoryIds.length && !appliedPendingCategoryIds.includes(categoryId)) {
+        return false;
+      }
+
+      if (appliedPendingWardIds.length && !appliedPendingWardIds.includes(wardId)) {
+        return false;
+      }
+
+      if (
+        appliedPendingServiceIds.length &&
+        !appliedPendingServiceIds.some((serviceId) => {
+          if (venueServiceIds.includes(serviceId)) {
+            return true;
+          }
+
+          const targetServiceName = normalizeSearchText(serviceNameById.get(Number(serviceId)));
+          if (!targetServiceName) {
+            return false;
+          }
+
+          return resolveVenueServiceNames(venue, serviceNameById)
+            .map((serviceName) => normalizeSearchText(serviceName))
+            .includes(targetServiceName);
+        })
+      ) {
+        return false;
+      }
+
+      if (!normalizedAppliedPendingSearch) {
+        return true;
+      }
+
+      const venueSearchSource = [
+        venue.title,
+        venue.name,
+        venue.address,
+        venue.ward_name,
+        venue.ward_id,
+        venue.category_name,
+        venue.description,
+        venue.phone,
+        ...resolveVenueServiceNames(venue, serviceNameById),
+      ]
+        .filter(Boolean)
+        .join(' ');
+
+      return normalizeSearchText(venueSearchSource).includes(normalizedAppliedPendingSearch);
+    });
+  }, [
+    pendingModeVenues,
+    appliedPendingCategoryIds,
+    appliedPendingWardIds,
+    appliedPendingServiceIds,
+    normalizedAppliedPendingSearch,
+    serviceNameById,
+  ]);
+
+  const pendingQueueVenues = useMemo(
+    () => pendingFilteredVenues.filter((venue) => String(venue.status || '').toLowerCase() === 'pending'),
+    [pendingFilteredVenues]
+  );
+
+  const pendingActiveFilterCount =
+    appliedPendingCategoryIds.length +
+    appliedPendingWardIds.length +
+    appliedPendingServiceIds.length +
+    (appliedPendingSearch ? 1 : 0);
+
   const selectedVenueSummary = useMemo(
-    () => pendingModeVenues.find((venue) => Number(venue.id) === Number(selectedVenueId)) || null,
-    [pendingModeVenues, selectedVenueId]
+    () => pendingFilteredVenues.find((venue) => Number(venue.id) === Number(selectedVenueId)) || null,
+    [pendingFilteredVenues, selectedVenueId]
   );
   const selectedVenue = useMemo(() => {
     if (!selectedVenueSummary) {
@@ -672,26 +738,31 @@ function AdminBoundaryPage() {
       ),
     [placeCategories]
   );
-  const serviceNameById = useMemo(
-    () =>
-      new Map(
-        merchantServices
-          .map((service) => [Number(service.id), String(service.name || '').trim()])
-          .filter(([serviceId, serviceName]) => Number.isInteger(serviceId) && serviceId > 0 && Boolean(serviceName))
-      ),
-    [merchantServices]
-  );
   const serviceUsageCountById = useMemo(() => {
     const countById = new Map();
 
     usageEligibleVenues.forEach((venue) => {
-      extractVenueServiceIds(venue).forEach((serviceId) => {
-        countById.set(serviceId, (countById.get(serviceId) || 0) + 1);
+      const venueServiceIds = new Set(extractVenueServiceIds(venue));
+      const venueServiceNames = new Set(
+        resolveVenueServiceNames(venue, serviceNameById).map((serviceName) => normalizeSearchText(serviceName))
+      );
+
+      merchantServices.forEach((service) => {
+        const serviceId = Number(service.id);
+        const serviceName = normalizeSearchText(service.name);
+
+        if (!Number.isInteger(serviceId) || serviceId <= 0) {
+          return;
+        }
+
+        if (venueServiceIds.has(serviceId) || (serviceName && venueServiceNames.has(serviceName))) {
+          countById.set(serviceId, (countById.get(serviceId) || 0) + 1);
+        }
       });
     });
 
     return countById;
-  }, [usageEligibleVenues]);
+  }, [usageEligibleVenues, merchantServices, serviceNameById]);
   const categoryUsageCountById = useMemo(() => {
     const countById = new Map();
 
@@ -716,8 +787,6 @@ function AdminBoundaryPage() {
     () => (selectedVenue ? extractVenueGalleryImages(selectedVenue) : []),
     [selectedVenue]
   );
-  const selectedVenueContactEmail = useMemo(() => extractVenueContactEmail(selectedVenue), [selectedVenue]);
-  const selectedVenueWeeklySchedule = useMemo(() => extractVenueWeeklySchedule(selectedVenue), [selectedVenue]);
   const selectedVenueActiveImage =
     selectedVenueGalleryImages[selectedVenueImageIndex] || selectedVenueGalleryImages[0] || selectedVenue?.cover_image_url || '';
   const activeModeMeta = PAGE_MODES.find((mode) => mode.value === activeMode);
@@ -808,14 +877,14 @@ function AdminBoundaryPage() {
       return;
     }
 
-    if (!pendingModeVenues.length) {
+    if (!pendingFilteredVenues.length) {
       setSelectedVenueId(null);
       setIsSubmissionDetailClosed(false);
       return;
     }
 
     const hasSelectedVenue = selectedVenueId
-      ? pendingModeVenues.some((venue) => Number(venue.id) === Number(selectedVenueId))
+      ? pendingFilteredVenues.some((venue) => Number(venue.id) === Number(selectedVenueId))
       : false;
 
     if (!hasSelectedVenue) {
@@ -827,10 +896,10 @@ function AdminBoundaryPage() {
     }
 
     if (!hasSelectedVenue) {
-      const fallbackVenueId = pendingVenues[0]?.id ?? pendingModeVenues[0]?.id ?? null;
+      const fallbackVenueId = pendingQueueVenues[0]?.id ?? pendingFilteredVenues[0]?.id ?? null;
       setSelectedVenueId(fallbackVenueId);
     }
-  }, [activeMode, pendingModeVenues, pendingVenues, selectedVenueId, isSubmissionDetailClosed]);
+  }, [activeMode, pendingFilteredVenues, pendingQueueVenues, selectedVenueId, isSubmissionDetailClosed]);
 
   useEffect(() => {
     if (activeMode !== 'pending' || !selectedVenue) {
@@ -849,6 +918,9 @@ function AdminBoundaryPage() {
   useEffect(() => {
     setSelectedVenueImageIndex(0);
     setExpandedImageUrl('');
+  }, [activeMode, selectedVenueId]);
+
+  useEffect(() => {
     setActiveDetailTab('overview');
     setSelectedVenueReviewSort('newest');
     setSelectedVenueReviews([]);
@@ -1061,9 +1133,10 @@ function AdminBoundaryPage() {
     setError('');
     setOperationMessage('');
     setIsSubmissionDetailClosed(false);
+    setIsPendingFilterPanelOpen(false);
 
     if (mode === 'pending') {
-      const fallbackVenueId = pendingVenues[0]?.id ?? pendingModeVenues[0]?.id ?? null;
+      const fallbackVenueId = pendingQueueVenues[0]?.id ?? pendingFilteredVenues[0]?.id ?? null;
       setSelectedVenueId(fallbackVenueId);
     }
 
@@ -1072,6 +1145,116 @@ function AdminBoundaryPage() {
       setSelectedServiceId(firstService.id);
       setServiceNameInput(firstService.name || '');
     }
+  }
+
+  const togglePendingSelection = (setter) => (value) => {
+    setter((current) =>
+      current.includes(value) ? current.filter((item) => item !== value) : [...current, value]
+    );
+  };
+
+  function applyPendingFilters() {
+    const nextAppliedSearch = pendingSearchInput.trim();
+    const normalizedNextSearch = normalizeSearchText(nextAppliedSearch);
+
+    setAppliedPendingSearch(nextAppliedSearch);
+    setAppliedPendingCategoryIds(selectedPendingCategoryIds);
+    setAppliedPendingWardIds(selectedPendingWardIds);
+    setAppliedPendingServiceIds(selectedPendingServiceIds);
+    setIsPendingFilterPanelOpen(false);
+
+    if (selectedPendingWardIds.length) {
+      const selectedWards = wards.filter((ward) => selectedPendingWardIds.includes(String(ward.ward_id)));
+      const selectedCenters = selectedWards.map((ward) => extractBoundaryCenter(ward.boundary)).filter(Boolean);
+
+      if (selectedCenters.length) {
+        const sum = selectedCenters.reduce(
+          (result, center) => ({ lat: result.lat + center[0], lng: result.lng + center[1] }),
+          { lat: 0, lng: 0 }
+        );
+        setMapCenter([sum.lat / selectedCenters.length, sum.lng / selectedCenters.length]);
+        setMapZoom(selectedCenters.length === 1 ? 14 : 13);
+        return;
+      }
+    }
+
+    const nextFilteredVenues = pendingModeVenues.filter((venue) => {
+      const categoryId = Number(venue.category_id);
+      const wardId = String(venue.ward_id || '');
+      const venueServiceIds = extractVenueServiceIds(venue);
+
+      if (selectedPendingCategoryIds.length && !selectedPendingCategoryIds.includes(categoryId)) {
+        return false;
+      }
+
+      if (selectedPendingWardIds.length && !selectedPendingWardIds.includes(wardId)) {
+        return false;
+      }
+
+      if (
+        selectedPendingServiceIds.length &&
+        !selectedPendingServiceIds.some((serviceId) => {
+          if (venueServiceIds.includes(serviceId)) {
+            return true;
+          }
+
+          const targetServiceName = normalizeSearchText(serviceNameById.get(Number(serviceId)));
+          if (!targetServiceName) {
+            return false;
+          }
+
+          return resolveVenueServiceNames(venue, serviceNameById)
+            .map((serviceName) => normalizeSearchText(serviceName))
+            .includes(targetServiceName);
+        })
+      ) {
+        return false;
+      }
+
+      if (!normalizedNextSearch) {
+        return true;
+      }
+
+      const venueSearchSource = [
+        venue.title,
+        venue.name,
+        venue.address,
+        venue.ward_name,
+        venue.ward_id,
+        venue.category_name,
+        venue.description,
+        venue.phone,
+        ...resolveVenueServiceNames(venue, serviceNameById),
+      ]
+        .filter(Boolean)
+        .join(' ');
+
+      return normalizeSearchText(venueSearchSource).includes(normalizedNextSearch);
+    });
+
+    const firstFilterMatch = nextFilteredVenues[0];
+    if (firstFilterMatch) {
+      const latitude = Number(firstFilterMatch.latitude);
+      const longitude = Number(firstFilterMatch.longitude);
+
+      if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+        setMapCenter([latitude, longitude]);
+        setMapZoom(13);
+      }
+    }
+  }
+
+  function clearPendingFilters() {
+    setPendingSearchInput('');
+    setSelectedPendingCategoryIds([]);
+    setSelectedPendingWardIds([]);
+    setSelectedPendingServiceIds([]);
+    setAppliedPendingSearch('');
+    setAppliedPendingCategoryIds([]);
+    setAppliedPendingWardIds([]);
+    setAppliedPendingServiceIds([]);
+    setMapCenter(DEFAULT_CENTER);
+    setMapZoom(DEFAULT_ZOOM);
   }
 
   function loadWardToEditor(ward) {
@@ -1475,7 +1658,7 @@ function AdminBoundaryPage() {
     const confirmationMessage =
       action === 'approve'
         ? `Approve post "${venueDisplayName}"? This will add this location to the approved map.`
-        : `Reject post "${venueDisplayName}"? This will permanently remove this location from the database.`;
+        : `Reject post "${venueDisplayName}"? This will keep the record and mark it as rejected.`;
 
     const shouldProceed = window.confirm(confirmationMessage);
 
@@ -1495,19 +1678,18 @@ function AdminBoundaryPage() {
         rejectionReason,
       });
 
-      if (action === 'reject') {
-        const deletedVenueId = Number(response.deletedVenueId ?? venueId);
-
-        setVenues((currentVenues) => currentVenues.filter((item) => Number(item.id) !== deletedVenueId));
-        setRejectReasons((currentReasons) => ({
-          ...currentReasons,
-          [venueId]: '',
-        }));
-      } else if (response.venue) {
+      if (response.venue) {
         const updatedVenue = response.venue;
         setVenues((currentVenues) =>
           currentVenues.map((item) => (Number(item.id) === Number(updatedVenue.id) ? updatedVenue : item))
         );
+      }
+
+      if (action === 'reject') {
+        setRejectReasons((currentReasons) => ({
+          ...currentReasons,
+          [venueId]: '',
+        }));
       }
 
       setOperationMessage(response.message || 'Moderation status updated.');
@@ -1543,83 +1725,6 @@ function AdminBoundaryPage() {
     setSelectedVenueImageIndex((currentIndex) => (currentIndex + 1) % selectedVenueGalleryImages.length);
   }
 
-  function handleVenueAttachmentSelect(event) {
-    const nextFiles = Array.from(event.target.files || []);
-
-    if (!nextFiles.length) {
-      return;
-    }
-
-    setAdminVenueAttachments((currentAttachments) => {
-      const remainingSlots = Math.max(0, 5 - currentAttachments.length);
-      if (!remainingSlots) {
-        return currentAttachments;
-      }
-
-      const newAttachments = nextFiles.slice(0, remainingSlots).map((file) => ({
-        id: `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(16).slice(2)}`,
-        file,
-        previewUrl: URL.createObjectURL(file),
-      }));
-
-      return [...currentAttachments, ...newAttachments];
-    });
-
-    event.target.value = '';
-  }
-
-  function handleRemoveVenueAttachment(attachmentId) {
-    setAdminVenueAttachments((currentAttachments) => {
-      const attachmentToRemove = currentAttachments.find((attachment) => attachment.id === attachmentId);
-
-      if (attachmentToRemove?.previewUrl) {
-        URL.revokeObjectURL(attachmentToRemove.previewUrl);
-      }
-
-      return currentAttachments.filter((attachment) => attachment.id !== attachmentId);
-    });
-  }
-
-  async function handleSendVenueModerationMessage() {
-    if (!selectedVenue?.id) {
-      return;
-    }
-
-    const trimmedMessage = adminVenueMessage.trim();
-
-    if (!trimmedMessage) {
-      setError('Please enter a moderation message before sending.');
-      return;
-    }
-
-    setError('');
-    setOperationMessage('');
-    setSendingVenueMessageId(selectedVenue.id);
-
-    try {
-      const response = await sendAdminVenueModerationMessage(selectedVenue.id, {
-        message: trimmedMessage,
-        attachments: adminVenueAttachments.map((attachment) => attachment.file),
-      });
-
-      setOperationMessage(response.message || 'Moderation message sent successfully.');
-      setAdminVenueMessage('');
-      setAdminVenueAttachments((currentAttachments) => {
-        currentAttachments.forEach((attachment) => {
-          if (attachment?.previewUrl) {
-            URL.revokeObjectURL(attachment.previewUrl);
-          }
-        });
-
-        return [];
-      });
-    } catch (sendError) {
-      setError(sendError.response?.data?.message || 'Could not send moderation message.');
-    } finally {
-      setSendingVenueMessageId(null);
-    }
-  }
-
   function resolveMarkerIcon(venue) {
     if (activeMode === 'category') {
       const categoryIcon = placeCategoryById.get(Number(venue.category_id))?.icon;
@@ -1635,11 +1740,11 @@ function AdminBoundaryPage() {
         <div className="admin-list-panel">
           <header>
             <h3>Pending Queue</h3>
-            <p>{pendingVenues.length} waiting submission(s)</p>
+            <p>{pendingQueueVenues.length} waiting submission(s)</p>
           </header>
 
           <div className="admin-scroll-list">
-            {pendingVenues.map((venue) => (
+            {pendingQueueVenues.map((venue) => (
               <button
                 key={venue.id}
                 type="button"
@@ -1652,7 +1757,11 @@ function AdminBoundaryPage() {
               </button>
             ))}
 
-            {!pendingVenues.length ? <p className="admin-empty-note">No pending posts right now.</p> : null}
+            {!pendingQueueVenues.length ? (
+              <p className="admin-empty-note">
+                {pendingActiveFilterCount ? 'No pending posts match your filters.' : 'No pending posts right now.'}
+              </p>
+            ) : null}
           </div>
         </div>
       );
@@ -1824,280 +1933,105 @@ function AdminBoundaryPage() {
               <h4>{selectedVenue.title || selectedVenue.name}</h4>
               <p>{selectedVenue.address || 'Address pending'}</p>
 
-              <div className="admin-detail-tabs" role="tablist" aria-label="Submission detail tabs">
-                <button
-                  type="button"
-                  className={`admin-detail-tab ${activeDetailTab === 'overview' ? 'is-active' : ''}`.trim()}
-                  onClick={() => setActiveDetailTab('overview')}
-                >
-                  Overview
-                </button>
-                <button
-                  type="button"
-                  className={`admin-detail-tab ${activeDetailTab === 'photos' ? 'is-active' : ''}`.trim()}
-                  onClick={() => setActiveDetailTab('photos')}
-                >
-                  Photos
-                </button>
-                <button
-                  type="button"
-                  className={`admin-detail-tab ${activeDetailTab === 'reviews' ? 'is-active' : ''}`.trim()}
-                  onClick={() => setActiveDetailTab('reviews')}
-                >
-                  Reviews
-                </button>
-                <button
-                  type="button"
-                  className={`admin-detail-tab ${activeDetailTab === 'introduction' ? 'is-active' : ''}`.trim()}
-                  onClick={() => setActiveDetailTab('introduction')}
-                >
-                  Introduction
-                </button>
-              </div>
+              <div className="admin-extra-detail-block">
+                <ul className="admin-detail-meta">
+                  <li>Venue ID: {selectedVenue.id}</li>
+                  <li>Name: {selectedVenue.name || 'Not provided'}</li>
+                  <li>Ward: {selectedVenue.ward_name || selectedVenue.ward_id || 'Not detected'}</li>
+                  <li>Category: {selectedVenue.category_name || 'Uncategorized'}</li>
+                  <li>Status: {statusLabel(selectedVenue.status)}</li>
+                  <li>Phone: {selectedVenue.phone || 'Not provided'}</li>
+                  <li>Submitted: {formatDateTime(selectedVenue.submitted_at)}</li>
+                  <li>Latitude: {formatCoordinate(selectedVenue.latitude)}</li>
+                  <li>Longitude: {formatCoordinate(selectedVenue.longitude)}</li>
+                  <li>
+                    Price range:
+                    {' '}
+                    {formatCurrencyVnd(selectedVenueMetadata.minPrice)} - {formatCurrencyVnd(selectedVenueMetadata.maxPrice)}
+                  </li>
+                  <li>
+                    Operating hours:
+                    {' '}
+                    {selectedVenueMetadata.startTime && selectedVenueMetadata.endTime
+                      ? `${selectedVenueMetadata.startTime} - ${selectedVenueMetadata.endTime}`
+                      : 'Not provided'}
+                  </li>
+                  <li>Gallery images: {selectedVenueGalleryImages.length || 0}</li>
+                  <li>Business license: {selectedVenue.business_license_image_url ? 'Uploaded' : 'Missing'}</li>
+                </ul>
 
-              {activeDetailTab === 'overview' ? (
-                <div className="admin-extra-detail-block">
-                  <ul className="admin-detail-meta">
-                    <li>Venue ID: {selectedVenue.id}</li>
-                    <li>Name: {selectedVenue.name || 'Not provided'}</li>
-                    <li>Ward: {selectedVenue.ward_name || selectedVenue.ward_id || 'Not detected'}</li>
-                    <li>Category: {selectedVenue.category_name || 'Uncategorized'}</li>
-                    <li>Status: {statusLabel(selectedVenue.status)}</li>
-                    <li>Phone: {selectedVenue.phone || 'Not provided'}</li>
-                    <li>Email: {selectedVenueContactEmail || 'Not provided'}</li>
-                    <li>Submitted: {formatDateTime(selectedVenue.submitted_at)}</li>
-                    <li>Latitude: {formatCoordinate(selectedVenue.latitude)}</li>
-                    <li>Longitude: {formatCoordinate(selectedVenue.longitude)}</li>
-                    <li>
-                      Price range:
-                      {' '}
-                      {formatCurrencyVnd(selectedVenueMetadata.minPrice)} - {formatCurrencyVnd(selectedVenueMetadata.maxPrice)}
-                    </li>
-                    <li>Business license: {selectedVenue.business_license_image_url ? 'Uploaded' : 'Missing'}</li>
-                  </ul>
+                {selectedVenue.description ? <p>{selectedVenue.description}</p> : null}
 
-                  {selectedVenue.business_license_image_url ? (
-                    <div className="admin-license-preview">
-                      <p>Business license preview</p>
-                      <button
-                        type="button"
-                        className="admin-license-image-wrap"
-                        onClick={() => setExpandedImageUrl(selectedVenue.business_license_image_url)}
-                      >
-                        <img
-                          src={selectedVenue.business_license_image_url}
-                          alt={`${selectedVenue.title || selectedVenue.name} license`}
-                          className="admin-detail-image admin-detail-image-clickable"
-                        />
-                      </button>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-
-              {activeDetailTab === 'photos' ? (
-                <div className="admin-extra-detail-block">
-                  {selectedVenueGalleryImages.length ? (
-                    <div className="admin-photo-grid">
-                      {selectedVenueGalleryImages.map((imageUrl, imageIndex) => (
-                        <button
-                          key={`${imageUrl}-${imageIndex}`}
-                          type="button"
-                          className="admin-photo-grid-item"
-                          onClick={() => setExpandedImageUrl(imageUrl)}
-                        >
-                          <img src={imageUrl} alt={`${selectedVenue.title || selectedVenue.name} ${imageIndex + 1}`} />
-                        </button>
+                <div className="admin-service-summary">
+                  <strong>Services offered</strong>
+                  {selectedVenueServiceNames.length ? (
+                    <div className="admin-service-chip-list">
+                      {selectedVenueServiceNames.map((serviceName) => (
+                        <span key={serviceName} className="admin-service-chip">
+                          {serviceName}
+                        </span>
                       ))}
                     </div>
                   ) : (
-                    <p className="admin-empty-note">No uploaded photos for this venue.</p>
+                    <p className="admin-empty-note">No services selected by merchant.</p>
                   )}
                 </div>
-              ) : null}
 
-              {activeDetailTab === 'reviews' ? (
-                <div className="admin-extra-detail-block">
-                  <div className="admin-review-toolbar">
-                    <label htmlFor="venueReviewSort">Sort reviews</label>
-                    <select
-                      id="venueReviewSort"
-                      value={selectedVenueReviewSort}
-                      onChange={(event) => setSelectedVenueReviewSort(event.target.value)}
-                    >
-                      <option value="newest">Newest first</option>
-                      <option value="oldest">Oldest first</option>
-                      <option value="rating_high">Rating: high to low</option>
-                      <option value="rating_low">Rating: low to high</option>
-                    </select>
-                  </div>
-
-                  {isLoadingSelectedVenueReviews ? <p className="admin-empty-note">Loading reviews...</p> : null}
-                  {selectedVenueReviewsError ? <p className="admin-empty-note">{selectedVenueReviewsError}</p> : null}
-
-                  {!isLoadingSelectedVenueReviews && !selectedVenueReviewsError ? (
-                    selectedVenueReviews.length ? (
-                      <div className="admin-review-list">
-                        {selectedVenueReviews.map((review) => (
-                          <article key={review.id} className="admin-review-item">
-                            <header>
-                              <strong>{review.author_name || 'Anonymous'}</strong>
-                              <span>{Number(review.rating || 0).toFixed(1)} / 5</span>
-                            </header>
-                            <p>{review.comment || 'No written comment provided.'}</p>
-                            <small>{formatDateTime(review.created_at)}</small>
-                          </article>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="admin-empty-note">No reviews found for this venue.</p>
-                    )
-                  ) : null}
-                </div>
-              ) : null}
-
-              {activeDetailTab === 'introduction' ? (
-                <div className="admin-extra-detail-block">
-                  <strong>Description</strong>
-                  {selectedVenue.description ? <p>{selectedVenue.description}</p> : <p>No introduction provided.</p>}
-
-                  <div className="admin-service-summary">
-                    <strong>Services offered</strong>
-                    {selectedVenueServiceNames.length ? (
-                      <div className="admin-service-chip-list">
-                        {selectedVenueServiceNames.map((serviceName) => (
-                          <span key={serviceName} className="admin-service-chip">
-                            {serviceName}
-                          </span>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="admin-empty-note">No services selected by merchant.</p>
-                    )}
-                  </div>
-
-                  <div className="admin-hours-grid">
-                    <strong>Opening hours</strong>
-                    {selectedVenueWeeklySchedule.length ? (
-                      <ul>
-                        {selectedVenueWeeklySchedule.map((daySchedule) => (
-                          <li key={daySchedule.key}>
-                            <span>{daySchedule.label}</span>
-                            <span>{daySchedule.off ? 'OFF' : `${daySchedule.start} - ${daySchedule.end}`}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="admin-empty-note">No weekly schedule provided.</p>
-                    )}
-                  </div>
-                </div>
-              ) : null}
-
-              {activeDetailTab === 'overview' ? (
-                <div className="admin-extra-detail-block">
-                <h4>Send Message To Venue</h4>
-                <p>
-                  Recipient: {selectedVenueContactEmail || 'No valid email in this submission'}
-                </p>
-                <p>Subject: Venue Report Feedback</p>
-
-                <div className="admin-form-field">
-                  <label htmlFor="adminVenueMessage">Admin Message</label>
-                  <textarea
-                    id="adminVenueMessage"
-                    value={adminVenueMessage}
-                    onChange={(event) => setAdminVenueMessage(event.target.value)}
-                    rows={4}
-                    placeholder="Write moderation feedback for this venue..."
-                  />
-                </div>
-
-                <div className="admin-form-field">
-                  <label htmlFor="adminVenueAttachment">Attach Image (Optional)</label>
-                  <input
-                    id="adminVenueAttachment"
-                    type="file"
-                    multiple
-                    accept="image/png,image/jpeg,image/webp,image/gif"
-                    onChange={handleVenueAttachmentSelect}
-                  />
-                </div>
-
-                <p className="admin-empty-note">Up to 5 images.</p>
-
-                {adminVenueAttachments.length ? (
-                  <div className="admin-message-attachment-grid">
-                    {adminVenueAttachments.map((attachment) => (
-                      <div key={attachment.id} className="admin-message-attachment-item">
-                        <img src={attachment.previewUrl} alt="Message attachment preview" />
-                        <button
-                          type="button"
-                          className="admin-message-attachment-remove"
-                          onClick={() => handleRemoveVenueAttachment(attachment.id)}
-                          aria-label="Remove attachment"
-                        >
-                          ×
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-
-                <div className="admin-action-row">
-                  <button
-                    type="button"
-                    className="action-primary"
-                    onClick={handleSendVenueModerationMessage}
-                    disabled={sendingVenueMessageId === selectedVenue.id || !selectedVenueContactEmail}
-                  >
-                    {sendingVenueMessageId === selectedVenue.id ? 'Sending...' : 'Send Message'}
-                  </button>
-                </div>
-                </div>
-              ) : null}
-
-              {activeDetailTab === 'overview' ? (
-                <div className="admin-form-field">
-                  <label htmlFor="rejectionReason">Rejection Reason (Optional)</label>
-                  <textarea
-                    id="rejectionReason"
-                    value={rejectReasons[selectedVenue.id] || ''}
-                    onChange={(event) =>
-                      setRejectReasons((currentReasons) => ({
-                        ...currentReasons,
-                        [selectedVenue.id]: event.target.value,
-                      }))
-                    }
-                    rows={3}
-                    placeholder="Optional note when rejecting this post."
-                  />
-                </div>
-              ) : null}
-
-              {activeDetailTab === 'overview' ? (
-                <div className="admin-action-row">
-                  {selectedVenueStatus !== 'approved' ? (
+                {selectedVenue.business_license_image_url ? (
+                  <div className="admin-license-preview">
+                    <p>Business license preview</p>
                     <button
                       type="button"
-                      className="action-approve"
-                      disabled={moderatingVenueId === selectedVenue.id}
-                      onClick={() => handleModeration(selectedVenue.id, 'approve')}
+                      className="admin-license-image-wrap"
+                      onClick={() => setExpandedImageUrl(selectedVenue.business_license_image_url)}
                     >
-                      {moderatingVenueId === selectedVenue.id ? 'Updating...' : 'Approve Post'}
+                      <img
+                        src={selectedVenue.business_license_image_url}
+                        alt={`${selectedVenue.title || selectedVenue.name} license`}
+                        className="admin-detail-image admin-detail-image-clickable"
+                      />
                     </button>
-                  ) : null}
+                  </div>
+                ) : null}
+              </div>
 
+              <div className="admin-form-field">
+                <label htmlFor="rejectionReason">Rejection Reason (Optional)</label>
+                <textarea
+                  id="rejectionReason"
+                  value={rejectReasons[selectedVenue.id] || ''}
+                  onChange={(event) =>
+                    setRejectReasons((currentReasons) => ({
+                      ...currentReasons,
+                      [selectedVenue.id]: event.target.value,
+                    }))
+                  }
+                  rows={3}
+                  placeholder="Optional note when rejecting this post."
+                />
+              </div>
+
+              <div className="admin-action-row">
+                {selectedVenueStatus !== 'approved' ? (
                   <button
                     type="button"
-                    className="action-reject"
+                    className="action-approve"
                     disabled={moderatingVenueId === selectedVenue.id}
-                    onClick={() => handleModeration(selectedVenue.id, 'reject')}
+                    onClick={() => handleModeration(selectedVenue.id, 'approve')}
                   >
-                    Reject Post
+                    {moderatingVenueId === selectedVenue.id ? 'Updating...' : 'Approve Post'}
                   </button>
-                </div>
-              ) : null}
+                ) : null}
+
+                <button
+                  type="button"
+                  className="action-reject"
+                  disabled={moderatingVenueId === selectedVenue.id}
+                  onClick={() => handleModeration(selectedVenue.id, 'reject')}
+                >
+                  Reject Post
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -2408,7 +2342,7 @@ function AdminBoundaryPage() {
                 );
               })}
 
-              {visibleVenues
+              {(activeMode === 'pending' ? pendingFilteredVenues : visibleVenues)
                 .filter((venue) => Number.isFinite(Number(venue.latitude)) && Number.isFinite(Number(venue.longitude)))
                 .map((venue) => (
                   <Marker
@@ -2445,6 +2379,121 @@ function AdminBoundaryPage() {
                   </Marker>
                 ))}
             </MapContainer>
+
+            {activeMode === 'pending' ? (
+              <div className="admin-pending-map-controls">
+                <button
+                  type="button"
+                  className="admin-pending-filter-toggle"
+                  onClick={() => setIsPendingFilterPanelOpen((current) => !current)}
+                >
+                  Filters {pendingActiveFilterCount ? `(${pendingActiveFilterCount})` : ''}
+                </button>
+              </div>
+            ) : null}
+
+            {activeMode === 'pending' && isPendingFilterPanelOpen ? (
+              <section className="admin-pending-filter-panel" role="region" aria-label="Pending map filters">
+                <header>
+                  <h3>Map filters</h3>
+                  <button
+                    type="button"
+                    onClick={() => setIsPendingFilterPanelOpen(false)}
+                    aria-label="Close pending filters"
+                  >
+                    ×
+                  </button>
+                </header>
+
+                <p>Choose Place Categories, Ward Naming, and Services Offered, then press Search.</p>
+
+                <label className="admin-pending-search-field">
+                  <span>Search keyword</span>
+                  <input
+                    type="text"
+                    value={pendingSearchInput}
+                    placeholder="Venue, address, ward, or service"
+                    onChange={(event) => setPendingSearchInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        applyPendingFilters();
+                      }
+                    }}
+                  />
+                </label>
+
+                <div className="admin-pending-filter-row">
+                  <div className="admin-pending-filter-group">
+                    <h4>Place Categories</h4>
+                    <div className="admin-pending-filter-list">
+                      {placeCategories.map((category) => {
+                        const categoryId = Number(category.id);
+                        const checked = selectedPendingCategoryIds.includes(categoryId);
+
+                        return (
+                          <label key={`pending-category-${categoryId}`}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => togglePendingSelection(setSelectedPendingCategoryIds)(categoryId)}
+                            />
+                            <span>{category.icon || DEFAULT_PLACE_CATEGORY_ICON} {category.name}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="admin-pending-filter-group">
+                    <h4>Ward Naming</h4>
+                    <div className="admin-pending-filter-list">
+                      {wards.map((ward) => {
+                        const wardId = String(ward.ward_id);
+                        const checked = selectedPendingWardIds.includes(wardId);
+
+                        return (
+                          <label key={`pending-ward-${wardId}`}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => togglePendingSelection(setSelectedPendingWardIds)(wardId)}
+                            />
+                            <span>{ward.name}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="admin-pending-filter-group">
+                    <h4>Services Offered - Merchant</h4>
+                    <div className="admin-pending-filter-list">
+                      {merchantServices.map((service) => {
+                        const serviceId = Number(service.id);
+                        const checked = selectedPendingServiceIds.includes(serviceId);
+
+                        return (
+                          <label key={`pending-service-${serviceId}`}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => togglePendingSelection(setSelectedPendingServiceIds)(serviceId)}
+                            />
+                            <span>{service.name}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="admin-pending-filter-actions">
+                  <button type="button" className="apply" onClick={applyPendingFilters}>Search</button>
+                  <button type="button" className="clear" onClick={clearPendingFilters}>Clear</button>
+                </div>
+              </section>
+            ) : null}
 
             {loading ? <div className="admin-map-overlay">Loading map management data...</div> : null}
           </section>

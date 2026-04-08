@@ -1,7 +1,7 @@
-require('dotenv').config();
-console.log("DB_HOST:", process.env.DB_HOST);
 const express = require('express');
 const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '.env') });
+console.log("DB_HOST:", process.env.DB_HOST);
 const fs = require('fs');
 const { Pool } = require('pg');
 const cors = require('cors');
@@ -16,7 +16,8 @@ const { supabaseAdmin } = require('./src/lib/supabase');
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Initialize Google OAuth2 Client
@@ -722,6 +723,165 @@ function normalizeNullableText(value) {
     return trimmed === '' ? null : trimmed;
 }
 
+const USER_PREFERENCE_AGE_RANGES = [
+    { key: '13_17', label: '13-17' },
+    { key: '18_24', label: '18-24' },
+    { key: '25_34', label: '25-34' },
+    { key: '35_49', label: '35-49' },
+    { key: '50_plus', label: '50+' }
+];
+
+const USER_PREFERENCE_GENDERS = [
+    { key: 'male', label: 'Male' },
+    { key: 'female', label: 'Female' },
+    { key: 'non_binary', label: 'Non-binary' },
+    { key: 'prefer_not_to_say', label: 'Prefer not to say' }
+];
+
+const USER_PREFERENCE_TIME_WINDOWS = [
+    { key: 'morning', label: 'Morning' },
+    { key: 'noon', label: 'Noon' },
+    { key: 'afternoon', label: 'Afternoon' },
+    { key: 'evening', label: 'Evening' },
+    { key: 'late_night', label: 'Late night' }
+];
+
+const USER_PREFERENCE_INTERESTS_BY_AGE = {
+    '13_17': [
+        { key: 'street_food', label: 'Street food' },
+        { key: 'bubble_tea', label: 'Bubble tea' },
+        { key: 'instagram_spots', label: 'Instagram spots' },
+        { key: 'arcades', label: 'Arcades & games' },
+        { key: 'parks', label: 'Parks' },
+        { key: 'cinema', label: 'Cinema' },
+        { key: 'sports', label: 'Sports activities' }
+    ],
+    '18_24': [
+        { key: 'nightlife', label: 'Nightlife' },
+        { key: 'live_music', label: 'Live music' },
+        { key: 'cafes', label: 'Cafes' },
+        { key: 'street_food', label: 'Street food' },
+        { key: 'adventure', label: 'Adventure' },
+        { key: 'photography', label: 'Photography' },
+        { key: 'fitness', label: 'Fitness' }
+    ],
+    '25_34': [
+        { key: 'specialty_coffee', label: 'Specialty coffee' },
+        { key: 'fine_dining', label: 'Fine dining' },
+        { key: 'family_spots', label: 'Family spots' },
+        { key: 'wellness', label: 'Wellness' },
+        { key: 'networking', label: 'Networking places' },
+        { key: 'cultural_sites', label: 'Cultural sites' },
+        { key: 'weekend_getaways', label: 'Weekend getaways' }
+    ],
+    '35_49': [
+        { key: 'family_friendly', label: 'Family friendly' },
+        { key: 'local_cuisine', label: 'Local cuisine' },
+        { key: 'heritage', label: 'Heritage places' },
+        { key: 'wellness', label: 'Wellness' },
+        { key: 'business_lunch', label: 'Business lunch' },
+        { key: 'shopping', label: 'Shopping' },
+        { key: 'nature_walks', label: 'Nature walks' }
+    ],
+    '50_plus': [
+        { key: 'quiet_cafes', label: 'Quiet cafes' },
+        { key: 'traditional_food', label: 'Traditional food' },
+        { key: 'scenic_walks', label: 'Scenic walks' },
+        { key: 'spiritual_sites', label: 'Spiritual sites' },
+        { key: 'cultural_sites', label: 'Cultural sites' },
+        { key: 'health_friendly', label: 'Health-friendly places' },
+        { key: 'gardens', label: 'Gardens' }
+    ]
+};
+
+const USER_PREFERENCE_AGE_RANGE_SET = new Set(USER_PREFERENCE_AGE_RANGES.map((item) => item.key));
+const USER_PREFERENCE_GENDER_SET = new Set(USER_PREFERENCE_GENDERS.map((item) => item.key));
+const USER_PREFERENCE_TIME_WINDOW_SET = new Set(USER_PREFERENCE_TIME_WINDOWS.map((item) => item.key));
+const USER_PREFERENCE_INTEREST_MAP = Object.values(USER_PREFERENCE_INTERESTS_BY_AGE)
+    .flat()
+    .reduce((map, item) => {
+        map[item.key] = item.label;
+        return map;
+    }, {});
+const USER_PREFERENCE_INTEREST_SET_BY_AGE = Object.entries(USER_PREFERENCE_INTERESTS_BY_AGE).reduce(
+    (accumulator, [ageRangeKey, interests]) => {
+        accumulator[ageRangeKey] = new Set(interests.map((item) => item.key));
+        return accumulator;
+    },
+    {}
+);
+
+const USER_PREFERENCE_INTEREST_KEYWORDS = {
+    street_food: ['street food', 'food market', 'food court', 'hawker', 'am thuc duong pho', 'an vat', 'quan an vat', 'cho dem'],
+    bubble_tea: ['bubble tea', 'milk tea', 'tea shop', 'tra sua'],
+    instagram_spots: ['instagram', 'photo spot', 'check-in', 'scenic', 'viewpoint', 'check in', 'song ao', 'view dep'],
+    arcades: ['arcade', 'game center', 'bowling', 'vr game', 'khu vui choi', 'choi game'],
+    parks: ['park', 'green space', 'playground', 'cong vien'],
+    cinema: ['cinema', 'movie', 'theater', 'rap phim', 'rap chieu phim'],
+    sports: ['sport', 'stadium', 'court', 'climbing', 'the thao', 'san bong', 'gym'],
+    nightlife: ['bar', 'club', 'nightlife', 'cocktail', 'pub', 'quan nhau', 'beer club', 'karaoke'],
+    live_music: ['live music', 'acoustic', 'dj', 'concert', 'nhac song', 'music lounge'],
+    cafes: ['cafe', 'coffee', 'espresso', 'tea room', 'ca phe', 'quan cafe'],
+    adventure: ['adventure', 'hiking', 'zipline', 'outdoor', 'mao hiem', 'trekking'],
+    photography: ['photography', 'photo', 'landmark', 'gallery', 'chup anh'],
+    fitness: ['gym', 'fitness', 'workout', 'yoga', 'phong tap'],
+    specialty_coffee: ['specialty coffee', 'single origin', 'brew bar', 'ca phe dac san'],
+    fine_dining: ['fine dining', 'premium', 'chef', 'tasting menu', 'nha hang cao cap'],
+    family_spots: ['family', 'kids', 'child-friendly', 'gia dinh', 'tre em'],
+    wellness: ['wellness', 'spa', 'massage', 'relax', 'thu gian'],
+    networking: ['coworking', 'meeting', 'workspace', 'business', 'van phong', 'hop nhom'],
+    cultural_sites: ['museum', 'cultural', 'heritage', 'art', 'bao tang', 'van hoa'],
+    weekend_getaways: ['weekend', 'resort', 'escape', 'staycation', 'nghi duong'],
+    family_friendly: ['family', 'child-friendly', 'kids', 'gia dinh', 'tre em'],
+    local_cuisine: ['local cuisine', 'traditional', 'authentic', 'dac san dia phuong'],
+    heritage: ['heritage', 'historic', 'history', 'di tich'],
+    business_lunch: ['business lunch', 'meeting', 'private room', 'an trua cong viec'],
+    shopping: ['shopping', 'mall', 'boutique', 'market', 'mua sam', 'trung tam thuong mai'],
+    nature_walks: ['nature', 'walk', 'trail', 'garden', 'di bo', 'duong dao'],
+    quiet_cafes: ['quiet', 'calm', 'peaceful', 'cafe', 'yen tinh'],
+    traditional_food: ['traditional', 'local dish', 'authentic', 'mon truyen thong'],
+    scenic_walks: ['scenic', 'riverside', 'view', 'walk', 'canh dep'],
+    spiritual_sites: ['temple', 'pagoda', 'church', 'spiritual', 'chua', 'nha tho', 'tam linh'],
+    health_friendly: ['healthy', 'low sugar', 'light meal', 'vegetarian', 'an lanh manh', 'it duong'],
+    gardens: ['garden', 'botanical', 'flower', 'vuon hoa']
+};
+
+const USER_PREFERENCE_TIME_KEYWORDS = {
+    morning: ['breakfast', 'morning', 'sunrise', 'early', 'buoi sang', 'sang som'],
+    noon: ['lunch', 'noon', 'midday', 'buoi trua', 'an trua'],
+    afternoon: ['afternoon', 'tea time', 'sunset', 'buoi chieu'],
+    evening: ['dinner', 'evening', 'night view', 'buoi toi', 'an toi'],
+    late_night: ['late night', 'open 24/7', 'nightlife', 'after midnight', 'khuya', 'dem']
+};
+
+const USER_PREFERENCE_ADULT_KEYWORDS = [
+    'bar', 'club', 'cocktail', 'nightlife', 'pub',
+    'beer', 'beer club', 'lounge', 'karaoke',
+    'quan nhau', 'nhau', 'bia', 'ruou'
+];
+const USER_PREFERENCE_FAMILY_KEYWORDS = [
+    'family', 'kids', 'park', 'museum', 'garden',
+    'library', 'book', 'playground',
+    'gia dinh', 'tre em', 'cong vien', 'khu vui choi', 'thu vien', 'bao tang', 'nha sach'
+];
+const USER_PREFERENCE_TEEN_FRIENDLY_KEYWORDS = [
+    'playground', 'theme park', 'amusement', 'arcade', 'library', 'book',
+    'park', 'museum', 'cinema', 'sports',
+    'khu vui choi', 'cong vien', 'thu vien', 'bao tang', 'nha sach', 'rap phim', 'the thao'
+];
+
+function normalizePreferenceStringList(input) {
+    if (!Array.isArray(input)) {
+        return [];
+    }
+
+    return [...new Set(
+        input
+            .map((item) => String(item || '').trim().toLowerCase())
+            .filter(Boolean)
+    )];
+}
+
 const REVIEW_BLOCKED_TERMS = ['địt', 'đụ', 'dm', 'dcm', 'đéo', 'cặc', 'lồn', 'đĩ', 'vcl'];
 
 function normalizeReviewModerationText(value) {
@@ -741,13 +901,15 @@ function findBlockedReviewTerm(value) {
         return null;
     }
 
+    const tokens = normalized.split(' ').map((token) => token.trim()).filter(Boolean);
+
     for (const term of REVIEW_BLOCKED_TERMS) {
         const normalizedTerm = normalizeReviewModerationText(term);
         if (!normalizedTerm) {
             continue;
         }
 
-        if (normalized.includes(normalizedTerm)) {
+        if (tokens.includes(normalizedTerm)) {
             return term;
         }
     }
@@ -821,6 +983,222 @@ function normalizeVenueMetadataObject(metadata) {
     }
 
     return {};
+}
+
+function normalizeStringArray(value) {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+
+    const extracted = value.flatMap((item) => {
+        if (typeof item === 'string') {
+            return [item];
+        }
+
+        if (item && typeof item === 'object') {
+            const candidates = [
+                item.url,
+                item.image_url,
+                item.imageUrl,
+                item.src,
+                item.path,
+                item.file_url,
+                item.fileUrl
+            ];
+
+            return candidates.filter((candidate) => typeof candidate === 'string');
+        }
+
+        return [];
+    });
+
+    return extracted
+        .map((item) => String(item || '').trim())
+        .map((item) => item.replace(/^['"]|['"]$/g, '').replace(/\\/g, '/'))
+        .map((item) => item.replace(/^\/?api\/v\d+\/uploads\//i, '/uploads/'))
+        .map((item) => item.replace(/^\/?api\/uploads\//i, '/uploads/'))
+        .map((item) => item.replace(/^(https?:\/\/[^/]+)\/api\/v\d+\/uploads\//i, '$1/uploads/'))
+        .map((item) => item.replace(/^(https?:\/\/[^/]+)\/api\/uploads\//i, '$1/uploads/'))
+        .filter((item) => {
+            const normalized = String(item || '').trim().toLowerCase();
+            const hasValidImagePath =
+                /^https?:\/\//i.test(normalized)
+                || normalized.startsWith('/uploads/')
+                || normalized.startsWith('uploads/')
+                || normalized.startsWith('data:image/');
+
+            return Boolean(normalized)
+                && hasValidImagePath
+                && !['nan', 'null', 'undefined'].includes(normalized)
+                && !normalized.startsWith('blob:');
+        });
+}
+
+function normalizeVenueImageKey(value) {
+    const normalized = String(value || '')
+        .trim()
+        .replace(/^['"]|['"]$/g, '')
+        .replace(/\\/g, '/')
+        .replace(/^\/?api\/v\d+\/uploads\//i, '/uploads/')
+        .replace(/^\/?api\/uploads\//i, '/uploads/')
+        .replace(/^(https?:\/\/[^/]+)\/api\/v\d+\/uploads\//i, '$1/uploads/')
+        .replace(/^(https?:\/\/[^/]+)\/api\/uploads\//i, '$1/uploads/');
+
+    if (!normalized) {
+        return '';
+    }
+
+    if (/^https?:\/\//i.test(normalized)) {
+        try {
+            const parsed = new URL(normalized);
+            const pathname = parsed.pathname
+                .replace(/^\/api\/v\d+\/uploads\//i, '/uploads/')
+                .replace(/^\/api\/uploads\//i, '/uploads/');
+            return `${pathname}${parsed.search || ''}`;
+        } catch (_error) {
+            return normalized;
+        }
+    }
+
+    return normalized;
+}
+
+function resolveVenueMetadataImageCandidates(metadata) {
+    return [
+        ...normalizeStringArray(metadata.galleryImages),
+        ...normalizeStringArray(metadata.images),
+        ...normalizeStringArray(metadata.imageUrls),
+        ...normalizeStringArray(metadata.photos),
+        ...normalizeStringArray(metadata.photoUrls),
+        ...normalizeStringArray(metadata.mapImages),
+        ...normalizeStringArray(metadata.mapImageUrls),
+        ...normalizeStringArray(metadata.map_images),
+        ...normalizeStringArray(metadata.map_image_urls),
+        ...normalizeStringArray([metadata.mapImage]),
+        ...normalizeStringArray([metadata.map_image])
+    ];
+}
+
+function mergeUniqueVenueImages(candidates = []) {
+    const imageByKey = new Map();
+
+    candidates.forEach((item) => {
+        const normalizedValue = String(item || '').trim();
+        if (!normalizedValue) {
+            return;
+        }
+
+        const imageKey = normalizeVenueImageKey(normalizedValue);
+        if (!imageKey || imageByKey.has(imageKey)) {
+            return;
+        }
+
+        imageByKey.set(imageKey, normalizedValue);
+    });
+
+    return [...imageByKey.values()];
+}
+
+function extractVenueImageUrls(venue, externalImages = []) {
+    const metadata = normalizeVenueMetadataObject(venue?.metadata);
+    const mergedCandidates = [
+        ...normalizeStringArray([venue?.venue_primary_image_url, venue?.map_image_url]),
+        ...normalizeStringArray(externalImages),
+        ...resolveVenueMetadataImageCandidates(metadata),
+        ...normalizeStringArray(venue?.venue_images)
+    ];
+
+    const coverImageUrl = String(venue?.cover_image_url || '').trim();
+    if (coverImageUrl) {
+        mergedCandidates.push(coverImageUrl);
+    }
+
+    return mergeUniqueVenueImages(mergedCandidates);
+}
+
+function resolveNumericCoordinate(value) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+}
+
+function normalizeVenueCoordinates(venue) {
+    const metadata = normalizeVenueMetadataObject(venue?.metadata);
+    const metadataLocation = metadata?.location && typeof metadata.location === 'object' ? metadata.location : {};
+
+    const latitudeCandidates = [
+        venue?.latitude,
+        metadata.latitude,
+        metadata.lat,
+        metadataLocation.latitude,
+        metadataLocation.lat
+    ];
+    const longitudeCandidates = [
+        venue?.longitude,
+        metadata.longitude,
+        metadata.lng,
+        metadata.lon,
+        metadataLocation.longitude,
+        metadataLocation.lng,
+        metadataLocation.lon
+    ];
+
+    let latitude = latitudeCandidates
+        .map((candidate) => resolveNumericCoordinate(candidate))
+        .find((candidate) => candidate !== null);
+    let longitude = longitudeCandidates
+        .map((candidate) => resolveNumericCoordinate(candidate))
+        .find((candidate) => candidate !== null);
+
+    const latitudeInRange = Number.isFinite(latitude) && latitude >= -90 && latitude <= 90;
+    const longitudeInRange = Number.isFinite(longitude) && longitude >= -180 && longitude <= 180;
+    const swappedLatitudeInRange = Number.isFinite(longitude) && longitude >= -90 && longitude <= 90;
+    const swappedLongitudeInRange = Number.isFinite(latitude) && latitude >= -180 && latitude <= 180;
+
+    if ((!latitudeInRange || !longitudeInRange) && swappedLatitudeInRange && swappedLongitudeInRange) {
+        const originalLatitude = latitude;
+        latitude = longitude;
+        longitude = originalLatitude;
+    }
+
+    if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
+        latitude = null;
+    }
+
+    if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+        longitude = null;
+    }
+
+    return {
+        ...venue,
+        latitude,
+        longitude
+    };
+}
+
+async function loadVenueGalleryImageUrls(venueId) {
+    if (!Number.isFinite(Number(venueId))) {
+        return [];
+    }
+
+    try {
+        const galleryResult = await pool.query(
+            `
+                SELECT image_url
+                FROM venue_images
+                WHERE venue_id = $1
+                ORDER BY display_order ASC, id ASC
+            `,
+            [venueId]
+        );
+
+        return normalizeStringArray(galleryResult.rows.map((row) => row.image_url));
+    } catch (error) {
+        if (error?.code === '42P01') {
+            return [];
+        }
+
+        throw error;
+    }
 }
 
 function getZonedNowSnapshot(now = new Date(), timeZone = VENUE_OPENING_TIMEZONE) {
@@ -922,6 +1300,28 @@ function normalizeWeeklyScheduleInput(scheduleInput, options = {}) {
     };
 }
 
+function mapWeeklyOpenHoursToWeeklySchedule(source) {
+    if (!source || typeof source !== 'object' || Array.isArray(source)) {
+        return null;
+    }
+
+    return WEEKLY_SCHEDULE_DAYS.reduce((accumulator, day) => {
+        const dayValue = source?.[day.key] || {};
+        const start = String(dayValue?.openTime ?? '').trim();
+        const end = String(dayValue?.closeTime ?? '').trim();
+        const off = Boolean(dayValue?.isClosed) || start.toUpperCase() === 'OFF' || end.toUpperCase() === 'OFF';
+
+        accumulator[day.key] = {
+            day: day.label,
+            start: off ? 'OFF' : start,
+            end: off ? 'OFF' : end,
+            off
+        };
+
+        return accumulator;
+    }, {});
+}
+
 function toMinutesFromHHmm(value) {
     const normalized = String(value || '').trim();
 
@@ -946,19 +1346,31 @@ function toMinutesFromHHmm(value) {
 
 function extractVenueWeeklySchedule(metadata) {
     const normalizedMetadata = normalizeVenueMetadataObject(metadata);
-    const source =
+    const canonicalSource =
         normalizedMetadata && typeof normalizedMetadata.weeklySchedule === 'object' && !Array.isArray(normalizedMetadata.weeklySchedule)
             ? normalizedMetadata.weeklySchedule
             : null;
 
-    if (!source) {
+    const legacySource =
+        normalizedMetadata && typeof normalizedMetadata.weeklyOpenHours === 'object' && !Array.isArray(normalizedMetadata.weeklyOpenHours)
+            ? mapWeeklyOpenHoursToWeeklySchedule(normalizedMetadata.weeklyOpenHours)
+            : null;
+
+    const source = canonicalSource || legacySource;
+
+    const fallbackStart = String(normalizedMetadata.startTime || '').trim();
+    const fallbackEnd = String(normalizedMetadata.endTime || '').trim();
+    const hasFallbackRange =
+        /^\d{2}:\d{2}$/.test(fallbackStart) && /^\d{2}:\d{2}$/.test(fallbackEnd) && fallbackStart < fallbackEnd;
+
+    if (!source && !hasFallbackRange) {
         return [];
     }
 
     return WEEKLY_SCHEDULE_DAYS.map((day) => {
         const daySchedule = source[day.key] || {};
-        const start = String(daySchedule.start || '').trim();
-        const end = String(daySchedule.end || '').trim();
+        const start = String(daySchedule.start || '').trim() || (hasFallbackRange ? fallbackStart : '');
+        const end = String(daySchedule.end || '').trim() || (hasFallbackRange ? fallbackEnd : '');
         const off = Boolean(daySchedule.off) || start === 'OFF' || end === 'OFF';
 
         return {
@@ -1118,6 +1530,44 @@ function normalizePaginationValue(value, fallback, { min = 1, max = 100 } = {}) 
     }
 
     return Math.min(Math.max(parsed, min), max);
+}
+
+function shouldUseDatabaseSsl() {
+    const sslValue = String(process.env.DB_SSL || process.env.PGSSLMODE || '').trim().toLowerCase();
+
+    if (['false', '0', 'disable', 'off', 'no'].includes(sslValue)) {
+        return false;
+    }
+
+    if (['true', '1', 'require', 'on', 'yes'].includes(sslValue)) {
+        return true;
+    }
+
+    // Default to no SSL for local/self-hosted development to avoid connection failures.
+    return false;
+}
+
+function buildDatabasePoolConfig() {
+    const connectionString = String(process.env.DATABASE_URL || '').trim();
+    const config = connectionString
+        ? {
+              connectionString
+          }
+        : {
+              host: process.env.DB_HOST || '127.0.0.1',
+              port: Number(process.env.DB_PORT) || 5432,
+              user: process.env.DB_USER || 'postgres',
+              password: String(process.env.DB_PASSWORD ?? ''),
+              database: process.env.DB_NAME || 'postgres'
+          };
+
+    if (shouldUseDatabaseSsl()) {
+        config.ssl = {
+            rejectUnauthorized: false
+        };
+    }
+
+    return config;
 }
 
 function resolveUploadPathFromUrl(fileUrl) {
@@ -1313,17 +1763,17 @@ async function generateWardIdFromName(name) {
                 };
             }
 
-        const poolMax = Number(process.env.PG_POOL_MAX || 8);
-        const poolIdleTimeoutMs = Number(process.env.PG_IDLE_TIMEOUT_MS || 10000);
-        const poolConnectionTimeoutMs = Number(process.env.PG_CONNECTION_TIMEOUT_MS || 60000);
+                const poolMax = Number(process.env.PG_POOL_MAX || 8);
+                const poolIdleTimeoutMs = Number(process.env.PG_IDLE_TIMEOUT_MS || 10000);
+                const poolConnectionTimeoutMs = Number(process.env.PG_CONNECTION_TIMEOUT_MS || 60000);
 
-        const pool = new Pool({
-  host: process.env.DB_HOST,
-  port: process.env.DB_PORT,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-});
+                const pool = new Pool({
+                        ...buildDatabasePoolConfig(),
+                        max: Number.isFinite(poolMax) && poolMax > 0 ? poolMax : 8,
+                        idleTimeoutMillis: Number.isFinite(poolIdleTimeoutMs) && poolIdleTimeoutMs > 0 ? poolIdleTimeoutMs : 10000,
+                        connectionTimeoutMillis:
+                                Number.isFinite(poolConnectionTimeoutMs) && poolConnectionTimeoutMs > 0 ? poolConnectionTimeoutMs : 60000
+                });
         console.log('ℹ️ PostgreSQL pool config:', {
             max: Number.isFinite(poolMax) && poolMax > 0 ? poolMax : 8,
             idleTimeoutMillis: Number.isFinite(poolIdleTimeoutMs) && poolIdleTimeoutMs > 0 ? poolIdleTimeoutMs : 10000,
@@ -1537,7 +1987,7 @@ async function generateWardIdFromName(name) {
                     author_name TEXT,
                     title TEXT,
                     comment TEXT NOT NULL,
-                    rating INTEGER CHECK (rating BETWEEN 1 AND 5),
+                    rating NUMERIC(2,1) CHECK (rating BETWEEN 0.5 AND 5),
                     image_urls JSONB NOT NULL DEFAULT '[]'::jsonb,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -1560,6 +2010,15 @@ async function generateWardIdFromName(name) {
             `
                 ALTER TABLE IF EXISTS venue_public_reviews
                 ALTER COLUMN user_id TYPE TEXT USING user_id::text
+            `
+        ).catch(() => {
+            // Ignore if table does not exist yet or schema not ready.
+        });
+
+        pool.query(
+            `
+                ALTER TABLE IF EXISTS venue_public_reviews
+                ALTER COLUMN rating TYPE NUMERIC(2,1) USING rating::numeric
             `
         ).catch(() => {
             // Ignore if table does not exist yet or schema not ready.
@@ -1603,7 +2062,7 @@ async function generateWardIdFromName(name) {
                     review_id BIGINT NOT NULL REFERENCES venue_public_reviews(id) ON DELETE CASCADE,
                     user_id TEXT NOT NULL,
                     author_name TEXT NOT NULL,
-                    rating INTEGER NULL CHECK (rating BETWEEN 1 AND 5),
+                    rating NUMERIC(2,1) NULL CHECK (rating BETWEEN 0.5 AND 5),
                     title TEXT,
                     content TEXT NOT NULL,
                     image_urls JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -1626,8 +2085,39 @@ async function generateWardIdFromName(name) {
 
         pool.query(
             `
+                CREATE TABLE IF NOT EXISTS venue_review_reply_likes (
+                    reply_id BIGINT NOT NULL REFERENCES venue_review_replies(id) ON DELETE CASCADE,
+                    user_id TEXT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (reply_id, user_id)
+                )
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                CREATE INDEX IF NOT EXISTS idx_venue_review_reply_likes_reply
+                ON venue_review_reply_likes (reply_id)
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
                 ALTER TABLE IF EXISTS venue_review_replies
-                ADD COLUMN IF NOT EXISTS rating INTEGER NULL CHECK (rating BETWEEN 1 AND 5)
+                ADD COLUMN IF NOT EXISTS rating NUMERIC(2,1) NULL CHECK (rating BETWEEN 0.5 AND 5)
+            `
+        ).catch(() => {
+            // Ignore if table does not exist yet or schema not ready.
+        });
+
+        pool.query(
+            `
+                ALTER TABLE IF EXISTS venue_review_replies
+                ALTER COLUMN rating TYPE NUMERIC(2,1) USING rating::numeric
             `
         ).catch(() => {
             // Ignore if table does not exist yet or schema not ready.
@@ -1649,6 +2139,34 @@ async function generateWardIdFromName(name) {
             `
         ).catch(() => {
             // Ignore if table does not exist yet or schema not ready.
+        });
+
+        pool.query(
+            `
+                CREATE TABLE IF NOT EXISTS user_ai_preferences (
+                    user_id TEXT PRIMARY KEY,
+                    age_range_key TEXT NOT NULL,
+                    preferred_gender TEXT NOT NULL,
+                    preferred_times TEXT[] NOT NULL DEFAULT '{}'::text[],
+                    interests TEXT[] NOT NULL DEFAULT '{}'::text[],
+                    onboarding_completed BOOLEAN NOT NULL DEFAULT true,
+                    last_known_latitude DOUBLE PRECISION,
+                    last_known_longitude DOUBLE PRECISION,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                CREATE INDEX IF NOT EXISTS idx_user_ai_preferences_updated_at
+                ON user_ai_preferences (updated_at DESC)
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
         });
 
         // ==========================================
@@ -1714,7 +2232,7 @@ async function generateWardIdFromName(name) {
             }
         });
 
-        const FEEDBACK_CATEGORIES = ['bug', 'feature', 'ui', 'data', 'performance', 'payment', 'other'];
+    const FEEDBACK_CATEGORIES = ['bug', 'feature', 'ui', 'data', 'performance', 'payment', 'venue_report', 'review_report', 'other'];
         const uploadFeedbackReply = multer({
             storage: feedbackReplyStorage,
             limits: { fileSize: 8 * 1024 * 1024 },
@@ -1751,13 +2269,21 @@ async function generateWardIdFromName(name) {
 
         const uploadVenueReview = multer({
             storage: venueReviewStorage,
-            limits: { fileSize: 8 * 1024 * 1024, files: 6 },
+            limits: { fileSize: 25 * 1024 * 1024, files: 6 },
             fileFilter: (_req, file, cb) => {
-                const allowed = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+                const allowed = [
+                    'image/png',
+                    'image/jpeg',
+                    'image/webp',
+                    'image/gif',
+                    'video/mp4',
+                    'video/webm',
+                    'video/quicktime'
+                ];
                 if (allowed.includes(file.mimetype)) {
                     cb(null, true);
                 } else {
-                    cb(new Error('Only image files are supported for review attachments'));
+                    cb(new Error('Only image/video files are supported for review attachments'));
                 }
             }
         });
@@ -1800,10 +2326,22 @@ async function generateWardIdFromName(name) {
                 sortOrder: 60
             },
             {
+                code: 'venue_report',
+                name: 'Venue Report',
+                description: 'Report incorrect, duplicate, or inappropriate venue information.',
+                sortOrder: 70
+            },
+            {
+                code: 'review_report',
+                name: 'Review Report',
+                description: 'Report inappropriate or incorrect review/comment content.',
+                sortOrder: 80
+            },
+            {
                 code: 'other',
                 name: 'Other',
                 description: 'Any issue that does not fit into predefined categories.',
-                sortOrder: 70
+                sortOrder: 90
             }
         ];
 
@@ -1813,27 +2351,82 @@ async function generateWardIdFromName(name) {
 
         const feedbackReplySmtpUser = String(
             process.env.FEEDBACK_GMAIL_USER || process.env.GMAIL_USER || DEFAULT_FEEDBACK_REPLY_GMAIL
-        ).trim();
+        )
+            .replace(/[\u200B-\u200D\uFEFF]/g, '')
+            .trim()
+            .toLowerCase();
         const feedbackReplySmtpPass = String(
             process.env.FEEDBACK_GMAIL_APP_PASSWORD || process.env.GMAIL_APP_PASSWORD || ''
-        ).trim();
+        )
+            .replace(/[\u200B-\u200D\uFEFF]/g, '')
+            .replace(/\s+/g, '')
+            .replace(/[^a-zA-Z0-9]/g, '')
+            .trim();
         const feedbackReplyFromName =
             String(process.env.FEEDBACK_REPLY_FROM_NAME || '').trim() || 'Smart City Discovery Support';
         const feedbackReplyFromEmail =
             String(process.env.FEEDBACK_REPLY_FROM_EMAIL || '').trim() || feedbackReplySmtpUser || DEFAULT_FEEDBACK_REPLY_GMAIL;
 
-        const feedbackReplyTransporter =
-            feedbackReplySmtpUser && feedbackReplySmtpPass
-                ? nodemailer.createTransport({
+        const feedbackReplyTransporters = [];
+
+        if (feedbackReplySmtpUser && feedbackReplySmtpPass) {
+            feedbackReplyTransporters.push(
+                nodemailer.createTransport({
+                    host: 'smtp.gmail.com',
+                    port: 465,
+                    secure: true,
+                    auth: {
+                        user: feedbackReplySmtpUser,
+                        pass: feedbackReplySmtpPass
+                    }
+                })
+            );
+
+            feedbackReplyTransporters.push(
+                nodemailer.createTransport({
                     service: 'gmail',
                     auth: {
                         user: feedbackReplySmtpUser,
                         pass: feedbackReplySmtpPass
                     }
                 })
-                : null;
+            );
+        }
 
-        if (!feedbackReplyTransporter) {
+        async function sendFeedbackReplyEmail(mailOptions) {
+            let lastError = null;
+
+            for (const transporter of feedbackReplyTransporters) {
+                try {
+                    const mailResult = await transporter.sendMail(mailOptions);
+                    return mailResult;
+                } catch (error) {
+                    lastError = error;
+                }
+            }
+
+            throw lastError || new Error('Email transport is not configured');
+        }
+
+        function maskEmailAddress(value) {
+            const email = String(value || '').trim().toLowerCase();
+            if (!isValidEmail(email)) {
+                return '';
+            }
+
+            const [localPart, domainPart] = email.split('@');
+            if (!domainPart) {
+                return '';
+            }
+
+            const visibleLocal = localPart.length <= 2
+                ? `${localPart.charAt(0)}*`
+                : `${localPart.slice(0, 2)}${'*'.repeat(Math.max(localPart.length - 2, 2))}`;
+
+            return `${visibleLocal}@${domainPart}`;
+        }
+
+        if (!feedbackReplyTransporters.length) {
             console.warn(
                 '⚠️ FEEDBACK_GMAIL_USER/FEEDBACK_GMAIL_APP_PASSWORD is not configured. Admin feedback reply email is disabled.'
             );
@@ -1919,9 +2512,396 @@ async function generateWardIdFromName(name) {
 
         const PUBLIC_WARDS_CACHE_TTL_MS = 30000;
         const PUBLIC_VENUES_COMPACT_CACHE_TTL_MS = 3000;
+        const PUBLIC_VENUE_DETAIL_CACHE_TTL_MS = 8000;
+    const PUBLIC_VENUE_COMMUNITY_CACHE_TTL_MS = 5000;
         let publicWardsSummaryCache = { timestamp: 0, data: null };
         let publicWardsFullCache = { timestamp: 0, data: null };
         let publicCompactApprovedVenuesCache = { timestamp: 0, data: null };
+        const publicVenueDetailCache = new Map();
+        const publicVenueForDetailCache = new Map();
+    const publicVenueCommunityBundleCache = new Map();
+
+        function getCachedMapValue(cacheMap, cacheKey, ttlMs) {
+            const cached = cacheMap.get(cacheKey);
+            if (!cached) {
+                return null;
+            }
+
+            if (Date.now() - cached.timestamp > ttlMs) {
+                cacheMap.delete(cacheKey);
+                return null;
+            }
+
+            return cached.data;
+        }
+
+        function setCachedMapValue(cacheMap, cacheKey, data) {
+            cacheMap.set(cacheKey, { timestamp: Date.now(), data });
+
+            if (cacheMap.size > 500) {
+                const firstKey = cacheMap.keys().next().value;
+                if (firstKey !== undefined) {
+                    cacheMap.delete(firstKey);
+                }
+            }
+        }
+
+        async function listPublicVenues(req, res) {
+            try {
+                const venueHasOwnerUserColumn = await hasVenueOwnerUserColumn();
+                const statusFilter = normalizeStatusList(req.query.status);
+                const effectiveStatuses = statusFilter.length ? statusFilter : ['approved'];
+                const compactMode = ['1', 'true', 'yes'].includes(String(req.query.compact || '').trim().toLowerCase());
+                const liveMode = ['1', 'true', 'yes'].includes(String(req.query.live || '').trim().toLowerCase());
+                const categoryId = normalizeCategoryId(req.query.categoryId);
+                const categoryIdsFilter = parsePositiveIntegerList(req.query.categoryIds);
+                const serviceIdsFilter = parsePositiveIntegerList(req.query.serviceIds);
+                const wardIdsFilter = parseTextList(req.query.wardIds);
+                const singleWardId = normalizeNullableText(req.query.wardId);
+                const searchKeyword = String(req.query.q ?? req.query.search ?? '').trim().toLowerCase();
+
+                if (Number.isNaN(categoryId)) {
+                    return res.status(400).json({ message: 'categoryId must be a positive integer' });
+                }
+        function invalidateVenueCommunityBundleCacheByVenueId(venueId) {
+            const normalizedVenueId = Number(venueId);
+            if (!Number.isFinite(normalizedVenueId)) {
+                return;
+            }
+
+            const venueCacheMarker = `:${normalizedVenueId}:`;
+            Array.from(publicVenueCommunityBundleCache.keys()).forEach((cacheKey) => {
+                if (String(cacheKey || '').includes(venueCacheMarker)) {
+                    publicVenueCommunityBundleCache.delete(cacheKey);
+                }
+            });
+        }
+
+        async function resolveVenueReviewStatsMapByVenueIds(venueIds = []) {
+            const normalizedIds = [...new Set(
+                venueIds
+                    .map((value) => Number(value))
+                    .filter((value) => Number.isFinite(value) && value > 0)
+            )];
+
+            if (!normalizedIds.length) {
+                return new Map();
+            }
+
+            try {
+                const statsResult = await pool.query(
+                    `
+                        SELECT
+                            venue_id,
+                            COALESCE(AVG(rating)::numeric(10,2), 0) AS average_rating,
+                            COUNT(*)::int AS total_reviews
+                        FROM venue_public_reviews
+                        WHERE venue_id = ANY($1::bigint[])
+                        GROUP BY venue_id
+                    `,
+                    [normalizedIds]
+                );
+
+                return statsResult.rows.reduce((acc, row) => {
+                    const venueId = Number(row.venue_id);
+                    if (!Number.isFinite(venueId)) {
+                        return acc;
+                    }
+
+                    acc.set(venueId, {
+                        averageRating: Number(row.average_rating || 0),
+                        totalReviews: Number(row.total_reviews || 0),
+                    });
+                    return acc;
+                }, new Map());
+            } catch (error) {
+                if (error?.code === '42P01') {
+                    return new Map();
+                }
+
+                throw error;
+            }
+        }
+
+        async function resolveVenueReviewStatsByVenueId(venueId) {
+            const statsByVenueId = await resolveVenueReviewStatsMapByVenueIds([venueId]);
+            return statsByVenueId.get(Number(venueId)) || null;
+        }
+
+        function buildUserPreferenceOptionsPayload() {
+            return {
+                ageRanges: USER_PREFERENCE_AGE_RANGES,
+                genders: USER_PREFERENCE_GENDERS,
+                visitTimes: USER_PREFERENCE_TIME_WINDOWS,
+                interestsByAgeRange: USER_PREFERENCE_INTERESTS_BY_AGE
+            };
+        }
+
+        function mapUserPreferenceRow(row) {
+            if (!row) {
+                return null;
+            }
+
+            const latitudeValue = Number(row.last_known_latitude);
+            const longitudeValue = Number(row.last_known_longitude);
+
+            return {
+                userId: String(row.user_id || ''),
+                ageRangeKey: String(row.age_range_key || '').trim(),
+                preferredGender: String(row.preferred_gender || '').trim(),
+                preferredTimes: normalizePreferenceStringList(row.preferred_times),
+                interests: normalizePreferenceStringList(row.interests),
+                onboardingCompleted: Boolean(row.onboarding_completed),
+                lastKnownLatitude: Number.isFinite(latitudeValue) ? latitudeValue : null,
+                lastKnownLongitude: Number.isFinite(longitudeValue) ? longitudeValue : null,
+                createdAt: row.created_at || null,
+                updatedAt: row.updated_at || null
+            };
+        }
+
+        async function getUserPreferenceRecordByUserId(userId) {
+            const result = await pool.query(
+                `
+                    SELECT
+                        user_id,
+                        age_range_key,
+                        preferred_gender,
+                        preferred_times,
+                        interests,
+                        onboarding_completed,
+                        last_known_latitude,
+                        last_known_longitude,
+                        created_at,
+                        updated_at
+                    FROM user_ai_preferences
+                    WHERE user_id = $1
+                    LIMIT 1
+                `,
+                [String(userId || '').trim()]
+            );
+
+            return mapUserPreferenceRow(result.rows[0] || null);
+        }
+
+        function normalizeRecommendationText(value) {
+            return String(value || '')
+                .toLowerCase()
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .replace(/[^a-z0-9\s]/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+        }
+
+        function countKeywordHits(text, keywords = []) {
+            const normalizedText = normalizeRecommendationText(text);
+            if (!normalizedText) {
+                return 0;
+            }
+
+            return [...new Set(keywords.map((keyword) => normalizeRecommendationText(keyword)).filter(Boolean))]
+                .reduce((count, keyword) => (normalizedText.includes(keyword) ? count + 1 : count), 0);
+        }
+
+        function computeDistanceKm(fromLatitude, fromLongitude, toLatitude, toLongitude) {
+            const lat1 = Number(fromLatitude);
+            const lon1 = Number(fromLongitude);
+            const lat2 = Number(toLatitude);
+            const lon2 = Number(toLongitude);
+
+            if (![lat1, lon1, lat2, lon2].every((value) => Number.isFinite(value))) {
+                return null;
+            }
+
+            const earthRadiusKm = 6371;
+            const toRadians = (degrees) => (degrees * Math.PI) / 180;
+            const deltaLat = toRadians(lat2 - lat1);
+            const deltaLon = toRadians(lon2 - lon1);
+            const a =
+                Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2)
+                + Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2))
+                * Math.sin(deltaLon / 2) * Math.sin(deltaLon / 2);
+
+            return 2 * earthRadiusKm * Math.asin(Math.sqrt(a));
+        }
+
+        function buildVenueRecommendationText(venue) {
+            const metadata = normalizeVenueMetadataObject(venue.metadata);
+            const serviceNames = normalizeStringArray(metadata.selectedServiceNames).join(' ');
+
+            return [
+                venue.name,
+                venue.title,
+                venue.description,
+                venue.address,
+                venue.category_name,
+                venue.ward_name,
+                serviceNames
+            ]
+                .map((item) => String(item || '').trim())
+                .filter(Boolean)
+                .join(' ');
+        }
+
+        function scoreVenueByUserPreference(venue, preference, userLatitude, userLongitude) {
+            const text = buildVenueRecommendationText(venue);
+            const ageRangeKey = preference.ageRangeKey;
+            const interestKeys = preference.interests;
+            const visitTimes = preference.preferredTimes;
+
+            let interestScore = 0;
+            let timeScore = 0;
+            let ageScore = 0;
+            let genderScore = 0;
+            let nearbyScore = 0;
+
+            const matchedInterestLabels = [];
+            const matchedTimeLabels = [];
+            let ageReason = '';
+
+            interestKeys.forEach((interestKey) => {
+                const interestKeywords = [
+                    ...(USER_PREFERENCE_INTEREST_KEYWORDS[interestKey] || []),
+                    USER_PREFERENCE_INTEREST_MAP[interestKey] || interestKey
+                ];
+                const hits = countKeywordHits(text, interestKeywords);
+
+                if (hits > 0) {
+                    interestScore += 1 + Math.min(hits, 2) * 0.2;
+                    matchedInterestLabels.push(USER_PREFERENCE_INTEREST_MAP[interestKey] || interestKey);
+                }
+            });
+
+            visitTimes.forEach((timeWindowKey) => {
+                const timeKeywords = USER_PREFERENCE_TIME_KEYWORDS[timeWindowKey] || [];
+                const hits = countKeywordHits(text, timeKeywords);
+                if (hits > 0) {
+                    timeScore += 0.6 + Math.min(hits, 2) * 0.15;
+                    const label = USER_PREFERENCE_TIME_WINDOWS.find((item) => item.key === timeWindowKey)?.label || timeWindowKey;
+                    matchedTimeLabels.push(label);
+                }
+            });
+
+            const adultHits = countKeywordHits(text, USER_PREFERENCE_ADULT_KEYWORDS);
+            const familyHits = countKeywordHits(text, USER_PREFERENCE_FAMILY_KEYWORDS);
+            const teenFriendlyHits = countKeywordHits(text, USER_PREFERENCE_TEEN_FRIENDLY_KEYWORDS);
+
+            if (ageRangeKey === '13_17' && adultHits > 0) {
+                return {
+                    score: -100,
+                    distanceKm: null,
+                    reasons: ['Filtered by age safety rule']
+                };
+            }
+
+            if (ageRangeKey === '13_17') {
+                ageScore += teenFriendlyHits * 1.4;
+                ageScore += familyHits * 0.45;
+                ageReason = 'Age fit: under-18 friendly';
+            } else if (ageRangeKey === '18_24') {
+                ageScore += adultHits * 1.05;
+                ageScore += familyHits * 0.1;
+                ageReason = 'Age fit: young adult';
+            } else if (ageRangeKey === '25_34') {
+                ageScore += adultHits * 0.8;
+                ageScore += familyHits * 0.2;
+                ageReason = 'Age fit: adult lifestyle';
+            } else if (ageRangeKey === '35_49' || ageRangeKey === '50_plus') {
+                ageScore += familyHits * 0.4;
+                ageScore -= adultHits * 0.25;
+                ageReason = 'Age fit: family and comfort';
+            }
+
+            if (preference.preferredGender === 'female' || preference.preferredGender === 'non_binary') {
+                const comfortHits = countKeywordHits(text, [
+                    'family', 'cafe', 'park', 'museum', 'wellness', 'community',
+                    'cong vien', 'thu vien', 'bao tang', 'yen tinh'
+                ]);
+                genderScore += comfortHits * 0.18;
+                genderScore -= adultHits * 0.08;
+            }
+
+            const distanceKm = computeDistanceKm(userLatitude, userLongitude, venue.latitude, venue.longitude);
+            if (Number.isFinite(distanceKm)) {
+                nearbyScore = Math.max(0, 1.2 - distanceKm / 12);
+            }
+
+            const ratingValue = Number(venue.average_rating || venue.averageRating || 0);
+            const ratingScore = Number.isFinite(ratingValue)
+                ? Math.max(0, Math.min(1, ratingValue / 5)) * 0.6
+                : 0;
+
+            const score =
+                interestScore * 2.2
+                + timeScore * 1.3
+                + ageScore
+                + genderScore
+                + nearbyScore * 2.1
+                + ratingScore;
+
+            const reasons = [];
+            if (matchedInterestLabels.length) {
+                reasons.push(`Matches interests: ${matchedInterestLabels.slice(0, 2).join(', ')}`);
+            }
+            if (matchedTimeLabels.length) {
+                reasons.push(`Fits your time: ${matchedTimeLabels.slice(0, 2).join(', ')}`);
+            }
+            if (ageReason) {
+                reasons.push(ageReason);
+            }
+            if (Number.isFinite(distanceKm)) {
+                reasons.push(`Nearby: ${distanceKm.toFixed(1)} km`);
+            }
+
+            return {
+                score,
+                distanceKm: Number.isFinite(distanceKm) ? Number(distanceKm.toFixed(2)) : null,
+                reasons
+            };
+        }
+
+        function diversifyRecommendedVenues(scoredVenues, limit) {
+            const groupedByCategory = new Map();
+
+            scoredVenues.forEach((item) => {
+                const categoryKey = item.category_id ? String(item.category_id) : 'uncategorized';
+                if (!groupedByCategory.has(categoryKey)) {
+                    groupedByCategory.set(categoryKey, []);
+                }
+                groupedByCategory.get(categoryKey).push(item);
+            });
+
+            const categoryOrder = [...groupedByCategory.keys()].sort((firstKey, secondKey) => {
+                const firstScore = groupedByCategory.get(firstKey)?.[0]?.recommendationScore || 0;
+                const secondScore = groupedByCategory.get(secondKey)?.[0]?.recommendationScore || 0;
+                return secondScore - firstScore;
+            });
+
+            const selected = [];
+            while (selected.length < limit) {
+                let pushedInThisRound = false;
+
+                for (const categoryKey of categoryOrder) {
+                    const bucket = groupedByCategory.get(categoryKey);
+                    if (!bucket || !bucket.length) {
+                        continue;
+                    }
+
+                    selected.push(bucket.shift());
+                    pushedInThisRound = true;
+
+                    if (selected.length >= limit) {
+                        break;
+                    }
+                }
+
+                if (!pushedInThisRound) {
+                    break;
+                }
+            }
+
+            return selected;
+        }
 
         async function listPublicWards(req, res) {
             try {
@@ -1956,9 +2936,17 @@ async function generateWardIdFromName(name) {
 
         async function listPublicVenues(req, res) {
             try {
-                const venueHasOwnerUserColumn = await hasVenueOwnerUserColumn();
                 const statusFilter = normalizeStatusList(req.query.status);
-                const effectiveStatuses = statusFilter.length ? statusFilter : ['approved'];
+                const isMineRequest = String(req.query.mine || '').trim().toLowerCase() === 'true';
+                const requesterId = req.authUser?.id ? String(req.authUser.id).trim() : '';
+                const isAdmin = normalizeRole(req.authUser?.role) === 'admin';
+                const effectiveStatuses = isMineRequest
+                    ? statusFilter.length
+                        ? statusFilter
+                        : ['approved', 'pending', 'rejected']
+                    : isAdmin && statusFilter.length
+                      ? statusFilter
+                      : ['approved'];
                 const compactMode = ['1', 'true', 'yes'].includes(String(req.query.compact || '').trim().toLowerCase());
                 const liveMode = ['1', 'true', 'yes'].includes(String(req.query.live || '').trim().toLowerCase());
                 const categoryId = normalizeCategoryId(req.query.categoryId);
@@ -1966,7 +2954,12 @@ async function generateWardIdFromName(name) {
                 const serviceIdsFilter = parsePositiveIntegerList(req.query.serviceIds);
                 const wardIdsFilter = parseTextList(req.query.wardIds);
                 const singleWardId = normalizeNullableText(req.query.wardId);
+                const requestedVenueId = normalizeNullableNumber(req.query.venueId);
                 const searchKeyword = String(req.query.q ?? req.query.search ?? '').trim().toLowerCase();
+
+                if (isMineRequest && !requesterId) {
+                    return res.status(401).json({ message: 'Missing authentication token' });
+                }
 
                 if (Number.isNaN(categoryId)) {
                     return res.status(400).json({ message: 'categoryId must be a positive integer' });
@@ -1984,6 +2977,10 @@ async function generateWardIdFromName(name) {
                         .json({ message: 'serviceIds must be a comma-separated list of positive integers' });
                 }
 
+                if (Number.isNaN(requestedVenueId)) {
+                    return res.status(400).json({ message: 'venueId must be a positive integer' });
+                }
+
                 const effectiveCategoryIds = [...categoryIdsFilter.values];
 
                 if (categoryId !== null && !effectiveCategoryIds.includes(categoryId)) {
@@ -1999,6 +2996,11 @@ async function generateWardIdFromName(name) {
                 const values = [effectiveStatuses];
                 const whereConditions = ['venues.status::text = ANY($1::text[])'];
 
+                if (isMineRequest) {
+                    values.push(requesterId);
+                    whereConditions.push(`venues.submitted_by_user_id = $${values.length}`);
+                }
+
                 if (effectiveCategoryIds.length) {
                     values.push(effectiveCategoryIds);
                     whereConditions.push(`venues.category_id = ANY($${values.length}::int[])`);
@@ -2007,6 +3009,11 @@ async function generateWardIdFromName(name) {
                 if (effectiveWardIds.length) {
                     values.push(effectiveWardIds);
                     whereConditions.push(`venues.ward_id::text = ANY($${values.length}::text[])`);
+                }
+
+                if (requestedVenueId !== null) {
+                    values.push(requestedVenueId);
+                    whereConditions.push(`venues.id = $${values.length}`);
                 }
 
                 if (serviceIdsFilter.values.length) {
@@ -2049,6 +3056,7 @@ async function generateWardIdFromName(name) {
                     effectiveStatuses[0] === 'approved' &&
                     effectiveCategoryIds.length === 0 &&
                     effectiveWardIds.length === 0 &&
+                    requestedVenueId === null &&
                     serviceIdsFilter.values.length === 0 &&
                     !searchKeyword;
 
@@ -2114,6 +3122,10 @@ async function generateWardIdFromName(name) {
                     place_categories.name AS category_name,
                     place_categories.slug AS category_slug,
                     ${coverImageSelect},
+                    venues.average_rating,
+                    venues.total_reviews,
+                    venues.cover_image_url,
+                    venue_primary_image.image_url AS venue_primary_image_url,
                     ${businessLicenseSelect},
                     ${metadataSelect},
                     venues.status::text AS status,
@@ -2124,6 +3136,13 @@ async function generateWardIdFromName(name) {
                 LEFT JOIN wards ON wards.ward_id = venues.ward_id
                 LEFT JOIN place_categories ON place_categories.id = venues.category_id
                 ${ownerJoin}
+                LEFT JOIN LATERAL (
+                    SELECT image_url
+                    FROM venue_images
+                    WHERE venue_id = venues.id
+                    ORDER BY display_order ASC, id ASC
+                    LIMIT 1
+                ) AS venue_primary_image ON true
                 WHERE ${whereConditions.join(' AND ')}
                 ORDER BY COALESCE(venues.approved_at, venues.created_at) DESC, venues.id DESC
             `,
@@ -2131,6 +3150,36 @@ async function generateWardIdFromName(name) {
                 );
 
                 const sanitizedRows = result.rows.map(sanitizeVenueRecord);
+                const normalizedRows = result.rows
+                    .map((row) => normalizeVenueCoordinates(row))
+                    .filter(
+                        (row) =>
+                            Number.isFinite(Number(row?.latitude)) &&
+                            Number.isFinite(Number(row?.longitude))
+                    );
+
+                const reviewStatsByVenueId = await resolveVenueReviewStatsMapByVenueIds(
+                    normalizedRows.map((row) => row?.id)
+                );
+
+                const enrichedRows = normalizedRows.map((row) => {
+                    const venueId = Number(row?.id);
+                    const resolvedStats = reviewStatsByVenueId.get(venueId);
+
+                    if (!resolvedStats) {
+                        return row;
+                    }
+
+                    return {
+                        ...row,
+                        average_rating: resolvedStats.averageRating,
+                        total_reviews: resolvedStats.totalReviews,
+                        averageRating: resolvedStats.averageRating,
+                        totalReviews: resolvedStats.totalReviews,
+                        review_count: resolvedStats.totalReviews,
+                        reviewCount: resolvedStats.totalReviews,
+                    };
+                });
 
                 if (useCompactApprovedCache) {
                     publicCompactApprovedVenuesCache = {
@@ -2140,6 +3189,11 @@ async function generateWardIdFromName(name) {
                 }
 
                 res.json(sanitizedRows);
+                        data: enrichedRows
+                    };
+                }
+
+                res.json(enrichedRows);
             } catch (err) {
                 res.status(500).json({ error: err.message });
             }
@@ -2170,6 +3224,18 @@ async function generateWardIdFromName(name) {
                 const ownerJoin = venueHasOwnerUserColumn
                     ? `LEFT JOIN users AS owner_users ON owner_users.id = ${resolvedOwnerUserSql}`
                     : '';
+                const isAdmin = normalizeRole(req.authUser?.role) === 'admin';
+                const cacheKey = `${isAdmin ? 'admin' : 'public'}:${venueId}`;
+                const cachedPayload = getCachedMapValue(
+                    publicVenueDetailCache,
+                    cacheKey,
+                    PUBLIC_VENUE_DETAIL_CACHE_TTL_MS
+                );
+
+                if (cachedPayload) {
+                    return res.json(cachedPayload);
+                }
+
                 const result = await pool.query(
                     `
                 SELECT
@@ -2190,6 +3256,12 @@ async function generateWardIdFromName(name) {
                     ${coverImageSelect},
                     ${businessLicenseSelect},
                     ${metadataSelect},
+                    venues.average_rating,
+                    venues.total_reviews,
+                    venues.cover_image_url,
+                    venues.business_license_image_url,
+                    venues.metadata,
+                    venues.submitted_by_user_id,
                     venues.status::text AS status,
                     venues.submitted_at,
                     venues.approved_at,
@@ -2212,13 +3284,30 @@ async function generateWardIdFromName(name) {
                 }
 
                 const venue = result.rows[0];
-                const isAdmin = normalizeRole(req.authUser?.role) === 'admin';
 
                 if (!isAdmin && String(venue.status || '').toLowerCase() !== 'approved') {
                     return res.status(404).json({ message: 'Venue not found' });
                 }
 
                 return res.json(sanitizeVenueRecord(venue));
+                const galleryImagesFromTable = await loadVenueGalleryImageUrls(venue.id);
+                const resolvedReviewStats = await resolveVenueReviewStatsByVenueId(venue.id);
+
+                const normalizedVenue = normalizeVenueCoordinates(venue);
+                const payload = {
+                    ...normalizedVenue,
+                    average_rating: Number(resolvedReviewStats?.averageRating ?? venue.average_rating ?? 0),
+                    total_reviews: Number(resolvedReviewStats?.totalReviews ?? venue.total_reviews ?? 0),
+                    averageRating: Number(resolvedReviewStats?.averageRating ?? venue.average_rating ?? 0),
+                    totalReviews: Number(resolvedReviewStats?.totalReviews ?? venue.total_reviews ?? 0),
+                    review_count: Number(resolvedReviewStats?.totalReviews ?? venue.total_reviews ?? 0),
+                    reviewCount: Number(resolvedReviewStats?.totalReviews ?? venue.total_reviews ?? 0),
+                    venue_images: extractVenueImageUrls(venue, galleryImagesFromTable)
+                };
+
+                setCachedMapValue(publicVenueDetailCache, cacheKey, payload);
+
+                return res.json(payload);
             } catch (error) {
                 return res.status(500).json({ message: error.message });
             }
@@ -2241,6 +3330,17 @@ async function generateWardIdFromName(name) {
             const ownerJoin = venueHasOwnerUserColumn
                 ? `LEFT JOIN users AS owner_users ON owner_users.id = ${resolvedOwnerUserSql}`
                 : '';
+            const cacheKey = `${isAdmin ? 'admin' : 'public'}:${venueId}`;
+            const cachedVenue = getCachedMapValue(
+                publicVenueForDetailCache,
+                cacheKey,
+                PUBLIC_VENUE_DETAIL_CACHE_TTL_MS
+            );
+
+            if (cachedVenue) {
+                return cachedVenue;
+            }
+
             const result = await pool.query(
                 `
                 SELECT
@@ -2285,6 +3385,24 @@ async function generateWardIdFromName(name) {
             }
 
             return sanitizeVenueRecord(venue);
+                const resolvedReviewStats = await resolveVenueReviewStatsByVenueId(venue.id);
+
+                const normalizedVenue = normalizeVenueCoordinates(venue);
+                const galleryImagesFromTable = await loadVenueGalleryImageUrls(venue.id);
+                const enrichedVenue = {
+                    ...normalizedVenue,
+                    average_rating: Number(resolvedReviewStats?.averageRating ?? venue.average_rating ?? 0),
+                    total_reviews: Number(resolvedReviewStats?.totalReviews ?? venue.total_reviews ?? 0),
+                    averageRating: Number(resolvedReviewStats?.averageRating ?? venue.average_rating ?? 0),
+                    totalReviews: Number(resolvedReviewStats?.totalReviews ?? venue.total_reviews ?? 0),
+                    review_count: Number(resolvedReviewStats?.totalReviews ?? venue.total_reviews ?? 0),
+                    reviewCount: Number(resolvedReviewStats?.totalReviews ?? venue.total_reviews ?? 0),
+                    venue_images: extractVenueImageUrls(venue, galleryImagesFromTable)
+                };
+
+                setCachedMapValue(publicVenueForDetailCache, cacheKey, enrichedVenue);
+
+                return enrichedVenue;
         }
 
         async function getVenueCommunityBundle(req, res) {
@@ -2298,6 +3416,17 @@ async function generateWardIdFromName(name) {
 
             try {
                 const isAdmin = normalizeRole(req.authUser?.role) === 'admin';
+                const communityCacheKey = `${isAdmin ? 'admin' : 'public'}:${venueId}:${currentUserId || 'guest'}`;
+                const cachedCommunityPayload = getCachedMapValue(
+                    publicVenueCommunityBundleCache,
+                    communityCacheKey,
+                    PUBLIC_VENUE_COMMUNITY_CACHE_TTL_MS
+                );
+
+                if (cachedCommunityPayload) {
+                    return res.json(cachedCommunityPayload);
+                }
+
                 venue = await getPublicVenueForDetail(venueId, isAdmin);
 
                 if (!venue) {
@@ -2362,21 +3491,35 @@ async function generateWardIdFromName(name) {
                     const repliesResult = await pool.query(
                         `
                             SELECT
-                                id,
-                                review_id,
-                                user_id,
-                                author_name,
-                                rating,
-                                title,
-                                content,
-                                image_urls,
-                                created_at,
-                                updated_at
-                            FROM venue_review_replies
-                            WHERE review_id = ANY($1::bigint[])
-                            ORDER BY created_at ASC, id ASC
+                                replies.id,
+                                replies.review_id,
+                                replies.user_id,
+                                replies.author_name,
+                                replies.rating,
+                                replies.title,
+                                replies.content,
+                                replies.image_urls,
+                                replies.created_at,
+                                replies.updated_at,
+                                COALESCE(reply_like_stats.like_count, 0)::int AS like_count,
+                                CASE
+                                    WHEN $2::text = '' THEN false
+                                    WHEN liked.reply_id IS NULL THEN false
+                                    ELSE true
+                                END AS liked_by_me
+                            FROM venue_review_replies AS replies
+                            LEFT JOIN (
+                                SELECT reply_id, COUNT(*)::int AS like_count
+                                FROM venue_review_reply_likes
+                                GROUP BY reply_id
+                            ) AS reply_like_stats ON reply_like_stats.reply_id = replies.id
+                            LEFT JOIN venue_review_reply_likes AS liked
+                                ON liked.reply_id = replies.id
+                               AND liked.user_id = $2
+                            WHERE replies.review_id = ANY($1::bigint[])
+                            ORDER BY replies.created_at ASC, replies.id ASC
                         `,
-                        [reviewIds]
+                        [reviewIds, currentUserId]
                     );
 
                     repliesByReviewId = repliesResult.rows.reduce((acc, reply) => {
@@ -2393,9 +3536,9 @@ async function generateWardIdFromName(name) {
                             rating: Number(reply.rating || 0),
                             title: reply.title || '',
                             content: reply.content || '',
-                            imageUrls: Array.isArray(reply.image_urls)
-                                ? reply.image_urls.map((item) => String(item || '').trim()).filter(Boolean)
-                                : [],
+                            imageUrls: normalizeStringArray(reply.image_urls),
+                            likeCount: Number(reply.like_count || 0),
+                            likedByMe: Boolean(reply.liked_by_me),
                             createdAt: reply.created_at,
                             updatedAt: reply.updated_at,
                             canDelete: currentUserId && String(reply.user_id || '') === currentUserId
@@ -2406,9 +3549,7 @@ async function generateWardIdFromName(name) {
                 }
 
                 const reviewRows = reviewsResult.rows.map((review) => {
-                    const imageUrls = Array.isArray(review.image_urls)
-                        ? review.image_urls.map((item) => String(item || '').trim()).filter(Boolean)
-                        : [];
+                    const imageUrls = normalizeStringArray(review.image_urls);
 
                     const normalizedReviewId = Number(review.id);
 
@@ -2431,30 +3572,70 @@ async function generateWardIdFromName(name) {
                     };
                 });
 
-                const reviewImages = [...new Set(reviewRows.flatMap((review) => review.imageUrls || []))];
+                const venueImages = extractVenueImageUrls(venue, venue?.venue_images);
+                const venueImageSet = new Set(venueImages);
+                const reviewImages = [
+                    ...new Set(
+                        reviewRows
+                            .flatMap((review) => review.imageUrls || [])
+                            .filter((imageUrl) => !venueImageSet.has(imageUrl))
+                    )
+                ];
                 const stats = {
                     averageRating:
                         Number(statsResult.rows[0]?.average_rating || 0) || Number(venue.average_rating || 0) || 0,
                     totalReviews: Number(statsResult.rows[0]?.total_reviews || 0) || Number(venue.total_reviews || 0) || 0
                 };
 
-                return res.json({
-                    venue,
+                const payload = {
+                    venue: {
+                        ...venue,
+                        average_rating: Number(stats.averageRating || 0),
+                        total_reviews: Number(stats.totalReviews || 0),
+                        averageRating: Number(stats.averageRating || 0),
+                        totalReviews: Number(stats.totalReviews || 0),
+                        venue_images: venueImages
+                    },
                     stats,
                     reviews: reviewRows,
-                    reviewImages
-                });
+                    reviewImages,
+                    venueImages,
+                    photos: {
+                        venue: venueImages,
+                        reviews: reviewImages
+                    }
+                };
+
+                setCachedMapValue(publicVenueCommunityBundleCache, communityCacheKey, payload);
+
+                return res.json(payload);
             } catch (error) {
                 if (error?.code === '42P01') {
-                    return res.json({
-                        venue,
+                    const venueImages = extractVenueImageUrls(venue, venue?.venue_images);
+                    const fallbackPayload = {
+                        venue: venue
+                            ? {
+                                ...venue,
+                                venue_images: venueImages
+                            }
+                            : null,
                         stats: {
                             averageRating: Number(venue?.average_rating || 0),
                             totalReviews: Number(venue?.total_reviews || 0)
                         },
                         reviews: [],
-                        reviewImages: []
-                    });
+                        reviewImages: [],
+                        venueImages,
+                        photos: {
+                            venue: venueImages,
+                            reviews: []
+                        }
+                    };
+
+                    const fallbackCacheKey = `${normalizeRole(req.authUser?.role) === 'admin' ? 'admin' : 'public'}:${venueId}:${currentUserId || 'guest'}`;
+                    setCachedMapValue(publicVenueCommunityBundleCache, fallbackCacheKey, fallbackPayload);
+
+                    return res.json(fallbackPayload);
                 }
 
                 return res.status(500).json({ message: error.message });
@@ -2523,9 +3704,14 @@ async function generateWardIdFromName(name) {
 
                 if (rawRating) {
                     const parsedRating = Number(rawRating);
-                    if (!Number.isInteger(parsedRating) || parsedRating < 1 || parsedRating > 5) {
+                    if (
+                        !Number.isFinite(parsedRating)
+                        || parsedRating < 0.5
+                        || parsedRating > 5
+                        || !Number.isInteger(parsedRating * 2)
+                    ) {
                         cleanupUploadedFiles();
-                        return res.status(400).json({ message: 'rating must be an integer between 1 and 5' });
+                        return res.status(400).json({ message: 'rating must be from 0.5 to 5 with step 0.5' });
                     }
 
                     rating = parsedRating;
@@ -2606,6 +3792,7 @@ async function generateWardIdFromName(name) {
                     );
 
                     const created = insertResult.rows[0];
+                    invalidateVenueCommunityBundleCacheByVenueId(venueId);
 
                     return res.status(201).json({
                         message: 'Review submitted successfully',
@@ -2619,7 +3806,8 @@ async function generateWardIdFromName(name) {
                             rating: created.rating === null ? null : Number(created.rating || 0),
                             imageUrls: Array.isArray(created.image_urls) ? created.image_urls : [],
                             createdAt: created.created_at,
-                            updatedAt: created.updated_at
+                            updatedAt: created.updated_at,
+                            canDelete: true
                         },
                         stats: {
                             averageRating: Number(statsResult.rows[0]?.average_rating || 0),
@@ -2702,6 +3890,8 @@ async function generateWardIdFromName(name) {
                     [reviewId]
                 );
 
+                invalidateVenueCommunityBundleCacheByVenueId(venueId);
+
                 return res.json({
                     success: true,
                     reviewId,
@@ -2753,9 +3943,14 @@ async function generateWardIdFromName(name) {
 
                 if (rawRating) {
                     const parsedRating = Number(rawRating);
-                    if (!Number.isInteger(parsedRating) || parsedRating < 1 || parsedRating > 5) {
+                    if (
+                        !Number.isFinite(parsedRating)
+                        || parsedRating < 0.5
+                        || parsedRating > 5
+                        || !Number.isInteger(parsedRating * 2)
+                    ) {
                         cleanupUploadedFiles();
-                        return res.status(400).json({ message: 'Số sao phải từ 1 đến 5.' });
+                        return res.status(400).json({ message: 'Số sao phải từ 0.5 đến 5 và cách nhau 0.5.' });
                     }
 
                     rating = parsedRating;
@@ -2814,6 +4009,7 @@ async function generateWardIdFromName(name) {
                     );
 
                     const created = insertResult.rows[0];
+                    invalidateVenueCommunityBundleCacheByVenueId(venueId);
 
                     return res.status(201).json({
                         success: true,
@@ -2826,6 +4022,8 @@ async function generateWardIdFromName(name) {
                             title: created.title || '',
                             content: created.content,
                             imageUrls: Array.isArray(created.image_urls) ? created.image_urls : [],
+                            likeCount: 0,
+                            likedByMe: false,
                             createdAt: created.created_at,
                             updatedAt: created.updated_at,
                             canDelete: true
@@ -2837,6 +4035,97 @@ async function generateWardIdFromName(name) {
                     return res.status(500).json({ message: error.message });
                 }
             });
+        }
+
+        async function toggleVenueReviewReplyLike(req, res) {
+            const venueId = normalizeNullableNumber(req.params.venueId);
+            const reviewId = normalizeNullableNumber(req.params.reviewId);
+            const replyId = normalizeNullableNumber(req.params.replyId);
+            const userId = String(req.user?.id || '').trim();
+
+            if (
+                Number.isNaN(venueId) || venueId === null
+                || Number.isNaN(reviewId) || reviewId === null
+                || Number.isNaN(replyId) || replyId === null
+            ) {
+                return res.status(400).json({ message: 'venueId/reviewId/replyId không hợp lệ.' });
+            }
+
+            if (!userId) {
+                return res.status(401).json({ message: 'Bạn cần đăng nhập để thích bình luận.' });
+            }
+
+            try {
+                const replyResult = await pool.query(
+                    `
+                        SELECT replies.id
+                        FROM venue_review_replies AS replies
+                        INNER JOIN venue_public_reviews AS reviews ON reviews.id = replies.review_id
+                        WHERE replies.id = $1
+                          AND replies.review_id = $2
+                          AND reviews.venue_id = $3
+                        LIMIT 1
+                    `,
+                    [replyId, reviewId, venueId]
+                );
+
+                if (!replyResult.rows.length) {
+                    return res.status(404).json({ message: 'Không tìm thấy bình luận nhỏ.' });
+                }
+
+                const existingLike = await pool.query(
+                    `
+                        SELECT 1
+                        FROM venue_review_reply_likes
+                        WHERE reply_id = $1 AND user_id = $2
+                        LIMIT 1
+                    `,
+                    [replyId, userId]
+                );
+
+                let liked = false;
+
+                if (existingLike.rows.length) {
+                    await pool.query(
+                        `
+                            DELETE FROM venue_review_reply_likes
+                            WHERE reply_id = $1 AND user_id = $2
+                        `,
+                        [replyId, userId]
+                    );
+                } else {
+                    await pool.query(
+                        `
+                            INSERT INTO venue_review_reply_likes (reply_id, user_id)
+                            VALUES ($1, $2)
+                            ON CONFLICT (reply_id, user_id) DO NOTHING
+                        `,
+                        [replyId, userId]
+                    );
+                    liked = true;
+                }
+
+                const countResult = await pool.query(
+                    `
+                        SELECT COUNT(*)::int AS like_count
+                        FROM venue_review_reply_likes
+                        WHERE reply_id = $1
+                    `,
+                    [replyId]
+                );
+
+                invalidateVenueCommunityBundleCacheByVenueId(venueId);
+
+                return res.json({
+                    success: true,
+                    reviewId,
+                    replyId,
+                    liked,
+                    likeCount: Number(countResult.rows[0]?.like_count || 0)
+                });
+            } catch (error) {
+                return res.status(500).json({ message: error.message });
+            }
         }
 
         async function deleteVenueReview(req, res) {
@@ -2881,16 +4170,177 @@ async function generateWardIdFromName(name) {
                     [reviewId, venueId]
                 );
 
+                invalidateVenueCommunityBundleCacheByVenueId(venueId);
+
                 return res.json({ success: true, deletedReviewId: reviewId });
             } catch (error) {
                 return res.status(500).json({ message: error.message });
             }
         }
 
+        function updateVenueReview(req, res) {
+            uploadVenueReview.array('images', 6)(req, res, async (uploadErr) => {
+                if (uploadErr) {
+                    return res.status(400).json({ message: uploadErr.message || 'Upload failed' });
+                }
+
+                const uploadedFiles = Array.isArray(req.files) ? req.files : [];
+                const cleanupUploadedFiles = () => {
+                    uploadedFiles.forEach((file) => {
+                        if (file?.filename) {
+                            safeDeleteUploadedFile(`/uploads/reviews/${file.filename}`);
+                        }
+                    });
+                };
+
+                const venueId = normalizeNullableNumber(req.params.venueId);
+                const reviewId = normalizeNullableNumber(req.params.reviewId);
+                const userId = String(req.user?.id || '').trim();
+                const rawRating = String(req.body.rating || '').trim();
+                const title = String(req.body.title || '').trim();
+                const comment = String(req.body.comment || '').trim();
+                const hasCommentField = Object.prototype.hasOwnProperty.call(req.body || {}, 'comment');
+                const removeExistingMedia = String(req.body.removeExistingMedia || '').trim().toLowerCase() === 'true';
+
+                if (Number.isNaN(venueId) || venueId === null || Number.isNaN(reviewId) || reviewId === null) {
+                    cleanupUploadedFiles();
+                    return res.status(400).json({ message: 'venueId/reviewId không hợp lệ.' });
+                }
+
+                if (!userId) {
+                    cleanupUploadedFiles();
+                    return res.status(401).json({ message: 'Bạn cần đăng nhập để chỉnh sửa bình luận.' });
+                }
+
+                let rating = null;
+                if (rawRating) {
+                    const parsedRating = Number(rawRating);
+                    if (
+                        !Number.isFinite(parsedRating)
+                        || parsedRating < 0.5
+                        || parsedRating > 5
+                        || !Number.isInteger(parsedRating * 2)
+                    ) {
+                        cleanupUploadedFiles();
+                        return res.status(400).json({ message: 'rating must be from 0.5 to 5 with step 0.5' });
+                    }
+
+                    rating = parsedRating;
+                }
+
+                try {
+                    const reviewResult = await pool.query(
+                        `
+                            SELECT id, user_id, comment, title, rating, image_urls
+                            FROM venue_public_reviews
+                            WHERE id = $1 AND venue_id = $2
+                            LIMIT 1
+                        `,
+                        [reviewId, venueId]
+                    );
+
+                    if (!reviewResult.rows.length) {
+                        cleanupUploadedFiles();
+                        return res.status(404).json({ message: 'Không tìm thấy bình luận.' });
+                    }
+
+                    const currentReview = reviewResult.rows[0];
+                    const ownerId = String(currentReview.user_id || '').trim();
+                    if (!ownerId || ownerId !== userId) {
+                        cleanupUploadedFiles();
+                        return res.status(403).json({ message: 'Bạn chỉ có thể chỉnh sửa bình luận của chính mình.' });
+                    }
+
+                    const nextComment = hasCommentField ? comment : String(currentReview.comment || '');
+                    if (!String(nextComment || '').trim()) {
+                        cleanupUploadedFiles();
+                        return res.status(400).json({ message: 'comment is required' });
+                    }
+
+                    const nextTitle = Object.prototype.hasOwnProperty.call(req.body || {}, 'title')
+                        ? title
+                        : String(currentReview.title || '');
+                    const nextRating = rawRating ? rating : currentReview.rating;
+
+                    if (findBlockedReviewTerm(`${nextTitle} ${nextComment}`)) {
+                        cleanupUploadedFiles();
+                        return res.status(400).json({ message: 'Nội dung bình luận chứa từ ngữ không phù hợp.' });
+                    }
+
+                    const existingMedia = Array.isArray(currentReview.image_urls) ? currentReview.image_urls : [];
+                    const uploadedMedia = uploadedFiles.map((file) => `/uploads/reviews/${file.filename}`);
+                    const shouldReplaceMedia = uploadedMedia.length > 0 || removeExistingMedia;
+                    const nextMedia = shouldReplaceMedia ? uploadedMedia : existingMedia;
+
+                    const updateResult = await pool.query(
+                        `
+                            UPDATE venue_public_reviews
+                            SET
+                                title = $3,
+                                comment = $4,
+                                rating = $5,
+                                image_urls = $6::jsonb,
+                                updated_at = NOW()
+                            WHERE id = $1 AND venue_id = $2
+                            RETURNING id, venue_id, user_id, author_name, title, comment, rating, image_urls, created_at, updated_at
+                        `,
+                        [reviewId, venueId, nextTitle || null, nextComment, nextRating, JSON.stringify(nextMedia)]
+                    );
+
+                    if (shouldReplaceMedia) {
+                        existingMedia.forEach((mediaUrl) => {
+                            if (!nextMedia.includes(mediaUrl)) {
+                                safeDeleteUploadedFile(mediaUrl);
+                            }
+                        });
+                    }
+
+                    const statsResult = await pool.query(
+                        `
+                            SELECT
+                                COALESCE(AVG(rating)::numeric(10,2), 0) AS average_rating,
+                                COUNT(*)::int AS total_reviews
+                            FROM venue_public_reviews
+                            WHERE venue_id = $1
+                        `,
+                        [venueId]
+                    );
+
+                    const updated = updateResult.rows[0];
+                    invalidateVenueCommunityBundleCacheByVenueId(venueId);
+
+                    return res.json({
+                        message: 'Review updated successfully',
+                        review: {
+                            id: updated.id,
+                            venueId: updated.venue_id,
+                            userId: updated.user_id,
+                            authorName: updated.author_name,
+                            title: updated.title || '',
+                            comment: updated.comment,
+                            rating: updated.rating === null ? null : Number(updated.rating || 0),
+                            imageUrls: Array.isArray(updated.image_urls) ? updated.image_urls : [],
+                            createdAt: updated.created_at,
+                            updatedAt: updated.updated_at,
+                            canDelete: true
+                        },
+                        stats: {
+                            averageRating: Number(statsResult.rows[0]?.average_rating || 0),
+                            totalReviews: Number(statsResult.rows[0]?.total_reviews || 0)
+                        }
+                    });
+                } catch (error) {
+                    cleanupUploadedFiles();
+                    return res.status(500).json({ message: error.message });
+                }
+            });
+        }
+
         async function listPublicVenueReviews(req, res) {
             const venueId = Number(req.params.venueId);
             const sort = String(req.query.sort || 'newest').trim().toLowerCase();
             const limit = normalizePaginationValue(req.query.limit, 20, { min: 1, max: 100 });
+            const currentUserId = String(req.user?.id || '').trim();
 
             if (!Number.isFinite(venueId)) {
                 return res.status(400).json({ message: 'Invalid venue id' });
@@ -2908,7 +4358,7 @@ async function generateWardIdFromName(name) {
             try {
                 const venueResult = await pool.query(
                     `
-                        SELECT id, status::text AS status
+                        SELECT id, submitted_by_user_id, status::text AS status
                         FROM venues
                         WHERE id = $1
                         LIMIT 1
@@ -2920,7 +4370,13 @@ async function generateWardIdFromName(name) {
                     return res.status(404).json({ message: 'Venue not found' });
                 }
 
-                if (String(venueResult.rows[0].status || '').toLowerCase() !== 'approved') {
+                const venue = venueResult.rows[0];
+                const isAdmin = normalizeRole(req.authUser?.role) === 'admin';
+                const requesterId = req.authUser?.id ? String(req.authUser.id).trim() : '';
+                const venueOwnerId = venue.submitted_by_user_id ? String(venue.submitted_by_user_id).trim() : '';
+                const isOwner = Boolean(requesterId && venueOwnerId && requesterId === venueOwnerId);
+
+                if (!isAdmin && !isOwner && String(venue.status || '').toLowerCase() !== 'approved') {
                     return res.status(404).json({ message: 'Venue not found' });
                 }
 
@@ -2929,23 +4385,134 @@ async function generateWardIdFromName(name) {
                         SELECT
                             r.id,
                             r.rating,
+                            r.title,
                             r.comment,
-                            r.author_profile_id,
+                            r.author_name,
+                            r.image_urls,
                             r.created_at,
                             r.updated_at,
-                            COALESCE(p.full_name, p.display_name, p.username, 'Anonymous') AS author_name
-                        FROM reviews AS r
-                        LEFT JOIN profiles AS p ON p.id = r.author_profile_id
+                            COALESCE(like_stats.like_count, 0)::int AS like_count,
+                            COALESCE(reply_stats.reply_count, 0)::int AS reply_count,
+                            CASE
+                                WHEN $2::text = '' THEN false
+                                WHEN liked.review_id IS NULL THEN false
+                                ELSE true
+                            END AS liked_by_me
+                        FROM venue_public_reviews AS r
+                        LEFT JOIN (
+                            SELECT review_id, COUNT(*)::int AS like_count
+                            FROM venue_review_likes
+                            GROUP BY review_id
+                        ) AS like_stats ON like_stats.review_id = r.id
+                        LEFT JOIN (
+                            SELECT review_id, COUNT(*)::int AS reply_count
+                            FROM venue_review_replies
+                            GROUP BY review_id
+                        ) AS reply_stats ON reply_stats.review_id = r.id
+                        LEFT JOIN venue_review_likes AS liked
+                            ON liked.review_id = r.id
+                           AND liked.user_id = $2
                         WHERE r.venue_id = $1
                         ORDER BY ${sortClause}
-                        LIMIT $2
+                        LIMIT $3
                     `,
-                    [venueId, limit]
+                    [venueId, currentUserId, limit]
                 );
 
+                const statsResult = await pool.query(
+                    `
+                        SELECT
+                            COALESCE(AVG(rating)::numeric(10,2), 0) AS average_rating,
+                            COUNT(*)::int AS total_reviews
+                        FROM venue_public_reviews
+                        WHERE venue_id = $1
+                    `,
+                    [venueId]
+                );
+
+                const normalizedReviewIds = reviewResult.rows
+                    .map((review) => Number(review.id))
+                    .filter((reviewId) => Number.isInteger(reviewId));
+
+                let repliesByReviewId = new Map();
+
+                if (normalizedReviewIds.length) {
+                    const repliesResult = await pool.query(
+                        `
+                            SELECT
+                                replies.id,
+                                replies.review_id,
+                                replies.author_name,
+                                replies.rating,
+                                replies.title,
+                                replies.content,
+                                replies.image_urls,
+                                replies.created_at,
+                                replies.updated_at,
+                                COALESCE(reply_like_stats.like_count, 0)::int AS like_count,
+                                CASE
+                                    WHEN $2::text = '' THEN false
+                                    WHEN liked.reply_id IS NULL THEN false
+                                    ELSE true
+                                END AS liked_by_me
+                            FROM venue_review_replies AS replies
+                            LEFT JOIN (
+                                SELECT reply_id, COUNT(*)::int AS like_count
+                                FROM venue_review_reply_likes
+                                GROUP BY reply_id
+                            ) AS reply_like_stats ON reply_like_stats.reply_id = replies.id
+                            LEFT JOIN venue_review_reply_likes AS liked
+                                ON liked.reply_id = replies.id
+                               AND liked.user_id = $2
+                            WHERE replies.review_id = ANY($1::bigint[])
+                            ORDER BY replies.created_at ASC, replies.id ASC
+                        `,
+                        [normalizedReviewIds, currentUserId]
+                    );
+
+                    repliesByReviewId = repliesResult.rows.reduce((acc, reply) => {
+                        const parentReviewId = Number(reply.review_id);
+                        if (!acc.has(parentReviewId)) {
+                            acc.set(parentReviewId, []);
+                        }
+
+                        acc.get(parentReviewId).push({
+                            id: reply.id,
+                            review_id: reply.review_id,
+                            author_name: String(reply.author_name || '').trim() || 'Anonymous',
+                            rating: Number(reply.rating || 0),
+                            title: reply.title || '',
+                            content: reply.content || '',
+                            image_urls: normalizeStringArray(reply.image_urls),
+                            like_count: Number(reply.like_count || 0),
+                            liked_by_me: Boolean(reply.liked_by_me),
+                            created_at: reply.created_at,
+                            updated_at: reply.updated_at
+                        });
+
+                        return acc;
+                    }, new Map());
+                }
+
+                const reviewItems = reviewResult.rows.map((review) => {
+                    const normalizedReviewId = Number(review.id);
+                    return {
+                        ...review,
+                        image_urls: normalizeStringArray(review.image_urls),
+                        like_count: Number(review.like_count || 0),
+                        reply_count: Number(review.reply_count || 0),
+                        liked_by_me: Boolean(review.liked_by_me),
+                        replies: repliesByReviewId.get(normalizedReviewId) || []
+                    };
+                });
+
                 return res.json({
-                    items: reviewResult.rows,
-                    total: reviewResult.rows.length,
+                    items: reviewItems,
+                    total: reviewItems.length,
+                    stats: {
+                        averageRating: Number(statsResult.rows[0]?.average_rating || 0),
+                        totalReviews: Number(statsResult.rows[0]?.total_reviews || 0)
+                    },
                     sort,
                     limit
                 });
@@ -2954,6 +4521,10 @@ async function generateWardIdFromName(name) {
                     return res.json({
                         items: [],
                         total: 0,
+                        stats: {
+                            averageRating: 0,
+                            totalReviews: 0
+                        },
                         sort,
                         limit
                     });
@@ -2976,7 +4547,6 @@ async function generateWardIdFromName(name) {
                 longitude,
                 description,
                 phone,
-                contactEmail,
                 coverImageUrl,
                 businessLicenseImageUrl,
                 metadata
@@ -2996,18 +4566,11 @@ async function generateWardIdFromName(name) {
             if (!normalizedContactEmail || !isValidEmail(normalizedContactEmail)) {
                 return res.status(400).json({ message: 'A valid contactEmail is required' });
             }
+            const submitterUserId = req.authUser?.id ? String(req.authUser.id).trim() : '';
 
-            const normalizedScheduleResult = normalizeWeeklyScheduleInput(normalizedMetadata.weeklySchedule, {
-                fallbackStart: normalizeNullableText(normalizedMetadata.startTime),
-                fallbackEnd: normalizeNullableText(normalizedMetadata.endTime)
-            });
-
-            if (normalizedScheduleResult.error) {
-                return res.status(400).json({ message: normalizedScheduleResult.error });
+            if (!submitterUserId) {
+                return res.status(401).json({ message: 'Missing authentication token' });
             }
-
-            normalizedMetadata.contactEmail = normalizedContactEmail;
-            normalizedMetadata.weeklySchedule = normalizedScheduleResult.value;
 
             if (!normalizedMetadata.category && normalizedCategoryName) {
                 normalizedMetadata.category = normalizedCategoryName;
@@ -3090,6 +4653,40 @@ async function generateWardIdFromName(name) {
                     normalizedMetadata.selectedServiceNames = [];
                 }
 
+                const metadataStartTime = String(normalizedMetadata.startTime || '').trim();
+                const metadataEndTime = String(normalizedMetadata.endTime || '').trim();
+                const hasCanonicalWeeklySchedule =
+                    normalizedMetadata.weeklySchedule &&
+                    typeof normalizedMetadata.weeklySchedule === 'object' &&
+                    !Array.isArray(normalizedMetadata.weeklySchedule);
+                const hasLegacyWeeklyOpenHours =
+                    normalizedMetadata.weeklyOpenHours &&
+                    typeof normalizedMetadata.weeklyOpenHours === 'object' &&
+                    !Array.isArray(normalizedMetadata.weeklyOpenHours);
+                const hasGlobalTimeRange =
+                    /^\d{2}:\d{2}$/.test(metadataStartTime) &&
+                    /^\d{2}:\d{2}$/.test(metadataEndTime) &&
+                    metadataStartTime < metadataEndTime;
+
+                if (hasCanonicalWeeklySchedule || hasLegacyWeeklyOpenHours || hasGlobalTimeRange) {
+                    const weeklyScheduleCandidate = hasCanonicalWeeklySchedule
+                        ? normalizedMetadata.weeklySchedule
+                        : hasLegacyWeeklyOpenHours
+                          ? mapWeeklyOpenHoursToWeeklySchedule(normalizedMetadata.weeklyOpenHours)
+                          : null;
+
+                    const normalizedScheduleResult = normalizeWeeklyScheduleInput(weeklyScheduleCandidate, {
+                        fallbackStart: metadataStartTime,
+                        fallbackEnd: metadataEndTime
+                    });
+
+                    if (normalizedScheduleResult.error) {
+                        return res.status(400).json({ message: normalizedScheduleResult.error });
+                    }
+
+                    normalizedMetadata.weeklySchedule = normalizedScheduleResult.value;
+                }
+
                 const duplicateLocationResult = await pool.query(
                     `
                     SELECT id, status::text AS status
@@ -3161,6 +4758,37 @@ async function generateWardIdFromName(name) {
                 )
                 VALUES (
                     ${insertPlaceholders.join(',\n                    ')},
+                    name,
+                    title,
+                    address,
+                    description,
+                    phone,
+                    latitude,
+                    longitude,
+                    ward_id,
+                    category_id,
+                    cover_image_url,
+                    business_license_image_url,
+                    metadata,
+                    submitted_by_user_id,
+                    status,
+                    submitted_at,
+                    updated_at
+                )
+                VALUES (
+                    $1,
+                    $2,
+                    $3,
+                    $4,
+                    $5,
+                    $6,
+                    $7,
+                    $8,
+                    $9,
+                    $10,
+                    $11,
+                    $12,
+                    $13,
                     'pending',
                     now(),
                     now()
@@ -3168,6 +4796,21 @@ async function generateWardIdFromName(name) {
                 RETURNING id
             `,
                     insertValues
+                    [
+                        normalizedName,
+                        String(title || '').trim() || normalizedName,
+                        normalizedAddress,
+                        String(description || '').trim() || null,
+                        String(phone || '').trim() || null,
+                        normalizedLatitude,
+                        normalizedLongitude,
+                        detection.wardId,
+                        resolvedCategoryId,
+                        String(coverImageUrl || '').trim() || null,
+                        String(businessLicenseImageUrl || '').trim() || null,
+                        normalizedMetadata,
+                        submitterUserId
+                    ]
                 );
 
                 const venueDetails = await pool.query(
@@ -3189,6 +4832,7 @@ async function generateWardIdFromName(name) {
                     venues.cover_image_url,
                     venues.business_license_image_url,
                     venues.metadata,
+                    venues.submitted_by_user_id,
                     venues.status::text AS status,
                     venues.submitted_at,
                     venues.created_at,
@@ -4312,7 +5956,6 @@ async function generateWardIdFromName(name) {
         async function moderateVenueSubmission(req, res) {
             const venueId = Number(req.params.venueId);
             const action = String(req.body.action || '').trim().toLowerCase();
-            const rejectionReason = String(req.body.rejectionReason || '').trim();
 
             if (!Number.isFinite(venueId)) {
                 return res.status(400).json({ message: 'Invalid venue id' });
@@ -4326,120 +5969,65 @@ async function generateWardIdFromName(name) {
 
             try {
                 if (action === 'reject') {
-                    const venueResult = await pool.query(
+                    const normalizedRejectionReason = normalizeNullableText(req.body.rejectionReason);
+                    const result = await pool.query(
                         `
-                            SELECT
-                                venues.id,
-                                venues.name,
-                                venues.title,
-                                venues.address,
-                                venues.phone,
-                                venues.metadata,
-                                wards.name AS ward_name,
-                                place_categories.name AS category_name
-                            FROM venues
-                            LEFT JOIN wards ON wards.ward_id = venues.ward_id
-                            LEFT JOIN place_categories ON place_categories.id = venues.category_id
-                            WHERE venues.id = $1
-                            LIMIT 1
-                        `,
-                        [venueId]
-                    );
-
-                    if (!venueResult.rows.length) {
-                        return res.status(404).json({ message: 'Venue submission not found' });
-                    }
-
-                    const rejectedVenue = venueResult.rows[0];
-                    const venueMetadata =
-                        rejectedVenue.metadata && typeof rejectedVenue.metadata === 'object' && !Array.isArray(rejectedVenue.metadata)
-                            ? rejectedVenue.metadata
-                            : {};
-
-                    const recipientEmail = normalizeNullableText(venueMetadata.contactEmail || venueMetadata.email);
-
-                    if (rejectionReason && isValidEmail(recipientEmail) && feedbackReplyTransporter && feedbackReplySmtpUser) {
-                        const venueName = String(rejectedVenue.title || rejectedVenue.name || '').trim() || `Venue #${rejectedVenue.id}`;
-                        const mailFrom = `${feedbackReplyFromName} <${feedbackReplyFromEmail || feedbackReplySmtpUser}>`;
-
-                        const plainTextBody = [
-                            'Smart City Discovery - Venue Submission Rejected',
-                            '',
-                            `Venue: ${venueName}`,
-                            `Venue ID: ${rejectedVenue.id}`,
-                            `Address: ${rejectedVenue.address || 'Not provided'}`,
-                            `Ward: ${rejectedVenue.ward_name || 'Not provided'}`,
-                            `Category: ${rejectedVenue.category_name || 'Not provided'}`,
-                            `Phone: ${rejectedVenue.phone || 'Not provided'}`,
-                            '',
-                            'Rejection Reason:',
-                            rejectionReason,
-                            '',
-                            `Reviewed by: ${reviewer}`,
-                            '',
-                            'You can revise your submission and submit again later.',
-                            '',
-                            'Best regards,',
-                            'Smart City Discovery Admin'
-                        ].join('\n');
-
-                        const htmlBody = `
-                            <div style="margin:0;padding:0;background:#f5f7fb;font-family:Segoe UI,Arial,sans-serif;color:#1f2937;">
-                                <div style="max-width:680px;margin:0 auto;padding:24px 16px;">
-                                    <div style="background:#ffffff;border:1px solid #e4e8f1;border-radius:14px;overflow:hidden;box-shadow:0 10px 28px rgba(23,33,79,0.08);">
-                                        <div style="padding:18px 22px;background:linear-gradient(135deg,#b91c1c,#dc2626);color:#ffffff;">
-                                            <p style="margin:0;font-size:12px;letter-spacing:.08em;text-transform:uppercase;opacity:.88;">Smart City Discovery Admin</p>
-                                            <h2 style="margin:8px 0 0;font-size:22px;line-height:1.3;">Venue Submission Rejected</h2>
-                                        </div>
-                                        <div style="padding:20px 22px 24px;">
-                                            <p style="margin:0 0 14px;font-size:14px;color:#334155;">Hello merchant,</p>
-                                            <p style="margin:0 0 18px;font-size:14px;line-height:1.7;color:#334155;">Your venue submission has been rejected after admin review.</p>
-
-                                            <div style="margin:0 0 18px;padding:14px;border:1px solid #e4e8f1;border-radius:10px;background:#f8faff;">
-                                                <p style="margin:0 0 8px;font-size:13px;color:#475569;"><strong>Venue:</strong> ${escapeHtml(venueName)}</p>
-                                                <p style="margin:0 0 8px;font-size:13px;color:#475569;"><strong>Venue ID:</strong> #${rejectedVenue.id}</p>
-                                                <p style="margin:0 0 8px;font-size:13px;color:#475569;"><strong>Address:</strong> ${escapeHtml(rejectedVenue.address || 'Not provided')}</p>
-                                                <p style="margin:0 0 8px;font-size:13px;color:#475569;"><strong>Ward:</strong> ${escapeHtml(rejectedVenue.ward_name || 'Not provided')}</p>
-                                                <p style="margin:0 0 8px;font-size:13px;color:#475569;"><strong>Category:</strong> ${escapeHtml(rejectedVenue.category_name || 'Not provided')}</p>
-                                                <p style="margin:0;font-size:13px;color:#475569;"><strong>Phone:</strong> ${escapeHtml(rejectedVenue.phone || 'Not provided')}</p>
-                                            </div>
-
-                                            <h3 style="margin:0 0 8px;font-size:15px;color:#1e293b;">Rejection Reason</h3>
-                                            <div style="margin:0 0 10px;padding:12px;border-radius:10px;background:#fef2f2;border:1px solid #fecaca;font-size:14px;line-height:1.65;color:#991b1b;">${formatMultilineHtml(rejectionReason)}</div>
-                                            <p style="margin:0 0 18px;font-size:12px;color:#64748b;"><strong>Reviewed by:</strong> ${escapeHtml(reviewer)}</p>
-
-                                            <p style="margin:0;font-size:13px;color:#64748b;">You can revise your venue information and submit again later.<br /><br />Best regards,<br /><strong>Smart City Discovery Admin</strong></p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        `;
-
-                        await feedbackReplyTransporter.sendMail({
-                            from: mailFrom,
-                            to: recipientEmail,
-                            subject: 'Venue Submission Rejected',
-                            text: plainTextBody,
-                            html: htmlBody
-                        });
-                    }
-
-                    const deleteResult = await pool.query(
-                        `
-                          DELETE FROM venues
+                          UPDATE venues
+                          SET
+                              status = 'rejected',
+                              rejected_at = now(),
+                              approved_at = NULL,
+                              rejection_reason = $3,
+                              reviewed_by = $2,
+                              updated_at = now()
                           WHERE id = $1
                           RETURNING id
                       `,
-                        [venueId]
+                        [venueId, reviewer, normalizedRejectionReason]
                     );
 
-                    if (!deleteResult.rows.length) {
+                    if (!result.rows.length) {
                         return res.status(404).json({ message: 'Venue submission not found' });
                     }
 
+                    const details = await pool.query(
+                        `
+                SELECT
+                    venues.id,
+                    venues.name,
+                    venues.title,
+                    venues.address,
+                    venues.description,
+                    venues.phone,
+                    venues.latitude,
+                    venues.longitude,
+                    venues.ward_id,
+                    wards.name AS ward_name,
+                    venues.category_id,
+                    place_categories.name AS category_name,
+                    place_categories.slug AS category_slug,
+                    venues.cover_image_url,
+                    venues.business_license_image_url,
+                    venues.metadata,
+                    venues.status::text AS status,
+                    venues.submitted_at,
+                    venues.approved_at,
+                    venues.rejected_at,
+                    venues.rejection_reason,
+                    venues.created_at,
+                    venues.updated_at
+                FROM venues
+                LEFT JOIN wards ON wards.ward_id = venues.ward_id
+                LEFT JOIN place_categories ON place_categories.id = venues.category_id
+                WHERE venues.id = $1
+                LIMIT 1
+            `,
+                        [venueId]
+                    );
+
                     return res.json({
-                        message: 'Venue rejected and removed successfully',
-                        deletedVenueId: deleteResult.rows[0].id
+                        message: 'Venue rejected successfully',
+                        venue: details.rows[0]
                     });
                 }
 
@@ -4522,8 +6110,31 @@ async function generateWardIdFromName(name) {
             return ['42P01', '42703', '42704'].includes(error?.code);
         }
 
+        async function ensureDefaultFeedbackTypesSeeded() {
+            try {
+                for (const type of DEFAULT_FEEDBACK_TYPES) {
+                    await pool.query(
+                        `
+                            INSERT INTO feedback_types (code, name, description, sort_order, is_active, updated_at)
+                            VALUES ($1, $2, $3, $4, true, now())
+                            ON CONFLICT (code) DO NOTHING
+                        `,
+                        [type.code, type.name, type.description, type.sortOrder]
+                    );
+                }
+            } catch (error) {
+                if (isFeedbackSchemaMissingError(error)) {
+                    return;
+                }
+
+                throw error;
+            }
+        }
+
         async function listPublicFeedbackTypes(_req, res) {
             try {
+                await ensureDefaultFeedbackTypesSeeded();
+
                 const result = await pool.query(
                     `
                         SELECT id, code, name, description, sort_order, is_active
@@ -4558,6 +6169,8 @@ async function generateWardIdFromName(name) {
 
         async function listAdminFeedbackTypes(_req, res) {
             try {
+                await ensureDefaultFeedbackTypesSeeded();
+
                 const result = await pool.query(
                     `
                         SELECT id, code, name, description, sort_order, is_active, created_at, updated_at
@@ -4794,6 +6407,48 @@ async function generateWardIdFromName(name) {
                     return res.status(400).json({ message: 'Message is required' });
                 }
 
+                let metadataObject = null;
+                const rawMetadata = req.body.metadata;
+
+                if (rawMetadata) {
+                    try {
+                        metadataObject =
+                            typeof rawMetadata === 'string' ? JSON.parse(rawMetadata) : rawMetadata;
+                    } catch {
+                        return res.status(400).json({ message: 'metadata must be valid JSON' });
+                    }
+                }
+
+                const metadataDetails = [];
+                const metadataContextTypeRaw = String(
+                    metadataObject?.contextType || metadataObject?.reportType || ''
+                )
+                    .trim()
+                    .toLowerCase();
+                const metadataDerivedCategory =
+                    metadataContextTypeRaw === 'venue'
+                        ? 'venue_report'
+                        : metadataContextTypeRaw === 'review'
+                            ? 'review_report'
+                            : '';
+                if (metadataObject && typeof metadataObject === 'object' && !Array.isArray(metadataObject)) {
+                    const contextType = String(metadataObject.contextType || '').trim();
+                    const contextId = String(metadataObject.contextId || '').trim();
+                    const venueId = String(metadataObject.venueId || '').trim();
+                    const venueName = String(metadataObject.venueName || '').trim();
+                    const severity = String(metadataObject.severity || '').trim();
+
+                    if (contextType) metadataDetails.push(`contextType: ${contextType}`);
+                    if (contextId) metadataDetails.push(`contextId: ${contextId}`);
+                    if (venueId) metadataDetails.push(`venueId: ${venueId}`);
+                    if (venueName) metadataDetails.push(`venueName: ${venueName}`);
+                    if (severity) metadataDetails.push(`severity: ${severity}`);
+                }
+
+                const finalMessage = metadataDetails.length
+                    ? `[metadata]\n${metadataDetails.join('\n')}\n\n${message}`
+                    : message;
+
                 const normalizedPhone = String(req.body.contactPhone || req.body.contact_phone || '')
                     .replace(/\D/g, '')
                     .slice(0, 15);
@@ -4806,8 +6461,9 @@ async function generateWardIdFromName(name) {
                     return res.status(400).json({ message: 'contactEmail is invalid' });
                 }
 
-                const normalizedLegacyCategory = FEEDBACK_CATEGORY_CODES.has(legacyCategoryRaw)
-                    ? legacyCategoryRaw
+                const requestedCategoryCode = legacyCategoryRaw || metadataDerivedCategory;
+                const normalizedLegacyCategory = FEEDBACK_CATEGORY_CODES.has(requestedCategoryCode)
+                    ? requestedCategoryCode
                     : 'other';
                 const attachmentUrl = req.file ? `/uploads/feedback/${req.file.filename}` : null;
 
@@ -4817,6 +6473,8 @@ async function generateWardIdFromName(name) {
                     DEFAULT_FEEDBACK_TYPES.find((type) => type.code === normalizedLegacyCategory)?.name || 'Other';
 
                 try {
+                    await ensureDefaultFeedbackTypesSeeded();
+
                     if (feedbackTypeId !== null) {
                         const selectedTypeResult = await pool.query(
                             `
@@ -4913,7 +6571,7 @@ async function generateWardIdFromName(name) {
                         const fallbackResult = await pool.query(fallbackInsertQuery, [
                             resolvedTypeCode,
                             resolvedTypeCode,
-                            message,
+                            finalMessage,
                             contactEmail || null,
                             normalizedPhone || null,
                             attachmentUrl
@@ -4937,7 +6595,15 @@ async function generateWardIdFromName(name) {
         }
 
         async function listAdminFeedbackReports(req, res) {
-            const statuses = normalizeFeedbackStatusList(req.query.status);
+            const rawStatusFilter = String(req.query.status || '').trim().toLowerCase();
+            const statuses = normalizeFeedbackStatusList(rawStatusFilter);
+            const requestedTypeCode = String(req.query.typeCode || req.query.feedbackTypeCode || '')
+                .trim()
+                .toLowerCase();
+            const statusDerivedTypeCode = ['venue_report', 'review_report'].includes(rawStatusFilter)
+                ? rawStatusFilter
+                : '';
+            const effectiveTypeCode = requestedTypeCode || statusDerivedTypeCode;
             const page = normalizePaginationValue(req.query.page, 1, { min: 1, max: 100000 });
             const pageSize = normalizePaginationValue(req.query.pageSize, 20, { min: 1, max: 100 });
             const search = String(req.query.search || '').trim();
@@ -4948,6 +6614,13 @@ async function generateWardIdFromName(name) {
             if (statuses.length) {
                 values.push(statuses);
                 whereConditions.push(`f.status = ANY($${values.length}::text[])`);
+            }
+
+            if (effectiveTypeCode && effectiveTypeCode !== 'all') {
+                values.push(effectiveTypeCode);
+                whereConditions.push(
+                    `LOWER(COALESCE(ft.code, f.category, f.issue_type, 'other')) = $${values.length}`
+                );
             }
 
             if (search) {
@@ -5073,6 +6746,47 @@ async function generateWardIdFromName(name) {
             }
         }
 
+        async function checkAdminFeedbackSmtpHealth(req, res) {
+            const diagnostics = {
+                checkedAt: new Date().toISOString(),
+                configured: Boolean(feedbackReplyTransporters.length && feedbackReplySmtpUser),
+                smtpUser: maskEmailAddress(feedbackReplySmtpUser),
+                fromEmail: feedbackReplyFromEmail || feedbackReplySmtpUser || DEFAULT_FEEDBACK_REPLY_GMAIL
+            };
+
+            if (!diagnostics.configured) {
+                return res.status(500).json({
+                    ok: false,
+                    ...diagnostics,
+                    message:
+                        'SMTP is not configured. Set FEEDBACK_GMAIL_USER and FEEDBACK_GMAIL_APP_PASSWORD, then restart backend.'
+                });
+            }
+
+            let lastError = null;
+            for (const transporter of feedbackReplyTransporters) {
+                try {
+                    await transporter.verify();
+                    return res.json({
+                        ok: true,
+                        ...diagnostics,
+                        message: 'SMTP connection is healthy and ready to send emails.'
+                    });
+                } catch (error) {
+                    lastError = error;
+                }
+            }
+
+            return res.status(502).json({
+                ok: false,
+                ...diagnostics,
+                errorCode: lastError?.code || null,
+                error: lastError?.message || 'SMTP verification failed',
+                message:
+                    'SMTP authentication failed. Update Gmail App Password (16 chars, no spaces), then restart backend.'
+            });
+        }
+
         function replyAdminFeedbackReport(req, res) {
             uploadFeedbackReply.single('attachment')(req, res, async (uploadErr) => {
                 if (uploadErr) {
@@ -5099,7 +6813,7 @@ async function generateWardIdFromName(name) {
                 const allowedNextStatuses = new Set(['in_progress', 'replied', 'closed']);
                 const nextStatus = allowedNextStatuses.has(requestedStatus) ? requestedStatus : 'replied';
 
-                if (!feedbackReplyTransporter || !feedbackReplySmtpUser) {
+                if (!feedbackReplyTransporters.length || !feedbackReplySmtpUser) {
                     if (req.file) {
                         safeDeleteUploadedFile(`/uploads/feedback/admin-replies/${req.file.filename}`);
                     }
@@ -5142,7 +6856,7 @@ async function generateWardIdFromName(name) {
                     const feedback = feedbackResult.rows[0];
                     const primaryContactEmail = normalizeNullableText(feedback.contact_email);
                     const reporterEmail = normalizeNullableText(feedback.reporter_email);
-                    const recipientEmail = [primaryContactEmail, reporterEmail].find((candidate) =>
+                    const recipientEmail = [reporterEmail, primaryContactEmail].find((candidate) =>
                         isValidEmail(candidate)
                     );
 
@@ -5237,22 +6951,45 @@ async function generateWardIdFromName(name) {
                         </div>
                     `;
 
-                    const mailResult = await feedbackReplyTransporter.sendMail({
-                        from: mailFrom,
-                        to: recipientEmail,
-                        subject: `[Smart City Discovery] Update on your feedback #${feedback.id}`,
-                        text: plainTextBody,
-                        html: htmlBody,
-                        attachments: req.file
-                            ? [
-                                {
-                                    filename: req.file.originalname,
-                                    path: req.file.path,
-                                    contentType: req.file.mimetype
+                    let mailResult = null;
+                    let emailSent = false;
+                    let emailErrorCode = '';
+
+                    try {
+                        mailResult = await sendFeedbackReplyEmail({
+                            from: mailFrom,
+                            to: recipientEmail,
+                            subject: `[Smart City Discovery] Update on your feedback #${feedback.id}`,
+                            text: plainTextBody,
+                            html: htmlBody,
+                            attachments: req.file
+                                ? [
+                                    {
+                                        filename: req.file.originalname,
+                                        path: req.file.path,
+                                        contentType: req.file.mimetype
+                                    }
+                                ]
+                                : []
+                        });
+                        emailSent = true;
+                    } catch (mailError) {
+                        emailErrorCode = String(mailError?.code || '').trim();
+
+                        if (mailError?.code !== 'EAUTH' && mailError?.responseCode !== 535) {
+                            if (mailError?.code === 'EENVELOPE') {
+                                if (req.file) {
+                                    safeDeleteUploadedFile(`/uploads/feedback/admin-replies/${req.file.filename}`);
                                 }
-                            ]
-                            : []
-                    });
+
+                                return res.status(400).json({
+                                    message: 'Recipient email is invalid or rejected by SMTP provider.'
+                                });
+                            }
+
+                            throw mailError;
+                        }
+                    }
 
                     const updateResult = await pool.query(
                         `
@@ -5279,9 +7016,13 @@ async function generateWardIdFromName(name) {
                     }
 
                     return res.json({
-                        message: 'Reply sent successfully via Gmail',
+                        message: emailSent
+                            ? 'Reply sent successfully via Gmail'
+                            : 'Reply saved successfully, but email delivery failed due Gmail authentication.',
                         deliveredTo: recipientEmail,
                         messageId: mailResult?.messageId || null,
+                        emailSent,
+                        emailErrorCode: emailSent ? null : emailErrorCode || 'EAUTH',
                         feedback: updateResult.rows[0]
                     });
                 } catch (error) {
@@ -5315,34 +7056,173 @@ async function generateWardIdFromName(name) {
 
         async function deleteAdminFeedbackReport(req, res) {
             const feedbackId = normalizeNullableNumber(req.params.feedbackId);
+            const shouldDeleteTarget = String(req.query.deleteTarget || '').trim().toLowerCase() === 'true';
 
             if (Number.isNaN(feedbackId) || feedbackId === null) {
                 return res.status(400).json({ message: 'feedbackId must be a positive integer' });
             }
 
-            try {
-                const deleteResult = await pool.query(
-                    `
-                        DELETE FROM feedbacks
-                        WHERE id = $1
-                        RETURNING id, attachment_url, admin_reply_attachment_url
-                    `,
-                    [feedbackId]
-                );
-
-                if (!deleteResult.rows.length) {
-                    return res.status(404).json({ message: 'Feedback report not found' });
+            const parsePositiveInteger = (value) => {
+                const normalized = Number(String(value ?? '').trim());
+                if (!Number.isFinite(normalized) || normalized <= 0) {
+                    return null;
                 }
 
-                const deletedReport = deleteResult.rows[0];
+                return Math.trunc(normalized);
+            };
 
-                safeDeleteUploadedFile(deletedReport.attachment_url);
-                safeDeleteUploadedFile(deletedReport.admin_reply_attachment_url);
+            const parseFeedbackMetadataMap = (rawMessage) => {
+                const text = String(rawMessage || '');
+                const metadataSectionMatch = text.match(/\[metadata\]([\s\S]*?)(?:\n\n|$)/i);
+                if (!metadataSectionMatch) {
+                    return {};
+                }
 
-                return res.json({
-                    message: 'Feedback report deleted successfully',
-                    deletedFeedbackId: deletedReport.id
-                });
+                const lines = String(metadataSectionMatch[1] || '').split(/\r?\n/);
+
+                return lines.reduce((accumulator, line) => {
+                    const pair = String(line || '').match(/^\s*([a-zA-Z0-9_]+)\s*:\s*(.+?)\s*$/);
+                    if (!pair) {
+                        return accumulator;
+                    }
+
+                    const key = String(pair[1] || '').trim().toLowerCase();
+                    const value = String(pair[2] || '').trim();
+                    if (key && value) {
+                        accumulator[key] = value;
+                    }
+
+                    return accumulator;
+                }, {});
+            };
+
+            try {
+                const client = await pool.connect();
+
+                try {
+                    await client.query('BEGIN');
+
+                    const feedbackResult = await client.query(
+                        `
+                            SELECT
+                                f.id,
+                                f.message,
+                                f.attachment_url,
+                                f.admin_reply_attachment_url,
+                                COALESCE(ft.code, f.category, f.issue_type, 'other') AS feedback_type_code
+                            FROM feedbacks AS f
+                            LEFT JOIN feedback_types AS ft ON ft.id = f.feedback_type_id
+                            WHERE f.id = $1
+                            LIMIT 1
+                        `,
+                        [feedbackId]
+                    );
+
+                    if (!feedbackResult.rows.length) {
+                        await client.query('ROLLBACK');
+                        return res.status(404).json({ message: 'Feedback report not found' });
+                    }
+
+                    const report = feedbackResult.rows[0];
+                    const reportTypeCode = String(report.feedback_type_code || '').trim().toLowerCase();
+                    const metadataMap = parseFeedbackMetadataMap(report.message);
+
+                    let deletedTarget = false;
+                    let deletedTargetId = null;
+                    let deletedTargetType = '';
+
+                    if (shouldDeleteTarget && reportTypeCode === 'review_report') {
+                        const inferredReviewId =
+                            parsePositiveInteger(metadataMap.contextid)
+                            || parsePositiveInteger(metadataMap.reviewid)
+                            || parsePositiveInteger(String(report.message || '').match(/bình\s*luận\s*#(\d+)/i)?.[1]);
+
+                        const inferredVenueId = parsePositiveInteger(metadataMap.venueid);
+
+                        if (inferredReviewId) {
+                            const reviewDeleteResult = inferredVenueId
+                                ? await client.query(
+                                    `
+                                        DELETE FROM venue_public_reviews
+                                        WHERE id = $1 AND venue_id = $2
+                                        RETURNING id, venue_id
+                                    `,
+                                    [inferredReviewId, inferredVenueId]
+                                )
+                                : await client.query(
+                                    `
+                                        DELETE FROM venue_public_reviews
+                                        WHERE id = $1
+                                        RETURNING id, venue_id
+                                    `,
+                                    [inferredReviewId]
+                                );
+
+                            if (reviewDeleteResult.rows.length) {
+                                deletedTarget = true;
+                                deletedTargetType = 'review';
+                                deletedTargetId = reviewDeleteResult.rows[0].id;
+                                invalidateVenueCommunityBundleCacheByVenueId(reviewDeleteResult.rows[0].venue_id);
+                            }
+                        }
+                    }
+
+                    if (shouldDeleteTarget && reportTypeCode === 'venue_report') {
+                        const inferredVenueId =
+                            parsePositiveInteger(metadataMap.venueid)
+                            || parsePositiveInteger(metadataMap.contextid)
+                            || parsePositiveInteger(String(report.message || '').match(/venue\s*#(\d+)/i)?.[1]);
+
+                        if (inferredVenueId) {
+                            const venueDeleteResult = await client.query(
+                                `
+                                    DELETE FROM venues
+                                    WHERE id = $1
+                                    RETURNING id
+                                `,
+                                [inferredVenueId]
+                            );
+
+                            if (venueDeleteResult.rows.length) {
+                                deletedTarget = true;
+                                deletedTargetType = 'venue';
+                                deletedTargetId = venueDeleteResult.rows[0].id;
+                                invalidateVenueCommunityBundleCacheByVenueId(venueDeleteResult.rows[0].id);
+                            }
+                        }
+                    }
+
+                    const deleteResult = await client.query(
+                        `
+                            DELETE FROM feedbacks
+                            WHERE id = $1
+                            RETURNING id, attachment_url, admin_reply_attachment_url
+                        `,
+                        [feedbackId]
+                    );
+
+                    await client.query('COMMIT');
+
+                    const deletedReport = deleteResult.rows[0];
+
+                    safeDeleteUploadedFile(deletedReport.attachment_url);
+                    safeDeleteUploadedFile(deletedReport.admin_reply_attachment_url);
+
+                    return res.json({
+                        message: deletedTarget
+                            ? 'Feedback report and reported target deleted successfully'
+                            : 'Feedback report deleted successfully',
+                        deletedFeedbackId: deletedReport.id,
+                        deletedTarget,
+                        deletedTargetType,
+                        deletedTargetId
+                    });
+                } catch (error) {
+                    await client.query('ROLLBACK');
+                    throw error;
+                } finally {
+                    client.release();
+                }
             } catch (error) {
                 if (isFeedbackSchemaMissingError(error)) {
                     return res.status(500).json({
@@ -6069,15 +7949,19 @@ async function generateWardIdFromName(name) {
         registerVersionedRoute('get', '/place-categories', listPublicPlaceCategories);
         registerVersionedRoute('get', '/merchant-services', listPublicMerchantServices);
         registerVersionedRoute('get', '/feedback/types', listPublicFeedbackTypes);
-        registerVersionedRoute('get', '/venues', listPublicVenues);
+        registerVersionedRoute('get', '/venues', authenticateOptional, listPublicVenues);
         registerVersionedRoute('get', '/venues/:venueId', authenticateOptional, getVenueDetails);
-        registerVersionedRoute('get', '/venues/:venueId/reviews', listPublicVenueReviews);
+    registerVersionedRoute('get', '/venues/:venueId/reviews', authenticateOptional, listPublicVenueReviews);
         registerVersionedRoute('get', '/venues/:venueId', getVenueDetails);
+        registerVersionedRoute('post', '/venues', authenticateRequest, createVenueSubmission);
+        registerVersionedRoute('get', '/venues/:venueId/reviews', listPublicVenueReviews);
         registerVersionedRoute('get', '/venues/:venueId/community', authenticateOptional, getVenueCommunityBundle);
         registerVersionedRoute('get', '/venues/:venueId/opening-hours', getVenueOpeningHoursRealtime);
         registerVersionedRoute('post', '/venues/:venueId/reviews', authenticateOptional, requireAuth, submitVenueReview);
+    registerVersionedRoute('patch', '/venues/:venueId/reviews/:reviewId', authenticateOptional, requireAuth, updateVenueReview);
         registerVersionedRoute('post', '/venues/:venueId/reviews/:reviewId/like', authenticateOptional, requireAuth, toggleVenueReviewLike);
         registerVersionedRoute('post', '/venues/:venueId/reviews/:reviewId/replies', authenticateOptional, requireAuth, createVenueReviewReply);
+    registerVersionedRoute('post', '/venues/:venueId/reviews/:reviewId/replies/:replyId/like', authenticateOptional, requireAuth, toggleVenueReviewReplyLike);
         registerVersionedRoute('delete', '/venues/:venueId/reviews/:reviewId', authenticateOptional, requireAuth, deleteVenueReview);
         registerVersionedRoute('post', '/venues', authenticateOptionalLenient, createVenueSubmission);
         registerVersionedRoute('post', '/feedback', authenticateOptional, submitFeedbackReport);
@@ -6096,12 +7980,11 @@ async function generateWardIdFromName(name) {
         registerVersionedRoute('get', '/admin/venues', authenticateRequest, requireAdminRole, listAdminVenues);
         registerVersionedRoute('get', '/admin/venues/:venueId', authenticateRequest, requireAdminRole, getAdminVenueDetail);
         registerVersionedRoute('patch', '/admin/venues/:venueId/moderation', authenticateRequest, requireAdminRole, moderateVenueSubmission);
-        registerVersionedRoute('get', '/admin/venues/:venueId/reviews', authenticateRequest, requireAdminRole, listAdminVenueReviews);
-        registerVersionedRoute('post', '/admin/venues/:venueId/message', authenticateRequest, requireAdminRole, sendAdminVenueModerationMessage);
         registerVersionedRoute('get', '/admin/feedback/types', authenticateRequest, requireAdminRole, listAdminFeedbackTypes);
         registerVersionedRoute('post', '/admin/feedback/types', authenticateRequest, requireAdminRole, createAdminFeedbackType);
         registerVersionedRoute('patch', '/admin/feedback/types/:typeId', authenticateRequest, requireAdminRole, updateAdminFeedbackType);
         registerVersionedRoute('delete', '/admin/feedback/types/:typeId', authenticateRequest, requireAdminRole, deleteAdminFeedbackType);
+    registerVersionedRoute('get', '/admin/feedback/smtp-health', authenticateRequest, requireAdminRole, checkAdminFeedbackSmtpHealth);
         registerVersionedRoute('get', '/admin/feedback/reports', authenticateRequest, requireAdminRole, listAdminFeedbackReports);
         registerVersionedRoute('get', '/admin/feedback/reports/:feedbackId', authenticateRequest, requireAdminRole, getAdminFeedbackReportDetail);
         registerVersionedRoute('post', '/admin/feedback/reports/:feedbackId/reply', authenticateRequest, requireAdminRole, replyAdminFeedbackReport);
@@ -6425,6 +8308,307 @@ async function generateWardIdFromName(name) {
             }
         });
 
+        const getUserPreferenceOptionsHandler = (_req, res) => {
+            return res.json(buildUserPreferenceOptionsPayload());
+        };
+
+        const getUserPreferenceHandler = async (req, res) => {
+            const userId = String(req.user?.id || '').trim();
+
+            if (!userId) {
+                return res.status(401).json({ message: 'Unauthorized' });
+            }
+
+            try {
+                const preference = await getUserPreferenceRecordByUserId(userId);
+
+                return res.json({
+                    success: true,
+                    preference,
+                    preferencesCompleted: Boolean(preference?.onboardingCompleted),
+                    options: buildUserPreferenceOptionsPayload()
+                });
+            } catch (error) {
+                if (isUndefinedTableError(error)) {
+                    return res.status(500).json({
+                        message: 'User preference schema is missing. Please run backend migrations.'
+                    });
+                }
+
+                return res.status(500).json({ message: error.message });
+            }
+        };
+
+        const saveUserPreferenceHandler = async (req, res) => {
+            const userId = String(req.user?.id || '').trim();
+            const ageRangeKey = String(req.body?.ageRangeKey || '').trim();
+            const preferredGender = String(req.body?.preferredGender || '').trim();
+            const preferredTimes = normalizePreferenceStringList(req.body?.preferredTimes);
+            const interests = normalizePreferenceStringList(req.body?.interests);
+            const latitudeInput = req.body?.latitude;
+            const longitudeInput = req.body?.longitude;
+
+            if (!userId) {
+                return res.status(401).json({ message: 'Unauthorized' });
+            }
+
+            if (!USER_PREFERENCE_AGE_RANGE_SET.has(ageRangeKey)) {
+                return res.status(400).json({ message: 'Invalid age range.' });
+            }
+
+            if (!USER_PREFERENCE_GENDER_SET.has(preferredGender)) {
+                return res.status(400).json({ message: 'Invalid preferred gender.' });
+            }
+
+            if (!preferredTimes.length || preferredTimes.some((item) => !USER_PREFERENCE_TIME_WINDOW_SET.has(item))) {
+                return res.status(400).json({ message: 'Please select at least one valid preferred time.' });
+            }
+
+            const allowedInterestSet = USER_PREFERENCE_INTEREST_SET_BY_AGE[ageRangeKey] || new Set();
+            if (!interests.length || interests.some((item) => !allowedInterestSet.has(item))) {
+                return res.status(400).json({ message: 'Selected interests are not valid for the chosen age range.' });
+            }
+
+            let latitude = null;
+            let longitude = null;
+            const hasLatitudeInput = latitudeInput !== undefined && latitudeInput !== null && latitudeInput !== '';
+            const hasLongitudeInput = longitudeInput !== undefined && longitudeInput !== null && longitudeInput !== '';
+
+            if (hasLatitudeInput || hasLongitudeInput) {
+                latitude = Number(latitudeInput);
+                longitude = Number(longitudeInput);
+
+                if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
+                    return res.status(400).json({ message: 'Invalid latitude value.' });
+                }
+
+                if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+                    return res.status(400).json({ message: 'Invalid longitude value.' });
+                }
+            }
+
+            try {
+                const result = await pool.query(
+                    `
+                        INSERT INTO user_ai_preferences (
+                            user_id,
+                            age_range_key,
+                            preferred_gender,
+                            preferred_times,
+                            interests,
+                            onboarding_completed,
+                            last_known_latitude,
+                            last_known_longitude,
+                            updated_at
+                        )
+                        VALUES ($1, $2, $3, $4::text[], $5::text[], true, $6, $7, NOW())
+                        ON CONFLICT (user_id)
+                        DO UPDATE SET
+                            age_range_key = EXCLUDED.age_range_key,
+                            preferred_gender = EXCLUDED.preferred_gender,
+                            preferred_times = EXCLUDED.preferred_times,
+                            interests = EXCLUDED.interests,
+                            onboarding_completed = true,
+                            last_known_latitude = COALESCE(EXCLUDED.last_known_latitude, user_ai_preferences.last_known_latitude),
+                            last_known_longitude = COALESCE(EXCLUDED.last_known_longitude, user_ai_preferences.last_known_longitude),
+                            updated_at = NOW()
+                        RETURNING
+                            user_id,
+                            age_range_key,
+                            preferred_gender,
+                            preferred_times,
+                            interests,
+                            onboarding_completed,
+                            last_known_latitude,
+                            last_known_longitude,
+                            created_at,
+                            updated_at
+                    `,
+                    [userId, ageRangeKey, preferredGender, preferredTimes, interests, latitude, longitude]
+                );
+
+                return res.json({
+                    success: true,
+                    message: 'Preferences saved successfully.',
+                    preference: mapUserPreferenceRow(result.rows[0] || null)
+                });
+            } catch (error) {
+                if (isUndefinedTableError(error)) {
+                    return res.status(500).json({
+                        message: 'User preference schema is missing. Please run backend migrations.'
+                    });
+                }
+
+                return res.status(500).json({ message: error.message });
+            }
+        };
+
+        const listUserRecommendationsHandler = async (req, res) => {
+            const userId = String(req.user?.id || '').trim();
+            const limit = normalizePaginationValue(req.query?.limit, 12, { min: 4, max: 24 });
+            const latitudeQuery = req.query?.latitude;
+            const longitudeQuery = req.query?.longitude;
+
+            if (!userId) {
+                return res.status(401).json({ message: 'Unauthorized' });
+            }
+
+            const hasLatitudeQuery = latitudeQuery !== undefined && latitudeQuery !== null && latitudeQuery !== '';
+            const hasLongitudeQuery = longitudeQuery !== undefined && longitudeQuery !== null && longitudeQuery !== '';
+
+            if (hasLatitudeQuery !== hasLongitudeQuery) {
+                return res.status(400).json({ message: 'latitude and longitude must be provided together.' });
+            }
+
+            let requestLatitude = null;
+            let requestLongitude = null;
+
+            if (hasLatitudeQuery && hasLongitudeQuery) {
+                requestLatitude = Number(latitudeQuery);
+                requestLongitude = Number(longitudeQuery);
+
+                if (!Number.isFinite(requestLatitude) || requestLatitude < -90 || requestLatitude > 90) {
+                    return res.status(400).json({ message: 'Invalid latitude value.' });
+                }
+
+                if (!Number.isFinite(requestLongitude) || requestLongitude < -180 || requestLongitude > 180) {
+                    return res.status(400).json({ message: 'Invalid longitude value.' });
+                }
+            }
+
+            try {
+                const preference = await getUserPreferenceRecordByUserId(userId);
+
+                if (!preference || !preference.onboardingCompleted) {
+                    return res.json({
+                        success: true,
+                        preferencesCompleted: false,
+                        recommendations: []
+                    });
+                }
+
+                const effectiveLatitude = Number.isFinite(requestLatitude)
+                    ? requestLatitude
+                    : preference.lastKnownLatitude;
+                const effectiveLongitude = Number.isFinite(requestLongitude)
+                    ? requestLongitude
+                    : preference.lastKnownLongitude;
+
+                if (Number.isFinite(requestLatitude) && Number.isFinite(requestLongitude)) {
+                    await pool.query(
+                        `
+                            UPDATE user_ai_preferences
+                            SET
+                                last_known_latitude = $2,
+                                last_known_longitude = $3,
+                                updated_at = NOW()
+                            WHERE user_id = $1
+                        `,
+                        [userId, requestLatitude, requestLongitude]
+                    );
+                }
+
+                const venueResult = await pool.query(
+                    `
+                        SELECT
+                            venues.id,
+                            venues.name,
+                            venues.title,
+                            venues.address,
+                            venues.description,
+                            venues.latitude,
+                            venues.longitude,
+                            venues.ward_id,
+                            wards.name AS ward_name,
+                            venues.category_id,
+                            place_categories.name AS category_name,
+                            venues.cover_image_url,
+                            venues.metadata,
+                            venues.average_rating,
+                            venues.total_reviews,
+                            venues.status::text AS status,
+                            venues.created_at,
+                            venues.updated_at
+                        FROM venues
+                        LEFT JOIN wards ON wards.ward_id = venues.ward_id
+                        LEFT JOIN place_categories ON place_categories.id = venues.category_id
+                        WHERE venues.status::text = 'approved'
+                        ORDER BY COALESCE(venues.approved_at, venues.created_at) DESC, venues.id DESC
+                        LIMIT 300
+                    `
+                );
+
+                const scoredVenues = venueResult.rows
+                    .map((row) => normalizeVenueCoordinates(row))
+                    .map((venue) => {
+                        const scoring = scoreVenueByUserPreference(
+                            venue,
+                            preference,
+                            effectiveLatitude,
+                            effectiveLongitude
+                        );
+
+                        return {
+                            ...venue,
+                            recommendationScore: Number(scoring.score.toFixed(4)),
+                            distanceKm: scoring.distanceKm,
+                            recommendationReasons: scoring.reasons
+                        };
+                    })
+                    .filter((venue) => venue.recommendationScore > 0.15)
+                    .sort((first, second) => {
+                        if (second.recommendationScore !== first.recommendationScore) {
+                            return second.recommendationScore - first.recommendationScore;
+                        }
+
+                        const secondRating = Number(second.average_rating || 0);
+                        const firstRating = Number(first.average_rating || 0);
+                        return secondRating - firstRating;
+                    });
+
+                const diversifiedVenues = diversifyRecommendedVenues(scoredVenues, limit).map((venue) => ({
+                    id: venue.id,
+                    name: venue.name,
+                    title: venue.title,
+                    address: venue.address,
+                    description: venue.description,
+                    latitude: venue.latitude,
+                    longitude: venue.longitude,
+                    ward_id: venue.ward_id,
+                    ward_name: venue.ward_name,
+                    category_id: venue.category_id,
+                    category_name: venue.category_name,
+                    cover_image_url: venue.cover_image_url,
+                    metadata: venue.metadata,
+                    average_rating: venue.average_rating,
+                    total_reviews: venue.total_reviews,
+                    recommendationScore: venue.recommendationScore,
+                    distanceKm: venue.distanceKm,
+                    recommendationReasons: venue.recommendationReasons
+                }));
+
+                return res.json({
+                    success: true,
+                    preferencesCompleted: true,
+                    preference,
+                    recommendations: diversifiedVenues
+                });
+            } catch (error) {
+                if (isUndefinedTableError(error)) {
+                    return res.status(500).json({
+                        message: 'User preference schema is missing. Please run backend migrations.'
+                    });
+                }
+
+                return res.status(500).json({ message: error.message });
+            }
+        };
+
+        registerVersionedRoute('get', '/users/preferences/options', getUserPreferenceOptionsHandler);
+        registerVersionedRoute('get', '/users/preferences', authenticateRequest, checkUserStatus, requireAuth, getUserPreferenceHandler);
+        registerVersionedRoute('put', '/users/preferences', authenticateRequest, checkUserStatus, requireAuth, saveUserPreferenceHandler);
+        registerVersionedRoute('get', '/users/recommendations', authenticateRequest, checkUserStatus, requireAuth, listUserRecommendationsHandler);
+
         app.put('/api/users/password', authenticateOptional, requireAuth, async (req, res) => {
             const userId = req.user.id;
             const { currentPassword, newPassword } = req.body;
@@ -6631,26 +8815,35 @@ async function generateWardIdFromName(name) {
         // ==========================================
         // GOOGLE OAUTH
         // ==========================================
-        app.post('/api/auth/google', async (req, res) => {
+        registerVersionedRoute('post', '/auth/google', async (req, res) => {
             try {
-                const { token } = req.body;
+                const idToken = req.body?.token || req.body?.credential;
 
-                if (!token) {
+                if (!process.env.GOOGLE_CLIENT_ID) {
+                    return res.status(500).json({ message: 'Google OAuth is not configured on server' });
+                }
+
+                if (!idToken) {
                     return res.status(400).json({ message: 'Token is required' });
                 }
 
                 // Verify Google ID Token
                 const ticket = await googleClient.verifyIdToken({
-                    idToken: token,
+                    idToken,
                     audience: process.env.GOOGLE_CLIENT_ID
                 });
 
                 const payload = ticket.getPayload();
                 const email = payload.email;
                 const name = payload.name;
+                const emailVerified = payload.email_verified === true;
 
                 if (!email) {
                     return res.status(400).json({ message: 'Failed to get email from Google' });
+                }
+
+                if (!emailVerified) {
+                    return res.status(400).json({ message: 'Google email is not verified' });
                 }
 
                 // Check if user exists
@@ -6658,7 +8851,7 @@ async function generateWardIdFromName(name) {
 
                 if (user.rows.length === 0) {
                     // Create new user from Google
-                    const username = email.split('@')[0] + '_' + Math.random().toString(36).substring(7);
+                    const username = `${email.split('@')[0]}_${Math.random().toString(36).substring(2, 8)}`;
                     const hashedPassword = await bcryptjs.hash(Math.random().toString(), 10);
 
                     const insertQuery = `
@@ -6670,6 +8863,23 @@ async function generateWardIdFromName(name) {
 
                 const userData = user.rows[0];
                 const userRole = normalizeRole(userData.role);
+                const status = (userData.status || 'active').toLowerCase();
+
+                if (status === 'blocked') {
+                    const reason = userData.blocked_reason || 'Vi pham dieu khoan su dung.';
+                    return res.status(403).json({ message: `Tai khoan da bi khoa vinh vien: ${reason}` });
+                }
+
+                if (status === 'paused') {
+                    const pauseUntil = userData.pause_until ? new Date(userData.pause_until) : null;
+                    const now = new Date();
+
+                    if (pauseUntil && pauseUntil > now) {
+                        return res.status(403).json({ message: `Tai khoan dang bi tam dung den ${pauseUntil.toLocaleString()}` });
+                    }
+
+                    await pool.query(`UPDATE users SET status = 'active', pause_until = NULL WHERE id = $1`, [userData.id]);
+                }
 
                 // Generate JWT token
                 const jwtToken = generateAccessToken({
@@ -6679,6 +8889,7 @@ async function generateWardIdFromName(name) {
                 });
 
                 res.json({
+                    success: true,
                     message: 'Login with Google successful!',
                     token: jwtToken,
                     user: {
