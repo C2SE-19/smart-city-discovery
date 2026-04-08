@@ -2546,23 +2546,6 @@ async function generateWardIdFromName(name) {
             }
         }
 
-        async function listPublicVenues(req, res) {
-            try {
-                const venueHasOwnerUserColumn = await hasVenueOwnerUserColumn();
-                const statusFilter = normalizeStatusList(req.query.status);
-                const effectiveStatuses = statusFilter.length ? statusFilter : ['approved'];
-                const compactMode = ['1', 'true', 'yes'].includes(String(req.query.compact || '').trim().toLowerCase());
-                const liveMode = ['1', 'true', 'yes'].includes(String(req.query.live || '').trim().toLowerCase());
-                const categoryId = normalizeCategoryId(req.query.categoryId);
-                const categoryIdsFilter = parsePositiveIntegerList(req.query.categoryIds);
-                const serviceIdsFilter = parsePositiveIntegerList(req.query.serviceIds);
-                const wardIdsFilter = parseTextList(req.query.wardIds);
-                const singleWardId = normalizeNullableText(req.query.wardId);
-                const searchKeyword = String(req.query.q ?? req.query.search ?? '').trim().toLowerCase();
-
-                if (Number.isNaN(categoryId)) {
-                    return res.status(400).json({ message: 'categoryId must be a positive integer' });
-                }
         function invalidateVenueCommunityBundleCacheByVenueId(venueId) {
             const normalizedVenueId = Number(venueId);
             if (!Number.isFinite(normalizedVenueId)) {
@@ -2936,6 +2919,7 @@ async function generateWardIdFromName(name) {
 
         async function listPublicVenues(req, res) {
             try {
+                const venueHasOwnerUserColumn = await hasVenueOwnerUserColumn();
                 const statusFilter = normalizeStatusList(req.query.status);
                 const isMineRequest = String(req.query.mine || '').trim().toLowerCase() === 'true';
                 const requesterId = req.authUser?.id ? String(req.authUser.id).trim() : '';
@@ -3150,7 +3134,7 @@ async function generateWardIdFromName(name) {
                 );
 
                 const sanitizedRows = result.rows.map(sanitizeVenueRecord);
-                const normalizedRows = result.rows
+                const normalizedRows = sanitizedRows
                     .map((row) => normalizeVenueCoordinates(row))
                     .filter(
                         (row) =>
@@ -3184,11 +3168,6 @@ async function generateWardIdFromName(name) {
                 if (useCompactApprovedCache) {
                     publicCompactApprovedVenuesCache = {
                         timestamp: Date.now(),
-                        data: sanitizedRows
-                    };
-                }
-
-                res.json(sanitizedRows);
                         data: enrichedRows
                     };
                 }
@@ -3289,11 +3268,11 @@ async function generateWardIdFromName(name) {
                     return res.status(404).json({ message: 'Venue not found' });
                 }
 
-                return res.json(sanitizeVenueRecord(venue));
                 const galleryImagesFromTable = await loadVenueGalleryImageUrls(venue.id);
                 const resolvedReviewStats = await resolveVenueReviewStatsByVenueId(venue.id);
 
-                const normalizedVenue = normalizeVenueCoordinates(venue);
+                const sanitizedVenue = sanitizeVenueRecord(venue);
+                const normalizedVenue = normalizeVenueCoordinates(sanitizedVenue);
                 const payload = {
                     ...normalizedVenue,
                     average_rating: Number(resolvedReviewStats?.averageRating ?? venue.average_rating ?? 0),
@@ -3302,7 +3281,7 @@ async function generateWardIdFromName(name) {
                     totalReviews: Number(resolvedReviewStats?.totalReviews ?? venue.total_reviews ?? 0),
                     review_count: Number(resolvedReviewStats?.totalReviews ?? venue.total_reviews ?? 0),
                     reviewCount: Number(resolvedReviewStats?.totalReviews ?? venue.total_reviews ?? 0),
-                    venue_images: extractVenueImageUrls(venue, galleryImagesFromTable)
+                    venue_images: extractVenueImageUrls(sanitizedVenue, galleryImagesFromTable)
                 };
 
                 setCachedMapValue(publicVenueDetailCache, cacheKey, payload);
