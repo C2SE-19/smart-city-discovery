@@ -218,23 +218,59 @@ export function extractVenueImages(venue) {
     metadata.images,
     metadata.imageUrls,
     metadata.photos,
+    venue?.venue_images,
   ];
 
   const merged = arrays
     .flatMap((items) => (Array.isArray(items) ? items : []))
-    .map((item) => (typeof item === 'string' ? item.trim() : ''))
+    .flatMap((item) => {
+      if (typeof item === 'string') {
+        return [item];
+      }
+
+      if (item && typeof item === 'object') {
+        return [item.url, item.image_url, item.imageUrl, item.src, item.path].filter(
+          (candidate) => typeof candidate === 'string'
+        );
+      }
+
+      return [];
+    })
+    .map((item) => item.trim())
     .filter(Boolean);
 
   const coverImage = typeof venue.cover_image_url === 'string' ? venue.cover_image_url.trim() : '';
   if (coverImage) {
-    merged.unshift(coverImage);
+    merged.push(coverImage);
   }
 
   return [...new Set(merged)];
 }
 
 export function resolveVenueRating(venue) {
+  if (!venue || typeof venue !== 'object') {
+    return null;
+  }
+
   const metadata = normalizeVenueMetadata(venue.metadata);
+  const totalReviewsCandidates = [
+    venue.total_reviews,
+    venue.totalReviews,
+    metadata.totalReviews,
+    metadata.total_reviews,
+    venue.review_count,
+    venue.reviewCount,
+  ];
+
+  let totalReviews = null;
+  for (const value of totalReviewsCandidates) {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && numeric >= 0) {
+      totalReviews = numeric;
+      break;
+    }
+  }
+
   const candidates = [
     venue.average_rating,
     venue.averageRating,
@@ -246,6 +282,14 @@ export function resolveVenueRating(venue) {
 
   for (const value of candidates) {
     const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric < 0) {
+      continue;
+    }
+
+    if (numeric === 0 && (totalReviews === null || totalReviews <= 0)) {
+      return null;
+    }
+
     if (Number.isFinite(numeric) && numeric >= 0) {
       return Math.min(5, numeric);
     }
@@ -282,14 +326,22 @@ export function mapCenterFromWards(wards) {
       if (geometry?.type === 'Polygon') {
         const firstPoint = geometry.coordinates?.[0]?.[0];
         if (Array.isArray(firstPoint) && firstPoint.length >= 2) {
-          return [Number(firstPoint[1]), Number(firstPoint[0])];
+          const latitude = Number(firstPoint[1]);
+          const longitude = Number(firstPoint[0]);
+          if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+            return [latitude, longitude];
+          }
         }
       }
 
       if (geometry?.type === 'MultiPolygon') {
         const firstPoint = geometry.coordinates?.[0]?.[0]?.[0];
         if (Array.isArray(firstPoint) && firstPoint.length >= 2) {
-          return [Number(firstPoint[1]), Number(firstPoint[0])];
+          const latitude = Number(firstPoint[1]);
+          const longitude = Number(firstPoint[0]);
+          if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+            return [latitude, longitude];
+          }
         }
       }
     }
