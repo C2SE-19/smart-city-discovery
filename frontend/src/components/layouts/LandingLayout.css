@@ -1,5 +1,6 @@
 .landing-shell {
   min-height: 100vh;
+  overflow-x: hidden;
   background:
     radial-gradient(circle at top left, rgba(255, 255, 255, 0.45), transparent 24%),
     linear-gradient(180deg, #efe4c5 0%, #ede0bf 100%);
