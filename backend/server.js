@@ -138,6 +138,100 @@ function getAuthToken(req) {
     return extractBearerToken(req) || null;
 }
 
+const venueOwnerColumnState = {
+    exists: null,
+    checkedAt: 0
+};
+
+const MAX_INLINE_IMAGE_URL_LENGTH = 200000;
+const MAX_METADATA_JSON_LENGTH = 300000;
+
+function sanitizeLargeInlineAssetUrl(value) {
+    const normalized = String(value || '').trim();
+
+    if (!normalized) {
+        return null;
+    }
+
+    if (/^data:image\//i.test(normalized) && normalized.length > MAX_INLINE_IMAGE_URL_LENGTH) {
+        return null;
+    }
+
+    return normalized;
+}
+
+function sanitizeVenueRecord(venue) {
+    if (!venue || typeof venue !== 'object') {
+        return venue;
+    }
+
+    return {
+        ...venue,
+        cover_image_url: sanitizeLargeInlineAssetUrl(venue.cover_image_url),
+        business_license_image_url: sanitizeLargeInlineAssetUrl(venue.business_license_image_url)
+    };
+}
+
+function buildSanitizedInlineAssetSql(columnSql, alias) {
+    return `
+        CASE
+            WHEN ${columnSql} IS NULL OR BTRIM(${columnSql}) = '' THEN NULL
+            WHEN ${columnSql} ~* '^data:image/' AND LENGTH(${columnSql}) > ${MAX_INLINE_IMAGE_URL_LENGTH} THEN NULL
+            ELSE ${columnSql}
+        END AS ${alias}
+    `;
+}
+
+function buildSanitizedMetadataSql(columnSql, alias = 'metadata') {
+    return `
+        CASE
+            WHEN ${columnSql} IS NULL THEN NULL
+            WHEN LENGTH(${columnSql}::text) > ${MAX_METADATA_JSON_LENGTH} THEN NULL
+            ELSE ${columnSql}
+        END AS ${alias}
+    `;
+}
+
+async function hasVenueOwnerUserColumn() {
+    const now = Date.now();
+
+    if (typeof venueOwnerColumnState.exists === 'boolean' && now - venueOwnerColumnState.checkedAt < 30000) {
+        return venueOwnerColumnState.exists;
+    }
+
+    try {
+        const result = await pool.query(
+            `
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'venues'
+                  AND column_name = 'owner_user_id'
+                LIMIT 1
+            `
+        );
+
+        venueOwnerColumnState.exists = Boolean(result.rows.length);
+    } catch {
+        venueOwnerColumnState.exists = false;
+    }
+
+    venueOwnerColumnState.checkedAt = now;
+    return venueOwnerColumnState.exists;
+}
+
+function buildResolvedVenueOwnerUserSql(venueAlias = 'venues') {
+    return `COALESCE(
+        ${venueAlias}.owner_user_id,
+        ${venueAlias}.owner_profile_id,
+        CASE
+            WHEN NULLIF(${venueAlias}.submitted_by_user_id, '') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+                THEN NULLIF(${venueAlias}.submitted_by_user_id, '')::uuid
+            ELSE NULL
+        END
+    )`;
+}
+
 // Middleware to check if user account is active (not paused or blocked)
 async function checkUserStatus(req, res, next) {
     try {
@@ -1714,6 +1808,178 @@ async function generateWardIdFromName(name) {
 
         pool.query(
             `
+                ALTER TABLE IF EXISTS venues
+                ADD COLUMN IF NOT EXISTS owner_user_id uuid REFERENCES users(id) ON DELETE SET NULL
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                CREATE INDEX IF NOT EXISTS venues_owner_user_id_idx
+                ON venues(owner_user_id)
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                UPDATE venues
+                SET owner_user_id = users.id
+                FROM users
+                WHERE venues.owner_user_id IS NULL
+                  AND venues.owner_profile_id IS NOT NULL
+                  AND users.id = venues.owner_profile_id
+            `
+        ).catch(() => {
+            // Ignore if venues/users schema is not ready yet.
+        });
+
+        pool.query(
+            `
+                UPDATE venues
+                SET owner_user_id = users.id
+                FROM users
+                WHERE venues.owner_user_id IS NULL
+                  AND NULLIF(venues.submitted_by_user_id, '') IS NOT NULL
+                  AND users.id::text = venues.submitted_by_user_id
+            `
+        ).catch(() => {
+            // Ignore if venues/users schema is not ready yet.
+        });
+
+        pool.query(
+            `
+                UPDATE venues
+                SET owner_user_id = users.id
+                FROM users
+                WHERE venues.owner_user_id IS NULL
+                  AND LOWER(COALESCE(venues.metadata ->> 'contactEmail', '')) = LOWER(users.email)
+            `
+        ).catch(() => {
+            // Ignore if venues/users schema is not ready yet.
+        });
+
+        pool.query(
+            `
+                CREATE TABLE IF NOT EXISTS chat_threads (
+                    id BIGSERIAL PRIMARY KEY,
+                    owner_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    customer_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    last_message_at TIMESTAMPTZ,
+                    CONSTRAINT chat_threads_owner_customer_unique UNIQUE (owner_user_id, customer_user_id)
+                )
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                CREATE TABLE IF NOT EXISTS chat_messages (
+                    id BIGSERIAL PRIMARY KEY,
+                    thread_id BIGINT NOT NULL REFERENCES chat_threads(id) ON DELETE CASCADE,
+                    sender_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    recipient_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    venue_id INTEGER REFERENCES venues(id) ON DELETE SET NULL,
+                    content TEXT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                ALTER TABLE IF EXISTS chat_messages
+                ADD COLUMN IF NOT EXISTS context_label TEXT
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                CREATE TABLE IF NOT EXISTS chat_thread_reads (
+                    thread_id BIGINT NOT NULL REFERENCES chat_threads(id) ON DELETE CASCADE,
+                    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    last_read_message_id BIGINT REFERENCES chat_messages(id) ON DELETE SET NULL,
+                    last_read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (thread_id, user_id)
+                )
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                CREATE TABLE IF NOT EXISTS chat_thread_hidden (
+                    thread_id BIGINT NOT NULL REFERENCES chat_threads(id) ON DELETE CASCADE,
+                    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    hidden_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (thread_id, user_id)
+                )
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                CREATE INDEX IF NOT EXISTS chat_threads_owner_user_id_idx
+                ON chat_threads(owner_user_id)
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                CREATE INDEX IF NOT EXISTS chat_threads_customer_user_id_idx
+                ON chat_threads(customer_user_id)
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                CREATE INDEX IF NOT EXISTS chat_messages_thread_id_created_at_idx
+                ON chat_messages(thread_id, created_at DESC, id DESC)
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                CREATE INDEX IF NOT EXISTS chat_messages_recipient_user_id_idx
+                ON chat_messages(recipient_user_id, created_at DESC)
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                CREATE INDEX IF NOT EXISTS chat_thread_hidden_user_id_idx
+                ON chat_thread_hidden(user_id, hidden_at DESC)
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
                 CREATE TABLE IF NOT EXISTS venue_public_reviews (
                     id BIGSERIAL PRIMARY KEY,
                     venue_id INT NOT NULL REFERENCES venues(id) ON DELETE CASCADE,
@@ -2280,6 +2546,23 @@ async function generateWardIdFromName(name) {
             }
         }
 
+        async function listPublicVenues(req, res) {
+            try {
+                const venueHasOwnerUserColumn = await hasVenueOwnerUserColumn();
+                const statusFilter = normalizeStatusList(req.query.status);
+                const effectiveStatuses = statusFilter.length ? statusFilter : ['approved'];
+                const compactMode = ['1', 'true', 'yes'].includes(String(req.query.compact || '').trim().toLowerCase());
+                const liveMode = ['1', 'true', 'yes'].includes(String(req.query.live || '').trim().toLowerCase());
+                const categoryId = normalizeCategoryId(req.query.categoryId);
+                const categoryIdsFilter = parsePositiveIntegerList(req.query.categoryIds);
+                const serviceIdsFilter = parsePositiveIntegerList(req.query.serviceIds);
+                const wardIdsFilter = parseTextList(req.query.wardIds);
+                const singleWardId = normalizeNullableText(req.query.wardId);
+                const searchKeyword = String(req.query.q ?? req.query.search ?? '').trim().toLowerCase();
+
+                if (Number.isNaN(categoryId)) {
+                    return res.status(400).json({ message: 'categoryId must be a positive integer' });
+                }
         function invalidateVenueCommunityBundleCacheByVenueId(venueId) {
             const normalizedVenueId = Number(venueId);
             if (!Number.isFinite(normalizedVenueId)) {
@@ -2788,12 +3071,12 @@ async function generateWardIdFromName(name) {
                 }
 
                 const compactMetadataSelect = 'NULL::jsonb AS metadata';
-
-                const fullMetadataSelect = 'venues.metadata';
-                const metadataSelect = compactMode ? compactMetadataSelect : `${fullMetadataSelect} AS metadata`;
+                const fullMetadataSelect = buildSanitizedMetadataSql('venues.metadata', 'metadata');
+                const metadataSelect = compactMode ? compactMetadataSelect : fullMetadataSelect;
                 const businessLicenseSelect = compactMode
                     ? 'NULL::text AS business_license_image_url'
-                    : 'venues.business_license_image_url';
+                    : buildSanitizedInlineAssetSql('venues.business_license_image_url', 'business_license_image_url');
+                const coverImageSelect = buildSanitizedInlineAssetSql('venues.cover_image_url', 'cover_image_url');
                 const moderationColumnsSelect = compactMode
                     ? `
                     NULL::timestamptz AS submitted_at,
@@ -2807,6 +3090,19 @@ async function generateWardIdFromName(name) {
                     venues.rejected_at,
                     venues.rejection_reason,
                 `;
+                const resolvedOwnerUserSql = buildResolvedVenueOwnerUserSql('venues');
+                const ownerSelect = venueHasOwnerUserColumn
+                    ? `
+                    ${resolvedOwnerUserSql} AS owner_user_id,
+                    owner_users.fullname AS owner_name,
+                `
+                    : `
+                    NULL::uuid AS owner_user_id,
+                    NULL::text AS owner_name,
+                `;
+                const ownerJoin = venueHasOwnerUserColumn
+                    ? `LEFT JOIN users AS owner_users ON owner_users.id = ${resolvedOwnerUserSql}`
+                    : '';
 
                 const result = await pool.query(
                     `
@@ -2814,6 +3110,7 @@ async function generateWardIdFromName(name) {
                     venues.id,
                     venues.name,
                     venues.title,
+                    ${ownerSelect}
                     venues.address,
                     venues.description,
                     venues.phone,
@@ -2824,6 +3121,7 @@ async function generateWardIdFromName(name) {
                     venues.category_id,
                     place_categories.name AS category_name,
                     place_categories.slug AS category_slug,
+                    ${coverImageSelect},
                     venues.average_rating,
                     venues.total_reviews,
                     venues.cover_image_url,
@@ -2837,6 +3135,7 @@ async function generateWardIdFromName(name) {
                 FROM venues
                 LEFT JOIN wards ON wards.ward_id = venues.ward_id
                 LEFT JOIN place_categories ON place_categories.id = venues.category_id
+                ${ownerJoin}
                 LEFT JOIN LATERAL (
                     SELECT image_url
                     FROM venue_images
@@ -2850,6 +3149,7 @@ async function generateWardIdFromName(name) {
                     values
                 );
 
+                const sanitizedRows = result.rows.map(sanitizeVenueRecord);
                 const normalizedRows = result.rows
                     .map((row) => normalizeVenueCoordinates(row))
                     .filter(
@@ -2884,6 +3184,11 @@ async function generateWardIdFromName(name) {
                 if (useCompactApprovedCache) {
                     publicCompactApprovedVenuesCache = {
                         timestamp: Date.now(),
+                        data: sanitizedRows
+                    };
+                }
+
+                res.json(sanitizedRows);
                         data: enrichedRows
                     };
                 }
@@ -2902,6 +3207,23 @@ async function generateWardIdFromName(name) {
             }
 
             try {
+                const venueHasOwnerUserColumn = await hasVenueOwnerUserColumn();
+                const resolvedOwnerUserSql = buildResolvedVenueOwnerUserSql('venues');
+                const coverImageSelect = buildSanitizedInlineAssetSql('venues.cover_image_url', 'cover_image_url');
+                const businessLicenseSelect = buildSanitizedInlineAssetSql('venues.business_license_image_url', 'business_license_image_url');
+                const metadataSelect = buildSanitizedMetadataSql('venues.metadata', 'metadata');
+                const ownerSelect = venueHasOwnerUserColumn
+                    ? `
+                    ${resolvedOwnerUserSql} AS owner_user_id,
+                    owner_users.fullname AS owner_name,
+                `
+                    : `
+                    NULL::uuid AS owner_user_id,
+                    NULL::text AS owner_name,
+                `;
+                const ownerJoin = venueHasOwnerUserColumn
+                    ? `LEFT JOIN users AS owner_users ON owner_users.id = ${resolvedOwnerUserSql}`
+                    : '';
                 const isAdmin = normalizeRole(req.authUser?.role) === 'admin';
                 const cacheKey = `${isAdmin ? 'admin' : 'public'}:${venueId}`;
                 const cachedPayload = getCachedMapValue(
@@ -2920,6 +3242,7 @@ async function generateWardIdFromName(name) {
                     venues.id,
                     venues.name,
                     venues.title,
+                    ${ownerSelect}
                     venues.address,
                     venues.description,
                     venues.phone,
@@ -2930,6 +3253,9 @@ async function generateWardIdFromName(name) {
                     venues.category_id,
                     place_categories.name AS category_name,
                     place_categories.slug AS category_slug,
+                    ${coverImageSelect},
+                    ${businessLicenseSelect},
+                    ${metadataSelect},
                     venues.average_rating,
                     venues.total_reviews,
                     venues.cover_image_url,
@@ -2946,6 +3272,7 @@ async function generateWardIdFromName(name) {
                 FROM venues
                 LEFT JOIN wards ON wards.ward_id = venues.ward_id
                 LEFT JOIN place_categories ON place_categories.id = venues.category_id
+                ${ownerJoin}
                 WHERE venues.id = $1
                 LIMIT 1
             `,
@@ -2962,6 +3289,7 @@ async function generateWardIdFromName(name) {
                     return res.status(404).json({ message: 'Venue not found' });
                 }
 
+                return res.json(sanitizeVenueRecord(venue));
                 const galleryImagesFromTable = await loadVenueGalleryImageUrls(venue.id);
                 const resolvedReviewStats = await resolveVenueReviewStatsByVenueId(venue.id);
 
@@ -2986,6 +3314,22 @@ async function generateWardIdFromName(name) {
         }
 
         async function getPublicVenueForDetail(venueId, isAdmin) {
+            const venueHasOwnerUserColumn = await hasVenueOwnerUserColumn();
+            const resolvedOwnerUserSql = buildResolvedVenueOwnerUserSql('venues');
+            const coverImageSelect = buildSanitizedInlineAssetSql('venues.cover_image_url', 'cover_image_url');
+            const metadataSelect = buildSanitizedMetadataSql('venues.metadata', 'metadata');
+            const ownerSelect = venueHasOwnerUserColumn
+                ? `
+                    ${resolvedOwnerUserSql} AS owner_user_id,
+                    owner_users.fullname AS owner_name,
+                `
+                : `
+                    NULL::uuid AS owner_user_id,
+                    NULL::text AS owner_name,
+                `;
+            const ownerJoin = venueHasOwnerUserColumn
+                ? `LEFT JOIN users AS owner_users ON owner_users.id = ${resolvedOwnerUserSql}`
+                : '';
             const cacheKey = `${isAdmin ? 'admin' : 'public'}:${venueId}`;
             const cachedVenue = getCachedMapValue(
                 publicVenueForDetailCache,
@@ -3003,6 +3347,7 @@ async function generateWardIdFromName(name) {
                     venues.id,
                     venues.name,
                     venues.title,
+                    ${ownerSelect}
                     venues.address,
                     venues.description,
                     venues.phone,
@@ -3013,8 +3358,8 @@ async function generateWardIdFromName(name) {
                     venues.category_id,
                     place_categories.name AS category_name,
                     place_categories.slug AS category_slug,
-                    venues.cover_image_url,
-                    venues.metadata,
+                    ${coverImageSelect},
+                    ${metadataSelect},
                     venues.average_rating,
                     venues.total_reviews,
                     venues.status::text AS status,
@@ -3023,6 +3368,7 @@ async function generateWardIdFromName(name) {
                 FROM venues
                 LEFT JOIN wards ON wards.ward_id = venues.ward_id
                 LEFT JOIN place_categories ON place_categories.id = venues.category_id
+                ${ownerJoin}
                 WHERE venues.id = $1
                 LIMIT 1
             `,
@@ -3038,6 +3384,7 @@ async function generateWardIdFromName(name) {
                 return null;
             }
 
+            return sanitizeVenueRecord(venue);
                 const resolvedReviewStats = await resolveVenueReviewStatsByVenueId(venue.id);
 
                 const normalizedVenue = normalizeVenueCoordinates(venue);
@@ -4213,6 +4560,12 @@ async function generateWardIdFromName(name) {
             const normalizedCategoryName = String(category || '').trim();
             const normalizedMetadata = metadata && typeof metadata === 'object' ? { ...metadata } : {};
             const requestedServiceIds = normalizeServiceIds(normalizedMetadata.selectedServices);
+            const normalizedContactEmail = normalizeNullableText(contactEmail ?? normalizedMetadata.contactEmail);
+            const resolvedOwnerUserId = await getAuthenticatedChatUserId(req);
+
+            if (!normalizedContactEmail || !isValidEmail(normalizedContactEmail)) {
+                return res.status(400).json({ message: 'A valid contactEmail is required' });
+            }
             const submitterUserId = req.authUser?.id ? String(req.authUser.id).trim() : '';
 
             if (!submitterUserId) {
@@ -4236,6 +4589,7 @@ async function generateWardIdFromName(name) {
             }
 
             try {
+                const venueHasOwnerUserColumn = await hasVenueOwnerUserColumn();
                 let resolvedCategoryId = normalizedCategoryId;
 
                 if (resolvedCategoryId === null && normalizedCategoryName) {
@@ -4358,9 +4712,52 @@ async function generateWardIdFromName(name) {
 
                 const detection = await detectWardByCoordinates(normalizedLatitude, normalizedLongitude);
 
+                const insertColumns = [
+                    'name',
+                    'title',
+                    ...(venueHasOwnerUserColumn ? ['owner_user_id'] : []),
+                    'submitted_by_user_id',
+                    'address',
+                    'description',
+                    'phone',
+                    'latitude',
+                    'longitude',
+                    'ward_id',
+                    'category_id',
+                    'cover_image_url',
+                    'business_license_image_url',
+                    'metadata',
+                    'status',
+                    'submitted_at',
+                    'updated_at'
+                ];
+                const insertValues = [
+                    normalizedName,
+                    String(title || '').trim() || normalizedName,
+                    ...(venueHasOwnerUserColumn
+                        ? [resolvedOwnerUserId || null]
+                        : []),
+                    resolvedOwnerUserId || null,
+                    normalizedAddress,
+                    String(description || '').trim() || null,
+                    String(phone || '').trim() || null,
+                    normalizedLatitude,
+                    normalizedLongitude,
+                    detection.wardId,
+                    resolvedCategoryId,
+                    String(coverImageUrl || '').trim() || null,
+                    String(businessLicenseImageUrl || '').trim() || null,
+                    normalizedMetadata
+                ];
+                const insertPlaceholders = insertValues.map((_, index) => `$${index + 1}`);
+
                 const insertResult = await pool.query(
                     `
                 INSERT INTO venues (
+                    ${insertColumns.join(',\n                    ')}
+                )
+                VALUES (
+                    ${insertPlaceholders.join(',\n                    ')},
                     name,
                     title,
                     address,
@@ -4398,6 +4795,7 @@ async function generateWardIdFromName(name) {
                 )
                 RETURNING id
             `,
+                    insertValues
                     [
                         normalizedName,
                         String(title || '').trim() || normalizedName,
@@ -6836,6 +7234,717 @@ async function generateWardIdFromName(name) {
             }
         }
 
+        async function getAuthenticatedChatUserId(req) {
+            const rawUserId = req.authUser?.id ?? req.user?.id ?? null;
+            const normalizedUserId = rawUserId === null || rawUserId === undefined ? '' : String(rawUserId).trim();
+
+            if (normalizedUserId) {
+                return normalizedUserId;
+            }
+
+            const authEmail = String(req.authUser?.email || req.user?.email || '').trim().toLowerCase();
+            if (!authEmail) {
+                return null;
+            }
+
+            try {
+                const userResult = await pool.query(
+                    `
+                        SELECT id
+                        FROM users
+                        WHERE LOWER(email) = $1
+                        LIMIT 1
+                    `,
+                    [authEmail]
+                );
+
+                const fallbackUserId = String(userResult.rows[0]?.id || '').trim();
+                return fallbackUserId || null;
+            } catch {
+                return null;
+            }
+        }
+
+        async function getVenueChatOwnerContext(venueId) {
+            const venueHasOwnerUserColumn = await hasVenueOwnerUserColumn();
+            const resolvedOwnerUserSql = buildResolvedVenueOwnerUserSql('venues');
+            const ownerSelect = venueHasOwnerUserColumn
+                ? `
+                        ${resolvedOwnerUserSql} AS owner_user_id,
+                        owner_users.fullname AS owner_name,
+                    `
+                : `
+                        NULL::uuid AS owner_user_id,
+                        NULL::text AS owner_name,
+                    `;
+            const ownerJoin = venueHasOwnerUserColumn
+                ? `LEFT JOIN users AS owner_users ON owner_users.id = ${resolvedOwnerUserSql}`
+                : '';
+            const result = await pool.query(
+                `
+                    SELECT
+                        venues.id,
+                        venues.name,
+                        venues.title,
+                        venues.address,
+                        venues.cover_image_url,
+                        venues.phone,
+                        venues.metadata,
+                        ${ownerSelect}
+                        wards.name AS ward_name
+                    FROM venues
+                    ${ownerJoin}
+                    LEFT JOIN wards ON wards.ward_id = venues.ward_id
+                    WHERE venues.id = $1
+                    LIMIT 1
+                `,
+                [venueId]
+            );
+
+            return result.rows[0] || null;
+        }
+
+        async function listOwnerChatVenues(ownerUserId) {
+            const normalizedOwnerUserId = String(ownerUserId || '').trim();
+            if (!normalizedOwnerUserId) {
+                return [];
+            }
+
+            const result = await pool.query(
+                `
+                    SELECT
+                        venues.id,
+                        venues.name,
+                        venues.title,
+                        venues.address,
+                        venues.cover_image_url,
+                        wards.name AS ward_name
+                    FROM venues
+                    LEFT JOIN wards ON wards.ward_id = venues.ward_id
+                    WHERE ${buildResolvedVenueOwnerUserSql('venues')} = $1
+                    ORDER BY LOWER(COALESCE(venues.name, venues.title, '')) ASC, venues.id ASC
+                `,
+                [normalizedOwnerUserId]
+            );
+
+            return result.rows.map((row) => ({
+                id: row.id,
+                name: row.name || row.title || 'Quán chưa đặt tên',
+                address: row.address || '',
+                coverImageUrl: row.cover_image_url || '',
+                wardName: row.ward_name || ''
+            }));
+        }
+
+        async function findOrCreateChatThread(ownerUserId, customerUserId) {
+            const result = await pool.query(
+                `
+                    INSERT INTO chat_threads (owner_user_id, customer_user_id, created_at, updated_at)
+                    VALUES ($1, $2, NOW(), NOW())
+                    ON CONFLICT (owner_user_id, customer_user_id)
+                    DO UPDATE SET updated_at = NOW()
+                    RETURNING id, owner_user_id, customer_user_id, created_at, updated_at, last_message_at
+                `,
+                [ownerUserId, customerUserId]
+            );
+
+            return result.rows[0] || null;
+        }
+
+        async function buildChatThreadPayload(threadId, currentUserId) {
+            const threadResult = await pool.query(
+                `
+                    SELECT
+                        t.id,
+                        t.owner_user_id,
+                        t.customer_user_id,
+                        t.created_at,
+                        t.updated_at,
+                        t.last_message_at,
+                        owner_user.fullname AS owner_name,
+                        owner_user.username AS owner_username,
+                        customer_user.fullname AS customer_name,
+                        customer_user.username AS customer_username,
+                        COALESCE(unread.unread_count, 0)::int AS unread_count
+                    FROM chat_threads AS t
+                    JOIN users AS owner_user ON owner_user.id = t.owner_user_id
+                    JOIN users AS customer_user ON customer_user.id = t.customer_user_id
+                    LEFT JOIN LATERAL (
+                        SELECT COUNT(*)::int AS unread_count
+                        FROM chat_messages AS m
+                        LEFT JOIN chat_thread_reads AS r
+                          ON r.thread_id = t.id
+                         AND r.user_id = $2
+                        WHERE m.thread_id = t.id
+                          AND m.recipient_user_id = $2
+                          AND (r.last_read_at IS NULL OR m.created_at > r.last_read_at)
+                    ) AS unread ON TRUE
+                    LEFT JOIN chat_thread_hidden AS hidden
+                      ON hidden.thread_id = t.id
+                     AND hidden.user_id = $2
+                    WHERE t.id = $1
+                      AND ($2 = t.owner_user_id OR $2 = t.customer_user_id)
+                      AND (
+                        hidden.hidden_at IS NULL
+                        OR COALESCE(t.last_message_at, t.updated_at, t.created_at) > hidden.hidden_at
+                      )
+                    LIMIT 1
+                `,
+                [threadId, currentUserId]
+            );
+
+            if (!threadResult.rows.length) {
+                return null;
+            }
+
+            const thread = threadResult.rows[0];
+            const messagesResult = await pool.query(
+                `
+                    SELECT
+                        m.id,
+                        m.thread_id,
+                        m.sender_user_id,
+                        m.recipient_user_id,
+                        m.venue_id,
+                        m.context_label,
+                        m.content,
+                        m.created_at,
+                        m.updated_at,
+                        sender_user.fullname AS sender_name,
+                        recipient_user.fullname AS recipient_name,
+                        venues.name AS venue_name,
+                        venues.title AS venue_title,
+                        venues.address AS venue_address,
+                        venues.cover_image_url AS venue_image,
+                        wards.name AS venue_ward_name
+                    FROM chat_messages AS m
+                    JOIN users AS sender_user ON sender_user.id = m.sender_user_id
+                    JOIN users AS recipient_user ON recipient_user.id = m.recipient_user_id
+                    LEFT JOIN venues ON venues.id = m.venue_id
+                    LEFT JOIN wards ON wards.ward_id = venues.ward_id
+                    WHERE m.thread_id = $1
+                    ORDER BY m.created_at ASC, m.id ASC
+                `,
+                [threadId]
+            );
+
+            return {
+                id: thread.id,
+                ownerUserId: thread.owner_user_id,
+                customerUserId: thread.customer_user_id,
+                ownerName: thread.owner_name || thread.owner_username || 'Chủ quán',
+                customerName: thread.customer_name || thread.customer_username || 'Khách hàng',
+                unreadCount: Number(thread.unread_count || 0),
+                lastMessageAt: thread.last_message_at || null,
+                createdAt: thread.created_at,
+                updatedAt: thread.updated_at,
+                messages: messagesResult.rows.map((message) => ({
+                    id: message.id,
+                    threadId: message.thread_id,
+                    senderUserId: message.sender_user_id,
+                    recipientUserId: message.recipient_user_id,
+                    venueId: message.venue_id,
+                    contextLabel: message.context_label || '',
+                    senderName: message.sender_name || 'Người dùng',
+                    recipientName: message.recipient_name || 'Người dùng',
+                    content: message.content || '',
+                    createdAt: message.created_at,
+                    updatedAt: message.updated_at,
+                    venueName: message.venue_name || message.venue_title || '',
+                    venueAddress: message.venue_address || '',
+                    venueImage: message.venue_image || '',
+                    venueWardName: message.venue_ward_name || ''
+                }))
+            };
+        }
+
+        async function listChatThreads(req, res) {
+            const currentUserId = await getAuthenticatedChatUserId(req);
+
+            if (!currentUserId) {
+                return res.status(401).json({ message: 'Bạn cần đăng nhập để xem tin nhắn.' });
+            }
+
+            const limit = Math.min(20, Math.max(1, Number(req.query.limit || 10)));
+
+            try {
+                const result = await pool.query(
+                    `
+                        SELECT
+                            t.id,
+                            t.owner_user_id,
+                            t.customer_user_id,
+                            t.created_at,
+                            t.updated_at,
+                            t.last_message_at,
+                            owner_user.fullname AS owner_name,
+                            owner_user.username AS owner_username,
+                            customer_user.fullname AS customer_name,
+                            customer_user.username AS customer_username,
+                            latest_message.id AS last_message_id,
+                            latest_message.content AS last_message_content,
+                            latest_message.created_at AS last_message_created_at,
+                            latest_message.venue_id AS last_message_venue_id,
+                            venues.name AS venue_name,
+                            venues.title AS venue_title,
+                            venues.address AS venue_address,
+                            venues.cover_image_url AS venue_image,
+                            wards.name AS venue_ward_name,
+                            fallback_venue.id AS fallback_venue_id,
+                            fallback_venue.name AS fallback_venue_name,
+                            fallback_venue.title AS fallback_venue_title,
+                            fallback_venue.address AS fallback_venue_address,
+                            fallback_venue.cover_image_url AS fallback_venue_image,
+                            fallback_venue.ward_name AS fallback_venue_ward_name,
+                            COALESCE(unread.unread_count, 0)::int AS unread_count
+                        FROM chat_threads AS t
+                        JOIN users AS owner_user ON owner_user.id = t.owner_user_id
+                        JOIN users AS customer_user ON customer_user.id = t.customer_user_id
+                        LEFT JOIN LATERAL (
+                            SELECT m.id, m.content, m.created_at, m.venue_id
+                            FROM chat_messages AS m
+                            WHERE m.thread_id = t.id
+                            ORDER BY m.created_at DESC, m.id DESC
+                            LIMIT 1
+                        ) AS latest_message ON TRUE
+                        LEFT JOIN venues ON venues.id = latest_message.venue_id
+                        LEFT JOIN wards ON wards.ward_id = venues.ward_id
+                        LEFT JOIN LATERAL (
+                            SELECT
+                                owner_venues.id,
+                                owner_venues.name,
+                                owner_venues.title,
+                                owner_venues.address,
+                                owner_venues.cover_image_url,
+                                owner_wards.name AS ward_name
+                            FROM venues AS owner_venues
+                            LEFT JOIN wards AS owner_wards ON owner_wards.ward_id = owner_venues.ward_id
+                            WHERE ${buildResolvedVenueOwnerUserSql('owner_venues')} = t.owner_user_id
+                            ORDER BY owner_venues.id ASC
+                            LIMIT 1
+                        ) AS fallback_venue ON TRUE
+                        LEFT JOIN chat_thread_hidden AS hidden
+                          ON hidden.thread_id = t.id
+                         AND hidden.user_id = $1
+                        LEFT JOIN LATERAL (
+                            SELECT COUNT(*)::int AS unread_count
+                            FROM chat_messages AS m
+                            LEFT JOIN chat_thread_reads AS r
+                              ON r.thread_id = t.id
+                             AND r.user_id = $1
+                            WHERE m.thread_id = t.id
+                              AND m.recipient_user_id = $1
+                              AND (r.last_read_at IS NULL OR m.created_at > r.last_read_at)
+                        ) AS unread ON TRUE
+                        WHERE t.owner_user_id = $1 OR t.customer_user_id = $1
+                          AND (
+                            hidden.hidden_at IS NULL
+                            OR COALESCE(latest_message.created_at, t.last_message_at, t.updated_at, t.created_at) > hidden.hidden_at
+                          )
+                        ORDER BY COALESCE(t.last_message_at, t.updated_at, t.created_at) DESC
+                        LIMIT $2
+                    `,
+                    [currentUserId, limit]
+                );
+
+                return res.json({
+                    threads: result.rows.map((row) => ({
+                        id: row.id,
+                        ownerUserId: row.owner_user_id,
+                        customerUserId: row.customer_user_id,
+                        ownerName: row.owner_name || row.owner_username || 'Chủ quán',
+                        customerName: row.customer_name || row.customer_username || 'Khách hàng',
+                        counterpartName:
+                            currentUserId === String(row.owner_user_id || '')
+                                ? row.customer_name || row.customer_username || 'Khách hàng'
+                                : row.owner_name || row.owner_username || 'Chủ quán',
+                        unreadCount: Number(row.unread_count || 0),
+                        lastMessage: row.last_message_id
+                            ? {
+                                  id: row.last_message_id,
+                                  content: row.last_message_content || '',
+                                  createdAt: row.last_message_created_at,
+                                  venueId: row.last_message_venue_id
+                              }
+                            : null,
+                        venueId: row.last_message_venue_id || row.fallback_venue_id || null,
+                        venueName: row.venue_name || row.venue_title || row.fallback_venue_name || row.fallback_venue_title || '',
+                        venueAddress: row.venue_address || row.fallback_venue_address || '',
+                        venueImage: row.venue_image || row.fallback_venue_image || '',
+                        venueWardName: row.venue_ward_name || row.fallback_venue_ward_name || ''
+                    }))
+                });
+            } catch (error) {
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
+        async function getVenueChatThread(req, res) {
+            const currentUserId = await getAuthenticatedChatUserId(req);
+            const venueId = Number(req.params.venueId);
+            const selectedThreadId = Number(req.query.threadId || '');
+
+            if (!currentUserId) {
+                return res.status(401).json({ message: 'Bạn cần đăng nhập để xem tin nhắn.' });
+            }
+
+            if (!Number.isFinite(venueId)) {
+                return res.status(400).json({ message: 'Invalid venue id' });
+            }
+
+            try {
+                const venue = await getVenueChatOwnerContext(venueId);
+
+                if (!venue) {
+                    return res.status(404).json({ message: 'Venue not found' });
+                }
+
+                let threadId = null;
+                const ownerUserId = String(venue.owner_user_id || '').trim();
+
+                if (ownerUserId && currentUserId === ownerUserId && Number.isFinite(selectedThreadId) && selectedThreadId > 0) {
+                    threadId = selectedThreadId;
+                } else if (ownerUserId && currentUserId !== ownerUserId) {
+                    const existingThreadResult = await pool.query(
+                        `
+                            SELECT id
+                            FROM chat_threads
+                            WHERE owner_user_id = $1
+                              AND customer_user_id = $2
+                            LIMIT 1
+                        `,
+                        [ownerUserId, currentUserId]
+                    );
+
+                    threadId = existingThreadResult.rows[0]?.id || null;
+                }
+
+                const thread = threadId ? await buildChatThreadPayload(threadId, currentUserId) : null;
+                const contextOptions = ownerUserId ? await listOwnerChatVenues(ownerUserId) : [];
+
+                return res.json({
+                    venueContext: {
+                        id: venue.id,
+                        ownerUserId: venue.owner_user_id,
+                        ownerName: venue.owner_name || 'Chủ quán',
+                        name: venue.name || venue.title || 'Quán chưa đặt tên',
+                        address: venue.address || '',
+                        coverImageUrl: venue.cover_image_url || '',
+                        wardName: venue.ward_name || '',
+                        phone: venue.phone || '',
+                        metadata: venue.metadata || {}
+                    },
+                    contextOptions,
+                    thread
+                });
+            } catch (error) {
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
+        async function sendVenueChatMessage(req, res) {
+            const currentUserId = await getAuthenticatedChatUserId(req);
+            const venueId = Number(req.params.venueId);
+            const threadId = Number(req.body.threadId || '');
+            const content = String(req.body.content || '').trim();
+            const requestedContextVenueId = Number(req.body.contextVenueId || '');
+            const requestedContextLabel = String(req.body.contextLabel || '').trim();
+
+            if (!currentUserId) {
+                return res.status(401).json({ message: 'Bạn cần đăng nhập để nhắn tin.' });
+            }
+
+            if (!Number.isFinite(venueId)) {
+                return res.status(400).json({ message: 'Invalid venue id' });
+            }
+
+            if (!content) {
+                return res.status(400).json({ message: 'Nội dung tin nhắn không được để trống.' });
+            }
+
+            try {
+                const venue = await getVenueChatOwnerContext(venueId);
+
+                if (!venue) {
+                    return res.status(404).json({ message: 'Venue not found' });
+                }
+
+                const ownerUserId = String(venue.owner_user_id || '').trim();
+
+                if (!ownerUserId) {
+                    return res.status(400).json({ message: 'Quán này chưa được gắn chủ sở hữu để sử dụng chat.' });
+                }
+
+                let resolvedThreadId = null;
+                let recipientUserId = null;
+
+                if (currentUserId === ownerUserId) {
+                    if (!Number.isFinite(threadId) || threadId <= 0) {
+                        return res.status(400).json({ message: 'Chủ quán cần chọn đúng cuộc trò chuyện để trả lời.' });
+                    }
+
+                    const threadResult = await pool.query(
+                        `
+                            SELECT id, customer_user_id
+                            FROM chat_threads
+                            WHERE id = $1
+                              AND owner_user_id = $2
+                            LIMIT 1
+                        `,
+                        [threadId, currentUserId]
+                    );
+
+                    if (!threadResult.rows.length) {
+                        return res.status(404).json({ message: 'Không tìm thấy cuộc trò chuyện.' });
+                    }
+
+                    resolvedThreadId = threadResult.rows[0].id;
+                    recipientUserId = String(threadResult.rows[0].customer_user_id || '').trim();
+                } else {
+                    const thread = await findOrCreateChatThread(ownerUserId, currentUserId);
+                    resolvedThreadId = thread?.id || null;
+                    recipientUserId = ownerUserId;
+                }
+
+                if (!resolvedThreadId || !recipientUserId) {
+                    return res.status(400).json({ message: 'Không thể xác định người nhận tin nhắn.' });
+                }
+
+                const customerUserId = currentUserId === ownerUserId ? recipientUserId : currentUserId;
+                let messageVenueId = venueId;
+                let messageContextLabel = venue.name || venue.title || '';
+
+                if (requestedContextLabel.toLowerCase() === 'other') {
+                    messageVenueId = null;
+                    messageContextLabel = 'Other';
+                } else if (Number.isFinite(requestedContextVenueId) && requestedContextVenueId > 0) {
+                    const selectedVenueContext = await getVenueChatOwnerContext(requestedContextVenueId);
+                    const selectedVenueOwnerUserId = String(selectedVenueContext?.owner_user_id || '').trim();
+
+                    if (!selectedVenueContext || selectedVenueOwnerUserId !== ownerUserId) {
+                        return res.status(400).json({ message: 'QuÃ¡n Ä‘Æ°á»£c chá»n khÃ´ng há»£p lá»‡ cho Ä‘oáº¡n chat nÃ y.' });
+                    }
+
+                    messageVenueId = requestedContextVenueId;
+                    messageContextLabel = selectedVenueContext.name || selectedVenueContext.title || '';
+                }
+
+                const insertMessageResult = await pool.query(
+                    `
+                        INSERT INTO chat_messages (
+                            thread_id,
+                            sender_user_id,
+                            recipient_user_id,
+                            venue_id,
+                            context_label,
+                            content,
+                            created_at,
+                            updated_at
+                        )
+                        VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+                        RETURNING id, created_at
+                    `,
+                    [resolvedThreadId, currentUserId, recipientUserId, messageVenueId, messageContextLabel, content]
+                );
+
+                await pool.query(
+                    `
+                        DELETE FROM chat_thread_hidden
+                        WHERE thread_id IN (
+                            SELECT id
+                            FROM chat_threads
+                            WHERE owner_user_id = $1
+                              AND customer_user_id = $2
+                        )
+                          AND user_id IN ($1, $2)
+                    `,
+                    [ownerUserId, customerUserId]
+                );
+
+                await pool.query(
+                    `
+                        UPDATE chat_threads
+                        SET updated_at = NOW(),
+                            last_message_at = $2
+                        WHERE id = $1
+                    `,
+                    [resolvedThreadId, insertMessageResult.rows[0]?.created_at || new Date().toISOString()]
+                );
+
+                const threadPayload = await buildChatThreadPayload(resolvedThreadId, currentUserId);
+                return res.status(201).json({
+                    message: 'Chat message sent successfully',
+                    thread: threadPayload
+                });
+            } catch (error) {
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
+        async function markChatThreadRead(req, res) {
+            const currentUserId = await getAuthenticatedChatUserId(req);
+            const threadId = Number(req.params.threadId);
+
+            if (!currentUserId) {
+                return res.status(401).json({ message: 'Bạn cần đăng nhập để đọc tin nhắn.' });
+            }
+
+            if (!Number.isFinite(threadId)) {
+                return res.status(400).json({ message: 'Invalid thread id' });
+            }
+
+            try {
+                const participantCheck = await pool.query(
+                    `
+                        SELECT id, owner_user_id, customer_user_id
+                        FROM chat_threads
+                        WHERE id = $1
+                          AND ($2 = owner_user_id OR $2 = customer_user_id)
+                        LIMIT 1
+                    `,
+                    [threadId, currentUserId]
+                );
+
+                if (!participantCheck.rows.length) {
+                    return res.status(404).json({ message: 'Không tìm thấy cuộc trò chuyện.' });
+                }
+
+                const ownerUserId = String(participantCheck.rows[0].owner_user_id || '').trim();
+                const customerUserId = String(participantCheck.rows[0].customer_user_id || '').trim();
+
+                const relatedThreadsResult = await pool.query(
+                    `
+                        SELECT id
+                        FROM chat_threads
+                        WHERE owner_user_id = $1
+                          AND customer_user_id = $2
+                        ORDER BY id ASC
+                    `,
+                    [ownerUserId, customerUserId]
+                );
+
+                const threadIds = relatedThreadsResult.rows.map((row) => Number(row.id)).filter((value) => Number.isFinite(value));
+
+                if (threadIds.length) {
+                    await pool.query(
+                        `
+                            WITH related_threads AS (
+                                SELECT UNNEST($1::bigint[]) AS thread_id
+                            ),
+                            latest_messages AS (
+                                SELECT
+                                    rt.thread_id,
+                                    latest_message.id AS last_read_message_id,
+                                    COALESCE(latest_message.created_at, NOW()) AS last_read_at
+                                FROM related_threads AS rt
+                                LEFT JOIN LATERAL (
+                                    SELECT m.id, m.created_at
+                                    FROM chat_messages AS m
+                                    WHERE m.thread_id = rt.thread_id
+                                      AND m.recipient_user_id = $2
+                                    ORDER BY m.created_at DESC, m.id DESC
+                                    LIMIT 1
+                                ) AS latest_message ON TRUE
+                            )
+                            INSERT INTO chat_thread_reads (thread_id, user_id, last_read_message_id, last_read_at, updated_at)
+                            SELECT
+                                latest_messages.thread_id,
+                                $2,
+                                latest_messages.last_read_message_id,
+                                latest_messages.last_read_at,
+                                NOW()
+                            FROM latest_messages
+                            ON CONFLICT (thread_id, user_id)
+                            DO UPDATE
+                            SET last_read_message_id = EXCLUDED.last_read_message_id,
+                                last_read_at = EXCLUDED.last_read_at,
+                                updated_at = NOW()
+                        `,
+                        [threadIds, currentUserId]
+                    );
+                }
+
+                return res.json({ message: 'Chat thread marked as read', threadId, threadIds });
+            } catch (error) {
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
+        async function deleteChatThread(req, res) {
+            const currentUserId = await getAuthenticatedChatUserId(req);
+            const threadId = Number(req.params.threadId);
+
+            if (!currentUserId) {
+                return res.status(401).json({ message: 'Báº¡n cáº§n Ä‘Äƒng nháº­p Ä‘á»ƒ xÃ³a tin nháº¯n.' });
+            }
+
+            if (!Number.isFinite(threadId)) {
+                return res.status(400).json({ message: 'Invalid thread id' });
+            }
+
+            try {
+                const participantCheck = await pool.query(
+                    `
+                        SELECT id, owner_user_id, customer_user_id
+                        FROM chat_threads
+                        WHERE id = $1
+                          AND ($2 = owner_user_id OR $2 = customer_user_id)
+                        LIMIT 1
+                    `,
+                    [threadId, currentUserId]
+                );
+
+                if (!participantCheck.rows.length) {
+                    return res.status(404).json({ message: 'KhÃ´ng tÃ¬m tháº¥y cuá»™c trÃ² chuyá»‡n.' });
+                }
+
+                const ownerUserId = String(participantCheck.rows[0].owner_user_id || '').trim();
+                const customerUserId = String(participantCheck.rows[0].customer_user_id || '').trim();
+
+                const relatedThreadsResult = await pool.query(
+                    `
+                        SELECT id
+                        FROM chat_threads
+                        WHERE owner_user_id = $1
+                          AND customer_user_id = $2
+                        ORDER BY id ASC
+                    `,
+                    [ownerUserId, customerUserId]
+                );
+
+                const relatedThreadIds = relatedThreadsResult.rows.map((row) => Number(row.id)).filter((value) => Number.isFinite(value));
+
+                if (relatedThreadIds.length) {
+                    await pool.query(
+                        `
+                            INSERT INTO chat_thread_hidden (thread_id, user_id, hidden_at, updated_at)
+                            SELECT thread_id, $2, NOW(), NOW()
+                            FROM UNNEST($1::bigint[]) AS hidden_threads(thread_id)
+                            ON CONFLICT (thread_id, user_id)
+                            DO UPDATE
+                            SET hidden_at = EXCLUDED.hidden_at,
+                                updated_at = NOW()
+                        `,
+                        [relatedThreadIds, currentUserId]
+                    );
+                }
+
+                return res.json({
+                    message: 'Chat thread hidden',
+                    threadId,
+                    deletedThreadIds: relatedThreadIds
+                });
+            } catch (error) {
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
+        registerVersionedRoute('get', '/chat/threads', authenticateRequest, checkUserStatus, listChatThreads);
+        registerVersionedRoute('get', '/chat/venues/:venueId', authenticateRequest, checkUserStatus, getVenueChatThread);
+        registerVersionedRoute('post', '/chat/venues/:venueId/messages', authenticateRequest, checkUserStatus, sendVenueChatMessage);
+        registerVersionedRoute('post', '/chat/threads/:threadId/read', authenticateRequest, checkUserStatus, markChatThreadRead);
+        registerVersionedRoute('delete', '/chat/threads/:threadId', authenticateRequest, checkUserStatus, deleteChatThread);
+
         registerVersionedRoute('get', '/wards', listPublicWards);
         registerVersionedRoute('get', '/place-categories', listPublicPlaceCategories);
         registerVersionedRoute('get', '/merchant-services', listPublicMerchantServices);
@@ -6854,6 +7963,7 @@ async function generateWardIdFromName(name) {
         registerVersionedRoute('post', '/venues/:venueId/reviews/:reviewId/replies', authenticateOptional, requireAuth, createVenueReviewReply);
     registerVersionedRoute('post', '/venues/:venueId/reviews/:reviewId/replies/:replyId/like', authenticateOptional, requireAuth, toggleVenueReviewReplyLike);
         registerVersionedRoute('delete', '/venues/:venueId/reviews/:reviewId', authenticateOptional, requireAuth, deleteVenueReview);
+        registerVersionedRoute('post', '/venues', authenticateOptionalLenient, createVenueSubmission);
         registerVersionedRoute('post', '/feedback', authenticateOptional, submitFeedbackReport);
 
         registerVersionedRoute('get', '/admin/wards', authenticateRequest, requireAdminRole, listAdminWards);

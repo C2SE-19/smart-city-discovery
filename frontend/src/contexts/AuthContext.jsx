@@ -62,8 +62,15 @@ export function AuthProvider({ children }) {
         const parsedAuth = JSON.parse(savedAuth);
         const savedToken =
           parsedAuth.token || parsedAuth.accessToken || parsedAuth.access_token || '';
-        setUser(normalizeUser(parsedAuth.user));
-        setToken(savedToken);
+
+        if (!savedToken) {
+          localStorage.removeItem(AUTH_STORAGE_KEY);
+          setUser(null);
+          setToken('');
+        } else {
+          setUser(normalizeUser(parsedAuth.user));
+          setToken(savedToken);
+        }
       }
     } catch (error) {
       console.error('Failed to restore auth state:', error);

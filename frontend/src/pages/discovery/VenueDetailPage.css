@@ -43,6 +43,10 @@
   position: absolute;
   top: 2px;
   right: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  z-index: 4;
 }
 
 .venue-icon-btn {
@@ -59,6 +63,236 @@
 
 .venue-icon-btn.is-active {
   color: #d7263d;
+}
+
+.venue-chat-toggle-btn {
+  width: 38px;
+  height: 38px;
+  font-size: 1.15rem;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 8px 18px rgba(41, 48, 61, 0.12);
+}
+
+.venue-chat-toggle-btn.is-active {
+  color: #6f1212;
+}
+
+.venue-chat-widget {
+  position: absolute;
+  top: 52px;
+  right: 0;
+  width: min(390px, calc(100vw - 42px));
+  max-height: calc(100vh - 76px);
+  display: flex;
+  flex-direction: column;
+  border-radius: 22px;
+  overflow: hidden;
+  background: #f8f8f8;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 20px 45px rgba(24, 30, 38, 0.24);
+  z-index: 5;
+}
+
+.venue-chat-widget-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 16px;
+  background: linear-gradient(135deg, #a7a518, #d0b905);
+  color: #fff;
+}
+
+.venue-chat-widget-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.venue-chat-widget-avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  overflow: hidden;
+  flex: 0 0 auto;
+  border: 2px solid rgba(255, 255, 255, 0.75);
+}
+
+.venue-chat-widget-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.venue-chat-widget-brand strong,
+.venue-chat-widget-brand p,
+.venue-chat-widget-intro p,
+.venue-chat-widget-empty p {
+  margin: 0;
+}
+
+.venue-chat-widget-brand p {
+  margin-top: 2px;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.82rem;
+}
+
+.venue-chat-widget-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.venue-chat-widget-minimize {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 0;
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+
+.venue-chat-widget-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  flex: 1 1 auto;
+  padding: 14px;
+  background: #f7f7f7;
+  overflow: hidden;
+}
+
+.venue-chat-widget-intro {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border-radius: 16px;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.venue-chat-widget-intro-title {
+  font-weight: 700;
+  color: #222;
+}
+
+.venue-chat-widget-messages {
+  display: grid;
+  gap: 10px;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.venue-chat-widget-bubble {
+  max-width: 86%;
+  display: grid;
+  gap: 8px;
+  padding: 11px 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.venue-chat-widget-bubble header {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+}
+
+.venue-chat-widget-bubble header span {
+  font-size: 0.76rem;
+  color: #6c7481;
+}
+
+.venue-chat-widget-bubble p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.venue-chat-widget-context {
+  font-size: 0.78rem;
+  color: #8a5a12;
+}
+
+.venue-chat-widget-bubble.is-seller {
+  background: #ffffff;
+}
+
+.venue-chat-widget-bubble.is-customer {
+  margin-left: auto;
+  background: #dff7ef;
+  border-color: rgba(24, 167, 116, 0.18);
+}
+
+.venue-chat-widget-empty {
+  padding: 16px;
+  border-radius: 14px;
+  background: #ffffff;
+  border: 1px dashed rgba(0, 0, 0, 0.12);
+  text-align: center;
+  color: #5e6674;
+}
+
+.venue-chat-widget-form {
+  display: grid;
+  gap: 10px;
+}
+
+.venue-chat-widget-form textarea {
+  width: 100%;
+  min-height: 96px;
+  resize: vertical;
+  border-radius: 14px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  padding: 12px 14px;
+  font: inherit;
+  background: #ffffff;
+}
+
+.venue-chat-widget-context-select {
+  width: auto;
+  min-width: 150px;
+  max-width: 220px;
+  flex: 1 1 170px;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  padding: 10px 12px;
+  font: inherit;
+  background: #ffffff;
+}
+
+.venue-chat-widget-form-footer {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.venue-chat-widget-form-footer span {
+  color: #6d7480;
+  font-size: 0.86rem;
+}
+
+.venue-chat-widget-form-footer button {
+  border: 0;
+  border-radius: 12px;
+  padding: 10px 16px;
+  background: linear-gradient(135deg, #18a774, #119368);
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.venue-chat-widget-form-footer button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .venue-detail-address,
@@ -1009,10 +1243,30 @@
 [data-theme='dark'] .venue-comment-form textarea,
 [data-theme='dark'] .venue-review-reply-form input,
 [data-theme='dark'] .venue-review-action-btn,
-[data-theme='dark'] .venue-comment-upload-box {
+[data-theme='dark'] .venue-comment-upload-box,
+[data-theme='dark'] .venue-chat-widget,
+[data-theme='dark'] .venue-chat-widget-intro,
+[data-theme='dark'] .venue-chat-widget-bubble.is-seller,
+[data-theme='dark'] .venue-chat-widget-empty,
+[data-theme='dark'] .venue-chat-widget-form textarea {
   background: #2a2a2f;
   color: #f2f2f4;
   border-color: rgba(255, 255, 255, 0.15);
+}
+
+[data-theme='dark'] .venue-chat-toggle-btn {
+  background: rgba(42, 42, 47, 0.94);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+[data-theme='dark'] .venue-chat-widget-body {
+  background: #232328;
+}
+
+[data-theme='dark'] .venue-chat-widget-form-footer span,
+[data-theme='dark'] .venue-chat-widget-bubble header span,
+[data-theme='dark'] .venue-chat-widget-empty {
+  color: #c9c9cf;
 }
 
 .venue-comment-upload-box input {
@@ -1362,5 +1616,23 @@
   .venue-detail-ward,
   .venue-detail-description {
     font-size: 1rem;
+  }
+
+  .venue-chat-widget {
+    position: fixed;
+    top: 88px;
+    right: 16px;
+    left: 16px;
+    width: auto;
+    max-width: none;
+  }
+
+  .venue-chat-widget-form-footer {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .venue-chat-widget-context-select {
+    max-width: none;
   }
 }
