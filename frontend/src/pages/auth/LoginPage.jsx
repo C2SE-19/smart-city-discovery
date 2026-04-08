@@ -147,20 +147,28 @@ export default function LoginPage() {
 
   // Google OAuth Handler
   const handleGoogleSuccess = async (credentialResponse) => {
+    const googleCredential = credentialResponse?.credential;
+
+    if (!googleCredential) {
+      setError("Google login failed: missing credential token");
+      return;
+    }
+
+    setError("");
     setOauthLoading(true);
     try {
-      const result = await authService.loginWithGoogle(credentialResponse.credential);
+      const result = await authService.loginWithGoogle(googleCredential);
       authLogin(result.user, result.token);
       navigate(getRedirectPathByRole(result?.user?.role));
     } catch (err) {
-      alert(err.message || "Failed to login with Google");
+      setError(err?.message || "Failed to login with Google");
     } finally {
       setOauthLoading(false);
     }
   };
 
   const handleGoogleError = () => {
-    alert("Failed to login with Google");
+    setError("Failed to login with Google");
   };
 
   const handleGoogleIconClick = () => {
