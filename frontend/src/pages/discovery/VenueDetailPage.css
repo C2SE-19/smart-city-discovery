@@ -303,6 +303,30 @@
   line-height: 1.25;
 }
 
+.venue-detail-address-link {
+  margin: 6px 0 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font-size: 1.05rem;
+  line-height: 1.25;
+  color: #222;
+  text-decoration: none;
+  cursor: pointer;
+  width: fit-content;
+}
+
+.venue-detail-address-link:hover {
+  color: #0c6fdc;
+}
+
+.venue-detail-address-link:focus-visible {
+  outline: 2px solid #2b78e4;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 .venue-detail-opening-inline {
   margin: 8px 0 0;
   display: flex;
@@ -630,6 +654,33 @@
   font-weight: 700;
 }
 
+.venue-star-display {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: #d58e10;
+  line-height: 1;
+}
+
+.venue-star-display-item {
+  font-size: 1em;
+}
+
+.venue-star-display-item.is-full {
+  color: #d58e10;
+}
+
+.venue-star-display-item.is-empty {
+  color: #b9b9b9;
+}
+
+.venue-star-display-item.is-half {
+  color: transparent;
+  background: linear-gradient(90deg, #d58e10 50%, #b9b9b9 50%);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
 .venue-review-actions {
   margin-top: 10px;
   display: flex;
@@ -711,6 +762,13 @@
 
 .venue-review-reply-item p {
   margin: 0;
+}
+
+.venue-review-reply-actions {
+  margin-top: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .venue-review-reply-empty {
@@ -891,6 +949,13 @@
   color: #f3b300;
 }
 
+.venue-star-btn.is-half-active {
+  color: transparent;
+  background: linear-gradient(90deg, #f3b300 50%, #d2d2d2 50%);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
 .venue-star-btn:focus-visible {
   outline: 2px solid #2b78e4;
   outline-offset: 2px;
@@ -924,6 +989,14 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
   gap: 10px;
+}
+
+.venue-image-group-section {
+  margin-top: 12px;
+}
+
+.venue-image-group-section h4 {
+  margin: 0;
 }
 
 .venue-detail-error-box {
@@ -1270,6 +1343,243 @@
   min-width: 148px;
   border: 1px solid rgba(0, 0, 0, 0.24);
   border-radius: 4px;
+}
+
+.venue-report-modal-card {
+  width: min(760px, 96vw);
+  background: #f7f4ef;
+  border-radius: 20px;
+  padding: 0;
+  overflow: hidden;
+}
+
+.venue-comment-report-modal {
+  width: min(760px, 96vw);
+  background: #f7f4ef;
+  border-radius: 20px;
+  padding: 0;
+  overflow: hidden;
+}
+
+.venue-report-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 22px 24px 14px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.venue-report-modal-head h3 {
+  margin: 0;
+  font-size: 2.8rem;
+  line-height: 1.1;
+}
+
+.venue-report-modal-head button {
+  border: 0;
+  background: transparent;
+  font-size: 2rem;
+  line-height: 1;
+  cursor: pointer;
+  color: #666;
+}
+
+.venue-report-modal-form {
+  display: grid;
+  gap: 14px;
+  padding: 18px 24px 22px;
+}
+
+.venue-report-modal-form label {
+  display: grid;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.venue-report-modal-form select,
+.venue-report-modal-form textarea,
+.venue-report-modal-form input[type='text'] {
+  width: 100%;
+  border: 1px solid rgba(0, 0, 0, 0.16);
+  border-radius: 12px;
+  background: #fff;
+  font: inherit;
+  padding: 12px 14px;
+}
+
+.venue-report-modal-form textarea {
+  resize: vertical;
+  min-height: 110px;
+}
+
+.venue-report-upload-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.venue-report-upload-btn {
+  min-width: 170px;
+  border: 1px dashed rgba(0, 0, 0, 0.2);
+  border-radius: 12px;
+  background: #fff;
+  padding: 12px 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.venue-report-upload-btn input {
+  display: none;
+}
+
+.venue-report-upload-preview {
+  position: relative;
+  width: 180px;
+  height: 100px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(0, 0, 0, 0.16);
+}
+
+.venue-report-upload-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.venue-report-upload-preview button {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.66);
+  color: #fff;
+  cursor: pointer;
+}
+
+.venue-report-severity-row {
+  display: grid;
+  gap: 8px;
+}
+
+.venue-report-severity-row > span {
+  font-weight: 600;
+}
+
+.venue-report-severity-row > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.venue-report-severity-chip {
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: 999px;
+  background: #fff;
+  padding: 8px 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.venue-report-severity-chip.is-active {
+  border-color: #2a72d6;
+  color: #1b4f97;
+  background: rgba(42, 114, 214, 0.08);
+}
+
+.venue-report-warning {
+  margin: 0;
+  color: #a0681b;
+  font-weight: 600;
+  background: rgba(214, 156, 60, 0.14);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.venue-report-status {
+  margin: 0;
+  font-weight: 600;
+}
+
+.venue-report-status.success {
+  color: #157a43;
+}
+
+.venue-report-status.error {
+  color: #b12727;
+}
+
+.venue-report-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.venue-report-actions button {
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 12px;
+  background: #fff;
+  padding: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.venue-report-actions button.is-danger {
+  border-color: #e34f4f;
+  background: #e74b4b;
+  color: #fff;
+}
+
+.venue-report-intro {
+  margin: 0;
+  padding: 16px 24px 0;
+  color: #555;
+}
+
+.venue-comment-report-preview {
+  margin: 12px 24px 0;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 14px;
+  background: #fff;
+  padding: 12px;
+  display: grid;
+  gap: 6px;
+}
+
+.venue-comment-report-preview strong,
+.venue-comment-report-preview p {
+  margin: 0;
+}
+
+.venue-report-radio-grid {
+  margin: 0;
+  border: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+}
+
+.venue-report-radio-grid legend {
+  grid-column: 1 / -1;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.venue-report-radio-grid label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
 }
 
 @media (max-width: 1000px) {

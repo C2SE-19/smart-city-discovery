@@ -8,8 +8,13 @@ import { fetchPlaceCategories } from '../../services/api/placeCategoriesApi';
 import { fetchMerchantServices } from '../../services/api/merchantServicesApi';
 import { fetchWards } from '../../services/api/wardsApi';
 import { fetchVenues } from '../../services/api/venuesApi';
+import {
+  fetchForYouRecommendations,
+  fetchUserPreferences
+} from '../../services/api/userPreferencesApi';
 import OverviewCityMapCard from '../../components/map/OverviewCityMapCard';
 import heroFoodImage from '../../assets/images/anh1.png';
+import UserPreferenceWizard from '../../components/preferences/UserPreferenceWizard';
 import './OverviewPage.css';
 
 const FALLBACK_VENUE_IMAGE =
@@ -48,6 +53,32 @@ function normalizeVenueMetadata(metadata) {
   }
 
   return {};
+}
+
+function normalizeSearchText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D')
+    .toLowerCase()
+    .trim();
+}
+
+function normalizeExactSearchText(value) {
+  return String(value || '').toLowerCase().trim();
+}
+
+function hasVietnameseToneMarks(value) {
+  return /[\u0300\u0301\u0303\u0309\u0323]/.test(String(value || '').normalize('NFD'));
+}
+
+function normalizeVietnameseToneInsensitive(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300\u0301\u0303\u0309\u0323]/g, '')
+    .toLowerCase()
+    .trim();
 }
 
 function getVenueImage(venue) {
@@ -179,7 +210,7 @@ function OverviewPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { language } = useLanguage();
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const t = translations[language] || translations.en;
   const [favoriteKeys, setFavoriteKeys] = useState(new Set());
   const [searchInput, setSearchInput] = useState('');
@@ -207,6 +238,13 @@ function OverviewPage() {
   const [imageError, setImageError] = useState('');
   const [searchPage, setSearchPage] = useState(1);
   const [searchTriggered, setSearchTriggered] = useState(false);
+  const [userPreference, setUserPreference] = useState(null);
+  const [preferencesLoading, setPreferencesLoading] = useState(false);
+  const [showPreferenceWizard, setShowPreferenceWizard] = useState(false);
+  const [forYouVenues, setForYouVenues] = useState([]);
+  const [forYouLoading, setForYouLoading] = useState(false);
+  const [forYouError, setForYouError] = useState('');
+  const [geoCoordinates, setGeoCoordinates] = useState({ latitude: null, longitude: null });
   const sliderRefs = useRef(new Map());
   const libraryInputRef = useRef(null);
   const cameraInputRef = useRef(null);
@@ -250,17 +288,62 @@ function OverviewPage() {
       params.serviceIds = appliedServiceIds.join(',');
     }
 
-    if (submittedSearch.trim()) {
-      params.q = submittedSearch.trim();
+    return params;
+  }, [appliedCategoryIds, appliedWardIds, appliedServiceIds]);
+
+  const normalizedSubmittedSearch = useMemo(
+    () => normalizeSearchText(submittedSearch),
+    [submittedSearch]
+  );
+  const exactSubmittedSearch = useMemo(
+    () => normalizeExactSearchText(submittedSearch),
+    [submittedSearch]
+  );
+  const toneInsensitiveSubmittedSearch = useMemo(
+    () => normalizeVietnameseToneInsensitive(submittedSearch),
+    [submittedSearch]
+  );
+  const submittedSearchHasTone = useMemo(
+    () => hasVietnameseToneMarks(submittedSearch),
+    [submittedSearch]
+  );
+
+  const displayedVenues = useMemo(() => {
+    if (!normalizedSubmittedSearch) {
+      return venues;
     }
 
-    return params;
-  }, [appliedCategoryIds, appliedWardIds, appliedServiceIds, submittedSearch]);
+    if (submittedSearchHasTone) {
+      return venues.filter((venue) => {
+        const venueName = venue.name || venue.title || '';
+        return normalizeExactSearchText(venueName).includes(exactSubmittedSearch);
+      });
+    }
+
+    return venues.filter((venue) => {
+      const venueName = venue.name || venue.title || '';
+      const exactName = normalizeExactSearchText(venueName);
+      const toneInsensitiveName = normalizeVietnameseToneInsensitive(venueName);
+      const asciiName = normalizeSearchText(venueName);
+
+      return (
+        exactName.includes(exactSubmittedSearch)
+        || toneInsensitiveName.includes(toneInsensitiveSubmittedSearch)
+        || asciiName.includes(normalizedSubmittedSearch)
+      );
+    });
+  }, [
+    venues,
+    normalizedSubmittedSearch,
+    submittedSearchHasTone,
+    exactSubmittedSearch,
+    toneInsensitiveSubmittedSearch,
+  ]);
 
   const categorySections = useMemo(() => {
     const groupedByCategory = new Map();
 
-    venues.forEach((venue) => {
+    displayedVenues.forEach((venue) => {
       const categoryId = getVenueCategoryId(venue);
 
       if (categoryId === null) {
@@ -313,11 +396,11 @@ function OverviewPage() {
     });
 
     return visibleSections;
-  }, [categories, venues, selectedCategoryIds]);
+  }, [categories, displayedVenues, selectedCategoryIds]);
 
   const uncategorizedVenues = useMemo(
-    () => venues.filter((venue) => getVenueCategoryId(venue) === null),
-    [venues]
+    () => displayedVenues.filter((venue) => getVenueCategoryId(venue) === null),
+    [displayedVenues]
   );
 
   const activeFilterCount =
@@ -333,11 +416,33 @@ function OverviewPage() {
   const isSearchMode = searchTriggered;
 
   const searchPageSize = 8;
-  const totalSearchPages = Math.max(1, Math.ceil(venues.length / searchPageSize));
+  const totalSearchPages = Math.max(1, Math.ceil(displayedVenues.length / searchPageSize));
   const pagedSearchVenues = useMemo(() => {
     const start = (searchPage - 1) * searchPageSize;
-    return venues.slice(start, start + searchPageSize);
-  }, [venues, searchPage]);
+    return displayedVenues.slice(start, start + searchPageSize);
+  }, [displayedVenues, searchPage]);
+
+  const userPreferenceSignal = useMemo(() => {
+    if (!userPreference) {
+      return '';
+    }
+
+    const preferredTimes = Array.isArray(userPreference.preferredTimes)
+      ? [...userPreference.preferredTimes].sort().join('|')
+      : '';
+    const interests = Array.isArray(userPreference.interests)
+      ? [...userPreference.interests].sort().join('|')
+      : '';
+
+    return [
+      userPreference.ageRangeKey || '',
+      userPreference.preferredGender || '',
+      preferredTimes,
+      interests,
+      userPreference.updatedAt || '',
+      userPreference.onboardingCompleted ? '1' : '0'
+    ].join('::');
+  }, [userPreference]);
 
   useEffect(() => {
     const fetchFavorites = async () => {
@@ -362,6 +467,110 @@ function OverviewPage() {
 
     fetchFavorites();
   }, [apiUrl, token]);
+
+  useEffect(() => {
+    if (!token) {
+      setUserPreference(null);
+      setShowPreferenceWizard(false);
+      return;
+    }
+
+    let isMounted = true;
+
+    const loadUserPreference = async () => {
+      setPreferencesLoading(true);
+
+      try {
+        const response = await fetchUserPreferences();
+        if (!isMounted) {
+          return;
+        }
+
+        const preference = response?.preference || null;
+        setUserPreference(preference);
+
+        if (!preference?.onboardingCompleted) {
+          setShowPreferenceWizard(true);
+        }
+      } catch {
+        if (!isMounted) {
+          return;
+        }
+
+        setUserPreference(null);
+      } finally {
+        if (isMounted) {
+          setPreferencesLoading(false);
+        }
+      }
+    };
+
+    loadUserPreference();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [token, user?.id]);
+
+  useEffect(() => {
+    if (!token || !userPreference?.onboardingCompleted) {
+      setForYouVenues([]);
+      setForYouError('');
+      return;
+    }
+
+    let isMounted = true;
+
+    const loadForYouVenues = async () => {
+      setForYouLoading(true);
+      setForYouError('');
+
+      try {
+        const params = { limit: 12 };
+        const latitude = Number(geoCoordinates.latitude);
+        const longitude = Number(geoCoordinates.longitude);
+
+        if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+          params.latitude = latitude;
+          params.longitude = longitude;
+        }
+
+        const response = await fetchForYouRecommendations(params);
+
+        if (!isMounted) {
+          return;
+        }
+
+        setForYouVenues(Array.isArray(response?.recommendations) ? response.recommendations : []);
+      } catch (error) {
+        if (!isMounted) {
+          return;
+        }
+
+        setForYouError(error?.response?.data?.message || 'Unable to load personalized places right now.');
+        setForYouVenues([]);
+      } finally {
+        if (isMounted) {
+          setForYouLoading(false);
+        }
+      }
+    };
+
+    loadForYouVenues();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [token, userPreferenceSignal, geoCoordinates.latitude, geoCoordinates.longitude]);
+
+  useEffect(() => {
+    const sliderNode = sliderRefs.current.get('for-you');
+    if (!sliderNode) {
+      return;
+    }
+
+    sliderNode.scrollLeft = 0;
+  }, [forYouVenues, userPreferenceSignal]);
 
   useEffect(() => {
     let isMounted = true;
@@ -584,12 +793,31 @@ function OverviewPage() {
 
   // retrieve user's location and (dummy) weather
   useEffect(() => {
-    if (!navigator.geolocation) return;
     const weatherLabel = translations[language]?.weather?.sunny || 'Sunny';
-    navigator.geolocation.getCurrentPosition(() => {
-      setCurrentLocation('Da Nang, Sơn Trà');
+
+    if (!navigator.geolocation) {
+      setCurrentLocation('Da Nang, Son Tra');
       setCurrentWeather(`29°C, ${weatherLabel}`);
-    });
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const latitude = Number(position?.coords?.latitude);
+        const longitude = Number(position?.coords?.longitude);
+
+        if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+          setGeoCoordinates({ latitude, longitude });
+        }
+
+        setCurrentLocation('Da Nang, Son Tra');
+        setCurrentWeather(`29°C, ${weatherLabel}`);
+      },
+      () => {
+        setCurrentLocation('Da Nang, Son Tra');
+        setCurrentWeather(`29°C, ${weatherLabel}`);
+      }
+    );
   }, [language]);
 
   const handlePickImage = (source) => {
@@ -630,6 +858,11 @@ function OverviewPage() {
     }
 
     navigate(`/venues/${venue.id}`);
+  };
+
+  const handlePreferenceSaved = (savedPreference) => {
+    setUserPreference(savedPreference || null);
+    setShowPreferenceWizard(false);
   };
 
   const registerSliderRef = (sectionId) => (node) => {
@@ -904,13 +1137,90 @@ function OverviewPage() {
         ) : null}
       </section>
 
+      {!isSearchMode && token ? (
+        <section className="overview-section overview-content-lane overview-for-you-section">
+          <div className="overview-section-heading">
+            <h2>For You</h2>
+            <span />
+            <p className="overview-section-subcopy">
+              Personalized places based on your profile, interests, and nearby distance.
+            </p>
+          </div>
+
+          {preferencesLoading ? (
+            <p className="overview-empty-copy">Checking your preference profile...</p>
+          ) : null}
+
+          {!preferencesLoading && !userPreference?.onboardingCompleted ? (
+            <div className="overview-for-you-empty">
+              <p>Complete your preference form to unlock personalized recommendations.</p>
+              <button type="button" onClick={() => setShowPreferenceWizard(true)}>
+                Set preferences
+              </button>
+            </div>
+          ) : null}
+
+          {!preferencesLoading && userPreference?.onboardingCompleted && forYouError ? (
+            <p className="overview-inline-error">{forYouError}</p>
+          ) : null}
+
+          {!preferencesLoading && userPreference?.onboardingCompleted && forYouLoading ? (
+            <p className="overview-empty-copy">Loading personalized places...</p>
+          ) : null}
+
+          {!preferencesLoading &&
+          userPreference?.onboardingCompleted &&
+          !forYouLoading &&
+          !forYouError &&
+          forYouVenues.length > 0 ? (
+            <div className="overview-category-board">
+              <button
+                type="button"
+                className="overview-slider-btn prev"
+                aria-label="Scroll For You left"
+                onClick={() => scrollCategorySlider('for-you', -1)}
+              />
+              <div
+                className="overview-dynamic-grid overview-dynamic-grid-slider"
+                ref={registerSliderRef('for-you')}
+              >
+                {forYouVenues.map((venue) => (
+                  <VenueCard
+                    key={`for-you-${venue.id}`}
+                    venue={venue}
+                    isFavorite={isFavorite('place', venue.id)}
+                    onToggleFavorite={handleToggleFavorite}
+                    onExplore={handleExploreVenue}
+                    services={getVenueServices(venue, serviceNameById)}
+                  />
+                ))}
+              </div>
+              <button
+                type="button"
+                className="overview-slider-btn next"
+                aria-label="Scroll For You right"
+                onClick={() => scrollCategorySlider('for-you', 1)}
+              />
+            </div>
+          ) : null}
+
+          {!preferencesLoading &&
+          userPreference?.onboardingCompleted &&
+          !forYouLoading &&
+          !forYouError &&
+          !forYouVenues.length ? (
+            <p className="overview-empty-copy">No personalized place found yet. Try updating your preferences.</p>
+          ) : null}
+        </section>
+      ) : null}
+
       {isSearchMode ? (
         <section className="overview-section overview-search-result-section">
           <div className="overview-section-heading">
             <h2>Search Results</h2>
             <span />
             <p className="overview-section-subcopy">
-              Results for "{submittedSearch.trim()}" ({venues.length})
+              Results for "{submittedSearch.trim()}" ({displayedVenues.length})
             </p>
           </div>
 
@@ -964,7 +1274,7 @@ function OverviewPage() {
           </div>
         </section>
       ) : (
-        <section className="overview-section">
+        <section className="overview-section overview-content-lane overview-dynamic-showcase-section">
           <div className="overview-section-heading">
             <h2>Dynamic Category Showcase</h2>
             <span />
@@ -1079,6 +1389,14 @@ function OverviewPage() {
           <OverviewCityMapCard />
         </section>
       )}
+
+      <UserPreferenceWizard
+        isOpen={showPreferenceWizard && Boolean(token)}
+        onClose={() => setShowPreferenceWizard(false)}
+        onSaved={handlePreferenceSaved}
+        initialPreference={userPreference}
+        currentCoordinates={geoCoordinates}
+      />
     </div>
   );
 }

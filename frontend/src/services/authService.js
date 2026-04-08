@@ -26,7 +26,8 @@ export const authService = {
   loginWithGoogle: async (token) => {
     try {
       const response = await axios.post(`${API_URL}/auth/google`, {
-        token
+        token,
+        credential: token
       });
       return response.data;
     } catch (err) {
