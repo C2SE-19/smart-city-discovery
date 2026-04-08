@@ -9,6 +9,7 @@ import { fetchMerchantServices } from '../../services/api/merchantServicesApi';
 import { fetchWards } from '../../services/api/wardsApi';
 import { fetchVenues } from '../../services/api/venuesApi';
 import OverviewCityMapCard from '../../components/map/OverviewCityMapCard';
+import heroFoodImage from '../../assets/images/anh1.png';
 import './OverviewPage.css';
 
 const FALLBACK_VENUE_IMAGE =
@@ -671,7 +672,7 @@ function OverviewPage() {
           <div className="overview-hero-visual">
             <div className="overview-hero-plate">
               <img
-                src="https://media.discordapp.net/attachments/1480399002565349536/1481206693173137470/anh_myquang.png?ex=69b3ca3b&is=69b278bb&hm=106ee06cafe406d8b99a675fea25f705d570ea648443a19d7c29fba2b87ec3f6&=&format=webp&quality=lossless&width=988&height=859"
+                src={heroFoodImage}
                 alt="Asian food bowl"
                 className="overview-hero-image"
               />
@@ -837,7 +838,7 @@ function OverviewPage() {
           </label>
 
           <button type="button" className="overview-search-submit" onClick={applySearch}>
-            Search
+            🔍 Search
           </button>
 
           <button

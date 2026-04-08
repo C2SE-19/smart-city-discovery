@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import axios from 'axios';
 import {
 	createVenueReviewReply,
@@ -15,6 +15,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { normalizeVenueMetadata } from '../../components/map/cityMapUtils';
+import { fetchVenueChatThread, markChatThreadRead, sendVenueChatMessage } from '../../services/api/chatApi';
 import './VenueDetailPage.css';
 
 const FALLBACK_VENUE_IMAGE =
@@ -86,6 +87,8 @@ const PAGE_I18N = {
 		replyTitlePlaceholder: 'Title'
 	}
 };
+const CHAT_DELETE_SYNC_KEY = 'chat_thread_deleted_sync';
+const ACTIVE_CHAT_THREAD_SYNC_KEY = 'active_chat_thread_sync';
 
 function normalizeModerationText(value) {
 	return String(value || '')
@@ -210,6 +213,56 @@ function resolveVenuePriceRange(venue) {
 	return directCandidates[0] || 'Đang cập nhật';
 }
 
+function resolveChatOwnerName(venue) {
+	const metadata = normalizeVenueMetadata(venue?.metadata);
+	const candidates = [
+		venue?.owner_name,
+		venue?.ownerName,
+		venue?.merchant_name,
+		venue?.merchantName,
+		venue?.fullname,
+		venue?.fullName,
+		metadata.ownerName,
+		metadata.owner_name,
+		metadata.merchantName,
+		metadata.merchant_name,
+		metadata.contactName,
+		metadata.contact_name
+	]
+		.map((item) => String(item || '').trim())
+		.filter(Boolean);
+
+	return candidates[0] || 'Chủ quán';
+}
+
+function buildVenueChatMeta(venue, fallback = {}) {
+	return {
+		id: String(venue?.id ?? fallback.id ?? '').trim(),
+		ownerName: String(fallback.ownerName || resolveChatOwnerName(venue)).trim(),
+		name: resolveVenueName(venue),
+		address: String(venue?.address || fallback.address || '').trim(),
+		ward_name: String(venue?.ward_name || fallback.ward_name || '').trim(),
+		cover_image_url: resolveCoverImage(venue),
+		price: String(fallback.price || '').trim()
+	};
+}
+
+function buildChatContextLine(message, fallbackVenueMeta = null) {
+	const resolvedVenueName = String(message?.venueName || fallbackVenueMeta?.name || '').trim();
+	const resolvedVenueAddress = String(message?.venueAddress || fallbackVenueMeta?.address || '').trim();
+	const resolvedContextLabel = String(message?.contextLabel || '').trim();
+
+	if (resolvedVenueName) {
+		return `Về quán: ${resolvedVenueName}${resolvedVenueAddress ? ` · ${resolvedVenueAddress}` : ''}`;
+	}
+
+	if (resolvedContextLabel) {
+		return `Chủ đề: ${resolvedContextLabel}`;
+	}
+
+	return '';
+}
+
 function normalizeScheduleLabel(item) {
 	const key = String(item?.key || '').toLowerCase();
 	return WEEK_DAYS.find((day) => day.key === key)?.label || item?.label || '';
@@ -236,8 +289,9 @@ function buildReviewReportQuery(venue, review) {
 
 function VenueDetailPage() {
 	const { venueId } = useParams();
+	const location = useLocation();
 	const navigate = useNavigate();
-	const { token } = useAuth();
+	const { token, user } = useAuth();
 	const { language } = useLanguage();
 	const { theme } = useTheme();
 	const apiUrl = useMemo(() => import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api', []);
@@ -276,12 +330,23 @@ function VenueDetailPage() {
 	const [favoriteCollection, setFavoriteCollection] = useState([]);
 	const [favoriteCollectionLoading, setFavoriteCollectionLoading] = useState(false);
 	const [favoriteCollectionError, setFavoriteCollectionError] = useState('');
+	const [chatMessages, setChatMessages] = useState([]);
+	const [chatInput, setChatInput] = useState('');
+	const [chatContextOptions, setChatContextOptions] = useState([]);
+	const [selectedChatContextValue, setSelectedChatContextValue] = useState('');
+	const [chatSending, setChatSending] = useState(false);
+	const [chatLoading, setChatLoading] = useState(false);
+	const [chatError, setChatError] = useState('');
+	const [showChatWidget, setShowChatWidget] = useState(false);
+	const [activeChatThreadId, setActiveChatThreadId] = useState(null);
+	const [syncedChatThread, setSyncedChatThread] = useState(null);
 	const [reviewForm, setReviewForm] = useState({
 		rating: null,
 		title: '',
 		comment: '',
 		images: []
 	});
+	const chatListRef = useRef(null);
 	const shareUrl = useMemo(() => {
 		if (typeof window !== 'undefined' && window.location?.origin) {
 			return `${window.location.origin}/venues/${venueId}`;
@@ -293,6 +358,49 @@ function VenueDetailPage() {
 	const weeklySchedule = useMemo(() => resolveWeeklySchedule(venue), [venue]);
 	const todaySchedule = useMemo(() => resolveTodaySchedule(weeklySchedule), [weeklySchedule]);
 	const venuePriceRange = useMemo(() => resolveVenuePriceRange(venue), [venue]);
+	const chatVenueMeta = useMemo(
+		() => (venue ? buildVenueChatMeta(venue, { price: venuePriceRange }) : null),
+		[venue, venuePriceRange]
+	);
+	const selectedChatThreadId = useMemo(() => {
+		const numericValue = Number(location.state?.chatThreadId || 0);
+		return Number.isFinite(numericValue) && numericValue > 0 ? numericValue : null;
+	}, [location.state]);
+	const syncedChatThreadId = useMemo(() => {
+		const numericValue = Number(syncedChatThread?.threadId || 0);
+		return Number.isFinite(numericValue) && numericValue > 0 ? numericValue : null;
+	}, [syncedChatThread]);
+	const shouldAutoOpenChat = useMemo(() => Boolean(location.state?.openChat), [location.state]);
+	const isCurrentUserVenueOwner = useMemo(() => {
+		const venueOwnerUserId = String(venue?.owner_user_id || venue?.ownerUserId || '').trim();
+		const currentUserId = String(user?.id || '').trim();
+		return Boolean(venueOwnerUserId) && Boolean(currentUserId) && venueOwnerUserId === currentUserId;
+	}, [venue, user]);
+	const chatConversationGroupKey = useMemo(() => {
+		const venueOwnerUserId = String(venue?.owner_user_id || venue?.ownerUserId || '').trim();
+		const currentUserId = String(user?.id || '').trim();
+		if (!venueOwnerUserId || !currentUserId || venueOwnerUserId === currentUserId) {
+			return '';
+		}
+		return `${venueOwnerUserId}::${currentUserId}`;
+	}, [venue, user]);
+	const effectiveSelectedChatThreadId = useMemo(() => {
+		if (selectedChatThreadId) {
+			return selectedChatThreadId;
+		}
+
+		if (!isCurrentUserVenueOwner || !syncedChatThreadId) {
+			return null;
+		}
+
+		const syncedVenueId = String(syncedChatThread?.venueId || '').trim();
+		const currentVenueId = String(venueId || '').trim();
+		return syncedVenueId && currentVenueId && syncedVenueId === currentVenueId ? syncedChatThreadId : null;
+	}, [selectedChatThreadId, isCurrentUserVenueOwner, syncedChatThreadId, syncedChatThread, venueId]);
+	const canUseVenueChat = useMemo(
+		() => Boolean(String(venue?.owner_user_id || venue?.ownerUserId || '').trim()),
+		[venue]
+	);
 	const favoriteVenueId = useMemo(() => String(venue?.id ?? venue?.venue_id ?? venueId ?? '').trim(), [venue?.id, venue?.venue_id, venueId]);
 	const authToken = useMemo(() => String(token || '').replace(/^Bearer\s+/i, '').trim(), [token]);
 	const reviewImagePreviews = useMemo(
@@ -396,6 +504,191 @@ function VenueDetailPage() {
 			window.clearInterval(intervalId);
 		};
 	}, [venueId]);
+
+	useEffect(() => {
+		if (shouldAutoOpenChat) {
+			setShowChatWidget(true);
+		}
+	}, [shouldAutoOpenChat]);
+
+	useEffect(() => {
+		const applySyncedChatThread = (payload) => {
+			if (!payload || typeof payload !== 'object') {
+				setSyncedChatThread(null);
+				return;
+			}
+
+			setSyncedChatThread({
+				threadId: payload.threadId || null,
+				venueId: payload.venueId || null,
+				ownerUserId: payload.ownerUserId || '',
+				customerUserId: payload.customerUserId || ''
+			});
+		};
+
+		try {
+			const rawValue = window.localStorage.getItem(ACTIVE_CHAT_THREAD_SYNC_KEY);
+			applySyncedChatThread(rawValue ? JSON.parse(rawValue) : null);
+		} catch {
+			setSyncedChatThread(null);
+		}
+
+		const handleActiveChatThreadChanged = (event) => {
+			applySyncedChatThread(event?.detail || null);
+		};
+
+		const handleActiveChatThreadStorage = (event) => {
+			if (event.key !== ACTIVE_CHAT_THREAD_SYNC_KEY) {
+				return;
+			}
+
+			try {
+				applySyncedChatThread(event.newValue ? JSON.parse(event.newValue) : null);
+			} catch {
+				setSyncedChatThread(null);
+			}
+		};
+
+		window.addEventListener('active-chat-thread-changed', handleActiveChatThreadChanged);
+		window.addEventListener('storage', handleActiveChatThreadStorage);
+
+		return () => {
+			window.removeEventListener('active-chat-thread-changed', handleActiveChatThreadChanged);
+			window.removeEventListener('storage', handleActiveChatThreadStorage);
+		};
+	}, []);
+
+	useEffect(() => {
+		if (!showChatWidget || !authToken || !venueId) {
+			return;
+		}
+
+		let active = true;
+
+		const loadChatThread = async (showLoader = true) => {
+			if (showLoader) {
+				setChatLoading(true);
+			}
+
+			try {
+				const data = await fetchVenueChatThread(
+					venueId,
+					effectiveSelectedChatThreadId ? { threadId: effectiveSelectedChatThreadId } : {},
+					token
+				);
+				if (!active) {
+					return;
+				}
+
+				setChatError('');
+				setActiveChatThreadId(data?.thread?.id || null);
+				setChatMessages(Array.isArray(data?.thread?.messages) ? data.thread.messages : []);
+				const nextContextOptions = Array.isArray(data?.contextOptions) ? data.contextOptions : [];
+				setChatContextOptions(nextContextOptions);
+				setSelectedChatContextValue((prev) => {
+					if (prev && (prev === 'other' || nextContextOptions.some((option) => String(option?.id || '') === prev))) {
+						return prev;
+					}
+
+					const currentVenueOption = nextContextOptions.find((option) => String(option?.id || '') === String(venueId || ''));
+					if (currentVenueOption) {
+						return String(currentVenueOption.id);
+					}
+
+					return 'other';
+				});
+			} catch (requestError) {
+				if (!active) {
+					return;
+				}
+
+				setChatMessages([]);
+				setActiveChatThreadId(null);
+				setChatContextOptions([]);
+				setSelectedChatContextValue('');
+				setChatError(requestError?.response?.data?.message || 'Khong the tai hoi thoai.');
+			} finally {
+				if (active && showLoader) {
+					setChatLoading(false);
+				}
+			}
+		};
+
+		loadChatThread(true);
+		const intervalId = window.setInterval(() => loadChatThread(false), 5000);
+
+		return () => {
+			active = false;
+			window.clearInterval(intervalId);
+		};
+	}, [showChatWidget, authToken, venueId, effectiveSelectedChatThreadId]);
+
+	useEffect(() => {
+		if (!chatListRef.current) {
+			return;
+		}
+
+		chatListRef.current.scrollTop = chatListRef.current.scrollHeight;
+	}, [chatMessages]);
+
+	useEffect(() => {
+		if (!showChatWidget || !activeChatThreadId || !authToken || !chatMessages.length) {
+			return;
+		}
+
+		markChatThreadRead(activeChatThreadId, token)
+			.then((result) => {
+				window.dispatchEvent(new CustomEvent('chat-threads-read', { detail: result || {} }));
+			})
+			.catch(() => {});
+	}, [showChatWidget, activeChatThreadId, authToken, token, chatMessages.length]);
+
+	useEffect(() => {
+		const applyDeletedThread = (detail) => {
+			const deletedGroupKey = String(detail?.groupKey || '').trim();
+			const deletedVenueId = String(detail?.venueId || '').trim();
+			const deletedThreadIds = new Set(
+				(Array.isArray(detail?.deletedThreadIds) ? detail.deletedThreadIds : []).map((value) => String(value))
+			);
+			const currentVenueId = String(venueId || '').trim();
+
+			const matchesActiveThread = activeChatThreadId && deletedThreadIds.has(String(activeChatThreadId));
+			const matchesConversationGroup = deletedGroupKey && chatConversationGroupKey && deletedGroupKey === chatConversationGroupKey;
+			const matchesVenue = deletedVenueId && currentVenueId && deletedVenueId === currentVenueId;
+
+			if (!matchesActiveThread && !matchesConversationGroup && !matchesVenue) {
+				return;
+			}
+
+			setChatMessages([]);
+			setActiveChatThreadId(null);
+			setChatInput('');
+			setChatError('');
+		};
+
+		const handleDeletedThread = (event) => {
+			applyDeletedThread(event?.detail || {});
+		};
+
+		const handleDeletedThreadStorage = (event) => {
+			if (event.key !== CHAT_DELETE_SYNC_KEY || !event.newValue) {
+				return;
+			}
+
+			try {
+				applyDeletedThread(JSON.parse(event.newValue));
+			} catch {
+				// Ignore malformed sync payloads.
+			}
+		};
+
+		window.addEventListener('chat-thread-deleted', handleDeletedThread);
+		window.addEventListener('storage', handleDeletedThreadStorage);
+		return () => {
+			window.removeEventListener('chat-thread-deleted', handleDeletedThread);
+			window.removeEventListener('storage', handleDeletedThreadStorage);
+		};
+	}, [activeChatThreadId, chatConversationGroupKey, venueId]);
 
 	useEffect(() => {
 		let active = true;
@@ -621,6 +914,56 @@ function VenueDetailPage() {
 		}
 	};
 
+	const handleSendChatMessage = async (event) => {
+		event.preventDefault();
+
+		const normalizedMessage = chatInput.trim();
+		if (!normalizedMessage || !venue) {
+			return;
+		}
+
+		if (!authToken) {
+			navigate(APP_ROUTES.LOGIN);
+			return;
+		}
+
+		if (!canUseVenueChat) {
+			setChatError('Quán này chưa được gắn chủ sở hữu nên chưa thể sử dụng chat.');
+			return;
+		}
+
+		setChatSending(true);
+		setChatError('');
+
+		try {
+			const normalizedContextValue = String(selectedChatContextValue || '').trim();
+			const response = await sendVenueChatMessage(
+				venueId,
+				{
+					content: normalizedMessage,
+					threadId: activeChatThreadId || undefined,
+					contextVenueId:
+						normalizedContextValue && normalizedContextValue !== 'other'
+							? Number(normalizedContextValue)
+							: undefined,
+					contextLabel: normalizedContextValue === 'other' ? 'Other' : undefined
+				},
+				token
+			);
+
+			setActiveChatThreadId(response?.thread?.id || activeChatThreadId || null);
+			setChatMessages(Array.isArray(response?.thread?.messages) ? response.thread.messages : []);
+			setChatInput('');
+
+			if (response?.thread?.id) {
+				await markChatThreadRead(response.thread.id, token).catch(() => {});
+			}
+		} catch (requestError) {
+			setChatError(requestError?.response?.data?.message || 'Khong the gui tin nhan.');
+		} finally {
+			setChatSending(false);
+		}
+	};
 	const handleSubmitReview = async (event) => {
 		event.preventDefault();
 		setReviewError('');
@@ -830,6 +1173,21 @@ function VenueDetailPage() {
 					<div className="venue-detail-quick-actions">
 						<button
 							type="button"
+							className={`venue-icon-btn venue-chat-toggle-btn ${showChatWidget ? 'is-active' : ''}`}
+							onClick={() => {
+								if (!authToken) {
+									navigate(APP_ROUTES.LOGIN);
+									return;
+								}
+
+								setShowChatWidget((current) => !current);
+							}}
+							aria-label="Mở chat với quán"
+						>
+							💬
+						</button>
+						<button
+							type="button"
 							className={`venue-icon-btn ${isFavorite ? 'is-active' : ''}`}
 							onClick={handleToggleFavorite}
 							disabled={favoriteLoading}
@@ -838,6 +1196,125 @@ function VenueDetailPage() {
 							{isFavorite ? '♥' : '♡'}
 						</button>
 					</div>
+
+					{showChatWidget ? (
+						<div className="venue-chat-widget">
+							<div className="venue-chat-widget-header">
+								<div className="venue-chat-widget-brand">
+									<div className="venue-chat-widget-avatar">
+										<img src={resolveCoverImage(venue)} alt={resolveVenueName(venue)} loading="lazy" />
+									</div>
+									<div>
+										<strong>{chatVenueMeta?.ownerName || 'Chủ quán'}</strong>
+										<p>{showOpenState ? 'Đang mở cửa' : 'Đã đóng cửa'} · {venue.ward_name || 'Đang cập nhật khu vực'}</p>
+									</div>
+								</div>
+								<div className="venue-chat-widget-actions">
+									<button
+										type="button"
+										className="venue-chat-widget-minimize"
+										onClick={() => setShowChatWidget(false)}
+										aria-label="Thu gọn chat"
+									>
+										−
+									</button>
+								</div>
+							</div>
+
+							<div className="venue-chat-widget-body">
+								<div className="venue-chat-widget-intro">
+									<p className="venue-chat-widget-intro-title">Thông tin quán đang nhắn</p>
+									<p><strong>{resolveVenueName(venue)}</strong></p>
+									<p>📍 {venue.address || 'Chưa có địa chỉ'}</p>
+									<p>💲 {venuePriceRange}</p>
+									<p>⭐ {Number(communityStats.averageRating || 0).toFixed(1)}/5 · {communityStats.totalReviews} đánh giá</p>
+								</div>
+
+								<div className="venue-chat-widget-messages" ref={chatListRef}>
+									{chatLoading ? (
+										<div className="venue-chat-widget-empty">
+											<p>Dang tai tin nhan...</p>
+										</div>
+									) : chatError ? (
+										<div className="venue-chat-widget-empty">
+											<p>{chatError}</p>
+										</div>
+									) : chatMessages.length ? (
+										chatMessages.map((message) => {
+											const contextLine = buildChatContextLine(message, chatVenueMeta);
+											const resolvedMessageVenueName = String(message?.venueName || '').trim();
+											const resolvedMessageVenueAddress = String(message?.venueAddress || '').trim();
+											const shouldShowVenueContext = Boolean(contextLine || resolvedMessageVenueName);
+
+											return (
+											<article
+												key={message.id}
+												className={`venue-chat-widget-bubble ${message.sender === 'seller' ? 'is-seller' : 'is-customer'}`}
+											>
+												<header>
+													<strong>{message.author}</strong>
+													<span>{new Date(message.createdAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</span>
+												</header>
+                                                {shouldShowVenueContext ? <p className="venue-chat-widget-context">{contextLine}</p> : null}
+														<p>{message.content}</p>
+													</article>
+												);
+											})
+									) : !canUseVenueChat ? (
+										<div className="venue-chat-widget-empty">
+											<p>This venue is not linked to an owner for chat yet.</p>
+										</div>
+									) : isCurrentUserVenueOwner && !effectiveSelectedChatThreadId ? (
+										<div className="venue-chat-widget-empty">
+											<p>Hãy mở đoạn chat từ icon tin nhắn trên header để trả lời khách.</p>
+										</div>
+									) : (
+										<div className="venue-chat-widget-empty">
+											<p>Bắt đầu chat với quán này. Tin nhắn sẽ được gom theo chủ quán.</p>
+										</div>
+									)}
+								</div>
+
+								<form className="venue-chat-widget-form" onSubmit={handleSendChatMessage}>
+									<textarea
+										rows="3"
+										value={chatInput}
+										onChange={(event) => setChatInput(event.target.value)}
+										placeholder="Nhập tin nhắn cho quán..."
+										disabled={!authToken || !canUseVenueChat}
+									/>
+									<div className="venue-chat-widget-form-footer">
+										<span>{chatMessages.length} tin nhắn</span>
+										<select
+											className="venue-chat-widget-context-select"
+											value={selectedChatContextValue}
+											onChange={(event) => setSelectedChatContextValue(event.target.value)}
+											disabled={!authToken || !canUseVenueChat || chatSending || chatLoading}
+										>
+											{chatContextOptions.map((option) => (
+												<option key={`chat-context-${option.id}`} value={String(option.id)}>
+													{option.name}
+												</option>
+											))}
+											<option value="other">Other</option>
+										</select>
+                                        {authToken ? (
+                                            <button
+                                                type="submit"
+                                                disabled={chatSending || chatLoading || !chatInput.trim() || !canUseVenueChat || (isCurrentUserVenueOwner && !activeChatThreadId)}
+                                            >
+                                                {chatSending ? 'Đang gửi...' : 'Gửi'}
+                                            </button>
+                                        ) : (
+                                            <button type="button" onClick={() => navigate(APP_ROUTES.LOGIN)}>
+                                                Đăng nhập
+                                            </button>
+                                        )}
+									</div>
+								</form>
+							</div>
+						</div>
+					) : null}
 
 					<h1>{resolveVenueName(venue)}</h1>
 					<p className="venue-detail-address">📍 {venue.address || 'Chưa có địa chỉ'}</p>
@@ -1350,3 +1827,4 @@ function VenueDetailPage() {
 }
 
 export default VenueDetailPage;
+
