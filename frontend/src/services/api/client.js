@@ -58,6 +58,20 @@ apiClient.interceptors.response.use(
   async (error) => {
     const originalRequest = error?.config;
     const statusCode = Number(error?.response?.status);
+    const savedAuthRaw = localStorage.getItem('auth');
+    const hasSavedAuth = Boolean(savedAuthRaw);
+    const requestUrl = String(originalRequest?.url || '');
+    const isAuthSessionRequest =
+      requestUrl.includes('/auth/verify') || requestUrl.includes('/users/profile');
+
+    if (statusCode === 401 && hasSavedAuth && isAuthSessionRequest) {
+      console.log('Unauthorized response detected - clearing stale auth and redirecting to login');
+      localStorage.removeItem('auth');
+      localStorage.removeItem('user');
+      localStorage.removeItem('token');
+      window.location.href = '/login?error=' + encodeURIComponent('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+      return Promise.reject(error);
+    }
 
     // Auto-logout on 403 (user account suspended/blocked/paused)
     // Any 403 means user status is not active
