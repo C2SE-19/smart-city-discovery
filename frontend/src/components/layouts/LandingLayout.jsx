@@ -143,6 +143,9 @@ function LandingLayout() {
   const [globalChatVenueContext, setGlobalChatVenueContext] = useState(null);
   const [globalChatContextOptions, setGlobalChatContextOptions] = useState([]);
   const [selectedGlobalChatContextValue, setSelectedGlobalChatContextValue] = useState('');
+  const chatMenuRef = useRef(null);
+  const profileMenuRef = useRef(null);
+  const chatActionsMenuRef = useRef(null);
   const globalChatListRef = useRef(null);
   const avatarUrl = user?.avatarUrl || user?.avatar_url || '';
 
@@ -203,6 +206,37 @@ function LandingLayout() {
       window.removeEventListener('resize', handleWindowInteraction);
     };
   }, [openChatActionsKey]);
+
+  useEffect(() => {
+    if (!showProfileMenu && !showChatMenu && !openChatActionsKey) {
+      return undefined;
+    }
+
+    const handleClickOutside = (event) => {
+      const target = event.target;
+
+      if (showProfileMenu && profileMenuRef.current && !profileMenuRef.current.contains(target)) {
+        setShowProfileMenu(false);
+      }
+
+      const clickedInsideChatMenu = chatMenuRef.current && chatMenuRef.current.contains(target);
+      const clickedInsideChatActions = chatActionsMenuRef.current && chatActionsMenuRef.current.contains(target);
+
+      if ((showChatMenu || openChatActionsKey) && !clickedInsideChatMenu && !clickedInsideChatActions) {
+        setShowChatMenu(false);
+        setOpenChatActionsKey('');
+        setOpenChatActionsThread(null);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside);
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+    };
+  }, [showProfileMenu, showChatMenu, openChatActionsKey]);
 
   useEffect(() => {
     const handleChatRead = () => {
@@ -719,12 +753,21 @@ function LandingLayout() {
               <option value="vi">Vietnamese</option>
             </select>
             <button type="button" className="landing-icon-button" aria-label={t.header.search} />
-            <div className="landing-chat-menu">
+            <div className="landing-chat-menu" ref={chatMenuRef}>
               <button
                 type="button"
                 className="landing-chat-trigger"
                 aria-label="Tin nhắn"
-                onClick={() => setShowChatMenu((current) => !current)}
+                onClick={() => {
+                  setShowProfileMenu(false);
+                  setShowChatMenu((current) => {
+                    if (current) {
+                      setOpenChatActionsKey('');
+                      setOpenChatActionsThread(null);
+                    }
+                    return !current;
+                  });
+                }}
               >
                 💬
                 {totalUnreadChats > 0 ? (
@@ -781,6 +824,7 @@ function LandingLayout() {
                   )}
                   {openChatActionsKey && openChatActionsThread ? (
                     <div
+                      ref={chatActionsMenuRef}
                       className="landing-chat-item-menu landing-chat-item-menu-floating"
                       style={{ top: `${chatActionsPosition.top}px`, left: `${chatActionsPosition.left}px` }}
                     >
@@ -804,11 +848,16 @@ function LandingLayout() {
                 {t.header.login}
               </Link>
             ) : (
-              <div className="landing-profile-menu">
+              <div className="landing-profile-menu" ref={profileMenuRef}>
                 <button 
                   type="button" 
                   className="landing-profile-button"
-                  onClick={() => setShowProfileMenu(!showProfileMenu)}
+                  onClick={() => {
+                    setShowChatMenu(false);
+                    setOpenChatActionsKey('');
+                    setOpenChatActionsThread(null);
+                    setShowProfileMenu((current) => !current);
+                  }}
                   aria-label="Profile menu"
                 >
                   <div className="landing-profile-avatar">
