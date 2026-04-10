@@ -88,9 +88,11 @@ function buildCategoryIcon(categoryId, emoji) {
 }
 
 function resolveVenuePopupImage(venue, apiBase) {
+  const fallbackImages = extractVenueImages(venue);
   const imageCandidates = [
     venue?.venue_primary_image_url,
     ...(Array.isArray(venue?.venue_images) ? venue.venue_images : []),
+    ...fallbackImages,
     venue?.cover_image_url,
     venue?.coverImageUrl,
     venue?.image,
@@ -1748,6 +1750,10 @@ function CityMapPage() {
             const markerIcon = buildCategoryIcon(categoryId || venue.id, categoryById.get(categoryId)?.icon);
             const markerLatitude = Number(venue.latitude);
             const markerLongitude = Number(venue.longitude);
+            const popupImageSource =
+              selectedVenue && Number(selectedVenue.id) === Number(venue.id) && selectedVenueImages.length
+                ? selectedVenueImages[0]
+                : resolveVenuePopupImage(venue, apiBase);
             const popupRatingValue = normalizeHalfStarRating(resolveVenueRating(venue));
             const popupReviewCount = Number(
               venue?.total_reviews || venue?.totalReviews || venue?.review_count || venue?.reviewCount || 0
@@ -1777,7 +1783,7 @@ function CityMapPage() {
                 <Popup>
                   <div className="city-map-popup">
                     <img
-                      src={resolveVenuePopupImage(venue, apiBase)}
+                      src={popupImageSource}
                       alt={resolveVenueName(venue)}
                       className="city-map-popup-image"
                       loading="lazy"

@@ -10,6 +10,11 @@
   animation: fadeIn 200ms ease forwards;
 }
 
+.location-picker-overlay {
+  background: transparent;
+  backdrop-filter: none;
+}
+
 .modal-content {
   display: flex;
   flex-direction: column;
@@ -188,11 +193,25 @@
   font-size: 0.8rem;
 }
 
+.selected-ward-note {
+  margin: 0 0 10px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #155e63;
+}
+
 .ward-load-note {
   color: #355761;
 }
 
 .ward-load-error {
+  color: #b23543;
+}
+
+.map-selection-error {
+  margin: 10px 0 0;
+  font-size: 0.82rem;
+  font-weight: 600;
   color: #b23543;
 }
 
