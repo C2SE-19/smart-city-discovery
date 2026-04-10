@@ -3,24 +3,44 @@ import { GeoJSON, MapContainer, Marker, Pane, TileLayer, Tooltip, useMap, useMap
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { fetchWards } from '../../../services/api/wardsApi';
+import { detectWardRequest } from '../../../services/api/venuesApi';
 import './LocationPickerModal.css';
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
 import markerShadow from 'leaflet/dist/images/marker-shadow.png';
 
 const DEFAULT_LOCATION = { lat: 16.0471, lng: 108.2068 };
 const DEFAULT_ZOOM = 13;
+const SELECTED_WARD_ZOOM = 14;
 const PICKED_LOCATION_ZOOM = 17;
 
+function normalizeBoundaryInput(boundary) {
+  if (!boundary) {
+    return null;
+  }
+
+  if (typeof boundary === 'string') {
+    try {
+      return JSON.parse(boundary);
+    } catch {
+      return null;
+    }
+  }
+
+  return typeof boundary === 'object' ? boundary : null;
+}
+
 function toPolygonBoundaryFeatureCollection(boundary) {
-  if (!boundary || typeof boundary !== 'object') {
+  const normalizedBoundary = normalizeBoundaryInput(boundary);
+
+  if (!normalizedBoundary || typeof normalizedBoundary !== 'object') {
     return null;
   }
 
   const features =
-    boundary.type === 'FeatureCollection' && Array.isArray(boundary.features)
-      ? boundary.features
-      : boundary.type === 'Feature'
-        ? [boundary]
+    normalizedBoundary.type === 'FeatureCollection' && Array.isArray(normalizedBoundary.features)
+      ? normalizedBoundary.features
+      : normalizedBoundary.type === 'Feature'
+        ? [normalizedBoundary]
         : [];
 
   const polygonFeatures = features.filter((feature) => {
@@ -36,6 +56,182 @@ function toPolygonBoundaryFeatureCollection(boundary) {
     type: 'FeatureCollection',
     features: polygonFeatures,
   };
+}
+
+function visitCoordinatePairs(coordinates, onPair) {
+  if (!Array.isArray(coordinates)) {
+    return;
+  }
+
+  if (
+    coordinates.length >= 2 &&
+    typeof coordinates[0] === 'number' &&
+    typeof coordinates[1] === 'number'
+  ) {
+    onPair(coordinates);
+    return;
+  }
+
+  coordinates.forEach((nested) => visitCoordinatePairs(nested, onPair));
+}
+
+function getBoundaryCenter(boundaryFeatureCollection) {
+  if (!boundaryFeatureCollection || boundaryFeatureCollection.type !== 'FeatureCollection') {
+    return null;
+  }
+
+  let minLatitude = Infinity;
+  let maxLatitude = -Infinity;
+  let minLongitude = Infinity;
+  let maxLongitude = -Infinity;
+  let hasPoint = false;
+
+  boundaryFeatureCollection.features.forEach((feature) => {
+    const geometry = feature?.geometry;
+    visitCoordinatePairs(geometry?.coordinates, (pair) => {
+      const longitude = Number(pair[0]);
+      const latitude = Number(pair[1]);
+
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+        return;
+      }
+
+      hasPoint = true;
+      minLatitude = Math.min(minLatitude, latitude);
+      maxLatitude = Math.max(maxLatitude, latitude);
+      minLongitude = Math.min(minLongitude, longitude);
+      maxLongitude = Math.max(maxLongitude, longitude);
+    });
+  });
+
+  if (!hasPoint) {
+    return null;
+  }
+
+  return {
+    lat: (minLatitude + maxLatitude) / 2,
+    lng: (minLongitude + maxLongitude) / 2,
+  };
+}
+
+function isPointOnSegment(point, segmentStart, segmentEnd) {
+  const tolerance = 1e-10;
+  const [pointX, pointY] = point;
+  const [x1, y1] = segmentStart;
+  const [x2, y2] = segmentEnd;
+
+  const cross = (pointY - y1) * (x2 - x1) - (pointX - x1) * (y2 - y1);
+  if (Math.abs(cross) > tolerance) {
+    return false;
+  }
+
+  const dot = (pointX - x1) * (x2 - x1) + (pointY - y1) * (y2 - y1);
+  if (dot < -tolerance) {
+    return false;
+  }
+
+  const squaredLength = (x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1);
+  if (dot - squaredLength > tolerance) {
+    return false;
+  }
+
+  return true;
+}
+
+function isPointInLinearRing(point, ring) {
+  if (!Array.isArray(ring) || ring.length < 3) {
+    return false;
+  }
+
+  let inside = false;
+
+  for (let index = 0, previousIndex = ring.length - 1; index < ring.length; previousIndex = index, index += 1) {
+    const current = ring[index];
+    const previous = ring[previousIndex];
+
+    if (!Array.isArray(current) || !Array.isArray(previous)) {
+      continue;
+    }
+
+    const currentX = Number(current[0]);
+    const currentY = Number(current[1]);
+    const previousX = Number(previous[0]);
+    const previousY = Number(previous[1]);
+
+    if (
+      !Number.isFinite(currentX) ||
+      !Number.isFinite(currentY) ||
+      !Number.isFinite(previousX) ||
+      !Number.isFinite(previousY)
+    ) {
+      continue;
+    }
+
+    if (isPointOnSegment(point, [currentX, currentY], [previousX, previousY])) {
+      return true;
+    }
+
+    const intersects =
+      (currentY > point[1]) !== (previousY > point[1]) &&
+      point[0] < ((previousX - currentX) * (point[1] - currentY)) / (previousY - currentY) + currentX;
+
+    if (intersects) {
+      inside = !inside;
+    }
+  }
+
+  return inside;
+}
+
+function isPointInPolygonCoordinates(point, polygonCoordinates) {
+  if (!Array.isArray(polygonCoordinates) || !polygonCoordinates.length) {
+    return false;
+  }
+
+  const outerRing = polygonCoordinates[0];
+  if (!isPointInLinearRing(point, outerRing)) {
+    return false;
+  }
+
+  for (let holeIndex = 1; holeIndex < polygonCoordinates.length; holeIndex += 1) {
+    if (isPointInLinearRing(point, polygonCoordinates[holeIndex])) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function isPointInsideBoundary(latlng, boundaryFeatureCollection) {
+  if (!latlng || !boundaryFeatureCollection || boundaryFeatureCollection.type !== 'FeatureCollection') {
+    return false;
+  }
+
+  const point = [Number(latlng.lng), Number(latlng.lat)];
+
+  if (!Number.isFinite(point[0]) || !Number.isFinite(point[1])) {
+    return false;
+  }
+
+  return boundaryFeatureCollection.features.some((feature) => {
+    const geometry = feature?.geometry;
+
+    if (!geometry || !Array.isArray(geometry.coordinates)) {
+      return false;
+    }
+
+    if (geometry.type === 'Polygon') {
+      return isPointInPolygonCoordinates(point, geometry.coordinates);
+    }
+
+    if (geometry.type === 'MultiPolygon') {
+      return geometry.coordinates.some((polygonCoordinates) =>
+        isPointInPolygonCoordinates(point, polygonCoordinates)
+      );
+    }
+
+    return false;
+  });
 }
 
 const defaultMarkerIcon = L.icon({
@@ -71,16 +267,20 @@ function MapViewportController({ center, zoom }) {
   return null;
 }
 
-function LocationPickerModal({ isOpen, onClose, onLocationSelect, defaultLocation = null }) {
-  const [selectedLocation, setSelectedLocation] = useState(defaultLocation || DEFAULT_LOCATION);
+function LocationPickerModal({ isOpen, onClose, onLocationSelect, defaultLocation = null, selectedWardId = '' }) {
+  const [selectedLocation, setSelectedLocation] = useState(null);
+  const [mapCenter, setMapCenter] = useState(DEFAULT_LOCATION);
   const [mapZoom, setMapZoom] = useState(DEFAULT_ZOOM);
   const [wards, setWards] = useState([]);
   const [loadingWards, setLoadingWards] = useState(false);
+  const [isValidatingLocation, setIsValidatingLocation] = useState(false);
   const [wardLoadError, setWardLoadError] = useState('');
+  const [selectionError, setSelectionError] = useState('');
 
   const defaultLocationLatitude = Number(defaultLocation?.lat);
   const defaultLocationLongitude = Number(defaultLocation?.lng);
   const hasDefaultLocation = Number.isFinite(defaultLocationLatitude) && Number.isFinite(defaultLocationLongitude);
+  const normalizedSelectedWardId = String(selectedWardId || '').trim();
 
   const defaultCenter = useMemo(() => {
     if (hasDefaultLocation) {
@@ -93,14 +293,51 @@ function LocationPickerModal({ isOpen, onClose, onLocationSelect, defaultLocatio
     return DEFAULT_LOCATION;
   }, [defaultLocationLatitude, defaultLocationLongitude, hasDefaultLocation]);
 
+  const wardsWithBoundaries = useMemo(
+    () =>
+      wards
+        .map((ward) => ({
+          ...ward,
+          boundary: toPolygonBoundaryFeatureCollection(ward.boundary),
+        }))
+        .filter((ward) => ward.boundary),
+    [wards]
+  );
+
+  const selectedWard = useMemo(() => {
+    if (!normalizedSelectedWardId) {
+      return null;
+    }
+
+    return (
+      wardsWithBoundaries.find((ward) => String(ward.ward_id) === normalizedSelectedWardId) || null
+    );
+  }, [normalizedSelectedWardId, wardsWithBoundaries]);
+
+  const selectedWardCenter = useMemo(
+    () => (selectedWard ? getBoundaryCenter(selectedWard.boundary) : null),
+    [selectedWard]
+  );
+
+  const allowedBoundaries = useMemo(() => {
+    if (selectedWard?.boundary) {
+      return [selectedWard.boundary];
+    }
+
+    return wardsWithBoundaries.map((ward) => ward.boundary);
+  }, [selectedWard, wardsWithBoundaries]);
+
   useEffect(() => {
     if (!isOpen) {
       return;
     }
 
-    setSelectedLocation(defaultCenter);
-    setMapZoom(hasDefaultLocation ? PICKED_LOCATION_ZOOM : DEFAULT_ZOOM);
-  }, [isOpen, defaultCenter, hasDefaultLocation]);
+    setSelectedLocation(null);
+    setMapCenter(selectedWardCenter || defaultCenter);
+    setMapZoom(selectedWardCenter ? SELECTED_WARD_ZOOM : hasDefaultLocation ? PICKED_LOCATION_ZOOM : DEFAULT_ZOOM);
+    setSelectionError('');
+    setIsValidatingLocation(false);
+  }, [isOpen, hasDefaultLocation, defaultCenter, selectedWardCenter]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -124,23 +361,106 @@ function LocationPickerModal({ isOpen, onClose, onLocationSelect, defaultLocatio
     loadWards();
   }, [isOpen]);
 
-  const handleMapClick = (latlng) => {
-    setSelectedLocation({
-      lat: latlng.lat,
-      lng: latlng.lng
-    });
-    setMapZoom(PICKED_LOCATION_ZOOM);
+  const handleMapClick = async (latlng) => {
+    if (isValidatingLocation) {
+      return;
+    }
+
+    if (!normalizedSelectedWardId) {
+      setSelectionError('Select a ward before picking location on map.');
+      return;
+    }
+
+    if (!allowedBoundaries.length) {
+      setSelectionError('Ward boundaries are not available. Please try again in a moment.');
+      return;
+    }
+
+    const isWithinAllowedBoundary = allowedBoundaries.some((boundary) => isPointInsideBoundary(latlng, boundary));
+
+    if (!isWithinAllowedBoundary) {
+      setSelectionError(
+        selectedWard
+          ? `You can only pin a location inside ${selectedWard.name}.`
+          : 'You can only pin a location inside ward boundaries.'
+      );
+      return;
+    }
+
+    setIsValidatingLocation(true);
+
+    try {
+      const detection = await detectWardRequest({ latitude: latlng.lat, longitude: latlng.lng });
+      const detectedWardId = String(detection?.wardId || detection?.ward_id || '').trim();
+
+      if (!detectedWardId) {
+        setSelectionError('You can only pin a location inside ward boundaries.');
+        return;
+      }
+
+      if (detectedWardId !== normalizedSelectedWardId) {
+        setSelectionError(
+          selectedWard
+            ? `You can only pin a location inside ${selectedWard.name}.`
+            : 'Selected location does not belong to the chosen ward.'
+        );
+        return;
+      }
+
+      setSelectedLocation({
+        lat: latlng.lat,
+        lng: latlng.lng
+      });
+      setMapZoom(PICKED_LOCATION_ZOOM);
+      setSelectionError('');
+    } catch {
+      setSelectionError('Could not validate this location. Please try again.');
+    } finally {
+      setIsValidatingLocation(false);
+    }
   };
 
-  const handleConfirm = () => {
-    onLocationSelect(selectedLocation);
-    onClose();
+  const handleConfirm = async () => {
+    if (!selectedLocation || isValidatingLocation) {
+      return;
+    }
+
+    if (!normalizedSelectedWardId) {
+      setSelectionError('Select a ward before confirming location.');
+      return;
+    }
+
+    setIsValidatingLocation(true);
+
+    try {
+      const detection = await detectWardRequest({
+        latitude: selectedLocation.lat,
+        longitude: selectedLocation.lng,
+      });
+
+      const detectedWardId = String(detection?.wardId || detection?.ward_id || '').trim();
+      if (!detectedWardId || detectedWardId !== normalizedSelectedWardId) {
+        setSelectionError(
+          selectedWard
+            ? `Selected point is outside ${selectedWard.name}. Please pick again.`
+            : 'Selected point is outside ward boundaries. Please pick again.'
+        );
+        return;
+      }
+
+      onLocationSelect(selectedLocation);
+      onClose();
+    } catch {
+      setSelectionError('Could not validate selected location. Please try again.');
+    } finally {
+      setIsValidatingLocation(false);
+    }
   };
 
   if (!isOpen) return null;
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay location-picker-overlay" onClick={onClose}>
       <div className="modal-content location-picker-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2 className="modal-title">Pick Venue Location</h2>
@@ -151,14 +471,18 @@ function LocationPickerModal({ isOpen, onClose, onLocationSelect, defaultLocatio
 
         <div className="modal-body">
           <div className="map-container">
-            <div className="map-instruction">Click anywhere on the map to pin your venue location.</div>
+            <div className="map-instruction">
+              {selectedWard
+                ? `Click inside ${selectedWard.name} to pin your venue location.`
+                : 'Click inside ward boundaries to pin your venue location.'}
+            </div>
 
             <MapContainer
-              center={[defaultCenter.lat, defaultCenter.lng]}
+              center={[mapCenter.lat, mapCenter.lng]}
               zoom={mapZoom}
               style={{ height: '100%', width: '100%' }}
             >
-              <MapViewportController center={selectedLocation} zoom={mapZoom} />
+              <MapViewportController center={selectedLocation || mapCenter} zoom={mapZoom} />
 
               <TileLayer
                 attribution="&copy; OpenStreetMap contributors &copy; CARTO"
@@ -172,25 +496,23 @@ function LocationPickerModal({ isOpen, onClose, onLocationSelect, defaultLocatio
                 />
               </Pane>
 
-              {wards.map((ward) => {
-                const polygonBoundary = toPolygonBoundaryFeatureCollection(ward.boundary);
-
-                if (!polygonBoundary) {
-                  return null;
-                }
+              {wardsWithBoundaries.map((ward) => {
+                const isSelectedWard =
+                  Boolean(selectedWard) && String(ward.ward_id) === String(selectedWard.ward_id);
 
                 return (
                   <GeoJSON
                     key={`${ward.ward_id}-${ward.updated_at || ward.created_at || ''}`}
-                    data={polygonBoundary}
+                    data={ward.boundary}
                     style={{
-                      color: '#155e63',
-                      weight: 2,
-                      fillOpacity: 0.08,
+                      color: isSelectedWard ? '#2e8f96' : '#155e63',
+                      weight: isSelectedWard ? 2.5 : 2,
+                      fillColor: isSelectedWard ? '#bde6e9' : '#155e63',
+                      fillOpacity: isSelectedWard ? 0.22 : selectedWard ? 0.04 : 0.08,
                     }}
                   >
                     <Tooltip sticky>
-                      <span>{ward.name}</span>
+                      <span>{ward.name}{isSelectedWard ? ' (selected)' : ''}</span>
                     </Tooltip>
                   </GeoJSON>
                 );
@@ -203,6 +525,7 @@ function LocationPickerModal({ isOpen, onClose, onLocationSelect, defaultLocatio
           </div>
 
           <div className="map-info">
+            {selectedWard ? <p className="selected-ward-note">Selected ward: {selectedWard.name}</p> : null}
             <div className="coordinate-display">
               <div className="coordinate-item">
                 <span className="coordinate-label">Latitude</span>
@@ -216,7 +539,9 @@ function LocationPickerModal({ isOpen, onClose, onLocationSelect, defaultLocatio
             </div>
 
             {loadingWards ? <p className="ward-load-note">Loading ward boundaries...</p> : null}
+            {isValidatingLocation ? <p className="ward-load-note">Validating selected location...</p> : null}
             {wardLoadError ? <p className="ward-load-error">{wardLoadError}</p> : null}
+            {selectionError ? <p className="map-selection-error">{selectionError}</p> : null}
           </div>
         </div>
 
@@ -224,7 +549,12 @@ function LocationPickerModal({ isOpen, onClose, onLocationSelect, defaultLocatio
           <button type="button" className="modal-btn modal-btn-cancel" onClick={onClose}>
             Cancel
           </button>
-          <button type="button" className="modal-btn modal-btn-confirm" onClick={handleConfirm}>
+          <button
+            type="button"
+            className="modal-btn modal-btn-confirm"
+            onClick={handleConfirm}
+            disabled={!selectedLocation || isValidatingLocation}
+          >
             Confirm Location
           </button>
         </div>
