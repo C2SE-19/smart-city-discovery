@@ -393,12 +393,12 @@ function resolveWeeklySchedule(venue) {
 	const hasFallbackRange =
 		/^\d{2}:\d{2}$/.test(fallbackStart) && /^\d{2}:\d{2}$/.test(fallbackEnd) && fallbackStart < fallbackEnd;
 
-	if (source || hasFallbackRange) {
-		return WEEK_DAYS.map((day) => {
-			const item = source[day.key] || {};
-			const start = String(item.start || '').trim() || (hasFallbackRange ? fallbackStart : '');
-			const end = String(item.end || '').trim() || (hasFallbackRange ? fallbackEnd : '');
-			const off = Boolean(item.off) || start === 'OFF' || end === 'OFF';
+		if (source || hasFallbackRange) {
+			return WEEK_DAYS.map((day) => {
+				const item = source?.[day.key] || {};
+				const start = String(item.start || '').trim() || (hasFallbackRange ? fallbackStart : '');
+				const end = String(item.end || '').trim() || (hasFallbackRange ? fallbackEnd : '');
+				const off = Boolean(item.off) || start === 'OFF' || end === 'OFF';
 
 			return {
 				key: day.key,

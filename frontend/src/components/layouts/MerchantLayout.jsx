@@ -1,5 +1,5 @@
 import { Link, NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useAuth } from '../../contexts/AuthContext';
@@ -16,6 +16,27 @@ function MerchantLayout() {
   const { user, logout } = useAuth();
   const t = translations[language];
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const profileMenuRef = useRef(null);
+
+  useEffect(() => {
+    if (!showProfileMenu) {
+      return undefined;
+    }
+
+    const handleClickOutside = (event) => {
+      if (profileMenuRef.current && !profileMenuRef.current.contains(event.target)) {
+        setShowProfileMenu(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside);
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+    };
+  }, [showProfileMenu]);
 
   const handleLogout = () => {
     logout();
@@ -80,11 +101,11 @@ function MerchantLayout() {
             <button type="button" className="landing-icon-button" aria-label={t.header.search} />
             
             {/* User Profile Dropdown */}
-            <div className="landing-profile-menu">
+            <div className="landing-profile-menu" ref={profileMenuRef}>
               <button
                 type="button"
                 className="landing-profile-button"
-                onClick={() => setShowProfileMenu(!showProfileMenu)}
+                onClick={() => setShowProfileMenu((current) => !current)}
               >
                 <div className="landing-avatar-initial">{getUserInitial()}</div>
                 <span className="landing-profile-dropdown-icon">▼</span>
