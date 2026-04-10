@@ -95,31 +95,6 @@ function getVenueCategoryId(venue) {
   return Number.isInteger(normalized) && normalized > 0 ? normalized : null;
 }
 
-function getVenueServices(venue, serviceNameById) {
-  const metadata = normalizeVenueMetadata(venue.metadata);
-  const byName = Array.isArray(metadata.selectedServiceNames)
-    ? metadata.selectedServiceNames
-        .map((value) => String(value || '').trim())
-        .filter(Boolean)
-    : [];
-
-  if (byName.length) {
-    return byName;
-  }
-
-  if (!Array.isArray(metadata.selectedServices)) {
-    return [];
-  }
-
-  return [...new Set(
-    metadata.selectedServices
-      .map((value) => Number(value))
-      .filter((value) => Number.isInteger(value) && value > 0)
-      .map((serviceId) => serviceNameById.get(serviceId))
-      .filter(Boolean)
-  )];
-}
-
 function toFavoriteVenuePayload(venue) {
   return {
     id: venue.id,
@@ -128,6 +103,123 @@ function toFavoriteVenuePayload(venue) {
     price: 'N/A',
     description: venue.description || venue.address || ''
   };
+}
+
+const WEEK_DAYS = [
+  { key: 'monday', label: 'Mon' },
+  { key: 'tuesday', label: 'Tue' },
+  { key: 'wednesday', label: 'Wed' },
+  { key: 'thursday', label: 'Thu' },
+  { key: 'friday', label: 'Fri' },
+  { key: 'saturday', label: 'Sat' },
+  { key: 'sunday', label: 'Sun' }
+];
+
+function resolveWeeklySchedule(venue) {
+  const metadata = normalizeVenueMetadata(venue?.metadata);
+  const canonicalSource =
+    metadata.weeklySchedule && typeof metadata.weeklySchedule === 'object' && !Array.isArray(metadata.weeklySchedule)
+      ? metadata.weeklySchedule
+      : null;
+
+  const fallbackStart = String(metadata.startTime || '').trim();
+  const fallbackEnd = String(metadata.endTime || '').trim();
+  const hasFallbackRange =
+    /^\d{2}:\d{2}$/.test(fallbackStart) && /^\d{2}:\d{2}$/.test(fallbackEnd) && fallbackStart < fallbackEnd;
+
+  if (!canonicalSource && !hasFallbackRange) {
+    return [];
+  }
+
+  return WEEK_DAYS.map((day) => {
+    const item = canonicalSource?.[day.key] || {};
+    const start = String(item.start || '').trim() || (hasFallbackRange ? fallbackStart : '');
+    const end = String(item.end || '').trim() || (hasFallbackRange ? fallbackEnd : '');
+    const off = Boolean(item.off) || start === 'OFF' || end === 'OFF';
+
+    return {
+      key: day.key,
+      open: off ? 'OFF' : start || 'N/A',
+      close: off ? 'OFF' : end || 'N/A',
+      off
+    };
+  });
+}
+
+function resolveTodaySchedule(weeklySchedule) {
+  if (!Array.isArray(weeklySchedule) || !weeklySchedule.length) {
+    return null;
+  }
+
+  const dayKeyByIndex = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+  const todayKey = dayKeyByIndex[new Date().getDay()] || 'monday';
+  return weeklySchedule.find((item) => item.key === todayKey) || null;
+}
+
+function toMinutesFromHHmm(value) {
+  if (!/^\d{2}:\d{2}$/.test(String(value || '').trim())) {
+    return null;
+  }
+
+  const [hoursPart, minutesPart] = String(value).split(':');
+  const hours = Number(hoursPart);
+  const minutes = Number(minutesPart);
+
+  if (!Number.isInteger(hours) || !Number.isInteger(minutes) || hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+    return null;
+  }
+
+  return hours * 60 + minutes;
+}
+
+function resolveVenueOpenState(venue) {
+  const weeklySchedule = resolveWeeklySchedule(venue);
+  const todaySchedule = resolveTodaySchedule(weeklySchedule);
+
+  if (!todaySchedule || todaySchedule.off || todaySchedule.open === 'OFF' || todaySchedule.close === 'OFF') {
+    return { isOpen: false, timeRange: 'N/A - N/A' };
+  }
+
+  const start = todaySchedule.open || 'N/A';
+  const end = todaySchedule.close || 'N/A';
+  const startMinutes = toMinutesFromHHmm(start);
+  const endMinutes = toMinutesFromHHmm(end);
+  const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes();
+  const isOpen =
+    startMinutes !== null &&
+    endMinutes !== null &&
+    startMinutes < endMinutes &&
+    nowMinutes >= startMinutes &&
+    nowMinutes < endMinutes;
+
+  return { isOpen, timeRange: `${start} - ${end}` };
+}
+
+function resolveVenuePriceRange(venue) {
+  const metadata = normalizeVenueMetadata(venue?.metadata);
+  const minPrice = Number(metadata.minPrice ?? metadata.min_price);
+  const maxPrice = Number(metadata.maxPrice ?? metadata.max_price);
+
+  if (Number.isFinite(minPrice) && Number.isFinite(maxPrice) && minPrice > 0 && maxPrice >= minPrice) {
+    return `$ ${minPrice.toLocaleString('vi-VN')}đ - ${maxPrice.toLocaleString('vi-VN')}đ`;
+  }
+
+  const directCandidates = [venue?.price, venue?.price_range, metadata.price, metadata.priceRange]
+    .map((item) => String(item || '').trim())
+    .filter(Boolean);
+
+  return directCandidates[0] ? `$ ${directCandidates[0]}` : '$ N/A';
+}
+
+function renderRatingStars(rating) {
+  const safeRating = Number.isFinite(rating) ? rating : 0;
+  const filledStars = Math.max(0, Math.min(5, Math.round(safeRating)));
+
+  return Array.from({ length: 5 }, (_, index) => (
+    <span key={`overview-rating-star-${index + 1}`} className={`overview-rating-star ${index < filledStars ? 'is-active' : ''}`}>
+      ★
+    </span>
+  ));
 }
 
 function FilterGroup({ title, options, selectedValues, optionValue, optionLabel, onToggle }) {
@@ -162,44 +254,80 @@ function FilterGroup({ title, options, selectedValues, optionValue, optionLabel,
   );
 }
 
-function VenueCard({ venue, isFavorite, onToggleFavorite, onExplore, services }) {
+function VenueCard({ venue, isFavorite, onToggleFavorite, onExplore }) {
   const venueName = venue.name || venue.title || 'Untitled venue';
-  const venueDescription = venue.description || 'No description provided yet.';
   const venueAddress = venue.address || 'Address not available';
   const wardName = venue.ward_name || venue.wardName;
+  const ratingValue = Number(venue.average_rating ?? venue.averageRating ?? 0);
+  const reviewCount = Number(venue.total_reviews ?? venue.totalReviews ?? venue.review_count ?? venue.reviewCount ?? 0);
+  const { isOpen, timeRange } = resolveVenueOpenState(venue);
+  const priceRange = resolveVenuePriceRange(venue);
 
   return (
-    <article className="overview-dynamic-card">
+    <article
+      className="overview-dynamic-card"
+      onClick={() => onExplore(venue)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onExplore(venue);
+        }
+      }}
+    >
       <div className="overview-dynamic-media">
-        <img src={getVenueImage(venue)} alt={venueName} loading="lazy" />
+        <button
+          type="button"
+          className="overview-dynamic-media-link"
+          onClick={(event) => {
+            event.stopPropagation();
+            onExplore(venue);
+          }}
+          aria-label={`Open ${venueName} on Discovery`}
+        >
+          <img src={getVenueImage(venue)} alt={venueName} loading="lazy" />
+        </button>
 
         <button
           type="button"
           className={`overview-favorite ${isFavorite ? 'is-active' : ''}`}
           aria-label={isFavorite ? `Unsave ${venueName}` : `Save ${venueName}`}
-          onClick={() => onToggleFavorite(toFavoriteVenuePayload(venue), 'place')}
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleFavorite(toFavoriteVenuePayload(venue), 'place');
+          }}
         />
       </div>
 
       <div className="overview-dynamic-body">
-        <h4>{venueName}</h4>
-        <p className="overview-dynamic-address">{venueAddress}</p>
-        <p className="overview-dynamic-description">{venueDescription}</p>
-
-        <div className="overview-dynamic-tags">
-          {wardName ? <span className="overview-venue-chip">{wardName}</span> : null}
-
-          {services.slice(0, 2).map((serviceName) => (
-            <span key={`${venue.id}-${serviceName}`} className="overview-venue-chip overview-venue-chip-muted">
-              {serviceName}
-            </span>
-          ))}
-        </div>
-
-        <div className="overview-dynamic-footer">
-          <button type="button" className="overview-card-link" onClick={() => onExplore(venue)}>
-            View on Discovery
+        <h4>
+          <button
+            type="button"
+            className="overview-dynamic-title-link"
+            onClick={(event) => {
+              event.stopPropagation();
+              onExplore(venue);
+            }}
+          >
+            {venueName}
           </button>
+        </h4>
+        <p className="overview-dynamic-address">📍 {venueAddress}</p>
+        <p className="overview-dynamic-ward">🗺 {wardName || 'N/A'}</p>
+
+        <div className="overview-dynamic-meta">
+          <p className="overview-meta-item">
+            <strong className={`overview-open-status ${isOpen ? 'is-open' : 'is-closed'}`}>
+              {isOpen ? 'Dang mo cua' : 'Da dong cua'}
+            </strong>
+            <span>{timeRange}</span>
+            <span className="overview-opening-alert">!</span>
+          </p>
+
+          <p className="overview-meta-item overview-meta-price">
+            <span>{priceRange}</span>
+          </p>
         </div>
       </div>
     </article>
@@ -245,7 +373,9 @@ function OverviewPage() {
   const [forYouLoading, setForYouLoading] = useState(false);
   const [forYouError, setForYouError] = useState('');
   const [geoCoordinates, setGeoCoordinates] = useState({ latitude: null, longitude: null });
+  const [sliderPager, setSliderPager] = useState({});
   const sliderRefs = useRef(new Map());
+  const sliderCleanupRefs = useRef(new Map());
   const libraryInputRef = useRef(null);
   const cameraInputRef = useRef(null);
 
@@ -261,16 +391,6 @@ function OverviewPage() {
   const apiUrl = useMemo(
     () => import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api',
     []
-  );
-
-  const serviceNameById = useMemo(
-    () =>
-      new Map(
-        services
-          .map((service) => [Number(service.id), service.name])
-          .filter(([serviceId, serviceName]) => Number.isInteger(serviceId) && Boolean(serviceName))
-      ),
-    [services]
   );
 
   const venueParams = useMemo(() => {
@@ -633,7 +753,7 @@ function OverviewPage() {
       setVenues([]);
 
       try {
-        const venueData = await fetchVenues({ ...venueParams, compact: 'true' });
+        const venueData = await fetchVenues({ ...venueParams });
 
         if (!isMounted) {
           return;
@@ -672,7 +792,7 @@ function OverviewPage() {
       pollingInFlight = true;
 
       try {
-        const liveVenueData = await fetchVenues({ ...venueParams, compact: 'true', live: 'true' });
+        const liveVenueData = await fetchVenues({ ...venueParams, live: 'true' });
         setVenues(Array.isArray(liveVenueData) ? liveVenueData : []);
       } catch {
         // Keep currently rendered venue list on transient polling errors.
@@ -865,38 +985,127 @@ function OverviewPage() {
     setShowPreferenceWizard(false);
   };
 
+  const updateSliderPager = (sectionId, node) => {
+    if (!node) {
+      return;
+    }
+
+    const key = String(sectionId);
+    const viewportWidth = node.clientWidth || 1;
+    const maxScroll = Math.max(0, node.scrollWidth - viewportWidth);
+    const totalPages = Math.max(1, Math.ceil(maxScroll / viewportWidth) + 1);
+    const currentPage = Math.min(totalPages, Math.max(1, Math.floor(node.scrollLeft / viewportWidth) + 1));
+
+    setSliderPager((prev) => {
+      const previous = prev[key];
+      if (previous?.currentPage === currentPage && previous?.totalPages === totalPages) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [key]: {
+          currentPage,
+          totalPages
+        }
+      };
+    });
+  };
+
+  const cleanupSliderRegistration = (sectionId) => {
+    const key = String(sectionId);
+    const cleanup = sliderCleanupRefs.current.get(key);
+    if (cleanup) {
+      cleanup();
+      sliderCleanupRefs.current.delete(key);
+    }
+  };
+
   const registerSliderRef = (sectionId) => (node) => {
+    const key = String(sectionId);
+    cleanupSliderRegistration(sectionId);
+
     if (!node) {
       sliderRefs.current.delete(sectionId);
       return;
     }
+
     sliderRefs.current.set(sectionId, node);
+
+    const handleScroll = () => updateSliderPager(sectionId, node);
+    node.addEventListener('scroll', handleScroll, { passive: true });
+    updateSliderPager(sectionId, node);
+
+    sliderCleanupRefs.current.set(key, () => {
+      node.removeEventListener('scroll', handleScroll);
+    });
   };
 
   const scrollCategorySlider = (sectionId, direction) => {
     const node = sliderRefs.current.get(sectionId);
     if (!node) return;
-    const distance = Math.max(260, node.clientWidth * 0.85) * direction;
-    const targetLeft = node.scrollLeft + distance;
-    const startLeft = node.scrollLeft;
-    const delta = targetLeft - startLeft;
-    const duration = 520;
-    let startTime = null;
 
-    const easeInOut = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+    const viewportWidth = node.clientWidth || 1;
+    const maxScroll = Math.max(0, node.scrollWidth - viewportWidth);
+    const targetLeft = Math.max(0, Math.min(maxScroll, node.scrollLeft + viewportWidth * direction));
 
-    const step = (timestamp) => {
-      if (startTime === null) startTime = timestamp;
-      const elapsed = timestamp - startTime;
-      const progress = Math.min(elapsed / duration, 1);
-      node.scrollLeft = startLeft + delta * easeInOut(progress);
-      if (progress < 1) {
-        requestAnimationFrame(step);
-      }
+    node.scrollTo({
+      left: targetLeft,
+      behavior: 'smooth'
+    });
+  };
+
+  const handleSliderDotClick = (sectionId, targetPage) => {
+    const node = sliderRefs.current.get(sectionId);
+    if (!node) {
+      return;
+    }
+
+    const clampedPage = Math.max(1, Number(targetPage) || 1);
+    node.scrollTo({
+      left: (clampedPage - 1) * node.clientWidth,
+      behavior: 'smooth'
+    });
+  };
+
+  const renderSliderPaginationDots = (sectionId) => {
+    const key = String(sectionId);
+    const pager = sliderPager[key] || { currentPage: 1, totalPages: 1 };
+    if (pager.totalPages <= 1) {
+      return null;
+    }
+
+    return (
+      <div className="overview-slider-dots" aria-label={`Slider pages for ${key}`}>
+        {Array.from({ length: pager.totalPages }).map((_, index) => {
+          const page = index + 1;
+          const isActive = page === pager.currentPage;
+          return (
+            <button
+              key={`slider-dot-${key}-${page}`}
+              type="button"
+              className={`overview-slider-dot ${isActive ? 'is-active' : ''}`.trim()}
+              aria-label={`Go to page ${page}`}
+              aria-current={isActive ? 'true' : 'false'}
+              onClick={() => handleSliderDotClick(sectionId, page)}
+            />
+          );
+        })}
+      </div>
+    );
+  };
+
+  useEffect(() => {
+    const handleWindowResize = () => {
+      sliderRefs.current.forEach((node, sectionId) => updateSliderPager(sectionId, node));
     };
 
-    requestAnimationFrame(step);
-  };
+    window.addEventListener('resize', handleWindowResize);
+    return () => {
+      window.removeEventListener('resize', handleWindowResize);
+      sliderCleanupRefs.current.forEach((cleanup) => cleanup());
+      sliderCleanupRefs.current.clear();
+    };
+  }, []);
 
   return (
     <div className={`overview-page ${isSearchMode ? 'is-search' : ''}`.trim()}>
@@ -1191,7 +1400,6 @@ function OverviewPage() {
                     isFavorite={isFavorite('place', venue.id)}
                     onToggleFavorite={handleToggleFavorite}
                     onExplore={handleExploreVenue}
-                    services={getVenueServices(venue, serviceNameById)}
                   />
                 ))}
               </div>
@@ -1201,6 +1409,7 @@ function OverviewPage() {
                 aria-label="Scroll For You right"
                 onClick={() => scrollCategorySlider('for-you', 1)}
               />
+              {renderSliderPaginationDots('for-you')}
             </div>
           ) : null}
 
@@ -1235,7 +1444,6 @@ function OverviewPage() {
                   isFavorite={isFavorite('place', venue.id)}
                   onToggleFavorite={handleToggleFavorite}
                   onExplore={handleExploreVenue}
-                  services={getVenueServices(venue, serviceNameById)}
                 />
               ))}
             </div>
@@ -1318,7 +1526,6 @@ function OverviewPage() {
                           isFavorite={isFavorite('place', venue.id)}
                           onToggleFavorite={handleToggleFavorite}
                           onExplore={handleExploreVenue}
-                          services={getVenueServices(venue, serviceNameById)}
                         />
                       ))}
                     </div>
@@ -1328,6 +1535,7 @@ function OverviewPage() {
                       aria-label={`Scroll ${section.name} right`}
                       onClick={() => scrollCategorySlider(section.id, 1)}
                     />
+                    {renderSliderPaginationDots(section.id)}
                   </div>
                 ) : (
                   <p className="overview-empty-copy">No approved places in this category yet.</p>
@@ -1362,7 +1570,6 @@ function OverviewPage() {
                         isFavorite={isFavorite('place', venue.id)}
                         onToggleFavorite={handleToggleFavorite}
                         onExplore={handleExploreVenue}
-                        services={getVenueServices(venue, serviceNameById)}
                       />
                     ))}
                   </div>
@@ -1372,6 +1579,7 @@ function OverviewPage() {
                     aria-label="Scroll other places right"
                     onClick={() => scrollCategorySlider('uncategorized', 1)}
                   />
+                  {renderSliderPaginationDots('uncategorized')}
                 </div>
               </article>
             ) : null}
