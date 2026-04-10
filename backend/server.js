@@ -2917,6 +2917,26 @@ async function generateWardIdFromName(name) {
             }
         }
 
+        async function detectPublicWard(req, res) {
+            const latitude = Number(req.body?.latitude);
+            const longitude = Number(req.body?.longitude);
+
+            if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+                return res.status(400).json({ message: 'latitude and longitude must be valid numbers' });
+            }
+
+            try {
+                const detection = await detectWardByCoordinates(latitude, longitude);
+                return res.json({
+                    wardId: detection.wardId || null,
+                    wardName: detection.wardName,
+                    detectedWard: detection.wardName
+                });
+            } catch (error) {
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
         async function listPublicVenues(req, res) {
             try {
                 const venueHasOwnerUserColumn = await hasVenueOwnerUserColumn();
@@ -4528,6 +4548,7 @@ async function generateWardIdFromName(name) {
                 phone,
                 coverImageUrl,
                 businessLicenseImageUrl,
+                contactEmail,
                 metadata
             } = req.body;
 
@@ -4539,16 +4560,22 @@ async function generateWardIdFromName(name) {
             const normalizedCategoryName = String(category || '').trim();
             const normalizedMetadata = metadata && typeof metadata === 'object' ? { ...metadata } : {};
             const requestedServiceIds = normalizeServiceIds(normalizedMetadata.selectedServices);
-            const normalizedContactEmail = normalizeNullableText(contactEmail ?? normalizedMetadata.contactEmail);
+            const normalizedContactEmail = normalizeNullableText(
+                contactEmail ?? normalizedMetadata.contactEmail ?? req.authUser?.email
+            );
             const resolvedOwnerUserId = await getAuthenticatedChatUserId(req);
+            const submitterUserId = String(resolvedOwnerUserId || req.authUser?.id || '').trim();
 
-            if (!normalizedContactEmail || !isValidEmail(normalizedContactEmail)) {
-                return res.status(400).json({ message: 'A valid contactEmail is required' });
+            if (normalizedContactEmail && !isValidEmail(normalizedContactEmail)) {
+                return res.status(400).json({ message: 'contactEmail is invalid' });
             }
-            const submitterUserId = req.authUser?.id ? String(req.authUser.id).trim() : '';
 
             if (!submitterUserId) {
                 return res.status(401).json({ message: 'Missing authentication token' });
+            }
+
+            if (normalizedContactEmail && !normalizedMetadata.contactEmail) {
+                normalizedMetadata.contactEmail = normalizedContactEmail;
             }
 
             if (!normalizedMetadata.category && normalizedCategoryName) {
@@ -4714,9 +4741,9 @@ async function generateWardIdFromName(name) {
                     normalizedName,
                     String(title || '').trim() || normalizedName,
                     ...(venueHasOwnerUserColumn
-                        ? [resolvedOwnerUserId || null]
+                        ? [submitterUserId]
                         : []),
-                    resolvedOwnerUserId || null,
+                    submitterUserId,
                     normalizedAddress,
                     String(description || '').trim() || null,
                     String(phone || '').trim() || null,
@@ -4737,37 +4764,6 @@ async function generateWardIdFromName(name) {
                 )
                 VALUES (
                     ${insertPlaceholders.join(',\n                    ')},
-                    name,
-                    title,
-                    address,
-                    description,
-                    phone,
-                    latitude,
-                    longitude,
-                    ward_id,
-                    category_id,
-                    cover_image_url,
-                    business_license_image_url,
-                    metadata,
-                    submitted_by_user_id,
-                    status,
-                    submitted_at,
-                    updated_at
-                )
-                VALUES (
-                    $1,
-                    $2,
-                    $3,
-                    $4,
-                    $5,
-                    $6,
-                    $7,
-                    $8,
-                    $9,
-                    $10,
-                    $11,
-                    $12,
-                    $13,
                     'pending',
                     now(),
                     now()
@@ -4775,21 +4771,6 @@ async function generateWardIdFromName(name) {
                 RETURNING id
             `,
                     insertValues
-                    [
-                        normalizedName,
-                        String(title || '').trim() || normalizedName,
-                        normalizedAddress,
-                        String(description || '').trim() || null,
-                        String(phone || '').trim() || null,
-                        normalizedLatitude,
-                        normalizedLongitude,
-                        detection.wardId,
-                        resolvedCategoryId,
-                        String(coverImageUrl || '').trim() || null,
-                        String(businessLicenseImageUrl || '').trim() || null,
-                        normalizedMetadata,
-                        submitterUserId
-                    ]
                 );
 
                 const venueDetails = await pool.query(
@@ -7925,6 +7906,7 @@ async function generateWardIdFromName(name) {
         registerVersionedRoute('delete', '/chat/threads/:threadId', authenticateRequest, checkUserStatus, deleteChatThread);
 
         registerVersionedRoute('get', '/wards', listPublicWards);
+        registerVersionedRoute('post', '/gis/detect-ward', detectPublicWard);
         registerVersionedRoute('get', '/place-categories', listPublicPlaceCategories);
         registerVersionedRoute('get', '/merchant-services', listPublicMerchantServices);
         registerVersionedRoute('get', '/feedback/types', listPublicFeedbackTypes);

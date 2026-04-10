@@ -224,10 +224,17 @@ function MerchantVenueForm() {
     unlockResubmitIfNeeded();
 
     setFormData((prev) => {
+      const isWardChanged = name === 'wardId' && String(prev.wardId || '') !== String(value || '');
       const nextFormData = {
         ...prev,
         [name]: value
       };
+
+      if (isWardChanged) {
+        // Force repick when ward changes so pinned point always matches selected ward.
+        nextFormData.latitude = null;
+        nextFormData.longitude = null;
+      }
 
       const isGlobalHoursField = name === 'startTime' || name === 'endTime';
 
@@ -263,6 +270,13 @@ function MerchantVenueForm() {
       setFormErrors((prev) => ({
         ...prev,
         [name]: ''
+      }));
+    }
+
+    if (name === 'wardId' && formErrors.location) {
+      setFormErrors((prev) => ({
+        ...prev,
+        location: ''
       }));
     }
 
@@ -409,6 +423,20 @@ function MerchantVenueForm() {
     if (submitStatus?.type === 'success') {
       setSubmitStatus(null);
     }
+  };
+
+  const openLocationPicker = () => {
+    unlockResubmitIfNeeded();
+
+    if (!formData.wardId) {
+      setFormErrors((prev) => ({
+        ...prev,
+        wardId: prev.wardId || 'Select ward before picking location on map'
+      }));
+      return;
+    }
+
+    setIsLocationPickerOpen(true);
   };
 
   const handleSubmit = async (e) => {
@@ -658,7 +686,7 @@ function MerchantVenueForm() {
                 ))}
               </select>
 
-              <button type="button" className={`btn-map-picker ${formErrors.location ? 'btn-error' : ''}`} onClick={() => setIsLocationPickerOpen(true)}>
+              <button type="button" className={`btn-map-picker ${formErrors.location ? 'btn-error' : ''}`} onClick={openLocationPicker}>
                 📍 Pick on Map
               </button>
             </div>
@@ -876,6 +904,7 @@ function MerchantVenueForm() {
         isOpen={isLocationPickerOpen}
         onClose={() => setIsLocationPickerOpen(false)}
         onLocationSelect={handleLocationSelect}
+        selectedWardId={formData.wardId}
         defaultLocation={
           formData.latitude && formData.longitude
             ? { lat: formData.latitude, lng: formData.longitude }
