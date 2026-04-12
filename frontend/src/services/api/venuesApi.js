@@ -10,6 +10,11 @@ const venueCommunityInFlight = new Map();
 const VENUE_DETAIL_CACHE_TTL_MS = 15000;
 const VENUE_COMMUNITY_CACHE_TTL_MS = 8000;
 
+function clearVenuesListCaches() {
+  venuesCache.clear();
+  venuesInFlight.clear();
+}
+
 function invalidateVenueScopedCaches(venueId) {
   const cacheKey = String(venueId || '').trim();
   if (!cacheKey) {
@@ -71,8 +76,36 @@ export async function fetchMyVenueSubmissions(params = {}) {
   return response.data;
 }
 
+export async function fetchMyVenueUpdateRequests(params = {}) {
+  const response = await apiClient.get('/venues/update-requests', {
+    params,
+  });
+
+  return response.data;
+}
+
 export async function createVenueRequest(payload) {
   const response = await apiClient.post('/venues', payload);
+  clearVenuesListCaches();
+  return response.data;
+}
+
+export async function fetchVenueEditDraft(venueId) {
+  const response = await apiClient.get(`/venues/${venueId}/edit-draft`);
+  return response.data;
+}
+
+export async function submitVenueUpdateRequest(venueId, payload) {
+  const response = await apiClient.post(`/venues/${venueId}/update-request`, payload);
+  invalidateVenueScopedCaches(venueId);
+  clearVenuesListCaches();
+  return response.data;
+}
+
+export async function deleteMerchantVenuePost(venueId) {
+  const response = await apiClient.delete(`/venues/${venueId}`);
+  invalidateVenueScopedCaches(venueId);
+  clearVenuesListCaches();
   return response.data;
 }
 
@@ -182,6 +215,12 @@ export async function toggleVenueReviewReplyLike(venueId, reviewId, replyId) {
 
 export async function deleteVenueReview(venueId, reviewId) {
   const response = await apiClient.delete(`/venues/${venueId}/reviews/${reviewId}`);
+  invalidateVenueScopedCaches(venueId);
+  return response.data;
+}
+
+export async function deleteVenueReviewReply(venueId, reviewId, replyId) {
+  const response = await apiClient.delete(`/venues/${venueId}/reviews/${reviewId}/replies/${replyId}`);
   invalidateVenueScopedCaches(venueId);
   return response.data;
 }

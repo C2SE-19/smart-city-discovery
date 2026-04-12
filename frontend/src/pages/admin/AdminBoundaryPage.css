@@ -126,6 +126,28 @@
   min-height: 0;
 }
 
+.admin-pending-queue-switch {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+}
+
+.admin-pending-queue-tab {
+  border: 1px solid rgba(21, 94, 99, 0.2);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.86);
+  color: #17414a;
+  padding: 8px 10px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-align: left;
+}
+
+.admin-pending-queue-tab.is-active {
+  border-color: rgba(242, 95, 41, 0.52);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(255, 236, 227, 0.75));
+}
+
 .admin-list-panel header,
 .admin-detail-panel header {
   display: grid;
@@ -449,6 +471,378 @@
   font-size: 0.75rem;
 }
 
+.admin-weekly-hours-list {
+  gap: 4px;
+}
+
+.admin-detail-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.admin-detail-tab-btn {
+  border: 1px solid rgba(21, 94, 99, 0.22);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.88);
+  color: #1a4a54;
+  padding: 7px 8px;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.admin-detail-tab-btn.is-active {
+  border-color: rgba(242, 95, 41, 0.52);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(255, 236, 227, 0.76));
+}
+
+.admin-introduction-text {
+  margin: 0;
+  color: #385a62;
+  font-size: 0.77rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.admin-message-attachment-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.admin-message-attachment-grid .admin-detail-image {
+  height: 120px;
+}
+
+.admin-review-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.admin-review-toolbar strong {
+  color: #18424b;
+  font-size: 0.76rem;
+}
+
+.admin-review-toolbar select {
+  border-radius: 8px;
+  border: 1px solid rgba(21, 94, 99, 0.24);
+  background: #fff;
+  color: #173f48;
+  font-size: 0.74rem;
+  padding: 6px 8px;
+}
+
+.admin-review-list {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-review-card {
+  border: 1px solid rgba(21, 94, 99, 0.16);
+  border-radius: 10px;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.86);
+  display: grid;
+  gap: 4px;
+}
+
+.admin-review-parent-card {
+  border-color: rgba(21, 94, 99, 0.22);
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.92), rgba(240, 249, 249, 0.88));
+}
+
+.admin-review-parent-content {
+  display: grid;
+  gap: 4px;
+}
+
+.admin-review-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.admin-review-card-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.admin-review-card-header strong {
+  color: #19424a;
+  font-size: 0.76rem;
+}
+
+.admin-review-card-header span {
+  color: #24545e;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.admin-review-comment-btn {
+  border: 1px solid rgba(13, 89, 101, 0.35);
+  border-radius: 999px;
+  background: rgba(244, 251, 252, 0.95);
+  color: #0f5965;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 4px 10px;
+}
+
+.admin-review-comment-btn.is-active {
+  background: rgba(13, 89, 101, 0.12);
+  border-color: rgba(13, 89, 101, 0.45);
+}
+
+.admin-review-card small {
+  color: #5e7880;
+  font-size: 0.7rem;
+}
+
+.admin-review-card p {
+  margin: 0;
+  color: #35565f;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.admin-review-title {
+  margin: 0;
+  color: #1f4f59;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.admin-review-replies {
+  display: grid;
+  gap: 6px;
+  border-left: 3px solid rgba(20, 90, 98, 0.2);
+  margin-top: 3px;
+  padding-left: 9px;
+}
+
+.admin-review-replies-label {
+  margin: 0;
+  color: #2b5e67;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.admin-review-replies-label strong {
+  color: #1a4b55;
+  font-size: 0.68rem;
+}
+
+.admin-review-reply {
+  border: 1px solid rgba(21, 94, 99, 0.16);
+  border-radius: 8px;
+  background: rgba(244, 250, 251, 0.9);
+  padding: 6px 8px;
+  display: grid;
+  gap: 4px;
+}
+
+.admin-review-child-card {
+  box-shadow: inset 0 0 0 1px rgba(21, 94, 99, 0.05);
+}
+
+.admin-review-reply.is-admin {
+  border-color: rgba(234, 88, 12, 0.42);
+  background: linear-gradient(135deg, rgba(255, 248, 240, 0.95), rgba(255, 255, 255, 0.96));
+}
+
+.admin-review-reply-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.admin-review-reply-meta-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.admin-review-delete-btn {
+  border: 1px solid rgba(185, 56, 63, 0.35);
+  border-radius: 999px;
+  background: rgba(255, 241, 241, 0.96);
+  color: #a53039;
+  font-size: 0.64rem;
+  font-weight: 700;
+  line-height: 1;
+  padding: 4px 8px;
+}
+
+.admin-review-delete-btn:disabled {
+  opacity: 0.6;
+}
+
+.admin-review-reply-badge {
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 0.63rem;
+  font-weight: 700;
+  color: #0d5965;
+  border: 1px solid rgba(13, 89, 101, 0.36);
+  background: rgba(13, 89, 101, 0.1);
+}
+
+.admin-review-reply-header strong {
+  color: #1e4c55;
+  font-size: 0.73rem;
+}
+
+.admin-review-admin-badge {
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 0.64rem;
+  font-weight: 700;
+  color: #8a2f06;
+  border: 1px solid rgba(234, 88, 12, 0.4);
+  background: rgba(255, 237, 221, 0.95);
+}
+
+.admin-review-reply-content {
+  margin: 0;
+  color: #35565f;
+  font-size: 0.73rem;
+  line-height: 1.42;
+  white-space: pre-wrap;
+}
+
+.admin-review-reply-context {
+  margin: 0;
+  color: #1e4f59;
+  font-size: 0.67rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.admin-review-reply-form {
+  display: grid;
+  gap: 5px;
+}
+
+.admin-review-reply-form label {
+  color: #214b54;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.admin-review-reply-form input,
+.admin-review-reply-form textarea {
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid rgba(21, 94, 99, 0.2);
+  background: rgba(255, 255, 255, 0.9);
+  padding: 7px 8px;
+  color: #1a3a46;
+  font-size: 0.74rem;
+}
+
+.admin-review-reply-form textarea {
+  resize: vertical;
+}
+
+.admin-review-root-form {
+  border: 1px solid rgba(21, 94, 99, 0.16);
+  border-radius: 10px;
+  background: rgba(250, 253, 253, 0.95);
+  padding: 8px;
+  display: grid;
+  gap: 6px;
+}
+
+.admin-review-root-form h4 {
+  margin: 0;
+  color: #214b54;
+  font-size: 0.74rem;
+}
+
+.admin-review-root-form input,
+.admin-review-root-form textarea {
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid rgba(21, 94, 99, 0.2);
+  background: rgba(255, 255, 255, 0.9);
+  padding: 7px 8px;
+  color: #1a3a46;
+  font-size: 0.74rem;
+}
+
+.admin-review-root-form textarea {
+  resize: vertical;
+}
+
+.admin-review-root-form button {
+  justify-self: flex-start;
+}
+
+.admin-review-reply-upload-label {
+  color: #27505a;
+  font-size: 0.69rem;
+  font-weight: 700;
+}
+
+.admin-review-reply-upload {
+  width: 100%;
+  border-radius: 8px;
+  border: 1px dashed rgba(21, 94, 99, 0.32);
+  background: rgba(255, 255, 255, 0.9);
+  color: #1a3a46;
+  font-size: 0.71rem;
+  padding: 6px 7px;
+}
+
+.admin-review-reply-media-list {
+  display: grid;
+  gap: 5px;
+}
+
+.admin-review-reply-media-item {
+  border: 1px solid rgba(21, 94, 99, 0.18);
+  border-radius: 8px;
+  background: rgba(245, 252, 252, 0.9);
+  padding: 5px 7px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.admin-review-reply-media-item span {
+  color: #25454f;
+  font-size: 0.69rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-review-reply-media-remove {
+  border: 1px solid rgba(184, 56, 63, 0.3);
+  border-radius: 999px;
+  background: rgba(255, 242, 242, 0.95);
+  color: #a5323a;
+  font-size: 0.63rem;
+  font-weight: 700;
+  line-height: 1;
+  padding: 4px 8px;
+}
+
+.admin-review-reply-form button {
+  justify-self: flex-start;
+}
+
 .admin-form-stack {
   display: grid;
   gap: 8px;
@@ -548,6 +942,63 @@
   padding: 8px;
   display: grid;
   gap: 8px;
+}
+
+.admin-update-compare-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.admin-update-compare-column {
+  border: 1px solid rgba(21, 94, 99, 0.18);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 8px;
+  display: grid;
+  gap: 6px;
+}
+
+.admin-update-compare-column h5 {
+  margin: 0;
+  color: #18434c;
+  font-size: 0.8rem;
+}
+
+.admin-update-compare-column.is-proposed {
+  border-color: rgba(217, 54, 62, 0.32);
+  background: linear-gradient(155deg, rgba(255, 245, 245, 0.96), rgba(255, 255, 255, 0.95));
+}
+
+.admin-location-version-toggle {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.admin-location-version-btn {
+  border: 1px solid rgba(21, 94, 99, 0.22);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #15424c;
+  padding: 8px 10px;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.admin-location-version-btn.is-active {
+  border-color: rgba(242, 95, 41, 0.56);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(255, 236, 227, 0.84));
+}
+
+.admin-update-view-note {
+  font-size: 0.74rem;
+  color: #4a6670;
+}
+
+.admin-update-submitter {
+  font-size: 0.75rem;
+  color: #224f59;
 }
 
 .admin-service-summary {
@@ -838,6 +1289,14 @@
   background: #cc4a54;
 }
 
+.admin-venue-pin-update-new span {
+  background: #cf640f;
+}
+
+.admin-venue-pin-update-old span {
+  background: #1e8577;
+}
+
 @media (max-width: 1380px) {
   .admin-workspace-grid {
     grid-template-columns: 170px minmax(0, 1fr) 320px;
@@ -851,6 +1310,10 @@
   }
 
   .admin-workspace-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-update-compare-grid {
     grid-template-columns: 1fr;
   }
 
