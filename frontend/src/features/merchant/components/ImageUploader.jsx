@@ -5,7 +5,15 @@ function ImageUploader({ maxImages = 6, onImagesChange }) {
   const [images, setImages] = useState([]);
   const [previews, setPreviews] = useState([]);
 
-  const handleImageSelect = (event) => {
+  const readFileAsDataUrl = (file) =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error(`Failed to read file: ${file?.name || 'unknown'}`));
+      reader.readAsDataURL(file);
+    });
+
+  const handleImageSelect = async (event) => {
     const files = Array.from(event.target.files);
     const remainingSlots = maxImages - images.length;
 
@@ -14,20 +22,26 @@ function ImageUploader({ maxImages = 6, onImagesChange }) {
       return;
     }
 
-    const newImages = [...images, ...files];
-    setImages(newImages);
-
-    files.forEach((file) => {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        setPreviews((prev) => [...prev, e.target.result]);
-      };
-      reader.readAsDataURL(file);
-    });
-
-    if (onImagesChange) {
-      onImagesChange(newImages);
+    if (!files.length) {
+      return;
     }
+
+    const newImages = [...images, ...files];
+
+    try {
+      const nextPreviews = await Promise.all(files.map((file) => readFileAsDataUrl(file)));
+
+      setImages(newImages);
+      setPreviews((prev) => [...prev, ...nextPreviews]);
+
+      if (onImagesChange) {
+        onImagesChange(newImages);
+      }
+    } catch (error) {
+      alert(error.message || 'Could not read selected images. Please try again.');
+    }
+
+    event.target.value = '';
   };
 
   const removeImage = (index) => {
@@ -38,6 +52,25 @@ function ImageUploader({ maxImages = 6, onImagesChange }) {
 
     if (onImagesChange) {
       onImagesChange(newImages);
+    }
+  };
+
+  const setCoverImage = (index) => {
+    if (index <= 0 || index >= images.length) {
+      return;
+    }
+
+    const selectedImage = images[index];
+    const reorderedImages = [selectedImage, ...images.filter((_, imageIndex) => imageIndex !== index)];
+
+    const selectedPreview = previews[index];
+    const reorderedPreviews = [selectedPreview, ...previews.filter((_, previewIndex) => previewIndex !== index)];
+
+    setImages(reorderedImages);
+    setPreviews(reorderedPreviews);
+
+    if (onImagesChange) {
+      onImagesChange(reorderedImages);
     }
   };
 
@@ -78,6 +111,7 @@ function ImageUploader({ maxImages = 6, onImagesChange }) {
             {previews.map((preview, index) => (
               <div key={index} className="preview-item">
                 <img src={preview} alt={`Preview ${index + 1}`} className="preview-image" />
+                {index === 0 ? <span className="preview-cover-badge">Cover</span> : null}
                 <div className="preview-remove">
                   <button 
                     type="button" 
@@ -90,6 +124,23 @@ function ImageUploader({ maxImages = 6, onImagesChange }) {
                   >
                     ✕
                   </button>
+                </div>
+
+                <div className="preview-actions">
+                  {index === 0 ? (
+                    <span className="preview-cover-label">Cover image</span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="preview-set-cover-btn"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setCoverImage(index);
+                      }}
+                    >
+                      Set Cover
+                    </button>
+                  )}
                 </div>
               </div>
             ))}

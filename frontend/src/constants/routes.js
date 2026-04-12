@@ -19,4 +19,5 @@ export const APP_ROUTES = {
   MERCHANT_DASHBOARD: '/merchant',
   MERCHANT_POSTS: '/merchant/posts',
   MERCHANT_WORKBENCH: '/merchant/workbench',
+  MERCHANT_WORKBENCH_EDIT: '/merchant/workbench/:venueId',
 };

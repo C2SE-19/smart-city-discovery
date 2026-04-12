@@ -5,7 +5,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import translations from '../../constants/translations';
 import { APP_ROUTES } from '../../constants/routes';
-import { fetchMyVenueSubmissions } from '../../services/api/venuesApi';
+import { deleteMerchantVenuePost, fetchMyVenueSubmissions, fetchMyVenueUpdateRequests } from '../../services/api/venuesApi';
 import './MerchantPostList.css';
 
 const MenuItems = [
@@ -71,6 +71,72 @@ function normalizeVenueMetadata(metadata) {
   return {};
 }
 
+function extractMetadataImageCandidates(metadata) {
+  const normalizedMetadata = normalizeVenueMetadata(metadata);
+  const rawCandidates = [];
+  const sourceGroups = [
+    normalizedMetadata.galleryImages,
+    normalizedMetadata.images,
+    normalizedMetadata.imageUrls,
+    normalizedMetadata.photos,
+  ];
+
+  sourceGroups.forEach((group) => {
+    if (!Array.isArray(group)) {
+      return;
+    }
+
+    group.forEach((item) => {
+      if (typeof item === 'string') {
+        rawCandidates.push(item);
+        return;
+      }
+
+      if (item && typeof item === 'object') {
+        rawCandidates.push(item.url || item.image_url || item.imageUrl || item.src || '');
+      }
+    });
+  });
+
+  return rawCandidates
+    .map((item) => String(item || '').trim())
+    .filter(Boolean);
+}
+
+function resolveFirstValidImage(candidates) {
+  for (const candidate of candidates) {
+    const resolvedImage = resolveVenueImageUrl(candidate);
+    if (resolvedImage) {
+      return resolvedImage;
+    }
+  }
+
+  return '';
+}
+
+function resolveVenuePreviewImageUrl(venue) {
+  const metadataImageCandidates = extractMetadataImageCandidates(venue?.metadata);
+  const tableGalleryImages = Array.isArray(venue?.venue_images) ? venue.venue_images : [];
+
+  return resolveFirstValidImage([
+    venue?.cover_image_url,
+    venue?.venue_primary_image_url,
+    ...metadataImageCandidates,
+    ...tableGalleryImages,
+  ]);
+}
+
+function resolveUpdateRequestPreviewImageUrl(updateRequest, proposedSnapshot) {
+  const metadataImageCandidates = extractMetadataImageCandidates(proposedSnapshot?.metadata);
+
+  return resolveFirstValidImage([
+    proposedSnapshot?.coverImageUrl,
+    updateRequest?.venue_cover_image_url,
+    updateRequest?.venue_primary_image_url,
+    ...metadataImageCandidates,
+  ]);
+}
+
 function formatPriceRange(metadata) {
   const minPrice = Number(metadata.minPrice);
   const maxPrice = Number(metadata.maxPrice);
@@ -84,18 +150,49 @@ function formatPriceRange(metadata) {
 
 function mapVenueToPost(venue) {
   const metadata = normalizeVenueMetadata(venue?.metadata);
-  const coverImageUrl = resolveVenueImageUrl(venue.cover_image_url);
-  const galleryImageUrl = resolveVenueImageUrl(metadata.galleryImages?.[0]);
+  const previewImageUrl = resolveVenuePreviewImageUrl(venue);
+  const normalizedStatus = String(venue.status || '').toLowerCase();
 
   return {
-    id: Number(venue.id),
+    id: `venue-${Number(venue.id)}`,
+    venueId: Number(venue.id),
+    kind: 'venue',
     name: venue.title || venue.name || 'Untitled venue',
-    image: coverImageUrl || galleryImageUrl || FALLBACK_POST_IMAGE,
+    image: previewImageUrl || FALLBACK_POST_IMAGE,
     price: formatPriceRange(metadata),
     rating: Number(metadata.averageRating) || 0,
     reviews: Number(metadata.reviewCount) || 0,
-    status: String(venue.status || '').toLowerCase(),
-    rejectionReason: venue.rejection_reason || ''
+    status: normalizedStatus,
+    rejectionReason: venue.rejection_reason || '',
+    rejectionTopic: normalizedStatus === POST_STATUSES.rejected ? 'Post rejected' : '',
+  };
+}
+
+function mapRejectedUpdateRequestToPost(updateRequest) {
+  const proposedSnapshot =
+    updateRequest?.proposed_snapshot && typeof updateRequest.proposed_snapshot === 'object'
+      ? updateRequest.proposed_snapshot
+      : {};
+  const proposedMetadata = normalizeVenueMetadata(proposedSnapshot.metadata);
+  const previewImageUrl = resolveUpdateRequestPreviewImageUrl(updateRequest, proposedSnapshot);
+
+  return {
+    id: `update-request-${Number(updateRequest.id)}`,
+    venueId: Number(updateRequest.venue_id),
+    kind: 'update-request',
+    name:
+      updateRequest?.venue_title ||
+      updateRequest?.venue_name ||
+      proposedSnapshot.title ||
+      proposedSnapshot.name ||
+      `Venue #${updateRequest?.venue_id || 'N/A'}`,
+    image: previewImageUrl || FALLBACK_POST_IMAGE,
+    price: formatPriceRange(proposedMetadata),
+    rating: 0,
+    reviews: 0,
+    status: POST_STATUSES.rejected,
+    rejectionReason: updateRequest?.rejection_reason || '',
+    rejectionTopic: 'Location update rejected',
   };
 }
 
@@ -111,6 +208,7 @@ function MerchantPostListPage() {
   const [activeStatus, setActiveStatus] = useState(POST_STATUSES.approved);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeMenu, setActiveMenu] = useState('posts');
+  const [deletingPostId, setDeletingPostId] = useState(null);
   const copy = {
     followers: language === 'en' ? 'Followers' : 'Người theo dõi',
     following: language === 'en' ? 'Following' : 'Đang theo dõi',
@@ -123,12 +221,19 @@ function MerchantPostListPage() {
       setLoadError('');
 
       try {
-        const venueRows = await fetchMyVenueSubmissions({
-          status: `${POST_STATUSES.approved},${POST_STATUSES.pending},${POST_STATUSES.rejected}`
-        });
+        const [venueRows, rejectedUpdateRows] = await Promise.all([
+          fetchMyVenueSubmissions({
+            status: `${POST_STATUSES.approved},${POST_STATUSES.pending},${POST_STATUSES.rejected}`
+          }),
+          fetchMyVenueUpdateRequests({ status: POST_STATUSES.rejected }),
+        ]);
 
-        const normalizedPosts = Array.isArray(venueRows) ? venueRows.map(mapVenueToPost) : [];
-        setPosts(normalizedPosts);
+        const normalizedVenuePosts = Array.isArray(venueRows) ? venueRows.map(mapVenueToPost) : [];
+        const normalizedRejectedUpdatePosts = Array.isArray(rejectedUpdateRows)
+          ? rejectedUpdateRows.map(mapRejectedUpdateRequestToPost)
+          : [];
+
+        setPosts([...normalizedVenuePosts, ...normalizedRejectedUpdatePosts]);
       } catch (error) {
         setLoadError(error.response?.data?.message || 'Không thể tải danh sách bài đăng của bạn.');
       } finally {
@@ -166,13 +271,33 @@ function MerchantPostListPage() {
     return 'H';
   };
 
-  const handleEditPost = (postId) => {
-    navigate(`/merchant/workbench/${postId}`);
+  const handleEditPost = (post) => {
+    if (!post?.venueId || post.status !== POST_STATUSES.approved || post.kind !== 'venue') {
+      return;
+    }
+
+    navigate(`/merchant/workbench/${post.venueId}`);
   };
 
-  const handleDeletePost = (postId) => {
-    if (window.confirm(t.merchant.confirmDelete)) {
-      setPosts((currentPosts) => currentPosts.filter((post) => post.id !== postId));
+  const handleDeletePost = async (post) => {
+    if (!post?.venueId) {
+      return;
+    }
+
+    if (!window.confirm(t.merchant.confirmDelete)) {
+      return;
+    }
+
+    setDeletingPostId(post.id);
+    setLoadError('');
+
+    try {
+      await deleteMerchantVenuePost(post.venueId);
+      setPosts((currentPosts) => currentPosts.filter((item) => Number(item.venueId) !== Number(post.venueId)));
+    } catch (error) {
+      setLoadError(error.response?.data?.message || 'Could not delete this post. Please try again.');
+    } finally {
+      setDeletingPostId(null);
     }
   };
 
@@ -342,6 +467,11 @@ function MerchantPostListPage() {
                 />
                 <div className="merchant-post-info">
                   <h3>{post.name}</h3>
+                  {post.status === POST_STATUSES.rejected && post.rejectionTopic ? (
+                    <p className="merchant-post-topic">
+                      {language === 'en' ? 'Topic' : 'Chủ đề'}: {post.rejectionTopic}
+                    </p>
+                  ) : null}
                   <p className="merchant-post-price">{post.price || (language === 'en' ? 'Price updating' : 'Đang cập nhật giá')}</p>
                   <div className="merchant-post-rating">
                     <span className="merchant-post-stars">⭐ {post.rating}</span>
@@ -352,17 +482,20 @@ function MerchantPostListPage() {
                   ) : null}
                 </div>
                 <div className="merchant-post-actions">
-                  <button 
-                    className="merchant-post-edit-btn"
-                    onClick={() => handleEditPost(post.id)}
-                  >
-                    {t.merchant.edit}
-                  </button>
+                  {post.status === POST_STATUSES.approved && post.kind === 'venue' ? (
+                    <button
+                      className="merchant-post-edit-btn"
+                      onClick={() => handleEditPost(post)}
+                    >
+                      {t.merchant.edit}
+                    </button>
+                  ) : null}
                   <button 
                     className="merchant-post-delete-btn"
-                    onClick={() => handleDeletePost(post.id)}
+                    disabled={deletingPostId === post.id}
+                    onClick={() => handleDeletePost(post)}
                   >
-                    {t.merchant.delete}
+                    {deletingPostId === post.id ? 'Deleting...' : t.merchant.delete}
                   </button>
                 </div>
               </div>

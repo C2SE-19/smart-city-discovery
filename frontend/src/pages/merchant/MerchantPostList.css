@@ -217,6 +217,17 @@
   font-weight: 600;
 }
 
+.merchant-post-topic {
+  margin: 0 0 8px 0;
+  font-size: 12px;
+  color: #8a4f1f;
+  font-weight: 600;
+}
+
+.theme-dark .merchant-post-topic {
+  color: #f59e0b;
+}
+
 .merchant-post-rating {
   display: flex;
   gap: 6px;
