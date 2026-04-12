@@ -20,6 +20,7 @@ import AdminReportsPage from './pages/admin/AdminReportsPage';
 import AdminVenueApprovalPage from './pages/admin/AdminVenueApprovalPage';
 import AdminFeedbackManagementPage from './pages/admin/AdminFeedbackManagementPage';
 import MerchantWorkbenchPage from './pages/merchant/MerchantWorkbenchPage';
+import MerchantWorkbenchEditPage from './pages/merchant/MerchantWorkbenchEditPage';
 import MerchantDashboardPage from './pages/merchant/MerchantDashboardPage';
 import MerchantPostListPage from './pages/merchant/MerchantPostListPage';
 import LoginPage from './pages/auth/LoginPage';
@@ -127,6 +128,7 @@ function App() {
           <Route path={APP_ROUTES.MERCHANT_DASHBOARD} element={<MerchantDashboardPage />} />
           <Route path={APP_ROUTES.MERCHANT_POSTS} element={<MerchantPostListPage />} />
           <Route path={APP_ROUTES.MERCHANT_WORKBENCH} element={<MerchantWorkbenchPage />} />
+          <Route path={APP_ROUTES.MERCHANT_WORKBENCH_EDIT} element={<MerchantWorkbenchEditPage />} />
         </Route>
 
         <Route
