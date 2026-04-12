@@ -4,17 +4,24 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import SectionCard from '../../components/common/SectionCard';
 import {
+  createAdminVenueReview,
+  createAdminVenueReviewReply,
+  deleteAdminVenueReview,
+  deleteAdminVenueReviewReply,
   createAdminMerchantService,
   createAdminPlaceCategory,
   deleteAdminMerchantService,
   deleteAdminPlaceCategory,
   deleteAdminWard,
   fetchAdminMerchantServices,
+  fetchAdminVenueReviews,
+  fetchAdminVenueUpdateRequests,
   fetchAdminVenueDetail,
   fetchAdminPlaceCategories,
   fetchAdminVenues,
   fetchAdminWards,
   moderateAdminVenue,
+  moderateAdminVenueUpdateRequest,
   updateAdminMerchantService,
   updateAdminPlaceCategory,
   upsertAdminWard,
@@ -90,6 +97,20 @@ const rejectedIcon = L.divIcon({
   iconAnchor: [9, 9],
 });
 
+const updateRequestNewIcon = L.divIcon({
+  className: 'admin-venue-pin admin-venue-pin-update-new',
+  html: '<span></span>',
+  iconSize: [18, 18],
+  iconAnchor: [9, 9],
+});
+
+const updateRequestOldIcon = L.divIcon({
+  className: 'admin-venue-pin admin-venue-pin-update-old',
+  html: '<span></span>',
+  iconSize: [18, 18],
+  iconAnchor: [9, 9],
+});
+
 function slugifyText(name) {
   return String(name || '')
     .normalize('NFD')
@@ -111,6 +132,29 @@ function normalizeSearchText(value) {
     .replace(/Đ/g, 'D')
     .toLowerCase()
     .trim();
+}
+
+function normalizeExactSearchText(value) {
+  return String(value || '').toLowerCase().trim();
+}
+
+function normalizeVietnameseToneInsensitive(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300\u0301\u0303\u0309\u0323]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+function buildVenueNameSearchSource(venue) {
+  const venueTitle = String(venue?.title || '').trim();
+  const venueName = String(venue?.name || '').trim();
+
+  if (venueTitle && venueName && venueTitle.toLowerCase() !== venueName.toLowerCase()) {
+    return `${venueTitle} ${venueName}`.trim();
+  }
+
+  return venueTitle || venueName;
 }
 
 function canonicalizeJsonValue(value) {
@@ -244,6 +288,43 @@ function formatDateTime(dateValue) {
   }
 
   return new Date(dateValue).toLocaleString('en-US');
+}
+
+function normalizeVenueUpdateSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
+    return {
+      name: '',
+      title: '',
+      address: '',
+      description: '',
+      phone: '',
+      latitude: null,
+      longitude: null,
+      wardId: '',
+      categoryId: null,
+      coverImageUrl: '',
+      businessLicenseImageUrl: '',
+      metadata: {},
+    };
+  }
+
+  const latitude = Number(snapshot.latitude);
+  const longitude = Number(snapshot.longitude);
+
+  return {
+    name: String(snapshot.name || '').trim(),
+    title: String(snapshot.title || '').trim(),
+    address: String(snapshot.address || '').trim(),
+    description: String(snapshot.description || '').trim(),
+    phone: String(snapshot.phone || '').trim(),
+    latitude: Number.isFinite(latitude) ? latitude : null,
+    longitude: Number.isFinite(longitude) ? longitude : null,
+    wardId: String(snapshot.wardId || '').trim(),
+    categoryId: Number.isFinite(Number(snapshot.categoryId)) ? Number(snapshot.categoryId) : null,
+    coverImageUrl: String(snapshot.coverImageUrl || '').trim(),
+    businessLicenseImageUrl: String(snapshot.businessLicenseImageUrl || '').trim(),
+    metadata: normalizeVenueMetadata(snapshot.metadata),
+  };
 }
 
 function resolveStatusIcon(status) {
@@ -399,6 +480,33 @@ function normalizeImageUrls(value) {
     .filter(Boolean);
 }
 
+function resolveAssetUrl(rawUrl) {
+  const normalizedUrl = String(rawUrl || '').trim();
+
+  if (!normalizedUrl || normalizedUrl.toLowerCase() === 'nan' || normalizedUrl.toLowerCase() === 'null') {
+    return '';
+  }
+
+  if (/^(data:|blob:|https?:\/\/)/i.test(normalizedUrl)) {
+    return normalizedUrl;
+  }
+
+  const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api/v1';
+  let apiOrigin = 'http://localhost:5000';
+
+  try {
+    apiOrigin = new URL(configuredBaseUrl).origin;
+  } catch {
+    apiOrigin = 'http://localhost:5000';
+  }
+
+  if (normalizedUrl.startsWith('/')) {
+    return `${apiOrigin}${normalizedUrl}`;
+  }
+
+  return `${apiOrigin}/${normalizedUrl}`;
+}
+
 function extractVenueGalleryImages(venue) {
   const metadata = normalizeVenueMetadata(venue?.metadata);
   const galleryImages = normalizeImageUrls(metadata.galleryImages);
@@ -412,6 +520,109 @@ function extractVenueGalleryImages(venue) {
   }
 
   return [...new Set(merged)];
+}
+
+function extractUpdateSnapshotGalleryImages(snapshot) {
+  const metadata = normalizeVenueMetadata(snapshot?.metadata);
+  const galleryImages = normalizeImageUrls(metadata.galleryImages);
+  const fallbackImages = normalizeImageUrls(metadata.images || metadata.imageUrls || metadata.photos);
+  const coverImage = typeof snapshot?.coverImageUrl === 'string' ? snapshot.coverImageUrl.trim() : '';
+
+  const merged = [...galleryImages, ...fallbackImages];
+
+  if (coverImage) {
+    merged.unshift(coverImage);
+  }
+
+  return [...new Set(merged)];
+}
+
+function formatMetadataOperatingHours(metadata) {
+  const normalizedMetadata = normalizeVenueMetadata(metadata);
+  const weeklySource =
+    normalizedMetadata.weeklyOpenHours && typeof normalizedMetadata.weeklyOpenHours === 'object' && !Array.isArray(normalizedMetadata.weeklyOpenHours)
+      ? normalizedMetadata.weeklyOpenHours
+      : normalizedMetadata.weeklySchedule && typeof normalizedMetadata.weeklySchedule === 'object' && !Array.isArray(normalizedMetadata.weeklySchedule)
+        ? normalizedMetadata.weeklySchedule
+        : null;
+
+  if (weeklySource) {
+    for (const day of VENUE_WEEK_DAYS) {
+      const dayValue = weeklySource?.[day.key];
+
+      if (!dayValue || typeof dayValue !== 'object') {
+        continue;
+      }
+
+      const isClosed = Boolean(dayValue.isClosed ?? dayValue.closed ?? dayValue.is_off ?? dayValue.off);
+      if (isClosed) {
+        continue;
+      }
+
+      const openTime = String(dayValue.openTime ?? dayValue.open ?? dayValue.start ?? dayValue.startTime ?? '').trim();
+      const closeTime = String(dayValue.closeTime ?? dayValue.close ?? dayValue.end ?? dayValue.endTime ?? '').trim();
+
+      if (openTime && closeTime) {
+        return `${openTime} - ${closeTime}`;
+      }
+    }
+  }
+
+  const startTime = String(normalizedMetadata.startTime || '').trim();
+  const endTime = String(normalizedMetadata.endTime || '').trim();
+
+  if (startTime && endTime) {
+    return `${startTime} - ${endTime}`;
+  }
+
+  return 'Not provided';
+}
+
+function extractMetadataWeeklySchedule(metadata) {
+  const normalizedMetadata = normalizeVenueMetadata(metadata);
+  const fallbackStart = String(normalizedMetadata.startTime || '').trim();
+  const fallbackEnd = String(normalizedMetadata.endTime || '').trim();
+  const hasFallbackRange = Boolean(fallbackStart && fallbackEnd);
+  const weeklySchedule =
+    normalizedMetadata.weeklyOpenHours && typeof normalizedMetadata.weeklyOpenHours === 'object' && !Array.isArray(normalizedMetadata.weeklyOpenHours)
+        ? normalizedMetadata.weeklyOpenHours
+      : normalizedMetadata.weeklySchedule && typeof normalizedMetadata.weeklySchedule === 'object' && !Array.isArray(normalizedMetadata.weeklySchedule)
+        ? normalizedMetadata.weeklySchedule
+        : null;
+
+  if (!weeklySchedule) {
+    return [];
+  }
+
+  return VENUE_WEEK_DAYS.map((day) => {
+    const rawDay = weeklySchedule?.[day.key];
+
+    if (!rawDay || typeof rawDay !== 'object') {
+      if (hasFallbackRange) {
+        return `${day.label}: ${fallbackStart} - ${fallbackEnd}`;
+      }
+
+      return `${day.label}: Not provided`;
+    }
+
+    const isClosed = Boolean(rawDay.isClosed ?? rawDay.closed ?? rawDay.is_off ?? rawDay.off);
+    if (isClosed) {
+      return `${day.label}: Closed`;
+    }
+
+    const openTime = String(rawDay.openTime ?? rawDay.open ?? rawDay.start ?? rawDay.startTime ?? '').trim();
+    const closeTime = String(rawDay.closeTime ?? rawDay.close ?? rawDay.end ?? rawDay.endTime ?? '').trim();
+
+    if (openTime && closeTime) {
+      return `${day.label}: ${openTime} - ${closeTime}`;
+    }
+
+    if (hasFallbackRange) {
+      return `${day.label}: ${fallbackStart} - ${fallbackEnd}`;
+    }
+
+    return `${day.label}: Not provided`;
+  });
 }
 
 function formatCurrencyVnd(value) {
@@ -493,8 +704,10 @@ async function fetchAdminWardsWithRetry(maxAttempts = 3) {
 
 function AdminBoundaryPage() {
   const [activeMode, setActiveMode] = useState('pending');
+  const [pendingQueueView, setPendingQueueView] = useState('submissions');
   const [wards, setWards] = useState([]);
   const [venues, setVenues] = useState([]);
+  const [venueUpdateRequests, setVenueUpdateRequests] = useState([]);
   const [placeCategories, setPlaceCategories] = useState([]);
   const [merchantServices, setMerchantServices] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -509,12 +722,16 @@ function AdminBoundaryPage() {
   const [submittingService, setSubmittingService] = useState(false);
   const [deletingServiceId, setDeletingServiceId] = useState(null);
   const [moderatingVenueId, setModeratingVenueId] = useState(null);
+  const [moderatingUpdateRequestId, setModeratingUpdateRequestId] = useState(null);
 
   const [selectedVenueId, setSelectedVenueId] = useState(null);
+  const [selectedUpdateRequestId, setSelectedUpdateRequestId] = useState(null);
+  const [selectedUpdateLocationView, setSelectedUpdateLocationView] = useState('new');
   const [selectedWardId, setSelectedWardId] = useState('');
   const [selectedCategoryId, setSelectedCategoryId] = useState(null);
   const [selectedServiceId, setSelectedServiceId] = useState(null);
   const [rejectReasons, setRejectReasons] = useState({});
+  const [updateRejectReasons, setUpdateRejectReasons] = useState({});
   const [isSubmissionDetailClosed, setIsSubmissionDetailClosed] = useState(false);
   const [selectedVenueImageIndex, setSelectedVenueImageIndex] = useState(0);
   const [expandedImageUrl, setExpandedImageUrl] = useState('');
@@ -524,9 +741,15 @@ function AdminBoundaryPage() {
   const [isLoadingSelectedVenueReviews, setIsLoadingSelectedVenueReviews] = useState(false);
   const [selectedVenueReviewsError, setSelectedVenueReviewsError] = useState('');
   const [selectedVenueDetail, setSelectedVenueDetail] = useState(null);
-  const [adminVenueMessage, setAdminVenueMessage] = useState('');
-  const [adminVenueAttachments, setAdminVenueAttachments] = useState([]);
-  const [sendingVenueMessageId, setSendingVenueMessageId] = useState(null);
+  const [adminVenueCommentDraft, setAdminVenueCommentDraft] = useState({ title: '', comment: '' });
+  const [adminVenueCommentMediaFiles, setAdminVenueCommentMediaFiles] = useState([]);
+  const [submittingAdminVenueComment, setSubmittingAdminVenueComment] = useState(false);
+  const [adminReviewReplyDrafts, setAdminReviewReplyDrafts] = useState({});
+  const [adminReviewReplyMediaDrafts, setAdminReviewReplyMediaDrafts] = useState({});
+  const [activeAdminReplyTarget, setActiveAdminReplyTarget] = useState(null);
+  const [sendingReviewReplyId, setSendingReviewReplyId] = useState(null);
+  const [deletingReviewId, setDeletingReviewId] = useState(null);
+  const [deletingReplyId, setDeletingReplyId] = useState(null);
 
   const [mapCenter, setMapCenter] = useState(DEFAULT_CENTER);
   const [mapZoom, setMapZoom] = useState(DEFAULT_ZOOM);
@@ -549,6 +772,15 @@ function AdminBoundaryPage() {
   const [categoryIconInput, setCategoryIconInput] = useState('');
   const [isCategoryIconPickerOpen, setIsCategoryIconPickerOpen] = useState(false);
   const [serviceNameInput, setServiceNameInput] = useState('');
+
+  const buildDefaultAdminReplyDraft = (authorName = '') => {
+    const normalizedAuthorName = String(authorName || '').trim();
+
+    return {
+      title: '',
+      content: normalizedAuthorName ? `@${normalizedAuthorName} ` : '',
+    };
+  };
 
   const pendingModeVenues = useMemo(
     () => venues.filter((venue) => String(venue.status || '').toLowerCase() !== 'rejected'),
@@ -627,6 +859,14 @@ function AdminBoundaryPage() {
     () => normalizeSearchText(appliedPendingSearch),
     [appliedPendingSearch]
   );
+  const exactAppliedPendingSearch = useMemo(
+    () => normalizeExactSearchText(appliedPendingSearch),
+    [appliedPendingSearch]
+  );
+  const toneInsensitiveAppliedPendingSearch = useMemo(
+    () => normalizeVietnameseToneInsensitive(appliedPendingSearch),
+    [appliedPendingSearch]
+  );
 
   const pendingFilteredVenues = useMemo(() => {
     return pendingModeVenues.filter((venue) => {
@@ -666,27 +906,30 @@ function AdminBoundaryPage() {
         return true;
       }
 
-      const venueSearchSource = [
-        venue.title,
-        venue.name,
-        venue.address,
-        venue.ward_name,
-        venue.ward_id,
-        venue.category_name,
-        venue.description,
-        venue.phone,
-        ...resolveVenueServiceNames(venue, serviceNameById),
-      ]
-        .filter(Boolean)
-        .join(' ');
+      const venueNameSearchSource = buildVenueNameSearchSource(venue);
+      if (!venueNameSearchSource) {
+        return false;
+      }
 
-      return normalizeSearchText(venueSearchSource).includes(normalizedAppliedPendingSearch);
+      const exactVenueName = normalizeExactSearchText(venueNameSearchSource);
+      const toneInsensitiveVenueName = normalizeVietnameseToneInsensitive(venueNameSearchSource);
+      const asciiVenueName = normalizeSearchText(venueNameSearchSource);
+
+      const isNameMatched = (
+        exactVenueName.includes(exactAppliedPendingSearch)
+        || toneInsensitiveVenueName.includes(toneInsensitiveAppliedPendingSearch)
+        || asciiVenueName.includes(normalizedAppliedPendingSearch)
+      );
+
+      return isNameMatched;
     });
   }, [
     pendingModeVenues,
     appliedPendingCategoryIds,
     appliedPendingWardIds,
     appliedPendingServiceIds,
+    exactAppliedPendingSearch,
+    toneInsensitiveAppliedPendingSearch,
     normalizedAppliedPendingSearch,
     serviceNameById,
   ]);
@@ -694,6 +937,13 @@ function AdminBoundaryPage() {
   const pendingQueueVenues = useMemo(
     () => pendingFilteredVenues.filter((venue) => String(venue.status || '').toLowerCase() === 'pending'),
     [pendingFilteredVenues]
+  );
+  const pendingLocationUpdateRequests = useMemo(
+    () =>
+      venueUpdateRequests.filter(
+        (request) => String(request?.status || '').toLowerCase() === 'pending'
+      ),
+    [venueUpdateRequests]
   );
 
   const pendingActiveFilterCount =
@@ -712,11 +962,60 @@ function AdminBoundaryPage() {
     }
 
     if (Number(selectedVenueDetail?.id) === Number(selectedVenueSummary.id)) {
-      return { ...selectedVenueSummary, ...selectedVenueDetail };
+      return { ...selectedVenueDetail, ...selectedVenueSummary };
     }
 
     return selectedVenueSummary;
   }, [selectedVenueSummary, selectedVenueDetail]);
+  const selectedUpdateRequest = useMemo(
+    () =>
+      pendingLocationUpdateRequests.find(
+        (request) => Number(request.id) === Number(selectedUpdateRequestId)
+      ) || null,
+    [pendingLocationUpdateRequests, selectedUpdateRequestId]
+  );
+  const selectedUpdateOldSnapshot = useMemo(
+    () => normalizeVenueUpdateSnapshot(selectedUpdateRequest?.old_snapshot),
+    [selectedUpdateRequest]
+  );
+  const selectedUpdateProposedSnapshot = useMemo(
+    () => normalizeVenueUpdateSnapshot(selectedUpdateRequest?.proposed_snapshot),
+    [selectedUpdateRequest]
+  );
+  const selectedUpdateOldServiceNames = useMemo(
+    () => resolveVenueServiceNames({ metadata: selectedUpdateOldSnapshot.metadata }, serviceNameById),
+    [selectedUpdateOldSnapshot, serviceNameById]
+  );
+  const selectedUpdateNewServiceNames = useMemo(
+    () => resolveVenueServiceNames({ metadata: selectedUpdateProposedSnapshot.metadata }, serviceNameById),
+    [selectedUpdateProposedSnapshot, serviceNameById]
+  );
+  const selectedUpdateActiveSnapshot = useMemo(
+    () => (selectedUpdateLocationView === 'old' ? selectedUpdateOldSnapshot : selectedUpdateProposedSnapshot),
+    [selectedUpdateLocationView, selectedUpdateOldSnapshot, selectedUpdateProposedSnapshot]
+  );
+  const selectedUpdateActiveServiceNames = useMemo(
+    () => (selectedUpdateLocationView === 'old' ? selectedUpdateOldServiceNames : selectedUpdateNewServiceNames),
+    [selectedUpdateLocationView, selectedUpdateOldServiceNames, selectedUpdateNewServiceNames]
+  );
+  const selectedUpdateActiveGalleryImages = useMemo(
+    () => extractUpdateSnapshotGalleryImages(selectedUpdateActiveSnapshot),
+    [selectedUpdateActiveSnapshot]
+  );
+  const selectedUpdateActiveImage =
+    selectedUpdateActiveGalleryImages[selectedVenueImageIndex] ||
+    selectedUpdateActiveGalleryImages[0] ||
+    selectedUpdateActiveSnapshot?.coverImageUrl ||
+    '';
+  const selectedUpdateActiveBusinessLicenseImage = String(selectedUpdateActiveSnapshot?.businessLicenseImageUrl || '').trim();
+  const selectedUpdateActiveOperatingHours = useMemo(
+    () => formatMetadataOperatingHours(selectedUpdateActiveSnapshot?.metadata),
+    [selectedUpdateActiveSnapshot]
+  );
+  const selectedUpdateActiveWeeklySchedule = useMemo(
+    () => extractMetadataWeeklySchedule(selectedUpdateActiveSnapshot?.metadata),
+    [selectedUpdateActiveSnapshot]
+  );
   const selectedWard = useMemo(
     () => wards.find((ward) => ward.ward_id === selectedWardId) || null,
     [wards, selectedWardId]
@@ -789,6 +1088,52 @@ function AdminBoundaryPage() {
   );
   const selectedVenueActiveImage =
     selectedVenueGalleryImages[selectedVenueImageIndex] || selectedVenueGalleryImages[0] || selectedVenue?.cover_image_url || '';
+  const selectedVenueOperatingHours = useMemo(
+    () => formatMetadataOperatingHours(selectedVenueMetadata),
+    [selectedVenueMetadata]
+  );
+  const selectedVenueWeeklySchedule = useMemo(
+    () => extractMetadataWeeklySchedule(selectedVenueMetadata),
+    [selectedVenueMetadata]
+  );
+  const selectedVenueIntroduction = useMemo(() => {
+    return String(
+      selectedVenue?.description ||
+      selectedVenueMetadata.introduction ||
+      selectedVenueMetadata.intro ||
+      selectedVenueMetadata.story ||
+      ''
+    ).trim();
+  }, [selectedVenue, selectedVenueMetadata]);
+  const selectedVenueRatingSummary = useMemo(() => {
+    const directRating = Number(selectedVenue?.average_rating ?? selectedVenue?.averageRating);
+    const directTotal = Number(
+      selectedVenue?.total_reviews ??
+      selectedVenue?.totalReviews ??
+      selectedVenue?.review_count ??
+      selectedVenue?.reviewCount
+    );
+
+    const ratedReviews = selectedVenueReviews
+      .map((review) => Number(review?.rating))
+      .filter((rating) => Number.isFinite(rating) && rating > 0);
+    const fallbackTotal = ratedReviews.length;
+    const fallbackAverage = fallbackTotal
+      ? ratedReviews.reduce((sum, rating) => sum + rating, 0) / fallbackTotal
+      : 0;
+
+    return {
+      average: Number.isFinite(directRating) && directRating > 0 ? directRating : fallbackAverage,
+      total: Number.isFinite(directTotal) && directTotal >= 0 ? directTotal : fallbackTotal,
+    };
+  }, [selectedVenue, selectedVenueReviews]);
+  const activeDetailGalleryImages = useMemo(() => {
+    if (activeMode === 'pending' && pendingQueueView === 'updates') {
+      return selectedUpdateActiveGalleryImages;
+    }
+
+    return selectedVenueGalleryImages;
+  }, [activeMode, pendingQueueView, selectedUpdateActiveGalleryImages, selectedVenueGalleryImages]);
   const activeModeMeta = PAGE_MODES.find((mode) => mode.value === activeMode);
 
   async function loadData() {
@@ -797,9 +1142,10 @@ function AdminBoundaryPage() {
     setLoadWarning('');
 
     try {
-      const [wardResult, venueResult] = await Promise.allSettled([
+      const [wardResult, venueResult, updateRequestResult] = await Promise.allSettled([
         fetchAdminWardsWithRetry(),
         fetchAdminVenuesWithRetry(),
+        fetchAdminVenueUpdateRequests({ status: 'pending' }),
       ]);
 
       const [categoryResult, serviceResult] = await Promise.allSettled([
@@ -821,6 +1167,12 @@ function AdminBoundaryPage() {
         setVenues(Array.isArray(venueResult.value) ? venueResult.value : []);
       } else {
         // Keep previously loaded venues if a transient request fails during startup.
+      }
+
+      if (updateRequestResult.status === 'fulfilled') {
+        setVenueUpdateRequests(Array.isArray(updateRequestResult.value) ? updateRequestResult.value : []);
+      } else {
+        setVenueUpdateRequests([]);
       }
 
       if (categoryResult.status === 'fulfilled') {
@@ -857,6 +1209,15 @@ function AdminBoundaryPage() {
     setVenues(venueData);
   }
 
+  async function refreshPendingModerationData() {
+    const [venueData, updateRequestData] = await Promise.all([
+      fetchAdminVenuesWithRetry(),
+      fetchAdminVenueUpdateRequests({ status: 'pending' }),
+    ]);
+    setVenues(Array.isArray(venueData) ? venueData : []);
+    setVenueUpdateRequests(Array.isArray(updateRequestData) ? updateRequestData : []);
+  }
+
   async function refreshCategoriesAndVenues() {
     const [categoryData, venueData] = await Promise.all([fetchAdminPlaceCategories(), fetchAdminVenuesWithRetry()]);
     setPlaceCategories(sortCategories(categoryData));
@@ -874,6 +1235,32 @@ function AdminBoundaryPage() {
 
   useEffect(() => {
     if (activeMode !== 'pending') {
+      return;
+    }
+
+    if (pendingQueueView === 'updates') {
+      if (!pendingLocationUpdateRequests.length) {
+        setSelectedUpdateRequestId(null);
+        setIsSubmissionDetailClosed(false);
+        return;
+      }
+
+      const hasSelectedRequest = selectedUpdateRequestId
+        ? pendingLocationUpdateRequests.some((request) => Number(request.id) === Number(selectedUpdateRequestId))
+        : false;
+
+      if (!hasSelectedRequest) {
+        setSelectedUpdateRequestId(null);
+      }
+
+      if (isSubmissionDetailClosed) {
+        return;
+      }
+
+      if (!hasSelectedRequest) {
+        setSelectedUpdateRequestId(pendingLocationUpdateRequests[0]?.id ?? null);
+      }
+
       return;
     }
 
@@ -899,26 +1286,38 @@ function AdminBoundaryPage() {
       const fallbackVenueId = pendingQueueVenues[0]?.id ?? pendingFilteredVenues[0]?.id ?? null;
       setSelectedVenueId(fallbackVenueId);
     }
-  }, [activeMode, pendingFilteredVenues, pendingQueueVenues, selectedVenueId, isSubmissionDetailClosed]);
+  }, [
+    activeMode,
+    pendingQueueView,
+    pendingFilteredVenues,
+    pendingQueueVenues,
+    pendingLocationUpdateRequests,
+    selectedVenueId,
+    selectedUpdateRequestId,
+    isSubmissionDetailClosed,
+  ]);
 
   useEffect(() => {
-    if (activeMode !== 'pending' || !selectedVenue) {
+    if (activeMode !== 'pending') {
       return;
     }
 
-    const latitude = Number(selectedVenue.latitude);
-    const longitude = Number(selectedVenue.longitude);
+    const focusSource = pendingQueueView === 'updates'
+      ? selectedUpdateActiveSnapshot
+      : selectedVenue;
+    const latitude = Number(focusSource?.latitude);
+    const longitude = Number(focusSource?.longitude);
 
     if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
       setMapCenter([latitude, longitude]);
       setMapZoom(15);
     }
-  }, [activeMode, selectedVenue]);
+  }, [activeMode, pendingQueueView, selectedVenue, selectedUpdateActiveSnapshot]);
 
   useEffect(() => {
     setSelectedVenueImageIndex(0);
     setExpandedImageUrl('');
-  }, [activeMode, selectedVenueId]);
+  }, [activeMode, pendingQueueView, selectedVenueId, selectedUpdateRequestId, selectedUpdateLocationView]);
 
   useEffect(() => {
     setActiveDetailTab('overview');
@@ -926,21 +1325,19 @@ function AdminBoundaryPage() {
     setSelectedVenueReviews([]);
     setSelectedVenueReviewsError('');
     setSelectedVenueDetail(null);
-    setAdminVenueMessage('');
-
-    setAdminVenueAttachments((currentAttachments) => {
-      currentAttachments.forEach((attachment) => {
-        if (attachment?.previewUrl) {
-          URL.revokeObjectURL(attachment.previewUrl);
-        }
-      });
-
-      return [];
-    });
-  }, [activeMode, selectedVenueId]);
+    setAdminVenueCommentDraft({ title: '', comment: '' });
+    setAdminVenueCommentMediaFiles([]);
+    setSubmittingAdminVenueComment(false);
+    setAdminReviewReplyDrafts({});
+    setAdminReviewReplyMediaDrafts({});
+    setActiveAdminReplyTarget(null);
+    setSendingReviewReplyId(null);
+    setDeletingReviewId(null);
+    setDeletingReplyId(null);
+  }, [activeMode, pendingQueueView, selectedVenueId, selectedUpdateRequestId]);
 
   useEffect(() => {
-    if (activeMode !== 'pending' || !selectedVenueId) {
+    if (activeMode !== 'pending' || pendingQueueView !== 'submissions' || !selectedVenueId) {
       return;
     }
 
@@ -967,10 +1364,10 @@ function AdminBoundaryPage() {
     return () => {
       isMounted = false;
     };
-  }, [activeMode, selectedVenueId]);
+  }, [activeMode, pendingQueueView, selectedVenueId]);
 
   useEffect(() => {
-    if (activeMode !== 'pending' || !selectedVenue?.id) {
+    if (activeMode !== 'pending' || pendingQueueView !== 'submissions' || !selectedVenue?.id) {
       return;
     }
 
@@ -1009,7 +1406,7 @@ function AdminBoundaryPage() {
     return () => {
       isMounted = false;
     };
-  }, [activeMode, selectedVenue?.id, selectedVenueReviewSort]);
+  }, [activeMode, pendingQueueView, selectedVenue?.id, selectedVenueReviewSort]);
 
   useEffect(() => {
     if (activeMode !== 'pending') {
@@ -1017,8 +1414,9 @@ function AdminBoundaryPage() {
     }
 
     let pollingInFlight = false;
+    let isMounted = true;
 
-    const intervalId = window.setInterval(async () => {
+    const refreshPendingData = async () => {
       if (pollingInFlight) {
         return;
       }
@@ -1026,8 +1424,17 @@ function AdminBoundaryPage() {
       pollingInFlight = true;
 
       try {
-        const freshVenues = await fetchAdminVenuesWithRetry(2);
-        setVenues(freshVenues);
+        const [freshVenues, freshUpdateRequests] = await Promise.all([
+          fetchAdminVenuesWithRetry(2),
+          fetchAdminVenueUpdateRequests({ status: 'pending' }),
+        ]);
+
+        if (!isMounted) {
+          return;
+        }
+
+        setVenues(Array.isArray(freshVenues) ? freshVenues : []);
+        setVenueUpdateRequests(Array.isArray(freshUpdateRequests) ? freshUpdateRequests : []);
         setError((currentError) => (/venue/i.test(String(currentError || '')) ? '' : currentError));
         setLoadWarning((currentWarning) => (/venue/i.test(String(currentWarning || '')) ? '' : currentWarning));
       } catch {
@@ -1035,10 +1442,20 @@ function AdminBoundaryPage() {
       } finally {
         pollingInFlight = false;
       }
-    }, 12000);
+    };
+
+    refreshPendingData();
+
+    const intervalId = window.setInterval(refreshPendingData, 5000);
+    const handleWindowFocus = () => {
+      refreshPendingData();
+    };
+    window.addEventListener('focus', handleWindowFocus);
 
     return () => {
+      isMounted = false;
       window.clearInterval(intervalId);
+      window.removeEventListener('focus', handleWindowFocus);
     };
   }, [activeMode]);
 
@@ -1136,8 +1553,13 @@ function AdminBoundaryPage() {
     setIsPendingFilterPanelOpen(false);
 
     if (mode === 'pending') {
-      const fallbackVenueId = pendingQueueVenues[0]?.id ?? pendingFilteredVenues[0]?.id ?? null;
-      setSelectedVenueId(fallbackVenueId);
+      if (pendingQueueView === 'updates') {
+        setSelectedUpdateLocationView('new');
+        setSelectedUpdateRequestId(pendingLocationUpdateRequests[0]?.id ?? null);
+      } else {
+        const fallbackVenueId = pendingQueueVenues[0]?.id ?? pendingFilteredVenues[0]?.id ?? null;
+        setSelectedVenueId(fallbackVenueId);
+      }
     }
 
     if (mode === 'service' && !selectedServiceId && merchantServices.length) {
@@ -1145,6 +1567,21 @@ function AdminBoundaryPage() {
       setSelectedServiceId(firstService.id);
       setServiceNameInput(firstService.name || '');
     }
+  }
+
+  function handlePendingQueueViewChange(nextQueueView) {
+    setPendingQueueView(nextQueueView);
+    setIsSubmissionDetailClosed(false);
+    setIsPendingFilterPanelOpen(false);
+
+    if (nextQueueView === 'updates') {
+      setSelectedUpdateLocationView('new');
+      setSelectedUpdateRequestId(pendingLocationUpdateRequests[0]?.id ?? null);
+      return;
+    }
+
+    const fallbackVenueId = pendingQueueVenues[0]?.id ?? pendingFilteredVenues[0]?.id ?? null;
+    setSelectedVenueId(fallbackVenueId);
   }
 
   const togglePendingSelection = (setter) => (value) => {
@@ -1654,6 +2091,13 @@ function AdminBoundaryPage() {
 
   async function handleModeration(venueId, action) {
     const venueToModerate = venues.find((item) => Number(item.id) === Number(venueId));
+    const rejectionReason = String(rejectReasons[venueId] || '').trim();
+
+    if (action === 'reject' && !rejectionReason) {
+      setError('Rejection reason is required before rejecting this post.');
+      return;
+    }
+
     const venueDisplayName = venueToModerate?.title || venueToModerate?.name || `#${venueId}`;
     const confirmationMessage =
       action === 'approve'
@@ -1669,7 +2113,6 @@ function AdminBoundaryPage() {
     setError('');
     setOperationMessage('');
 
-    const rejectionReason = rejectReasons[venueId] || '';
     setModeratingVenueId(venueId);
 
     try {
@@ -1700,6 +2143,458 @@ function AdminBoundaryPage() {
     }
   }
 
+  async function handleUpdateRequestModeration(requestId, action) {
+    const requestToModerate = pendingLocationUpdateRequests.find(
+      (request) => Number(request.id) === Number(requestId)
+    );
+    const rejectionReason = String(updateRejectReasons[requestId] || '').trim();
+
+    if (action === 'reject' && !rejectionReason) {
+      setError('Rejection reason is required before rejecting an update request.');
+      return;
+    }
+
+    const venueDisplayName =
+      requestToModerate?.venue_title ||
+      requestToModerate?.venue_name ||
+      `Venue #${requestToModerate?.venue_id || 'N/A'}`;
+    const confirmationMessage =
+      action === 'approve'
+        ? `Approve update request for "${venueDisplayName}"? This will apply the proposed location and details.`
+        : `Reject update request for "${venueDisplayName}"? This will keep the current venue location and details.`;
+
+    const shouldProceed = window.confirm(confirmationMessage);
+    if (!shouldProceed) {
+      return;
+    }
+
+    setError('');
+    setOperationMessage('');
+    setModeratingUpdateRequestId(requestId);
+
+    try {
+      const response = await moderateAdminVenueUpdateRequest(requestId, {
+        action,
+        rejectionReason,
+      });
+
+      if (response?.venue) {
+        setVenues((currentVenues) =>
+          currentVenues.map((item) =>
+            Number(item.id) === Number(response.venue.id) ? { ...item, ...response.venue } : item
+          )
+        );
+      }
+
+      await refreshPendingModerationData();
+
+      if (action === 'reject') {
+        setUpdateRejectReasons((currentReasons) => ({
+          ...currentReasons,
+          [requestId]: ''
+        }));
+      }
+
+      if (action === 'approve' && response?.venue?.id) {
+        setPendingQueueView('submissions');
+        setSelectedVenueId(response.venue.id);
+        setSelectedUpdateRequestId(null);
+        setSelectedUpdateLocationView('new');
+        setIsSubmissionDetailClosed(false);
+      } else if (Number(selectedUpdateRequestId) === Number(requestId)) {
+        setSelectedUpdateRequestId(null);
+      }
+
+      setOperationMessage(response?.message || 'Update request moderation completed.');
+    } catch (moderateError) {
+      setError(moderateError.response?.data?.message || 'Could not moderate update request.');
+    } finally {
+      setModeratingUpdateRequestId(null);
+    }
+  }
+
+  function handleAdminVenueCommentMediaChange(selectedFiles) {
+    const nextFiles = Array.isArray(selectedFiles)
+      ? selectedFiles.filter((file) => String(file?.type || '').startsWith('image/'))
+      : [];
+
+    setAdminVenueCommentMediaFiles((currentFiles) => [...currentFiles, ...nextFiles].slice(0, 3));
+  }
+
+  function handleRemoveAdminVenueCommentMedia(targetFileId) {
+    setAdminVenueCommentMediaFiles((currentFiles) =>
+      currentFiles.filter((file) => `${file.name}-${file.lastModified}-${file.size}` !== targetFileId)
+    );
+  }
+
+  async function handlePostAdminVenueComment() {
+    const normalizedVenueId = Number(selectedVenue?.id);
+    const comment = String(adminVenueCommentDraft.comment || '').trim();
+    const title = String(adminVenueCommentDraft.title || '').trim();
+
+    if (!Number.isFinite(normalizedVenueId)) {
+      setError('Select a valid venue before posting a comment.');
+      return;
+    }
+
+    if (!comment) {
+      setError('Comment content cannot be empty.');
+      return;
+    }
+
+    setError('');
+    setOperationMessage('');
+    setSubmittingAdminVenueComment(true);
+
+    try {
+      const payload = new FormData();
+      payload.append('comment', comment);
+      if (title) {
+        payload.append('title', title);
+      }
+
+      adminVenueCommentMediaFiles.forEach((file) => {
+        payload.append('images', file);
+      });
+
+      await createAdminVenueReview(normalizedVenueId, payload);
+
+      setAdminVenueCommentDraft({ title: '', comment: '' });
+      setAdminVenueCommentMediaFiles([]);
+
+      const refreshedReviews = await fetchAdminVenueReviews(normalizedVenueId, {
+        sort: selectedVenueReviewSort,
+      });
+
+      setSelectedVenueReviews(Array.isArray(refreshedReviews?.items) ? refreshedReviews.items : []);
+      setSelectedVenueReviewsError('');
+      setOperationMessage('Comment posted.');
+    } catch (submitError) {
+      setError(submitError.response?.data?.message || 'Could not post comment.');
+    } finally {
+      setSubmittingAdminVenueComment(false);
+    }
+  }
+
+  function handleToggleAdminReviewReplyComposer(reviewId, authorName = '', replyId = null) {
+    const normalizedReviewId = Number(reviewId);
+    const hasReplyId = replyId !== null && replyId !== undefined && String(replyId).trim() !== '';
+    const normalizedReplyId = hasReplyId ? Number(replyId) : NaN;
+    const nextReplyId = Number.isFinite(normalizedReplyId) ? normalizedReplyId : null;
+    if (!Number.isFinite(normalizedReviewId)) {
+      return;
+    }
+
+    setError('');
+    setOperationMessage('');
+    setActiveAdminReplyTarget((currentTarget) => {
+      const currentReviewId = Number(currentTarget?.reviewId);
+      const currentRawReplyId = currentTarget?.replyId;
+      const hasCurrentReplyId =
+        currentRawReplyId !== null
+        && currentRawReplyId !== undefined
+        && String(currentRawReplyId).trim() !== '';
+      const currentReplyId = hasCurrentReplyId ? Number(currentRawReplyId) : NaN;
+      const isSameReview = Number.isFinite(currentReviewId) && currentReviewId === normalizedReviewId;
+      const isSameReply =
+        (nextReplyId === null && !hasCurrentReplyId)
+        || (Number.isFinite(nextReplyId) && Number.isFinite(currentReplyId) && currentReplyId === nextReplyId);
+      const shouldClose = isSameReview && isSameReply;
+
+      if (shouldClose) {
+        return null;
+      }
+
+      setAdminReviewReplyDrafts((currentDrafts) => ({
+        ...currentDrafts,
+        [normalizedReviewId]: buildDefaultAdminReplyDraft(authorName),
+      }));
+      setAdminReviewReplyMediaDrafts((currentDrafts) => ({
+        ...currentDrafts,
+        [normalizedReviewId]: [],
+      }));
+
+      return {
+        reviewId: normalizedReviewId,
+        replyId: nextReplyId,
+        replyToName: String(authorName || '').trim(),
+      };
+    });
+  }
+
+  async function handlePostAdminReviewReply(reviewId) {
+    const normalizedVenueId = Number(selectedVenue?.id);
+    const normalizedReviewId = Number(reviewId);
+    const replyDraft = adminReviewReplyDrafts[normalizedReviewId] || buildDefaultAdminReplyDraft();
+    const replyTitle = String(replyDraft.title || '').trim();
+    const replyContent = String(replyDraft.content || '').trim();
+    const replyMediaFiles = Array.isArray(adminReviewReplyMediaDrafts[normalizedReviewId])
+      ? adminReviewReplyMediaDrafts[normalizedReviewId]
+      : [];
+
+    if (!Number.isFinite(normalizedVenueId) || !Number.isFinite(normalizedReviewId)) {
+      setError('Select a valid venue review before posting an admin comment.');
+      return;
+    }
+
+    if (!replyContent) {
+      setError('Admin comment cannot be empty.');
+      return;
+    }
+
+    setError('');
+    setOperationMessage('');
+    setSendingReviewReplyId(normalizedReviewId);
+
+    try {
+      const payload = new FormData();
+      payload.append('content', replyContent);
+      if (replyTitle) {
+        payload.append('title', replyTitle);
+      }
+      replyMediaFiles.forEach((file) => {
+        payload.append('images', file);
+      });
+
+      await createAdminVenueReviewReply(normalizedVenueId, normalizedReviewId, payload);
+
+      setAdminReviewReplyDrafts((currentDrafts) => ({
+        ...currentDrafts,
+        [normalizedReviewId]: buildDefaultAdminReplyDraft(),
+      }));
+      setAdminReviewReplyMediaDrafts((currentDrafts) => ({
+        ...currentDrafts,
+        [normalizedReviewId]: [],
+      }));
+      setActiveAdminReplyTarget(null);
+
+      const refreshedReviews = await fetchAdminVenueReviews(normalizedVenueId, {
+        sort: selectedVenueReviewSort,
+      });
+
+      setSelectedVenueReviews(Array.isArray(refreshedReviews?.items) ? refreshedReviews.items : []);
+      setSelectedVenueReviewsError('');
+      setOperationMessage('Admin comment posted.');
+    } catch (replyError) {
+      setError(replyError.response?.data?.message || 'Could not post admin comment.');
+    } finally {
+      setSendingReviewReplyId(null);
+    }
+  }
+
+  function handleAdminReplyMediaChange(reviewId, selectedFiles) {
+    const normalizedReviewId = Number(reviewId);
+    if (!Number.isFinite(normalizedReviewId)) {
+      return;
+    }
+
+    const nextFiles = Array.isArray(selectedFiles)
+      ? selectedFiles.filter((file) => String(file?.type || '').startsWith('image/'))
+      : [];
+
+    setAdminReviewReplyMediaDrafts((currentDrafts) => {
+      const currentFiles = Array.isArray(currentDrafts[normalizedReviewId])
+        ? currentDrafts[normalizedReviewId]
+        : [];
+      return {
+        ...currentDrafts,
+        [normalizedReviewId]: [...currentFiles, ...nextFiles].slice(0, 3),
+      };
+    });
+  }
+
+  function handleRemoveAdminReplyMedia(reviewId, targetFileId) {
+    const normalizedReviewId = Number(reviewId);
+    if (!Number.isFinite(normalizedReviewId)) {
+      return;
+    }
+
+    setAdminReviewReplyMediaDrafts((currentDrafts) => {
+      const currentFiles = Array.isArray(currentDrafts[normalizedReviewId])
+        ? currentDrafts[normalizedReviewId]
+        : [];
+
+      return {
+        ...currentDrafts,
+        [normalizedReviewId]: currentFiles.filter(
+          (file) => `${file.name}-${file.lastModified}-${file.size}` !== targetFileId
+        ),
+      };
+    });
+  }
+
+  function renderAdminReviewReplyComposer(reviewId, reviewAuthorName, contextLabel = '') {
+    const normalizedReviewId = Number(reviewId);
+
+    if (!Number.isFinite(normalizedReviewId)) {
+      return null;
+    }
+
+    const replyDraftForm = adminReviewReplyDrafts[normalizedReviewId] || buildDefaultAdminReplyDraft(reviewAuthorName);
+    const replyDraftTitle = String(replyDraftForm.title || '');
+    const replyDraftContent = String(replyDraftForm.content || '');
+    const replyMediaDraftFiles = Array.isArray(adminReviewReplyMediaDrafts[normalizedReviewId])
+      ? adminReviewReplyMediaDrafts[normalizedReviewId]
+      : [];
+
+    return (
+      <div className="admin-review-reply-form">
+        {contextLabel ? <p className="admin-review-reply-context">{contextLabel}</p> : null}
+
+        <input
+          type="text"
+          value={replyDraftTitle}
+          placeholder="Title"
+          onChange={(event) =>
+            setAdminReviewReplyDrafts((currentDrafts) => ({
+              ...currentDrafts,
+              [normalizedReviewId]: {
+                ...buildDefaultAdminReplyDraft(reviewAuthorName),
+                ...(currentDrafts[normalizedReviewId] || {}),
+                title: event.target.value,
+              },
+            }))
+          }
+        />
+
+        <textarea
+          id={`admin-review-reply-${normalizedReviewId}`}
+          rows={2}
+          value={replyDraftContent}
+          placeholder="Write a comment..."
+          onChange={(event) =>
+            setAdminReviewReplyDrafts((currentDrafts) => ({
+              ...currentDrafts,
+              [normalizedReviewId]: {
+                ...buildDefaultAdminReplyDraft(reviewAuthorName),
+                ...(currentDrafts[normalizedReviewId] || {}),
+                content: event.target.value,
+              },
+            }))
+          }
+        />
+
+        <label className="admin-review-reply-upload-label" htmlFor={`admin-review-reply-upload-${normalizedReviewId}`}>
+          Upload images (max 3)
+        </label>
+        <input
+          id={`admin-review-reply-upload-${normalizedReviewId}`}
+          type="file"
+          accept="image/*"
+          multiple
+          className="admin-review-reply-upload"
+          onChange={(event) => {
+            handleAdminReplyMediaChange(normalizedReviewId, Array.from(event.target.files || []));
+            event.target.value = '';
+          }}
+        />
+
+        {replyMediaDraftFiles.length ? (
+          <div className="admin-review-reply-media-list">
+            {replyMediaDraftFiles.map((file) => {
+              const fileId = `${file.name}-${file.lastModified}-${file.size}`;
+              return (
+                <div key={fileId} className="admin-review-reply-media-item">
+                  <span>{file.name}</span>
+                  <button
+                    type="button"
+                    className="admin-review-reply-media-remove"
+                    onClick={() => handleRemoveAdminReplyMedia(normalizedReviewId, fileId)}
+                  >
+                    Remove
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
+
+        <button
+          type="button"
+          className="action-secondary"
+          disabled={
+            sendingReviewReplyId === normalizedReviewId
+            || !String(replyDraftContent).trim()
+          }
+          onClick={() => handlePostAdminReviewReply(normalizedReviewId)}
+        >
+          {sendingReviewReplyId === normalizedReviewId ? 'Posting...' : 'Post comment'}
+        </button>
+      </div>
+    );
+  }
+
+  async function handleDeleteAdminReview(reviewId) {
+    const normalizedVenueId = Number(selectedVenue?.id);
+    const normalizedReviewId = Number(reviewId);
+
+    if (!Number.isFinite(normalizedVenueId) || !Number.isFinite(normalizedReviewId)) {
+      setError('Select a valid review before deleting.');
+      return;
+    }
+
+    const shouldDelete = window.confirm('Delete this review? Admin can delete any review.');
+    if (!shouldDelete) {
+      return;
+    }
+
+    setError('');
+    setOperationMessage('');
+    setDeletingReviewId(normalizedReviewId);
+
+    try {
+      await deleteAdminVenueReview(normalizedVenueId, normalizedReviewId);
+
+      const refreshedReviews = await fetchAdminVenueReviews(normalizedVenueId, {
+        sort: selectedVenueReviewSort,
+      });
+
+      setSelectedVenueReviews(Array.isArray(refreshedReviews?.items) ? refreshedReviews.items : []);
+      setSelectedVenueReviewsError('');
+      setOperationMessage('Review deleted by admin.');
+    } catch (deleteError) {
+      setError(deleteError.response?.data?.message || 'Could not delete review.');
+    } finally {
+      setDeletingReviewId(null);
+    }
+  }
+
+  async function handleDeleteAdminReviewReply(reviewId, replyId) {
+    const normalizedVenueId = Number(selectedVenue?.id);
+    const normalizedReviewId = Number(reviewId);
+    const normalizedReplyId = Number(replyId);
+
+    if (!Number.isFinite(normalizedVenueId) || !Number.isFinite(normalizedReviewId) || !Number.isFinite(normalizedReplyId)) {
+      setError('Select a valid reply before deleting.');
+      return;
+    }
+
+    const shouldDelete = window.confirm('Delete this reply comment? Admin can delete any reply.');
+    if (!shouldDelete) {
+      return;
+    }
+
+    setError('');
+    setOperationMessage('');
+    setDeletingReplyId(normalizedReplyId);
+
+    try {
+      await deleteAdminVenueReviewReply(normalizedVenueId, normalizedReviewId, normalizedReplyId);
+
+      const refreshedReviews = await fetchAdminVenueReviews(normalizedVenueId, {
+        sort: selectedVenueReviewSort,
+      });
+
+      setSelectedVenueReviews(Array.isArray(refreshedReviews?.items) ? refreshedReviews.items : []);
+      setSelectedVenueReviewsError('');
+      setOperationMessage('Reply deleted by admin.');
+    } catch (deleteError) {
+      setError(deleteError.response?.data?.message || 'Could not delete reply.');
+    } finally {
+      setDeletingReplyId(null);
+    }
+  }
+
   function handleOpenVenueDetails(venueId) {
     setIsSubmissionDetailClosed(false);
     setSelectedVenueId(venueId);
@@ -1707,22 +2602,30 @@ function AdminBoundaryPage() {
     setExpandedImageUrl('');
   }
 
+  function handleOpenUpdateRequestDetails(requestId) {
+    setIsSubmissionDetailClosed(false);
+    setSelectedUpdateRequestId(requestId);
+    setSelectedUpdateLocationView('new');
+    setSelectedVenueImageIndex(0);
+    setExpandedImageUrl('');
+  }
+
   function handlePreviousVenueImage() {
-    if (selectedVenueGalleryImages.length <= 1) {
+    if (activeDetailGalleryImages.length <= 1) {
       return;
     }
 
     setSelectedVenueImageIndex((currentIndex) =>
-      currentIndex === 0 ? selectedVenueGalleryImages.length - 1 : currentIndex - 1
+      currentIndex === 0 ? activeDetailGalleryImages.length - 1 : currentIndex - 1
     );
   }
 
   function handleNextVenueImage() {
-    if (selectedVenueGalleryImages.length <= 1) {
+    if (activeDetailGalleryImages.length <= 1) {
       return;
     }
 
-    setSelectedVenueImageIndex((currentIndex) => (currentIndex + 1) % selectedVenueGalleryImages.length);
+    setSelectedVenueImageIndex((currentIndex) => (currentIndex + 1) % activeDetailGalleryImages.length);
   }
 
   function resolveMarkerIcon(venue) {
@@ -1738,26 +2641,67 @@ function AdminBoundaryPage() {
     if (activeMode === 'pending') {
       return (
         <div className="admin-list-panel">
+          <div className="admin-pending-queue-switch" role="tablist" aria-label="Pending queues">
+            <button
+              type="button"
+              className={`admin-pending-queue-tab ${pendingQueueView === 'submissions' ? 'is-active' : ''}`.trim()}
+              onClick={() => handlePendingQueueViewChange('submissions')}
+            >
+              Pending Queue ({pendingQueueVenues.length})
+            </button>
+            <button
+              type="button"
+              className={`admin-pending-queue-tab ${pendingQueueView === 'updates' ? 'is-active' : ''}`.trim()}
+              onClick={() => handlePendingQueueViewChange('updates')}
+            >
+              Location Updates ({pendingLocationUpdateRequests.length})
+            </button>
+          </div>
+
           <header>
-            <h3>Pending Queue</h3>
-            <p>{pendingQueueVenues.length} waiting submission(s)</p>
+            <h3>{pendingQueueView === 'updates' ? 'Location Update Review' : 'Pending Queue'}</h3>
+            <p>
+              {pendingQueueView === 'updates'
+                ? `${pendingLocationUpdateRequests.length} update request(s) waiting moderation`
+                : `${pendingQueueVenues.length} waiting submission(s)`}
+            </p>
           </header>
 
           <div className="admin-scroll-list">
-            {pendingQueueVenues.map((venue) => (
-              <button
-                key={venue.id}
-                type="button"
-                className={`admin-list-item ${Number(selectedVenueId) === Number(venue.id) ? 'is-active' : ''}`.trim()}
-                onClick={() => handleOpenVenueDetails(venue.id)}
-              >
-                <strong>{venue.title || venue.name}</strong>
-                <span>{venue.address || 'Address pending'}</span>
-                <small>{formatDateTime(venue.submitted_at)}</small>
-              </button>
-            ))}
+            {pendingQueueView === 'updates'
+              ? pendingLocationUpdateRequests.map((request) => {
+                  const proposedSnapshot = normalizeVenueUpdateSnapshot(request.proposed_snapshot);
+                  return (
+                    <button
+                      key={request.id}
+                      type="button"
+                      className={`admin-list-item ${Number(selectedUpdateRequestId) === Number(request.id) ? 'is-active' : ''}`.trim()}
+                      onClick={() => handleOpenUpdateRequestDetails(request.id)}
+                    >
+                      <strong>{request.venue_title || request.venue_name || `Venue #${request.venue_id}`}</strong>
+                      <span>{proposedSnapshot.address || request.venue_address || 'Address pending'}</span>
+                      <small>{formatDateTime(request.submitted_at || request.created_at)}</small>
+                    </button>
+                  );
+                })
+              : pendingQueueVenues.map((venue) => (
+                  <button
+                    key={venue.id}
+                    type="button"
+                    className={`admin-list-item ${Number(selectedVenueId) === Number(venue.id) ? 'is-active' : ''}`.trim()}
+                    onClick={() => handleOpenVenueDetails(venue.id)}
+                  >
+                    <strong>{venue.title || venue.name}</strong>
+                    <span>{venue.address || 'Address pending'}</span>
+                    <small>{formatDateTime(venue.submitted_at)}</small>
+                  </button>
+                ))}
 
-            {!pendingQueueVenues.length ? (
+            {pendingQueueView === 'updates' && !pendingLocationUpdateRequests.length ? (
+              <p className="admin-empty-note">No location update requests right now.</p>
+            ) : null}
+
+            {pendingQueueView === 'submissions' && !pendingQueueVenues.length ? (
               <p className="admin-empty-note">
                 {pendingActiveFilterCount ? 'No pending posts match your filters.' : 'No pending posts right now.'}
               </p>
@@ -1855,6 +2799,246 @@ function AdminBoundaryPage() {
 
   function renderRightPanel() {
     if (activeMode === 'pending') {
+      if (pendingQueueView === 'updates') {
+        const oldWardName =
+          wards.find((ward) => String(ward.ward_id) === String(selectedUpdateOldSnapshot.wardId))?.name ||
+          selectedUpdateOldSnapshot.wardId ||
+          'Not provided';
+        const newWardName =
+          wards.find((ward) => String(ward.ward_id) === String(selectedUpdateProposedSnapshot.wardId))?.name ||
+          selectedUpdateProposedSnapshot.wardId ||
+          'Not provided';
+        const oldCategoryName =
+          placeCategoryById.get(Number(selectedUpdateOldSnapshot.categoryId))?.name ||
+          selectedUpdateRequest?.venue_category_name ||
+          'Not provided';
+        const newCategoryName =
+          placeCategoryById.get(Number(selectedUpdateProposedSnapshot.categoryId))?.name ||
+          oldCategoryName;
+        const activeWardName = selectedUpdateLocationView === 'old' ? oldWardName : newWardName;
+        const activeCategoryName = selectedUpdateLocationView === 'old' ? oldCategoryName : newCategoryName;
+        const submitterEmail =
+          String(selectedUpdateRequest?.submitted_by_email || '').trim() ||
+          String(selectedUpdateRequest?.submitted_by_user_id || '').trim() ||
+          'Not provided';
+        const submitterFullName =
+          String(selectedUpdateRequest?.submitted_by_full_name || '').trim() ||
+          'Not provided';
+        const isRejectReasonProvided =
+          Boolean(String(updateRejectReasons[selectedUpdateRequest?.id] || '').trim());
+
+        return (
+          <div className="admin-detail-panel">
+            <header className="admin-detail-panel-header">
+              <div className="admin-detail-panel-header-text">
+                <h3>Location Update Detail</h3>
+                <p>Use Old Location and New Location to switch marker focus and detail data.</p>
+              </div>
+
+              {selectedUpdateRequest ? (
+                <button
+                  type="button"
+                  className="admin-detail-close-btn"
+                  onClick={() => {
+                    setIsSubmissionDetailClosed(true);
+                    setSelectedUpdateRequestId(null);
+                    setExpandedImageUrl('');
+                  }}
+                  aria-label="Close location update detail"
+                >
+                  ×
+                </button>
+              ) : null}
+            </header>
+
+            {!selectedUpdateRequest ? (
+              <p className="admin-empty-note">Select a location update request from the queue.</p>
+            ) : (
+              <div className="admin-detail-stack">
+                <h4>{selectedUpdateRequest.venue_title || selectedUpdateRequest.venue_name || `Venue #${selectedUpdateRequest.venue_id}`}</h4>
+                <p>Requested at {formatDateTime(selectedUpdateRequest.submitted_at || selectedUpdateRequest.created_at)}</p>
+                <p className="admin-update-submitter">Submitted by: {submitterFullName} ({submitterEmail})</p>
+
+                <div className="admin-location-version-toggle" role="tablist" aria-label="Location version">
+                  <button
+                    type="button"
+                    className={`admin-location-version-btn ${selectedUpdateLocationView === 'old' ? 'is-active' : ''}`.trim()}
+                    onClick={() => setSelectedUpdateLocationView('old')}
+                  >
+                    Old Location
+                  </button>
+                  <button
+                    type="button"
+                    className={`admin-location-version-btn ${selectedUpdateLocationView === 'new' ? 'is-active' : ''}`.trim()}
+                    onClick={() => setSelectedUpdateLocationView('new')}
+                  >
+                    New Location
+                  </button>
+                </div>
+
+                <p className="admin-update-view-note">
+                  {selectedUpdateLocationView === 'old'
+                    ? 'Map marker is focused on old location (teal).'
+                    : 'Map marker is focused on new location (dark orange).'}
+                </p>
+
+                {selectedUpdateActiveImage ? (
+                  <div className="admin-image-carousel">
+                    <button
+                      type="button"
+                      className="admin-carousel-btn"
+                      onClick={handlePreviousVenueImage}
+                      disabled={selectedUpdateActiveGalleryImages.length <= 1}
+                      aria-label="Show previous image"
+                    >
+                      ‹
+                    </button>
+
+                    <button
+                      type="button"
+                      className="admin-carousel-image-wrap"
+                      onClick={() => setExpandedImageUrl(resolveAssetUrl(selectedUpdateActiveImage))}
+                      aria-label="Open image preview"
+                    >
+                      <img
+                        src={resolveAssetUrl(selectedUpdateActiveImage)}
+                        alt={`${selectedUpdateLocationView === 'old' ? 'Old' : 'New'} location preview`}
+                        className="admin-detail-image admin-detail-image-clickable"
+                      />
+                    </button>
+
+                    <button
+                      type="button"
+                      className="admin-carousel-btn"
+                      onClick={handleNextVenueImage}
+                      disabled={selectedUpdateActiveGalleryImages.length <= 1}
+                      aria-label="Show next image"
+                    >
+                      ›
+                    </button>
+
+                    <p className="admin-carousel-counter">
+                      {Math.min(selectedVenueImageIndex + 1, Math.max(selectedUpdateActiveGalleryImages.length, 1))}
+                      {' / '}
+                      {Math.max(selectedUpdateActiveGalleryImages.length, 1)}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="admin-detail-image-placeholder">
+                    {selectedUpdateLocationView === 'old' ? 'No old images' : 'No new images'}
+                  </div>
+                )}
+
+                <div className={`admin-update-compare-column ${selectedUpdateLocationView === 'new' ? 'is-proposed' : ''}`.trim()}>
+                  <h5>{selectedUpdateLocationView === 'old' ? 'Old Location Data' : 'New Location Data'}</h5>
+                  <ul className="admin-detail-meta">
+                    <li>Name: {selectedUpdateActiveSnapshot.title || selectedUpdateActiveSnapshot.name || 'Not provided'}</li>
+                    <li>Address: {selectedUpdateActiveSnapshot.address || 'Not provided'}</li>
+                    <li>Ward: {activeWardName}</li>
+                    <li>Category: {activeCategoryName}</li>
+                    <li>Phone: {selectedUpdateActiveSnapshot.phone || 'Not provided'}</li>
+                    <li>Contact email: {selectedUpdateActiveSnapshot.metadata?.contactEmail || 'Not provided'}</li>
+                    <li>Latitude: {formatCoordinate(selectedUpdateActiveSnapshot.latitude)}</li>
+                    <li>Longitude: {formatCoordinate(selectedUpdateActiveSnapshot.longitude)}</li>
+                    <li>
+                      Price range:
+                      {' '}
+                      {formatCurrencyVnd(selectedUpdateActiveSnapshot.metadata.minPrice)} - {formatCurrencyVnd(selectedUpdateActiveSnapshot.metadata.maxPrice)}
+                    </li>
+                    <li>Operating hours: {selectedUpdateActiveOperatingHours}</li>
+                    <li>Gallery images: {selectedUpdateActiveGalleryImages.length || 0}</li>
+                    <li>Business license: {selectedUpdateActiveBusinessLicenseImage ? 'Uploaded' : 'Missing'}</li>
+                  </ul>
+
+                  {selectedUpdateActiveSnapshot.description ? <p>{selectedUpdateActiveSnapshot.description}</p> : null}
+
+                  {selectedUpdateActiveWeeklySchedule.length ? (
+                    <div className="admin-service-summary">
+                      <strong>Weekly schedule</strong>
+                      <ul className="admin-detail-meta">
+                        {selectedUpdateActiveWeeklySchedule.map((daySchedule) => (
+                          <li key={`${selectedUpdateLocationView}-${daySchedule}`}>{daySchedule}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+
+                  {selectedUpdateActiveServiceNames.length ? (
+                    <div className="admin-service-chip-list">
+                      {selectedUpdateActiveServiceNames.map((serviceName) => (
+                        <span key={`${selectedUpdateLocationView}-${serviceName}`} className="admin-service-chip">{serviceName}</span>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="admin-empty-note">
+                      {selectedUpdateLocationView === 'old'
+                        ? 'No old services listed.'
+                        : 'No new services listed.'}
+                    </p>
+                  )}
+
+                  {selectedUpdateActiveBusinessLicenseImage ? (
+                    <div className="admin-license-preview">
+                      <p>Business license preview</p>
+                      <button
+                        type="button"
+                        className="admin-license-image-wrap"
+                        onClick={() => setExpandedImageUrl(resolveAssetUrl(selectedUpdateActiveBusinessLicenseImage))}
+                      >
+                        <img
+                          src={resolveAssetUrl(selectedUpdateActiveBusinessLicenseImage)}
+                          alt={`${selectedUpdateLocationView === 'old' ? 'Old' : 'New'} business license`}
+                          className="admin-detail-image admin-detail-image-clickable"
+                        />
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="admin-form-field">
+                  <label htmlFor="updateRejectionReason">Rejection Reason (Optional)</label>
+                  <textarea
+                    id="updateRejectionReason"
+                    value={updateRejectReasons[selectedUpdateRequest.id] || ''}
+                    onChange={(event) =>
+                      setUpdateRejectReasons((currentReasons) => ({
+                        ...currentReasons,
+                        [selectedUpdateRequest.id]: event.target.value,
+                      }))
+                    }
+                    rows={3}
+                    placeholder="Required before rejecting this update request."
+                  />
+                </div>
+
+                <div className="admin-action-row">
+                  <button
+                    type="button"
+                    className="action-approve"
+                    disabled={moderatingUpdateRequestId === selectedUpdateRequest.id}
+                    onClick={() => handleUpdateRequestModeration(selectedUpdateRequest.id, 'approve')}
+                  >
+                    {moderatingUpdateRequestId === selectedUpdateRequest.id ? 'Updating...' : 'Approve Post'}
+                  </button>
+
+                  <button
+                    type="button"
+                    className="action-reject"
+                    disabled={
+                      moderatingUpdateRequestId === selectedUpdateRequest.id ||
+                      !isRejectReasonProvided
+                    }
+                    onClick={() => handleUpdateRequestModeration(selectedUpdateRequest.id, 'reject')}
+                  >
+                    Reject Post
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      }
+
       const selectedVenueStatus = String(selectedVenue?.status || '').toLowerCase();
 
       return (
@@ -1933,105 +3117,470 @@ function AdminBoundaryPage() {
               <h4>{selectedVenue.title || selectedVenue.name}</h4>
               <p>{selectedVenue.address || 'Address pending'}</p>
 
-              <div className="admin-extra-detail-block">
-                <ul className="admin-detail-meta">
-                  <li>Venue ID: {selectedVenue.id}</li>
-                  <li>Name: {selectedVenue.name || 'Not provided'}</li>
-                  <li>Ward: {selectedVenue.ward_name || selectedVenue.ward_id || 'Not detected'}</li>
-                  <li>Category: {selectedVenue.category_name || 'Uncategorized'}</li>
-                  <li>Status: {statusLabel(selectedVenue.status)}</li>
-                  <li>Phone: {selectedVenue.phone || 'Not provided'}</li>
-                  <li>Submitted: {formatDateTime(selectedVenue.submitted_at)}</li>
-                  <li>Latitude: {formatCoordinate(selectedVenue.latitude)}</li>
-                  <li>Longitude: {formatCoordinate(selectedVenue.longitude)}</li>
-                  <li>
-                    Price range:
-                    {' '}
-                    {formatCurrencyVnd(selectedVenueMetadata.minPrice)} - {formatCurrencyVnd(selectedVenueMetadata.maxPrice)}
-                  </li>
-                  <li>
-                    Operating hours:
-                    {' '}
-                    {selectedVenueMetadata.startTime && selectedVenueMetadata.endTime
-                      ? `${selectedVenueMetadata.startTime} - ${selectedVenueMetadata.endTime}`
-                      : 'Not provided'}
-                  </li>
-                  <li>Gallery images: {selectedVenueGalleryImages.length || 0}</li>
-                  <li>Business license: {selectedVenue.business_license_image_url ? 'Uploaded' : 'Missing'}</li>
-                </ul>
-
-                {selectedVenue.description ? <p>{selectedVenue.description}</p> : null}
-
-                <div className="admin-service-summary">
-                  <strong>Services offered</strong>
-                  {selectedVenueServiceNames.length ? (
-                    <div className="admin-service-chip-list">
-                      {selectedVenueServiceNames.map((serviceName) => (
-                        <span key={serviceName} className="admin-service-chip">
-                          {serviceName}
-                        </span>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="admin-empty-note">No services selected by merchant.</p>
-                  )}
-                </div>
-
-                {selectedVenue.business_license_image_url ? (
-                  <div className="admin-license-preview">
-                    <p>Business license preview</p>
-                    <button
-                      type="button"
-                      className="admin-license-image-wrap"
-                      onClick={() => setExpandedImageUrl(selectedVenue.business_license_image_url)}
-                    >
-                      <img
-                        src={selectedVenue.business_license_image_url}
-                        alt={`${selectedVenue.title || selectedVenue.name} license`}
-                        className="admin-detail-image admin-detail-image-clickable"
-                      />
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="admin-form-field">
-                <label htmlFor="rejectionReason">Rejection Reason (Optional)</label>
-                <textarea
-                  id="rejectionReason"
-                  value={rejectReasons[selectedVenue.id] || ''}
-                  onChange={(event) =>
-                    setRejectReasons((currentReasons) => ({
-                      ...currentReasons,
-                      [selectedVenue.id]: event.target.value,
-                    }))
-                  }
-                  rows={3}
-                  placeholder="Optional note when rejecting this post."
-                />
-              </div>
-
-              <div className="admin-action-row">
-                {selectedVenueStatus !== 'approved' ? (
-                  <button
-                    type="button"
-                    className="action-approve"
-                    disabled={moderatingVenueId === selectedVenue.id}
-                    onClick={() => handleModeration(selectedVenue.id, 'approve')}
-                  >
-                    {moderatingVenueId === selectedVenue.id ? 'Updating...' : 'Approve Post'}
-                  </button>
-                ) : null}
-
+              <div className="admin-detail-tabs" role="tablist" aria-label="Submission detail sections">
                 <button
                   type="button"
-                  className="action-reject"
-                  disabled={moderatingVenueId === selectedVenue.id}
-                  onClick={() => handleModeration(selectedVenue.id, 'reject')}
+                  className={`admin-detail-tab-btn ${activeDetailTab === 'overview' ? 'is-active' : ''}`.trim()}
+                  onClick={() => setActiveDetailTab('overview')}
                 >
-                  Reject Post
+                  Overview
+                </button>
+                <button
+                  type="button"
+                  className={`admin-detail-tab-btn ${activeDetailTab === 'introduction' ? 'is-active' : ''}`.trim()}
+                  onClick={() => setActiveDetailTab('introduction')}
+                >
+                  Introduction
+                </button>
+                <button
+                  type="button"
+                  className={`admin-detail-tab-btn ${activeDetailTab === 'images' ? 'is-active' : ''}`.trim()}
+                  onClick={() => setActiveDetailTab('images')}
+                >
+                  Images
+                </button>
+                <button
+                  type="button"
+                  className={`admin-detail-tab-btn ${activeDetailTab === 'rating' ? 'is-active' : ''}`.trim()}
+                  onClick={() => setActiveDetailTab('rating')}
+                >
+                  Rating
                 </button>
               </div>
+
+              {activeDetailTab === 'overview' ? (
+                <div className="admin-extra-detail-block">
+                  <ul className="admin-detail-meta">
+                    <li>Venue ID: {selectedVenue.id}</li>
+                    <li>Name: {selectedVenue.name || 'Not provided'}</li>
+                    <li>Ward: {selectedVenue.ward_name || selectedVenue.ward_id || 'Not detected'}</li>
+                    <li>Category: {selectedVenue.category_name || 'Uncategorized'}</li>
+                    <li>Status: {statusLabel(selectedVenue.status)}</li>
+                    <li>Submitter full name: {selectedVenue.submitter_full_name || selectedVenue.owner_name || 'Not provided'}</li>
+                    <li>Submitter email: {selectedVenue.submitter_email || selectedVenue.submitted_by_user_id || 'Not provided'}</li>
+                    <li>Phone: {selectedVenue.phone || 'Not provided'}</li>
+                    <li>Submitted: {formatDateTime(selectedVenue.submitted_at)}</li>
+                    <li>Latitude: {formatCoordinate(selectedVenue.latitude)}</li>
+                    <li>Longitude: {formatCoordinate(selectedVenue.longitude)}</li>
+                    <li>
+                      Price range:
+                      {' '}
+                      {formatCurrencyVnd(selectedVenueMetadata.minPrice)} - {formatCurrencyVnd(selectedVenueMetadata.maxPrice)}
+                    </li>
+                    <li>Operating hours: {selectedVenueOperatingHours}</li>
+                    <li>
+                      Rating:
+                      {' '}
+                      {selectedVenueRatingSummary.total > 0
+                        ? `${selectedVenueRatingSummary.average.toFixed(1)} / 5 (${selectedVenueRatingSummary.total} review${selectedVenueRatingSummary.total === 1 ? '' : 's'})`
+                        : 'No ratings yet'}
+                    </li>
+                    <li>Gallery images: {selectedVenueGalleryImages.length || 0}</li>
+                    <li>Business license: {selectedVenue.business_license_image_url ? 'Uploaded' : 'Missing'}</li>
+                  </ul>
+
+                  <div className="admin-form-field">
+                    <label htmlFor="rejectionReason">Rejection Reason (Required for reject)</label>
+                    <textarea
+                      id="rejectionReason"
+                      value={rejectReasons[selectedVenue.id] || ''}
+                      onChange={(event) =>
+                        setRejectReasons((currentReasons) => ({
+                          ...currentReasons,
+                          [selectedVenue.id]: event.target.value,
+                        }))
+                      }
+                      rows={3}
+                      placeholder="Required before rejecting this post."
+                    />
+                  </div>
+
+                  {(() => {
+                    const isRejectReasonProvided = Boolean(String(rejectReasons[selectedVenue.id] || '').trim());
+
+                    return (
+                      <div className="admin-action-row">
+                        {selectedVenueStatus !== 'approved' ? (
+                          <button
+                            type="button"
+                            className="action-approve"
+                            disabled={moderatingVenueId === selectedVenue.id}
+                            onClick={() => handleModeration(selectedVenue.id, 'approve')}
+                          >
+                            {moderatingVenueId === selectedVenue.id ? 'Updating...' : 'Approve Post'}
+                          </button>
+                        ) : null}
+
+                        <button
+                          type="button"
+                          className="action-reject"
+                          disabled={moderatingVenueId === selectedVenue.id || !isRejectReasonProvided}
+                          onClick={() => handleModeration(selectedVenue.id, 'reject')}
+                        >
+                          Reject Post
+                        </button>
+                      </div>
+                    );
+                  })()}
+                </div>
+              ) : null}
+
+              {activeDetailTab === 'introduction' ? (
+                <div className="admin-extra-detail-block">
+                  <strong>Venue introduction</strong>
+                  {selectedVenueIntroduction ? (
+                    <p className="admin-introduction-text">{selectedVenueIntroduction}</p>
+                  ) : (
+                    <p className="admin-empty-note">No introduction provided by merchant.</p>
+                  )}
+
+                  {selectedVenueWeeklySchedule.length ? (
+                    <div className="admin-service-summary">
+                      <strong>Weekly schedule</strong>
+                      <ul className="admin-detail-meta admin-weekly-hours-list">
+                        {selectedVenueWeeklySchedule.map((daySchedule) => (
+                          <li key={`submission-weekly-${daySchedule}`}>{daySchedule}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+
+                  <div className="admin-service-summary">
+                    <strong>Services offered</strong>
+                    {selectedVenueServiceNames.length ? (
+                      <div className="admin-service-chip-list">
+                        {selectedVenueServiceNames.map((serviceName) => (
+                          <span key={serviceName} className="admin-service-chip">
+                            {serviceName}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="admin-empty-note">No services selected by merchant.</p>
+                    )}
+                  </div>
+                </div>
+              ) : null}
+
+              {activeDetailTab === 'images' ? (
+                <div className="admin-extra-detail-block">
+                  <strong>Gallery</strong>
+                  {selectedVenueGalleryImages.length ? (
+                    <div className="admin-message-attachment-grid">
+                      {selectedVenueGalleryImages.map((imageUrl, imageIndex) => {
+                        const resolvedImageUrl = resolveAssetUrl(imageUrl);
+
+                        if (!resolvedImageUrl) {
+                          return null;
+                        }
+
+                        return (
+                          <button
+                            key={`${resolvedImageUrl}-${imageIndex}`}
+                            type="button"
+                            className="admin-license-image-wrap"
+                            onClick={() => setExpandedImageUrl(resolvedImageUrl)}
+                          >
+                            <img
+                              src={resolvedImageUrl}
+                              alt={`${selectedVenue.title || selectedVenue.name} gallery ${imageIndex + 1}`}
+                              className="admin-detail-image admin-detail-image-clickable"
+                            />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="admin-empty-note">No gallery images uploaded.</p>
+                  )}
+
+                  {selectedVenue.business_license_image_url ? (
+                    <div className="admin-license-preview">
+                      <p>Business license preview</p>
+                      <button
+                        type="button"
+                        className="admin-license-image-wrap"
+                        onClick={() => setExpandedImageUrl(resolveAssetUrl(selectedVenue.business_license_image_url))}
+                      >
+                        <img
+                          src={resolveAssetUrl(selectedVenue.business_license_image_url)}
+                          alt={`${selectedVenue.title || selectedVenue.name} license`}
+                          className="admin-detail-image admin-detail-image-clickable"
+                        />
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="admin-empty-note">Business license not uploaded.</p>
+                  )}
+                </div>
+              ) : null}
+
+              {activeDetailTab === 'rating' ? (
+                <div className="admin-extra-detail-block">
+                  <div className="admin-review-toolbar">
+                    <strong>
+                      {selectedVenueRatingSummary.total > 0
+                        ? `${selectedVenueRatingSummary.average.toFixed(1)} / 5 from ${selectedVenueRatingSummary.total} review${selectedVenueRatingSummary.total === 1 ? '' : 's'}`
+                        : 'No ratings yet'}
+                    </strong>
+
+                    <select
+                      id="selectedVenueReviewSort"
+                      value={selectedVenueReviewSort}
+                      onChange={(event) => setSelectedVenueReviewSort(event.target.value)}
+                    >
+                      <option value="newest">Newest first</option>
+                      <option value="oldest">Oldest first</option>
+                    </select>
+                  </div>
+
+                  <div className="admin-review-root-form">
+                    <h4>Comment on this venue</h4>
+                    <input
+                      type="text"
+                      value={adminVenueCommentDraft.title}
+                      placeholder="Title"
+                      onChange={(event) =>
+                        setAdminVenueCommentDraft((currentDraft) => ({
+                          ...currentDraft,
+                          title: event.target.value,
+                        }))
+                      }
+                    />
+                    <textarea
+                      rows={3}
+                      value={adminVenueCommentDraft.comment}
+                      placeholder="Write a comment..."
+                      onChange={(event) =>
+                        setAdminVenueCommentDraft((currentDraft) => ({
+                          ...currentDraft,
+                          comment: event.target.value,
+                        }))
+                      }
+                    />
+                    <label className="admin-review-reply-upload-label" htmlFor="admin-review-root-upload">
+                      Upload images (max 3)
+                    </label>
+                    <input
+                      id="admin-review-root-upload"
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      className="admin-review-reply-upload"
+                      onChange={(event) => {
+                        handleAdminVenueCommentMediaChange(Array.from(event.target.files || []));
+                        event.target.value = '';
+                      }}
+                    />
+                    {adminVenueCommentMediaFiles.length ? (
+                      <div className="admin-review-reply-media-list">
+                        {adminVenueCommentMediaFiles.map((file) => {
+                          const fileId = `${file.name}-${file.lastModified}-${file.size}`;
+                          return (
+                            <div key={fileId} className="admin-review-reply-media-item">
+                              <span>{file.name}</span>
+                              <button
+                                type="button"
+                                className="admin-review-reply-media-remove"
+                                onClick={() => handleRemoveAdminVenueCommentMedia(fileId)}
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="action-secondary"
+                      disabled={
+                        submittingAdminVenueComment
+                        || !String(adminVenueCommentDraft.comment || '').trim()
+                      }
+                      onClick={handlePostAdminVenueComment}
+                    >
+                      {submittingAdminVenueComment ? 'Posting...' : 'Post comment'}
+                    </button>
+                  </div>
+
+                  {isLoadingSelectedVenueReviews ? <p className="admin-empty-note">Loading reviews...</p> : null}
+                  {selectedVenueReviewsError ? <p className="admin-empty-note">{selectedVenueReviewsError}</p> : null}
+
+                  {!isLoadingSelectedVenueReviews && !selectedVenueReviewsError ? (
+                    selectedVenueReviews.length ? (
+                      <div className="admin-review-list">
+                        {selectedVenueReviews.map((review) => {
+                          const reviewId = Number(review?.id);
+                          const reviewAuthorName = String(review?.author_name || review?.authorName || 'Anonymous');
+                          const reviewTitle = String(review?.title || '').trim();
+                          const reviewComment = String(review?.comment || review?.content || '').trim();
+                          const reviewReplies = Array.isArray(review?.replies) ? review.replies : [];
+                          const reviewImageUrls = normalizeImageUrls(review?.image_urls || review?.imageUrls)
+                            .map((imageUrl) => resolveAssetUrl(imageUrl))
+                            .filter(Boolean);
+                          const isReplyComposerOpenOnParent =
+                            Number(activeAdminReplyTarget?.reviewId) === reviewId
+                            && activeAdminReplyTarget?.replyId == null;
+
+                          return (
+                            <article key={review.id} className="admin-review-card admin-review-parent-card">
+                              <div className="admin-review-card-header">
+                                <strong>{reviewAuthorName}</strong>
+                                <div className="admin-review-card-header-actions">
+                                  <button
+                                    type="button"
+                                    className={`admin-review-comment-btn ${isReplyComposerOpenOnParent ? 'is-active' : ''}`.trim()}
+                                    onClick={() => handleToggleAdminReviewReplyComposer(reviewId, reviewAuthorName)}
+                                  >
+                                    {isReplyComposerOpenOnParent ? 'Close' : 'Reply'}
+                                  </button>
+                                  {Number.isFinite(reviewId) ? (
+                                    <button
+                                      type="button"
+                                      className="admin-review-delete-btn"
+                                      disabled={deletingReviewId === reviewId}
+                                      onClick={() => handleDeleteAdminReview(reviewId)}
+                                    >
+                                      {deletingReviewId === reviewId ? 'Deleting...' : 'Delete'}
+                                    </button>
+                                  ) : null}
+                                </div>
+                              </div>
+                              <small>{formatDateTime(review?.updated_at || review?.created_at)}</small>
+
+                              <div className="admin-review-parent-content">
+                                {reviewTitle ? <p className="admin-review-title">{reviewTitle}</p> : null}
+                                <p>{reviewComment || 'No written comment.'}</p>
+                              </div>
+
+                              {isReplyComposerOpenOnParent
+                                ? renderAdminReviewReplyComposer(
+                                  reviewId,
+                                  reviewAuthorName,
+                                  `Replying in ${reviewAuthorName}'s main thread`
+                                )
+                                : null}
+
+                              {reviewImageUrls.length ? (
+                                <div className="admin-message-attachment-grid">
+                                  {reviewImageUrls.map((imageUrl, imageIndex) => (
+                                    <button
+                                      key={`${review.id}-image-${imageUrl}-${imageIndex}`}
+                                      type="button"
+                                      className="admin-license-image-wrap"
+                                      onClick={() => setExpandedImageUrl(imageUrl)}
+                                    >
+                                      <img
+                                        src={imageUrl}
+                                        alt={`${reviewAuthorName} review ${imageIndex + 1}`}
+                                        className="admin-detail-image admin-detail-image-clickable"
+                                      />
+                                    </button>
+                                  ))}
+                                </div>
+                              ) : null}
+
+                              {reviewReplies.length ? (
+                                <div className="admin-review-replies">
+                                  <p className="admin-review-replies-label">
+                                    Replies to <strong>{reviewAuthorName}</strong>
+                                  </p>
+                                  {reviewReplies.map((reply, replyIndex) => {
+                                    const replyId = Number(reply?.id);
+                                    const replyAuthorName = String(reply?.author_name || reply?.authorName || 'Anonymous');
+                                    const replyTitle = String(reply?.title || '').trim();
+                                    const replyContent = String(reply?.content || reply?.comment || '').trim();
+                                    const isReplyComposerOpenOnChild =
+                                      Number(activeAdminReplyTarget?.reviewId) === reviewId
+                                      && Number(activeAdminReplyTarget?.replyId) === replyId;
+                                    const replyIsAdmin =
+                                      Boolean(reply?.is_admin || reply?.isAdmin)
+                                      || String(reply?.author_role || reply?.authorRole || '').toLowerCase() === 'admin';
+                                    const replyImageUrls = normalizeImageUrls(reply?.image_urls || reply?.imageUrls)
+                                      .map((imageUrl) => resolveAssetUrl(imageUrl))
+                                      .filter(Boolean);
+
+                                    return (
+                                      <div
+                                        key={Number.isFinite(replyId)
+                                          ? `${review.id}-reply-${replyId}`
+                                          : `${review.id}-reply-index-${replyIndex}`}
+                                        className={`admin-review-reply admin-review-child-card ${replyIsAdmin ? 'is-admin' : ''}`.trim()}
+                                      >
+                                        <div className="admin-review-reply-header">
+                                          <strong>{replyIsAdmin ? `★ ${replyAuthorName}` : replyAuthorName}</strong>
+                                          <div className="admin-review-reply-meta-badges">
+                                            <span className="admin-review-reply-badge">Reply</span>
+                                            {replyIsAdmin ? <span className="admin-review-admin-badge">Admin</span> : null}
+                                            {Number.isFinite(replyId) ? (
+                                              <button
+                                                type="button"
+                                                className={`admin-review-comment-btn ${isReplyComposerOpenOnChild ? 'is-active' : ''}`.trim()}
+                                                onClick={() => handleToggleAdminReviewReplyComposer(reviewId, replyAuthorName, replyId)}
+                                              >
+                                                {isReplyComposerOpenOnChild ? 'Close' : 'Reply'}
+                                              </button>
+                                            ) : null}
+                                            {Number.isFinite(replyId) ? (
+                                              <button
+                                                type="button"
+                                                className="admin-review-delete-btn"
+                                                disabled={deletingReplyId === replyId}
+                                                onClick={() => handleDeleteAdminReviewReply(reviewId, replyId)}
+                                              >
+                                                {deletingReplyId === replyId ? 'Deleting...' : 'Delete'}
+                                              </button>
+                                            ) : null}
+                                          </div>
+                                        </div>
+                                        <small>{formatDateTime(reply?.updated_at || reply?.updatedAt || reply?.created_at || reply?.createdAt)}</small>
+                                        {replyTitle ? <p className="admin-review-title">{replyTitle}</p> : null}
+                                        <p className="admin-review-reply-content">{replyContent || 'No content.'}</p>
+
+                                        {isReplyComposerOpenOnChild
+                                          ? renderAdminReviewReplyComposer(
+                                            reviewId,
+                                            replyAuthorName,
+                                            `Replying to ${replyAuthorName} under ${reviewAuthorName}'s thread`
+                                          )
+                                          : null}
+
+                                        {replyImageUrls.length ? (
+                                          <div className="admin-message-attachment-grid">
+                                            {replyImageUrls.map((imageUrl, imageIndex) => (
+                                              <button
+                                                key={`${review.id}-reply-image-${imageUrl}-${imageIndex}`}
+                                                type="button"
+                                                className="admin-license-image-wrap"
+                                                onClick={() => setExpandedImageUrl(imageUrl)}
+                                              >
+                                                <img
+                                                  src={imageUrl}
+                                                  alt={`${replyAuthorName} reply ${imageIndex + 1}`}
+                                                  className="admin-detail-image admin-detail-image-clickable"
+                                                />
+                                              </button>
+                                            ))}
+                                          </div>
+                                        ) : null}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              ) : null}
+
+                            </article>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="admin-empty-note">No reviews found for this venue.</p>
+                    )
+                  ) : null}
+                </div>
+              ) : null}
+
             </div>
           )}
         </div>
@@ -2342,45 +3891,114 @@ function AdminBoundaryPage() {
                 );
               })}
 
-              {(activeMode === 'pending' ? pendingFilteredVenues : visibleVenues)
-                .filter((venue) => Number.isFinite(Number(venue.latitude)) && Number.isFinite(Number(venue.longitude)))
-                .map((venue) => (
-                  <Marker
-                    key={venue.id}
-                    position={[Number(venue.latitude), Number(venue.longitude)]}
-                    icon={resolveMarkerIcon(venue)}
-                    eventHandlers={
-                      activeMode === 'pending'
-                        ? {
-                            click: () => handleOpenVenueDetails(venue.id),
-                          }
-                        : undefined
-                    }
-                  >
-                    <Popup>
-                      <div className="admin-map-popup">
-                        {venue.cover_image_url ? (
-                          <img src={venue.cover_image_url} alt={venue.name} className="admin-map-popup-image" />
-                        ) : (
-                          <div className="admin-map-popup-image-placeholder">No cover image</div>
-                        )}
+              {activeMode === 'pending' && pendingQueueView === 'updates' ? (
+                <>
+                  {pendingLocationUpdateRequests
+                    .map((request) => ({
+                      request,
+                      proposedSnapshot: normalizeVenueUpdateSnapshot(request.proposed_snapshot),
+                    }))
+                    .filter(
+                      ({ proposedSnapshot }) =>
+                        Number.isFinite(Number(proposedSnapshot.latitude)) &&
+                        Number.isFinite(Number(proposedSnapshot.longitude))
+                    )
+                    .map(({ request, proposedSnapshot }) => (
+                      <Marker
+                        key={`update-request-new-${request.id}`}
+                        position={[Number(proposedSnapshot.latitude), Number(proposedSnapshot.longitude)]}
+                        icon={updateRequestNewIcon}
+                        eventHandlers={{
+                          click: () => handleOpenUpdateRequestDetails(request.id),
+                        }}
+                      >
+                        <Popup>
+                          <div className="admin-map-popup">
+                            {proposedSnapshot.coverImageUrl ? (
+                              <img
+                                src={proposedSnapshot.coverImageUrl}
+                                alt={request.venue_title || request.venue_name || `Venue #${request.venue_id}`}
+                                className="admin-map-popup-image"
+                              />
+                            ) : (
+                              <div className="admin-map-popup-image-placeholder">No proposed cover image</div>
+                            )}
 
-                        <h3>{venue.title || venue.name}</h3>
-                        <p>{venue.address || 'Address pending'}</p>
-                        <ul>
-                          <li>Ward: {venue.ward_name || venue.ward_id || 'Not detected'}</li>
-                          <li>Category: {venue.category_name || 'Uncategorized'}</li>
-                          <li>Status: {statusLabel(venue.status)}</li>
-                          <li>Phone: {venue.phone || 'Not provided'}</li>
-                        </ul>
-                        {venue.description ? <p className="admin-map-popup-description">{venue.description}</p> : null}
-                      </div>
-                    </Popup>
-                  </Marker>
-                ))}
+                            <h3>{request.venue_title || request.venue_name || `Venue #${request.venue_id}`}</h3>
+                            <p>{proposedSnapshot.address || request.venue_address || 'Address pending'}</p>
+                            <ul>
+                              <li>Queue: Location Updates</li>
+                              <li>Marker: New Location (Dark Orange)</li>
+                              <li>Ward: {proposedSnapshot.wardId || 'Not detected'}</li>
+                              <li>Status: Pending</li>
+                            </ul>
+                          </div>
+                        </Popup>
+                      </Marker>
+                    ))}
+
+                  {selectedUpdateRequest &&
+                  Number.isFinite(Number(selectedUpdateOldSnapshot.latitude)) &&
+                  Number.isFinite(Number(selectedUpdateOldSnapshot.longitude)) ? (
+                    <Marker
+                      key={`update-request-old-${selectedUpdateRequest.id}`}
+                      position={[Number(selectedUpdateOldSnapshot.latitude), Number(selectedUpdateOldSnapshot.longitude)]}
+                      icon={updateRequestOldIcon}
+                    >
+                      <Popup>
+                        <div className="admin-map-popup">
+                          <h3>{selectedUpdateRequest.venue_title || selectedUpdateRequest.venue_name || `Venue #${selectedUpdateRequest.venue_id}`}</h3>
+                          <p>{selectedUpdateOldSnapshot.address || 'Address pending'}</p>
+                          <ul>
+                            <li>Queue: Location Updates</li>
+                            <li>Marker: Old Location (Teal)</li>
+                            <li>Ward: {selectedUpdateOldSnapshot.wardId || 'Not detected'}</li>
+                            <li>Status: Current Live Data</li>
+                          </ul>
+                        </div>
+                      </Popup>
+                    </Marker>
+                  ) : null}
+                </>
+              ) : (activeMode === 'pending' ? pendingFilteredVenues : visibleVenues)
+                    .filter((venue) => Number.isFinite(Number(venue.latitude)) && Number.isFinite(Number(venue.longitude)))
+                    .map((venue) => (
+                      <Marker
+                        key={venue.id}
+                        position={[Number(venue.latitude), Number(venue.longitude)]}
+                        icon={resolveMarkerIcon(venue)}
+                        eventHandlers={
+                          activeMode === 'pending'
+                            ? {
+                                click: () => handleOpenVenueDetails(venue.id),
+                              }
+                            : undefined
+                        }
+                      >
+                        <Popup>
+                          <div className="admin-map-popup">
+                            {venue.cover_image_url ? (
+                              <img src={venue.cover_image_url} alt={venue.name} className="admin-map-popup-image" />
+                            ) : (
+                              <div className="admin-map-popup-image-placeholder">No cover image</div>
+                            )}
+
+                            <h3>{venue.title || venue.name}</h3>
+                            <p>{venue.address || 'Address pending'}</p>
+                            <ul>
+                              <li>Ward: {venue.ward_name || venue.ward_id || 'Not detected'}</li>
+                              <li>Category: {venue.category_name || 'Uncategorized'}</li>
+                              <li>Status: {statusLabel(venue.status)}</li>
+                              <li>Phone: {venue.phone || 'Not provided'}</li>
+                            </ul>
+                            {venue.description ? <p className="admin-map-popup-description">{venue.description}</p> : null}
+                          </div>
+                        </Popup>
+                      </Marker>
+                    ))}
             </MapContainer>
 
-            {activeMode === 'pending' ? (
+            {activeMode === 'pending' && pendingQueueView === 'submissions' ? (
               <div className="admin-pending-map-controls">
                 <button
                   type="button"
@@ -2392,7 +4010,7 @@ function AdminBoundaryPage() {
               </div>
             ) : null}
 
-            {activeMode === 'pending' && isPendingFilterPanelOpen ? (
+            {activeMode === 'pending' && pendingQueueView === 'submissions' && isPendingFilterPanelOpen ? (
               <section className="admin-pending-filter-panel" role="region" aria-label="Pending map filters">
                 <header>
                   <h3>Map filters</h3>
@@ -2405,14 +4023,14 @@ function AdminBoundaryPage() {
                   </button>
                 </header>
 
-                <p>Choose Place Categories, Ward Naming, and Services Offered, then press Search.</p>
+                <p>Choose Place Categories, Ward Naming, and Services Offered, then search by place name.</p>
 
                 <label className="admin-pending-search-field">
                   <span>Search keyword</span>
                   <input
                     type="text"
                     value={pendingSearchInput}
-                    placeholder="Venue, address, ward, or service"
+                    placeholder="Place name (supports Vietnamese with/without accents)"
                     onChange={(event) => setPendingSearchInput(event.target.value)}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter') {

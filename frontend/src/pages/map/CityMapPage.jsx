@@ -12,6 +12,8 @@ import { fetchPlaceCategories } from '../../services/api/placeCategoriesApi';
 import {
   createVenueReview,
   createVenueReviewReply,
+  deleteVenueReview,
+  deleteVenueReviewReply,
   fetchVenueCommunityBundle,
   fetchVenueDetails,
   fetchVenueReviews,
@@ -173,17 +175,6 @@ function resolveStarDisplayItems(rating) {
   });
 }
 
-function resolveHalfStarSelection(event, starValue) {
-  if (!event?.currentTarget) {
-    return normalizeHalfStarRating(starValue);
-  }
-
-  const targetRect = event.currentTarget.getBoundingClientRect();
-  const pointerX = event.clientX - targetRect.left;
-  const pickedValue = pointerX <= targetRect.width / 2 ? starValue - 0.5 : starValue;
-  return normalizeHalfStarRating(pickedValue);
-}
-
 function StarRatingDisplay({ rating, className = '' }) {
   const starItems = resolveStarDisplayItems(rating);
 
@@ -246,12 +237,16 @@ function normalizeReviewReplies(value, apiBase) {
 
   return value.map((reply) => ({
     id: reply?.id,
+    userId: reply?.user_id || reply?.userId || null,
     authorName: String(reply?.author_name || reply?.authorName || '').trim() || 'Anonymous',
     rating: Number(reply?.rating || 0),
     title: String(reply?.title || '').trim(),
     content: String(reply?.content || reply?.comment || '').trim(),
     likeCount: Number(reply?.like_count || reply?.likeCount || 0),
     likedByMe: Boolean(reply?.liked_by_me || reply?.likedByMe),
+    isAdmin: Boolean(reply?.is_admin || reply?.isAdmin)
+      || String(reply?.author_role || reply?.authorRole || '').toLowerCase() === 'admin',
+    canDelete: Boolean(reply?.can_delete || reply?.canDelete),
     createdAt: reply?.created_at || reply?.createdAt || null,
     imageUrls: resolveUniqueAssetUrls(
       normalizeImageUrlList(reply?.image_urls || reply?.imageUrls),
@@ -274,16 +269,33 @@ function normalizeExactSearchText(value) {
   return String(value || '').toLowerCase().trim();
 }
 
-function hasVietnameseToneMarks(value) {
-  return /[\u0300\u0301\u0303\u0309\u0323]/.test(String(value || '').normalize('NFD'));
-}
-
 function normalizeVietnameseToneInsensitive(value) {
   return String(value || '')
     .normalize('NFD')
     .replace(/[\u0300\u0301\u0303\u0309\u0323]/g, '')
     .toLowerCase()
     .trim();
+}
+
+function buildVenueSearchSource(venue) {
+  const rawNames = [resolveVenueName(venue), venue?.title, venue?.name]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+
+  const uniqueNames = [];
+  const seen = new Set();
+
+  rawNames.forEach((name) => {
+    const key = name.toLowerCase();
+    if (seen.has(key)) {
+      return;
+    }
+
+    seen.add(key);
+    uniqueNames.push(name);
+  });
+
+  return uniqueNames.join(' ');
 }
 
 function normalizeImageUrlList(value) {
@@ -457,10 +469,10 @@ function CityMapPage() {
   const [venueReviewsError, setVenueReviewsError] = useState('');
   const [venueReviewSort, setVenueReviewSort] = useState('newest');
   const [venueReviewStats, setVenueReviewStats] = useState({ averageRating: 0, totalReviews: 0 });
-  const [venueReviewForm, setVenueReviewForm] = useState({ rating: null, title: '', comment: '', mediaFiles: [] });
+  const [venueReviewForm, setVenueReviewForm] = useState({ title: '', comment: '', mediaFiles: [] });
   const [submittingVenueReview, setSubmittingVenueReview] = useState(false);
-  const [activeReplyReviewId, setActiveReplyReviewId] = useState(null);
-  const [venueReplyForm, setVenueReplyForm] = useState({ rating: null, title: '', content: '' });
+  const [activeReplyTarget, setActiveReplyTarget] = useState(null);
+  const [venueReplyForm, setVenueReplyForm] = useState({ title: '', content: '', mediaFiles: [] });
   const [submittingVenueReply, setSubmittingVenueReply] = useState(false);
   const [reviewActionError, setReviewActionError] = useState('');
   const [reviewFormError, setReviewFormError] = useState('');
@@ -499,6 +511,10 @@ function CityMapPage() {
   const [popupVenueIdToOpen, setPopupVenueIdToOpen] = useState('');
   const venueMarkerRefs = useRef(new Map());
   const authToken = useMemo(() => String(token || '').replace(/^Bearer\s+/i, '').trim(), [token]);
+  const currentUserId = useMemo(
+    () => String(user?.id || user?.user_id || user?.userId || '').trim(),
+    [user?.id, user?.user_id, user?.userId]
+  );
 
   const wardById = useMemo(
     () => new Map(wards.map((ward) => [String(ward.ward_id), ward])),
@@ -577,7 +593,6 @@ function CityMapPage() {
     [appliedSearch]
   );
   const normalizedAppliedSearch = useMemo(() => normalizeSearchText(appliedSearch), [appliedSearch]);
-  const appliedSearchHasTone = useMemo(() => hasVietnameseToneMarks(appliedSearch), [appliedSearch]);
   const venueReportAttachmentPreview = useMemo(() => {
     const attachment = venueReportForm.attachment;
     if (!attachment || !String(attachment.type || '').startsWith('image/')) {
@@ -619,6 +634,15 @@ function CityMapPage() {
         isVideo: String(file.type || '').toLowerCase().startsWith('video/'),
       })),
     [venueReviewForm.mediaFiles]
+  );
+  const replyMediaPreviews = useMemo(
+    () =>
+      (Array.isArray(venueReplyForm.mediaFiles) ? venueReplyForm.mediaFiles : []).map((file) => ({
+        id: `${file.name}-${file.lastModified}-${file.size}`,
+        url: URL.createObjectURL(file),
+        isVideo: String(file.type || '').toLowerCase().startsWith('video/'),
+      })),
+    [venueReplyForm.mediaFiles]
   );
 
   const activeFilterCount =
@@ -720,17 +744,11 @@ function CityMapPage() {
       return venuesWithValidCoordinates;
     }
 
-    if (appliedSearchHasTone) {
-      return venuesWithValidCoordinates.filter((venue) =>
-        normalizeExactSearchText(resolveVenueName(venue)).includes(exactAppliedSearch)
-      );
-    }
-
     return venuesWithValidCoordinates.filter((venue) => {
-      const venueName = resolveVenueName(venue);
-      const exactName = normalizeExactSearchText(venueName);
-      const toneInsensitiveName = normalizeVietnameseToneInsensitive(venueName);
-      const asciiName = normalizeSearchText(venueName);
+      const venueSearchSource = buildVenueSearchSource(venue);
+      const exactName = normalizeExactSearchText(venueSearchSource);
+      const toneInsensitiveName = normalizeVietnameseToneInsensitive(venueSearchSource);
+      const asciiName = normalizeSearchText(venueSearchSource);
 
       return (
         exactName.includes(exactAppliedSearch)
@@ -740,7 +758,6 @@ function CityMapPage() {
     });
   }, [
     venues,
-    appliedSearchHasTone,
     exactAppliedSearch,
     toneInsensitiveAppliedSearch,
     normalizedAppliedSearch,
@@ -1000,6 +1017,12 @@ function CityMapPage() {
   }, [reviewMediaPreviews]);
 
   useEffect(() => {
+    return () => {
+      replyMediaPreviews.forEach((item) => URL.revokeObjectURL(item.url));
+    };
+  }, [replyMediaPreviews]);
+
+  useEffect(() => {
     if (!selectedVenueId) {
       return;
     }
@@ -1112,9 +1135,9 @@ function CityMapPage() {
       averageRating: Number(resolveVenueRating(venue) || 0),
       totalReviews: Number.isFinite(initialReviewCount) ? initialReviewCount : 0,
     });
-    setVenueReviewForm({ rating: null, title: '', comment: '' });
-    setActiveReplyReviewId(null);
-    setVenueReplyForm({ rating: null, title: '', content: '' });
+    setVenueReviewForm({ title: '', comment: '', mediaFiles: [] });
+    setActiveReplyTarget(null);
+    setVenueReplyForm({ title: '', content: '', mediaFiles: [] });
     setReviewActionError('');
     setReviewFormError('');
     setVenueReviewImages([]);
@@ -1171,9 +1194,9 @@ function CityMapPage() {
     setVenueReviews([]);
     setVenueReviewsError('');
     setVenueReviewStats({ averageRating: 0, totalReviews: 0 });
-  setVenueReviewForm({ rating: null, title: '', comment: '', mediaFiles: [] });
-    setActiveReplyReviewId(null);
-    setVenueReplyForm({ rating: null, title: '', content: '' });
+  setVenueReviewForm({ title: '', comment: '', mediaFiles: [] });
+    setActiveReplyTarget(null);
+    setVenueReplyForm({ title: '', content: '', mediaFiles: [] });
     setReviewActionError('');
     setReviewFormError('');
     setVenueReviewImages([]);
@@ -1246,11 +1269,6 @@ function CityMapPage() {
 
     try {
       const payload = new FormData();
-      const normalizedRating = normalizeHalfStarRating(venueReviewForm.rating);
-      if (normalizedRating >= 0.5) {
-        payload.append('rating', String(normalizedRating));
-      }
-
       payload.append('title', String(venueReviewForm.title || '').trim());
       payload.append('comment', normalizedComment);
       (Array.isArray(venueReviewForm.mediaFiles) ? venueReviewForm.mediaFiles : []).forEach((file) => {
@@ -1263,7 +1281,7 @@ function CityMapPage() {
         syncVenueRatingStats(selectedVenueId, response.stats.averageRating, response.stats.totalReviews);
       }
 
-  setVenueReviewForm({ rating: null, title: '', comment: '', mediaFiles: [] });
+  setVenueReviewForm({ title: '', comment: '', mediaFiles: [] });
       setVenueReviewsRefreshKey((value) => value + 1);
     } catch (submitError) {
       setReviewFormError(submitError?.response?.data?.message || 'Không thể gửi bình luận lúc này.');
@@ -1347,14 +1365,36 @@ function CityMapPage() {
       return;
     }
 
-    setActiveReplyReviewId(review.id);
+    const nextReviewId = Number(review.id);
+    const nextReplyId = Number(reply?.id);
+    const normalizedReplyId = Number.isFinite(nextReplyId) ? nextReplyId : null;
+
+    setActiveReplyTarget((currentTarget) => {
+      const currentReviewId = Number(currentTarget?.reviewId);
+      const currentReplyId = Number(currentTarget?.replyId);
+      const isSameReview = Number.isFinite(currentReviewId) && currentReviewId === nextReviewId;
+      const isSameReply =
+        (normalizedReplyId === null && !Number.isFinite(currentReplyId))
+        || (Number.isFinite(normalizedReplyId) && currentReplyId === normalizedReplyId);
+
+      if (isSameReview && isSameReply) {
+        return null;
+      }
+
+      return {
+        reviewId: nextReviewId,
+        replyId: normalizedReplyId,
+        replyToName: String(reply?.authorName || '').trim(),
+      };
+    });
+
     setReviewActionError('');
 
     const mention = reply?.authorName ? `@${reply.authorName} ` : '';
     setVenueReplyForm({
-      rating: null,
       title: '',
       content: mention,
+      mediaFiles: [],
     });
   };
 
@@ -1378,23 +1418,157 @@ function CityMapPage() {
 
     try {
       const payload = new FormData();
-      const normalizedRating = normalizeHalfStarRating(venueReplyForm.rating);
-      if (normalizedRating >= 0.5) {
-        payload.append('rating', String(normalizedRating));
-      }
-
       payload.append('title', String(venueReplyForm.title || '').trim());
       payload.append('content', normalizedContent);
+      (Array.isArray(venueReplyForm.mediaFiles) ? venueReplyForm.mediaFiles : []).forEach((file) => {
+        payload.append('images', file);
+      });
 
       await createVenueReviewReply(selectedVenueId, review.id, payload);
 
-      setVenueReplyForm({ rating: null, title: '', content: '' });
-      setActiveReplyReviewId(null);
+      setVenueReplyForm({ title: '', content: '', mediaFiles: [] });
+      setActiveReplyTarget(null);
       setVenueReviewsRefreshKey((value) => value + 1);
     } catch (requestError) {
       setReviewActionError(requestError?.response?.data?.message || 'Không thể gửi thảo luận lúc này.');
     } finally {
       setSubmittingVenueReply(false);
+    }
+  };
+
+  const renderInlineReplyComposer = (review, contextLabel = '') => (
+    <div className="city-map-review-reply-form">
+      {contextLabel ? <p className="city-map-review-reply-context">{contextLabel}</p> : null}
+
+      <input
+        type="text"
+        placeholder="Tiêu đề"
+        value={venueReplyForm.title}
+        onChange={(event) => setVenueReplyForm((prev) => ({ ...prev, title: event.target.value }))}
+      />
+      <textarea
+        rows="2"
+        placeholder="Viết thảo luận..."
+        value={venueReplyForm.content}
+        onChange={(event) => setVenueReplyForm((prev) => ({ ...prev, content: event.target.value }))}
+      />
+
+      <label className="city-map-review-media-upload">
+        📷 Ảnh đính kèm
+        <input
+          type="file"
+          accept="image/*"
+          multiple
+          onChange={(event) => {
+            const pickedFiles = Array.from(event.target.files || []);
+            setVenueReplyForm((prev) => ({
+              ...prev,
+              mediaFiles: [...(Array.isArray(prev.mediaFiles) ? prev.mediaFiles : []), ...pickedFiles].slice(0, 3),
+            }));
+            event.target.value = '';
+          }}
+        />
+        <small>
+          {(Array.isArray(venueReplyForm.mediaFiles) && venueReplyForm.mediaFiles.length)
+            ? `Đã chọn ${venueReplyForm.mediaFiles.length}/3 ảnh`
+            : 'Tối đa 3 ảnh'}
+        </small>
+      </label>
+
+      {replyMediaPreviews.length ? (
+        <div className="city-map-photo-grid">
+          {replyMediaPreviews.map((item) => (
+            <div key={`reply-media-preview-${item.id}`} className="city-map-media-preview-card">
+              <div className="city-map-media-preview-asset">
+                <img src={item.url} alt="Reply media preview" loading="lazy" />
+              </div>
+              <button
+                type="button"
+                className="city-map-review-action-btn is-danger"
+                onClick={() => {
+                  setVenueReplyForm((prev) => ({
+                    ...prev,
+                    mediaFiles: (Array.isArray(prev.mediaFiles) ? prev.mediaFiles : []).filter(
+                      (file) => `${file.name}-${file.lastModified}-${file.size}` !== item.id
+                    ),
+                  }));
+                }}
+              >
+                Xóa ảnh
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="city-map-review-reply-form-actions">
+        <button
+          type="button"
+          className="city-map-review-action-btn"
+          onClick={() => {
+            setActiveReplyTarget(null);
+            setVenueReplyForm({ title: '', content: '', mediaFiles: [] });
+          }}
+        >
+          Hủy
+        </button>
+        <button
+          type="button"
+          className="city-map-review-action-btn is-primary"
+          disabled={submittingVenueReply}
+          onClick={() => handleSubmitVenueReply(review)}
+        >
+          {submittingVenueReply ? 'Đang gửi...' : 'Gửi thảo luận'}
+        </button>
+      </div>
+    </div>
+  );
+
+  const handleDeleteReview = async (review) => {
+    if (!selectedVenueId || !review?.id) {
+      return;
+    }
+
+    if (!requireAuthForReviewAction()) {
+      return;
+    }
+
+    const shouldDelete = window.confirm('Bạn có chắc muốn xóa bình luận này?');
+    if (!shouldDelete) {
+      return;
+    }
+
+    setReviewActionError('');
+
+    try {
+      await deleteVenueReview(selectedVenueId, review.id);
+      setVenueReviewsRefreshKey((value) => value + 1);
+    } catch (requestError) {
+      setReviewActionError(requestError?.response?.data?.message || 'Không thể xóa bình luận lúc này.');
+    }
+  };
+
+  const handleDeleteReply = async (review, reply) => {
+    if (!selectedVenueId || !review?.id || !reply?.id) {
+      return;
+    }
+
+    if (!requireAuthForReviewAction()) {
+      return;
+    }
+
+    const shouldDelete = window.confirm('Bạn có chắc muốn xóa bình luận nhỏ này?');
+    if (!shouldDelete) {
+      return;
+    }
+
+    setReviewActionError('');
+
+    try {
+      await deleteVenueReviewReply(selectedVenueId, review.id, reply.id);
+      setVenueReviewsRefreshKey((value) => value + 1);
+    } catch (requestError) {
+      setReviewActionError(requestError?.response?.data?.message || 'Không thể xóa bình luận nhỏ lúc này.');
     }
   };
 
@@ -1413,12 +1587,38 @@ function CityMapPage() {
     setShowVenueReportModal(true);
   };
 
-  const openReviewReportModal = (review) => {
-    if (!review) {
+  const canReportReviewItem = (targetComment) => {
+    const targetUserId = String(targetComment?.userId || '').trim();
+
+    if (!currentUserId || !targetUserId) {
+      return true;
+    }
+
+    return currentUserId !== targetUserId;
+  };
+
+  const openReviewReportModal = (targetComment, options = {}) => {
+    if (!targetComment) {
       return;
     }
 
-    setActiveReviewToReport(review);
+    if (!canReportReviewItem(targetComment)) {
+      setReviewActionError('Bạn không thể báo lỗi bình luận của chính mình.');
+      return;
+    }
+
+    const reportType = options.reportType === 'reply' ? 'reply' : 'review';
+    const normalizedComment = String(targetComment.comment || targetComment.content || '').trim();
+
+    setReviewActionError('');
+
+    setActiveReviewToReport({
+      ...targetComment,
+      reportType,
+      parentReviewId: options.parentReviewId || null,
+      comment: normalizedComment,
+      content: normalizedComment,
+    });
     setReviewReportForm({
       reason: 'inappropriate_language',
       description: '',
@@ -1506,12 +1706,16 @@ function CityMapPage() {
     const selectedReasonLabel =
       REVIEW_REPORT_REASON_OPTIONS.find((item) => item.value === reviewReportForm.reason)?.label || 'Khác';
     const detail = String(reviewReportForm.description || '').trim();
+    const reportType = activeReviewToReport?.reportType === 'reply' ? 'reply' : 'review';
+    const targetContent = String(activeReviewToReport.comment || activeReviewToReport.content || '').trim();
 
     const message = [
-      `Báo lỗi bình luận #${activeReviewToReport.id || 'N/A'}`,
+      reportType === 'reply'
+        ? `Báo lỗi bình luận nhỏ #${activeReviewToReport.id || 'N/A'}`
+        : `Báo lỗi bình luận #${activeReviewToReport.id || 'N/A'}`,
       `Lý do: ${selectedReasonLabel}`,
       `Người bình luận: ${activeReviewToReport.authorName || 'Ẩn danh'}`,
-      `Nội dung: ${activeReviewToReport.comment || ''}`,
+      `Nội dung: ${targetContent}`,
       detail ? `Mô tả chi tiết: ${detail}` : '',
     ]
       .filter(Boolean)
@@ -1524,8 +1728,9 @@ function CityMapPage() {
         attachment: reviewReportForm.attachment || null,
         contactEmail: user?.email || '',
         metadata: {
-          contextType: 'review',
+          contextType: reportType === 'reply' ? 'review_reply' : 'review',
           contextId: activeReviewToReport?.id,
+          parentReviewId: activeReviewToReport?.parentReviewId || null,
           venueId: selectedVenue?.id,
           venueName: resolveVenueName(selectedVenue),
         },
@@ -1568,12 +1773,16 @@ function CityMapPage() {
 
         const normalizedReviewItems = (Array.isArray(reviewResponse?.items) ? reviewResponse.items : []).map((review) => ({
           id: review?.id,
+          userId: review?.user_id || review?.userId || null,
           authorName: String(review?.author_name || review?.authorName || '').trim() || 'Anonymous',
           rating: Number(review?.rating || 0),
           title: String(review?.title || '').trim(),
           comment: String(review?.comment || review?.content || '').trim(),
           likeCount: Number(review?.like_count || review?.likeCount || 0),
           likedByMe: Boolean(review?.liked_by_me || review?.likedByMe),
+          isAdmin: Boolean(review?.is_admin || review?.isAdmin)
+            || String(review?.author_role || review?.authorRole || '').toLowerCase() === 'admin',
+          canDelete: Boolean(review?.can_delete || review?.canDelete),
           replyCount: Number(review?.reply_count || review?.replyCount || 0),
           createdAt: review?.created_at || review?.createdAt || null,
           imageUrls: resolveUniqueAssetUrls(
@@ -2163,19 +2372,9 @@ function CityMapPage() {
               <div className="city-map-detail-block">
                 <div className="city-map-review-summary-row">
                   <strong>
-                    <button
-                      type="button"
-                      className="city-map-rating-link-btn"
-                      onClick={() => {
-                        setVenueReviewForm((prev) => ({
-                          ...prev,
-                          rating: normalizeHalfStarRating(selectedVenueRatingValue || prev.rating),
-                        }));
-                      }}
-                      title="Bấm để dùng điểm sao hiện tại"
-                    >
+                    <span className="city-map-rating-link-btn" role="img" aria-label="Overall venue rating">
                       <StarRatingDisplay rating={selectedVenueRatingValue} />
-                    </button>
+                    </span>
                     {' '}
                     {Number(selectedVenueRatingValue || 0).toFixed(1)}/5 ({Number(selectedVenueReviewCount || 0)} đánh giá)
                   </strong>
@@ -2189,31 +2388,6 @@ function CityMapPage() {
                 </div>
 
                 <form className="city-map-review-form" onSubmit={handleSubmitVenueReview}>
-                  <label className="city-map-review-form-rating">
-                    Đánh giá sao
-                    <div className="city-map-star-picker" role="radiogroup" aria-label="Đánh giá sao">
-                      {[1, 2, 3, 4, 5].map((value) => {
-                        const normalizedRating = normalizeHalfStarRating(venueReviewForm.rating);
-                        const isFull = normalizedRating >= value;
-                        const isHalf = !isFull && normalizedRating >= value - 0.5;
-
-                        return (
-                          <button
-                            key={`city-map-review-rating-${value}`}
-                            type="button"
-                            className={`city-map-star-picker-btn ${isFull ? 'is-active' : ''} ${isHalf ? 'is-half' : ''}`}
-                            onClick={(event) => setVenueReviewForm((prev) => ({
-                              ...prev,
-                              rating: resolveHalfStarSelection(event, value),
-                            }))}
-                          >
-                            ★
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </label>
-
                   <input
                     type="text"
                     placeholder="Tiêu đề"
@@ -2252,15 +2426,17 @@ function CityMapPage() {
                   {reviewMediaPreviews.length ? (
                     <div className="city-map-photo-grid">
                       {reviewMediaPreviews.map((item) => (
-                        <div key={`review-media-preview-${item.id}`} className="city-map-photo-button">
-                          {item.isVideo ? (
-                            <video src={item.url} controls preload="metadata" />
-                          ) : (
-                            <img src={item.url} alt="Review media preview" loading="lazy" />
-                          )}
+                        <div key={`review-media-preview-${item.id}`} className="city-map-media-preview-card">
+                          <div className="city-map-media-preview-asset">
+                            {item.isVideo ? (
+                              <video src={item.url} controls preload="metadata" />
+                            ) : (
+                              <img src={item.url} alt="Review media preview" loading="lazy" />
+                            )}
+                          </div>
                           <button
                             type="button"
-                            className="city-map-review-action-btn"
+                            className="city-map-review-action-btn is-danger"
                             onClick={() => {
                               setVenueReviewForm((prev) => ({
                                 ...prev,
@@ -2270,7 +2446,7 @@ function CityMapPage() {
                               }));
                             }}
                           >
-                            Xóa
+                            Xóa ảnh
                           </button>
                         </div>
                       ))}
@@ -2293,8 +2469,6 @@ function CityMapPage() {
                   >
                     <option value="newest">Newest first</option>
                     <option value="oldest">Oldest first</option>
-                    <option value="rating_high">Rating: high to low</option>
-                    <option value="rating_low">Rating: low to high</option>
                   </select>
                 </div>
 
@@ -2306,13 +2480,21 @@ function CityMapPage() {
                   venueReviews.length ? (
                     <div className="city-map-review-list">
                       {venueReviews.map((review) => (
-                        <article key={review.id} className="city-map-review-item">
+                        <article
+                          key={review.id}
+                          className={`city-map-review-item city-map-review-parent-card ${review.isAdmin ? 'is-admin' : ''}`.trim()}
+                        >
                           <header>
-                            <strong>{review.authorName || 'Anonymous'}</strong>
-                            <span>{Number(review.rating || 0).toFixed(1)} / 5</span>
+                            <strong>
+                              {review.isAdmin ? '★ ' : ''}
+                              {review.authorName || 'Anonymous'}
+                            </strong>
                           </header>
-                          {review.title ? <strong className="city-map-review-title">{review.title}</strong> : null}
-                          <p>{review.comment || 'No written comment provided.'}</p>
+
+                          <div className="city-map-review-parent-content">
+                            {review.title ? <strong className="city-map-review-title">{review.title}</strong> : null}
+                            <p>{review.comment || 'No written comment provided.'}</p>
+                          </div>
 
                           <div className="city-map-review-action-row">
                             <button
@@ -2327,16 +2509,31 @@ function CityMapPage() {
                               className="city-map-review-action-btn"
                               onClick={() => handleOpenReplyComposer(review)}
                             >
-                              💬 Bình luận {Number(review.replyCount || (Array.isArray(review.replies) ? review.replies.length : 0))}
+                              ↩ Reply {Number(review.replyCount || (Array.isArray(review.replies) ? review.replies.length : 0))}
                             </button>
-                            <button
-                              type="button"
-                              className="city-map-review-action-btn"
-                              onClick={() => openReviewReportModal(review)}
-                            >
-                              ⚠ Báo lỗi
-                            </button>
+                            {canReportReviewItem(review) ? (
+                              <button
+                                type="button"
+                                className="city-map-review-action-btn"
+                                onClick={() => openReviewReportModal(review)}
+                              >
+                                ⚠ Báo lỗi
+                              </button>
+                            ) : null}
+                            {review.canDelete ? (
+                              <button
+                                type="button"
+                                className="city-map-review-action-btn is-danger"
+                                onClick={() => handleDeleteReview(review)}
+                              >
+                                🗑 Xóa bình luận
+                              </button>
+                            ) : null}
                           </div>
+
+                          {Number(activeReplyTarget?.reviewId) === Number(review.id) && activeReplyTarget?.replyId == null
+                            ? renderInlineReplyComposer(review, 'Đang trả lời trong luồng bình luận chính')
+                            : null}
 
                           {Array.isArray(review.imageUrls) && review.imageUrls.length ? (
                             <div className="city-map-photo-grid">
@@ -2370,11 +2567,23 @@ function CityMapPage() {
 
                           {Array.isArray(review.replies) && review.replies.length ? (
                             <div className="city-map-review-replies">
+                              <p className="city-map-review-replies-label">
+                                Replies to <strong>{review.authorName || 'Anonymous'}</strong>
+                              </p>
                               {review.replies.map((reply) => (
-                                <article key={`review-reply-${review.id}-${reply.id}`} className="city-map-review-reply-item">
+                                <article
+                                  key={`review-reply-${review.id}-${reply.id}`}
+                                  className={`city-map-review-reply-item city-map-review-child-card ${reply.isAdmin ? 'is-admin' : ''}`.trim()}
+                                >
                                   <header>
-                                    <strong>{reply.authorName || 'Anonymous'}</strong>
-                                    {Number(reply.rating || 0) > 0 ? <span>{Number(reply.rating || 0).toFixed(1)} / 5</span> : null}
+                                    <strong>
+                                      {reply.isAdmin ? '★ ' : ''}
+                                      {reply.authorName || 'Anonymous'}
+                                    </strong>
+                                    <div className="city-map-review-reply-meta">
+                                      <span className="city-map-review-reply-badge">Reply</span>
+                                      {reply.isAdmin ? <span className="city-map-review-reply-badge is-admin">Admin</span> : null}
+                                    </div>
                                   </header>
                                   {reply.title ? <strong className="city-map-review-title">{reply.title}</strong> : null}
                                   <p>{reply.content || 'No written comment provided.'}</p>
@@ -2392,9 +2601,35 @@ function CityMapPage() {
                                       className="city-map-review-action-btn"
                                       onClick={() => handleOpenReplyComposer(review, reply)}
                                     >
-                                      💬 Bình luận
+                                      ↩ Reply
                                     </button>
+                                    {canReportReviewItem(reply) ? (
+                                      <button
+                                        type="button"
+                                        className="city-map-review-action-btn"
+                                        onClick={() => openReviewReportModal(reply, { reportType: 'reply', parentReviewId: review.id })}
+                                      >
+                                        ⚠ Báo lỗi
+                                      </button>
+                                    ) : null}
+                                    {reply.canDelete ? (
+                                      <button
+                                        type="button"
+                                        className="city-map-review-action-btn is-danger"
+                                        onClick={() => handleDeleteReply(review, reply)}
+                                      >
+                                        🗑 Xóa bình luận
+                                      </button>
+                                    ) : null}
                                   </div>
+
+                                  {Number(activeReplyTarget?.reviewId) === Number(review.id)
+                                    && Number(activeReplyTarget?.replyId) === Number(reply.id)
+                                    ? renderInlineReplyComposer(
+                                      review,
+                                      `Đang trả lời ${reply.authorName || 'Anonymous'} trong bình luận con`
+                                    )
+                                    : null}
 
                                   {Array.isArray(reply.imageUrls) && reply.imageUrls.length ? (
                                     <div className="city-map-photo-grid">
@@ -2430,68 +2665,6 @@ function CityMapPage() {
                             </div>
                           ) : null}
 
-                          {activeReplyReviewId === review.id ? (
-                            <div className="city-map-review-reply-form">
-                              <label className="city-map-review-form-rating">
-                                Đánh giá sao
-                                <div className="city-map-star-picker" role="radiogroup" aria-label="Đánh giá sao cho thảo luận">
-                                  {[1, 2, 3, 4, 5].map((value) => {
-                                    const normalizedRating = normalizeHalfStarRating(venueReplyForm.rating);
-                                    const isFull = normalizedRating >= value;
-                                    const isHalf = !isFull && normalizedRating >= value - 0.5;
-
-                                    return (
-                                      <button
-                                        key={`city-map-reply-rating-${review.id}-${value}`}
-                                        type="button"
-                                        className={`city-map-star-picker-btn ${isFull ? 'is-active' : ''} ${isHalf ? 'is-half' : ''}`}
-                                        onClick={(event) => setVenueReplyForm((prev) => ({
-                                          ...prev,
-                                          rating: resolveHalfStarSelection(event, value),
-                                        }))}
-                                      >
-                                        ★
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              </label>
-
-                              <input
-                                type="text"
-                                placeholder="Tiêu đề"
-                                value={venueReplyForm.title}
-                                onChange={(event) => setVenueReplyForm((prev) => ({ ...prev, title: event.target.value }))}
-                              />
-                              <textarea
-                                rows="2"
-                                placeholder="Viết thảo luận..."
-                                value={venueReplyForm.content}
-                                onChange={(event) => setVenueReplyForm((prev) => ({ ...prev, content: event.target.value }))}
-                              />
-
-                              <div className="city-map-review-reply-form-actions">
-                                <button
-                                  type="button"
-                                  className="city-map-review-action-btn"
-                                  onClick={() => {
-                                    setActiveReplyReviewId(null);
-                                    setVenueReplyForm({ rating: null, title: '', content: '' });
-                                  }}
-                                >
-                                  Hủy
-                                </button>
-                                <button
-                                  type="button"
-                                  className="city-map-review-action-btn is-primary"
-                                  disabled={submittingVenueReply}
-                                  onClick={() => handleSubmitVenueReply(review)}
-                                >
-                                  {submittingVenueReply ? 'Đang gửi...' : 'Gửi thảo luận'}
-                                </button>
-                              </div>
-                            </div>
-                          ) : null}
                         </article>
                       ))}
                     </div>

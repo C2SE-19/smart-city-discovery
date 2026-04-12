@@ -34,8 +34,65 @@ export async function fetchAdminVenueDetail(venueId) {
   return response.data;
 }
 
+export async function fetchAdminVenueReviews(venueId, params = {}) {
+  const response = await apiClient.get(`/admin/venues/${venueId}/reviews`, {
+    params,
+    timeout: 30000,
+  });
+
+  return response.data;
+}
+
+export async function createAdminVenueReviewReply(venueId, reviewId, payload) {
+  const isFormData = typeof FormData !== 'undefined' && payload instanceof FormData;
+  const response = await apiClient.post(`/venues/${venueId}/reviews/${reviewId}/replies`, payload, isFormData
+    ? {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    }
+    : undefined);
+  return response.data;
+}
+
+export async function createAdminVenueReview(venueId, payload) {
+  const isFormData = typeof FormData !== 'undefined' && payload instanceof FormData;
+  const response = await apiClient.post(`/venues/${venueId}/reviews`, payload, isFormData
+    ? {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    }
+    : undefined);
+  return response.data;
+}
+
+export async function deleteAdminVenueReview(venueId, reviewId) {
+  const response = await apiClient.delete(`/venues/${venueId}/reviews/${reviewId}`);
+  return response.data;
+}
+
+export async function deleteAdminVenueReviewReply(venueId, reviewId, replyId) {
+  const response = await apiClient.delete(`/venues/${venueId}/reviews/${reviewId}/replies/${replyId}`);
+  return response.data;
+}
+
 export async function moderateAdminVenue(venueId, payload) {
   const response = await apiClient.patch(`/admin/venues/${venueId}/moderation`, payload);
+  return response.data;
+}
+
+export async function fetchAdminVenueUpdateRequests(params = {}) {
+  const response = await apiClient.get('/admin/venues/update-requests', {
+    params,
+    timeout: 30000,
+  });
+
+  return response.data;
+}
+
+export async function moderateAdminVenueUpdateRequest(requestId, payload) {
+  const response = await apiClient.patch(`/admin/venues/update-requests/${requestId}/moderation`, payload);
   return response.data;
 }
 

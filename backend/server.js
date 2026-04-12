@@ -659,6 +659,55 @@ function normalizeServiceIds(input) {
     return [...new Set(normalized)];
 }
 
+function normalizeVenueUpdateRequestStatusList(statusInput) {
+    if (!statusInput) {
+        return [];
+    }
+
+    const normalized = String(statusInput)
+        .split(',')
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean);
+
+    const allowedStatuses = new Set(['pending', 'approved', 'rejected']);
+    return normalized.filter((value) => allowedStatuses.has(value));
+}
+
+function normalizeVenueUpdateSnapshot(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return {};
+    }
+
+    return {
+        name: String(value.name || '').trim(),
+        title: String(value.title || value.name || '').trim(),
+        address: String(value.address || '').trim(),
+        description: normalizeNullableText(value.description),
+        phone: normalizeNullableText(value.phone),
+        latitude: Number(value.latitude),
+        longitude: Number(value.longitude),
+        wardId: normalizeNullableText(value.wardId ?? value.ward_id),
+        categoryId: normalizeNullableNumber(value.categoryId ?? value.category_id),
+        coverImageUrl: sanitizeLargeInlineAssetUrl(value.coverImageUrl ?? value.cover_image_url),
+        businessLicenseImageUrl: sanitizeLargeInlineAssetUrl(
+            value.businessLicenseImageUrl ?? value.business_license_image_url
+        ),
+        metadata: normalizeVenueMetadataObject(value.metadata)
+    };
+}
+
+function extractVenueOwnerCandidateIds(venue) {
+    if (!venue || typeof venue !== 'object') {
+        return [];
+    }
+
+    return [...new Set(
+        [venue.submitted_by_user_id, venue.owner_user_id]
+            .map((value) => String(value || '').trim())
+            .filter(Boolean)
+    )];
+}
+
 function parsePositiveIntegerList(input) {
     if (input === undefined || input === null || input === '') {
         return { values: [], invalid: false };
@@ -1322,6 +1371,58 @@ function mapWeeklyOpenHoursToWeeklySchedule(source) {
     }, {});
 }
 
+function resolveWeeklyScheduleSource(normalizedMetadata, incomingMetadata = null) {
+    const mergedMetadata =
+        normalizedMetadata && typeof normalizedMetadata === 'object' && !Array.isArray(normalizedMetadata)
+            ? normalizedMetadata
+            : {};
+    const incomingSource =
+        incomingMetadata && typeof incomingMetadata === 'object' && !Array.isArray(incomingMetadata)
+            ? incomingMetadata
+            : null;
+
+    const incomingCanonicalSource =
+        incomingSource &&
+        incomingSource.weeklySchedule &&
+        typeof incomingSource.weeklySchedule === 'object' &&
+        !Array.isArray(incomingSource.weeklySchedule)
+            ? incomingSource.weeklySchedule
+            : null;
+
+    if (incomingCanonicalSource) {
+        return incomingCanonicalSource;
+    }
+
+    const incomingLegacySource =
+        incomingSource &&
+        incomingSource.weeklyOpenHours &&
+        typeof incomingSource.weeklyOpenHours === 'object' &&
+        !Array.isArray(incomingSource.weeklyOpenHours)
+            ? mapWeeklyOpenHoursToWeeklySchedule(incomingSource.weeklyOpenHours)
+            : null;
+
+    if (incomingLegacySource) {
+        return incomingLegacySource;
+    }
+
+    const canonicalSource =
+        mergedMetadata.weeklySchedule &&
+        typeof mergedMetadata.weeklySchedule === 'object' &&
+        !Array.isArray(mergedMetadata.weeklySchedule)
+            ? mergedMetadata.weeklySchedule
+            : null;
+
+    if (canonicalSource) {
+        return canonicalSource;
+    }
+
+    return mergedMetadata.weeklyOpenHours &&
+        typeof mergedMetadata.weeklyOpenHours === 'object' &&
+        !Array.isArray(mergedMetadata.weeklyOpenHours)
+        ? mapWeeklyOpenHoursToWeeklySchedule(mergedMetadata.weeklyOpenHours)
+        : null;
+}
+
 function toMinutesFromHHmm(value) {
     const normalized = String(value || '').trim();
 
@@ -1346,17 +1447,7 @@ function toMinutesFromHHmm(value) {
 
 function extractVenueWeeklySchedule(metadata) {
     const normalizedMetadata = normalizeVenueMetadataObject(metadata);
-    const canonicalSource =
-        normalizedMetadata && typeof normalizedMetadata.weeklySchedule === 'object' && !Array.isArray(normalizedMetadata.weeklySchedule)
-            ? normalizedMetadata.weeklySchedule
-            : null;
-
-    const legacySource =
-        normalizedMetadata && typeof normalizedMetadata.weeklyOpenHours === 'object' && !Array.isArray(normalizedMetadata.weeklyOpenHours)
-            ? mapWeeklyOpenHoursToWeeklySchedule(normalizedMetadata.weeklyOpenHours)
-            : null;
-
-    const source = canonicalSource || legacySource;
+    const source = resolveWeeklyScheduleSource(normalizedMetadata);
 
     const fallbackStart = String(normalizedMetadata.startTime || '').trim();
     const fallbackEnd = String(normalizedMetadata.endTime || '').trim();
@@ -2207,11 +2298,14 @@ async function generateWardIdFromName(name) {
             storage: feedbackStorage,
             limits: { fileSize: 5 * 1024 * 1024 },
             fileFilter: (_req, file, cb) => {
-                const allowed = ['image/png', 'image/jpeg', 'application/pdf'];
-                if (allowed.includes(file.mimetype)) {
+                const mimeType = String(file.mimetype || '').toLowerCase();
+                const isImageFile = mimeType.startsWith('image/');
+                const isPdfFile = mimeType === 'application/pdf';
+
+                if (isImageFile || isPdfFile) {
                     cb(null, true);
                 } else {
-                    cb(new Error('Unsupported file type'));
+                    cb(new Error('Unsupported file type. Only image or PDF attachments are allowed.'));
                 }
             }
         });
@@ -3075,12 +3169,19 @@ async function generateWardIdFromName(name) {
                 }
 
                 const compactMetadataSelect = 'NULL::jsonb AS metadata';
-                const fullMetadataSelect = buildSanitizedMetadataSql('venues.metadata', 'metadata');
+                const fullMetadataSelect = isMineRequest
+                    ? 'venues.metadata AS metadata'
+                    : buildSanitizedMetadataSql('venues.metadata', 'metadata');
                 const metadataSelect = compactMode ? compactMetadataSelect : fullMetadataSelect;
+                const fullBusinessLicenseSelect = isMineRequest
+                    ? 'venues.business_license_image_url AS business_license_image_url'
+                    : buildSanitizedInlineAssetSql('venues.business_license_image_url', 'business_license_image_url');
                 const businessLicenseSelect = compactMode
                     ? 'NULL::text AS business_license_image_url'
-                    : buildSanitizedInlineAssetSql('venues.business_license_image_url', 'business_license_image_url');
-                const coverImageSelect = buildSanitizedInlineAssetSql('venues.cover_image_url', 'cover_image_url');
+                    : fullBusinessLicenseSelect;
+                const coverImageSelect = isMineRequest
+                    ? 'venues.cover_image_url AS cover_image_url'
+                    : buildSanitizedInlineAssetSql('venues.cover_image_url', 'cover_image_url');
                 const moderationColumnsSelect = compactMode
                     ? `
                     NULL::timestamptz AS submitted_at,
@@ -3153,8 +3254,7 @@ async function generateWardIdFromName(name) {
                     values
                 );
 
-                const sanitizedRows = result.rows.map(sanitizeVenueRecord);
-                const normalizedRows = sanitizedRows
+                const normalizedRows = (isMineRequest ? result.rows : result.rows.map(sanitizeVenueRecord))
                     .map((row) => normalizeVenueCoordinates(row))
                     .filter(
                         (row) =>
@@ -3903,7 +4003,7 @@ async function generateWardIdFromName(name) {
         }
 
         function createVenueReviewReply(req, res) {
-            uploadVenueReview.array('images', 6)(req, res, async (uploadErr) => {
+            uploadVenueReview.array('images', 3)(req, res, async (uploadErr) => {
                 if (uploadErr) {
                     return res.status(400).json({ message: uploadErr.message || 'Upload failed' });
                 }
@@ -4131,6 +4231,7 @@ async function generateWardIdFromName(name) {
             const venueId = normalizeNullableNumber(req.params.venueId);
             const reviewId = normalizeNullableNumber(req.params.reviewId);
             const userId = String(req.user?.id || '').trim();
+            const isAdmin = normalizeRole(req.authUser?.role) === 'admin';
 
             if (Number.isNaN(venueId) || venueId === null || Number.isNaN(reviewId) || reviewId === null) {
                 return res.status(400).json({ message: 'venueId/reviewId không hợp lệ.' });
@@ -4157,8 +4258,8 @@ async function generateWardIdFromName(name) {
 
                 const ownerId = String(reviewResult.rows[0].user_id || '').trim();
 
-                if (!ownerId || ownerId !== userId) {
-                    return res.status(403).json({ message: 'Bạn chỉ có thể xóa bình luận của chính mình.' });
+                if (!ownerId || (ownerId !== userId && !isAdmin)) {
+                    return res.status(403).json({ message: 'Bạn không có quyền xóa bình luận này.' });
                 }
 
                 await pool.query(
@@ -4172,6 +4273,73 @@ async function generateWardIdFromName(name) {
                 invalidateVenueCommunityBundleCacheByVenueId(venueId);
 
                 return res.json({ success: true, deletedReviewId: reviewId });
+            } catch (error) {
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
+        async function deleteVenueReviewReply(req, res) {
+            const venueId = normalizeNullableNumber(req.params.venueId);
+            const reviewId = normalizeNullableNumber(req.params.reviewId);
+            const replyId = normalizeNullableNumber(req.params.replyId);
+            const userId = String(req.user?.id || '').trim();
+            const isAdmin = normalizeRole(req.authUser?.role) === 'admin';
+
+            if (
+                Number.isNaN(venueId) || venueId === null
+                || Number.isNaN(reviewId) || reviewId === null
+                || Number.isNaN(replyId) || replyId === null
+            ) {
+                return res.status(400).json({ message: 'venueId/reviewId/replyId không hợp lệ.' });
+            }
+
+            if (!userId) {
+                return res.status(401).json({ message: 'Bạn cần đăng nhập để xóa bình luận nhỏ.' });
+            }
+
+            try {
+                const replyResult = await pool.query(
+                    `
+                        SELECT replies.id, replies.user_id, replies.image_urls
+                        FROM venue_review_replies AS replies
+                        INNER JOIN venue_public_reviews AS reviews ON reviews.id = replies.review_id
+                        WHERE replies.id = $1
+                          AND replies.review_id = $2
+                          AND reviews.venue_id = $3
+                        LIMIT 1
+                    `,
+                    [replyId, reviewId, venueId]
+                );
+
+                if (!replyResult.rows.length) {
+                    return res.status(404).json({ message: 'Không tìm thấy bình luận nhỏ.' });
+                }
+
+                const ownerId = String(replyResult.rows[0].user_id || '').trim();
+
+                if (!ownerId || (ownerId !== userId && !isAdmin)) {
+                    return res.status(403).json({ message: 'Bạn không có quyền xóa bình luận này.' });
+                }
+
+                await pool.query(
+                    `
+                        DELETE FROM venue_review_replies
+                        WHERE id = $1 AND review_id = $2
+                    `,
+                    [replyId, reviewId]
+                );
+
+                normalizeStringArray(replyResult.rows[0].image_urls).forEach((mediaUrl) => {
+                    safeDeleteUploadedFile(mediaUrl);
+                });
+
+                invalidateVenueCommunityBundleCacheByVenueId(venueId);
+
+                return res.json({
+                    success: true,
+                    deletedReviewId: reviewId,
+                    deletedReplyId: replyId
+                });
             } catch (error) {
                 return res.status(500).json({ message: error.message });
             }
@@ -4374,6 +4542,25 @@ async function generateWardIdFromName(name) {
                 const requesterId = req.authUser?.id ? String(req.authUser.id).trim() : '';
                 const venueOwnerId = venue.submitted_by_user_id ? String(venue.submitted_by_user_id).trim() : '';
                 const isOwner = Boolean(requesterId && venueOwnerId && requesterId === venueOwnerId);
+                let adminUserIds = new Set();
+
+                try {
+                    const adminUsersResult = await pool.query(
+                        `
+                            SELECT id::text AS id
+                            FROM users
+                            WHERE LOWER(COALESCE(role::text, '')) = 'admin'
+                        `
+                    );
+
+                    adminUserIds = new Set(
+                        adminUsersResult.rows
+                            .map((row) => String(row.id || '').trim())
+                            .filter(Boolean)
+                    );
+                } catch {
+                    adminUserIds = new Set();
+                }
 
                 if (!isAdmin && !isOwner && String(venue.status || '').toLowerCase() !== 'approved') {
                     return res.status(404).json({ message: 'Venue not found' });
@@ -4383,6 +4570,7 @@ async function generateWardIdFromName(name) {
                     `
                         SELECT
                             r.id,
+                            r.user_id,
                             r.rating,
                             r.title,
                             r.comment,
@@ -4441,6 +4629,7 @@ async function generateWardIdFromName(name) {
                             SELECT
                                 replies.id,
                                 replies.review_id,
+                                replies.user_id,
                                 replies.author_name,
                                 replies.rating,
                                 replies.title,
@@ -4475,9 +4664,16 @@ async function generateWardIdFromName(name) {
                             acc.set(parentReviewId, []);
                         }
 
+                        const normalizedReplyUserId = String(reply.user_id || '').trim();
+                        const isAdminReply = normalizedReplyUserId ? adminUserIds.has(normalizedReplyUserId) : false;
+                        const canDeleteReply = Boolean(
+                            currentUserId && (currentUserId === normalizedReplyUserId || isAdmin)
+                        );
+
                         acc.get(parentReviewId).push({
                             id: reply.id,
                             review_id: reply.review_id,
+                            user_id: reply.user_id,
                             author_name: String(reply.author_name || '').trim() || 'Anonymous',
                             rating: Number(reply.rating || 0),
                             title: reply.title || '',
@@ -4485,6 +4681,9 @@ async function generateWardIdFromName(name) {
                             image_urls: normalizeStringArray(reply.image_urls),
                             like_count: Number(reply.like_count || 0),
                             liked_by_me: Boolean(reply.liked_by_me),
+                            is_admin: isAdminReply,
+                            author_role: isAdminReply ? 'admin' : 'user',
+                            can_delete: canDeleteReply,
                             created_at: reply.created_at,
                             updated_at: reply.updated_at
                         });
@@ -4495,12 +4694,21 @@ async function generateWardIdFromName(name) {
 
                 const reviewItems = reviewResult.rows.map((review) => {
                     const normalizedReviewId = Number(review.id);
+                    const normalizedReviewUserId = String(review.user_id || '').trim();
+                    const isAdminReview = normalizedReviewUserId ? adminUserIds.has(normalizedReviewUserId) : false;
+                    const canDeleteReview = Boolean(
+                        currentUserId && (currentUserId === normalizedReviewUserId || isAdmin)
+                    );
+
                     return {
                         ...review,
                         image_urls: normalizeStringArray(review.image_urls),
                         like_count: Number(review.like_count || 0),
                         reply_count: Number(review.reply_count || 0),
                         liked_by_me: Boolean(review.liked_by_me),
+                        is_admin: isAdminReview,
+                        author_role: isAdminReview ? 'admin' : 'user',
+                        can_delete: canDeleteReview,
                         replies: repliesByReviewId.get(normalizedReviewId) || []
                     };
                 });
@@ -4661,6 +4869,7 @@ async function generateWardIdFromName(name) {
 
                 const metadataStartTime = String(normalizedMetadata.startTime || '').trim();
                 const metadataEndTime = String(normalizedMetadata.endTime || '').trim();
+                const incomingMetadata = normalizedMetadata;
                 const hasCanonicalWeeklySchedule =
                     normalizedMetadata.weeklySchedule &&
                     typeof normalizedMetadata.weeklySchedule === 'object' &&
@@ -4675,11 +4884,7 @@ async function generateWardIdFromName(name) {
                     metadataStartTime < metadataEndTime;
 
                 if (hasCanonicalWeeklySchedule || hasLegacyWeeklyOpenHours || hasGlobalTimeRange) {
-                    const weeklyScheduleCandidate = hasCanonicalWeeklySchedule
-                        ? normalizedMetadata.weeklySchedule
-                        : hasLegacyWeeklyOpenHours
-                          ? mapWeeklyOpenHoursToWeeklySchedule(normalizedMetadata.weeklyOpenHours)
-                          : null;
+                    const weeklyScheduleCandidate = resolveWeeklyScheduleSource(normalizedMetadata, incomingMetadata);
 
                     const normalizedScheduleResult = normalizeWeeklyScheduleInput(weeklyScheduleCandidate, {
                         fallbackStart: metadataStartTime,
@@ -4816,6 +5021,965 @@ async function generateWardIdFromName(name) {
             } catch (err) {
                 console.error('API error:', err);
                 res.status(500).json({ error: 'Server error' });
+            }
+        }
+
+        async function getMerchantVenueEditDraft(req, res) {
+            const venueId = Number(req.params.venueId);
+
+            if (!Number.isFinite(venueId)) {
+                return res.status(400).json({ message: 'Invalid venue id' });
+            }
+
+            try {
+                const currentUserId = await getAuthenticatedChatUserId(req);
+                const isAdmin = normalizeRole(req.authUser?.role) === 'admin';
+
+                if (!currentUserId && !isAdmin) {
+                    return res.status(401).json({ message: 'Missing authentication token' });
+                }
+
+                const venueHasOwnerUserColumn = await hasVenueOwnerUserColumn();
+                const resolvedOwnerUserSql = buildResolvedVenueOwnerUserSql('venues');
+                const ownerSelect = venueHasOwnerUserColumn
+                    ? `${resolvedOwnerUserSql} AS owner_user_id,`
+                    : `NULL::uuid AS owner_user_id,`;
+
+                const result = await pool.query(
+                    `
+                        SELECT
+                            venues.id,
+                            venues.name,
+                            venues.title,
+                            ${ownerSelect}
+                            venues.submitted_by_user_id,
+                            venues.address,
+                            venues.description,
+                            venues.phone,
+                            venues.latitude,
+                            venues.longitude,
+                            venues.ward_id,
+                            wards.name AS ward_name,
+                            venues.category_id,
+                            place_categories.name AS category_name,
+                            place_categories.slug AS category_slug,
+                            venues.cover_image_url,
+                            venues.business_license_image_url,
+                            venues.metadata,
+                            venues.average_rating,
+                            venues.total_reviews,
+                            venues.status::text AS status,
+                            venues.submitted_at,
+                            venues.approved_at,
+                            venues.rejected_at,
+                            venues.rejection_reason,
+                            venues.created_at,
+                            venues.updated_at
+                        FROM venues
+                        LEFT JOIN wards ON wards.ward_id = venues.ward_id
+                        LEFT JOIN place_categories ON place_categories.id = venues.category_id
+                        WHERE venues.id = $1
+                        LIMIT 1
+                    `,
+                    [venueId]
+                );
+
+                if (!result.rows.length) {
+                    return res.status(404).json({ message: 'Venue not found' });
+                }
+
+                const venue = result.rows[0];
+                const ownerCandidateIds = extractVenueOwnerCandidateIds(venue);
+                const isOwner = Boolean(currentUserId && ownerCandidateIds.includes(String(currentUserId || '').trim()));
+
+                if (!isAdmin && !isOwner) {
+                    return res.status(403).json({ message: 'You do not have permission to edit this venue' });
+                }
+
+                const galleryImagesFromTable = await loadVenueGalleryImageUrls(venue.id);
+                const resolvedReviewStats = await resolveVenueReviewStatsByVenueId(venue.id);
+                const normalizedVenue = normalizeVenueCoordinates(venue);
+                const enrichedVenue = {
+                    ...normalizedVenue,
+                    average_rating: Number(resolvedReviewStats?.averageRating ?? venue.average_rating ?? 0),
+                    total_reviews: Number(resolvedReviewStats?.totalReviews ?? venue.total_reviews ?? 0),
+                    averageRating: Number(resolvedReviewStats?.averageRating ?? venue.average_rating ?? 0),
+                    totalReviews: Number(resolvedReviewStats?.totalReviews ?? venue.total_reviews ?? 0),
+                    review_count: Number(resolvedReviewStats?.totalReviews ?? venue.total_reviews ?? 0),
+                    reviewCount: Number(resolvedReviewStats?.totalReviews ?? venue.total_reviews ?? 0),
+                    venue_images: extractVenueImageUrls(venue, galleryImagesFromTable)
+                };
+
+                let pendingUpdateRequest = null;
+
+                try {
+                    const updateRequestResult = await pool.query(
+                        `
+                            SELECT
+                                id,
+                                venue_id,
+                                submitted_by_user_id,
+                                old_snapshot,
+                                proposed_snapshot,
+                                status,
+                                rejection_reason,
+                                reviewed_by,
+                                submitted_at,
+                                reviewed_at,
+                                created_at,
+                                updated_at
+                            FROM venue_update_requests
+                            WHERE venue_id = $1
+                              AND status = 'pending'
+                            ORDER BY COALESCE(submitted_at, created_at) DESC, id DESC
+                            LIMIT 1
+                        `,
+                        [venueId]
+                    );
+
+                    if (updateRequestResult.rows.length) {
+                        pendingUpdateRequest = updateRequestResult.rows[0];
+                    }
+                } catch (updateRequestError) {
+                    if (!isUndefinedTableError(updateRequestError)) {
+                        throw updateRequestError;
+                    }
+                }
+
+                return res.json({
+                    venue: enrichedVenue,
+                    pendingUpdateRequest
+                });
+            } catch (error) {
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
+        async function submitMerchantVenueUpdateRequest(req, res) {
+            const venueId = Number(req.params.venueId);
+
+            if (!Number.isFinite(venueId)) {
+                return res.status(400).json({ message: 'Invalid venue id' });
+            }
+
+            try {
+                const currentUserId = await getAuthenticatedChatUserId(req);
+                const isAdmin = normalizeRole(req.authUser?.role) === 'admin';
+
+                if (!currentUserId && !isAdmin) {
+                    return res.status(401).json({ message: 'Missing authentication token' });
+                }
+
+                const venueHasOwnerUserColumn = await hasVenueOwnerUserColumn();
+                const resolvedOwnerUserSql = buildResolvedVenueOwnerUserSql('venues');
+                const ownerSelect = venueHasOwnerUserColumn
+                    ? `${resolvedOwnerUserSql} AS owner_user_id,`
+                    : `NULL::uuid AS owner_user_id,`;
+
+                const venueResult = await pool.query(
+                    `
+                        SELECT
+                            venues.id,
+                            venues.name,
+                            venues.title,
+                            ${ownerSelect}
+                            venues.submitted_by_user_id,
+                            venues.address,
+                            venues.description,
+                            venues.phone,
+                            venues.latitude,
+                            venues.longitude,
+                            venues.ward_id,
+                            venues.category_id,
+                            venues.cover_image_url,
+                            venues.business_license_image_url,
+                            venues.metadata,
+                            venues.status::text AS status
+                        FROM venues
+                        WHERE venues.id = $1
+                        LIMIT 1
+                    `,
+                    [venueId]
+                );
+
+                if (!venueResult.rows.length) {
+                    return res.status(404).json({ message: 'Venue not found' });
+                }
+
+                const venue = venueResult.rows[0];
+                const ownerCandidateIds = extractVenueOwnerCandidateIds(venue);
+                const isOwner = Boolean(currentUserId && ownerCandidateIds.includes(String(currentUserId || '').trim()));
+
+                if (!isAdmin && !isOwner) {
+                    return res.status(403).json({ message: 'You do not have permission to edit this venue' });
+                }
+
+                if (String(venue.status || '').toLowerCase() !== 'approved') {
+                    return res.status(400).json({ message: 'Only approved venues can submit update requests' });
+                }
+
+                const {
+                    name,
+                    title,
+                    address,
+                    categoryId,
+                    category_id,
+                    category,
+                    wardId,
+                    ward_id,
+                    latitude,
+                    longitude,
+                    description,
+                    phone,
+                    coverImageUrl,
+                    businessLicenseImageUrl,
+                    contactEmail,
+                    metadata
+                } = req.body || {};
+
+                const normalizedName = String(name || title || '').trim();
+                const normalizedAddress = String(address || '').trim();
+                const normalizedLatitude = Number(latitude);
+                const normalizedLongitude = Number(longitude);
+                const normalizedCategoryId = normalizeCategoryId(categoryId ?? category_id);
+                const normalizedCategoryName = String(category || '').trim();
+                const existingMetadata = normalizeVenueMetadataObject(venue.metadata);
+                const incomingMetadata = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+                    ? { ...metadata }
+                    : {};
+                const normalizedMetadata = {
+                    ...existingMetadata,
+                    ...incomingMetadata
+                };
+
+                if (!normalizedName) {
+                    return res.status(400).json({ message: 'Venue name is required' });
+                }
+
+                if (!normalizedAddress) {
+                    return res.status(400).json({ message: 'Address is required' });
+                }
+
+                if (!Number.isFinite(normalizedLatitude) || !Number.isFinite(normalizedLongitude)) {
+                    return res.status(400).json({ message: 'Latitude and longitude must be valid numbers' });
+                }
+
+                if (Number.isNaN(normalizedCategoryId)) {
+                    return res.status(400).json({ message: 'categoryId must be a positive integer' });
+                }
+
+                let resolvedCategoryId = normalizedCategoryId;
+
+                if (resolvedCategoryId === null && normalizedCategoryName) {
+                    const inferredSlug = slugifyText(normalizedCategoryName);
+                    const categoryLookup = await pool.query(
+                        `
+                            SELECT id
+                            FROM place_categories
+                            WHERE is_active = true
+                              AND (LOWER(name) = LOWER($1) OR slug = $2)
+                            LIMIT 1
+                        `,
+                        [normalizedCategoryName, inferredSlug]
+                    );
+
+                    resolvedCategoryId = categoryLookup.rows[0]?.id ?? null;
+                }
+
+                if (resolvedCategoryId !== null) {
+                    const categoryCheck = await pool.query(
+                        `
+                            SELECT id
+                            FROM place_categories
+                            WHERE id = $1
+                              AND is_active = true
+                            LIMIT 1
+                        `,
+                        [resolvedCategoryId]
+                    );
+
+                    if (!categoryCheck.rows.length) {
+                        return res.status(400).json({ message: 'Selected category is invalid or inactive' });
+                    }
+                }
+
+                const requestedServiceIds = normalizeServiceIds(normalizedMetadata.selectedServices);
+                if (requestedServiceIds.length) {
+                    const servicesResult = await pool.query(
+                        `
+                            SELECT id, name
+                            FROM merchant_services
+                            WHERE id = ANY($1::int[])
+                              AND is_active = true
+                        `,
+                        [requestedServiceIds]
+                    );
+
+                    if (servicesResult.rows.length !== requestedServiceIds.length) {
+                        return res.status(400).json({ message: 'Selected services are invalid or inactive' });
+                    }
+
+                    const serviceNameMap = new Map(
+                        servicesResult.rows.map((service) => [Number(service.id), service.name])
+                    );
+
+                    normalizedMetadata.selectedServices = requestedServiceIds;
+                    normalizedMetadata.selectedServiceNames = requestedServiceIds
+                        .map((serviceId) => serviceNameMap.get(serviceId))
+                        .filter(Boolean);
+                } else {
+                    normalizedMetadata.selectedServices = [];
+                    normalizedMetadata.selectedServiceNames = [];
+                }
+
+                const metadataStartTime = String(normalizedMetadata.startTime || '').trim();
+                const metadataEndTime = String(normalizedMetadata.endTime || '').trim();
+                const hasCanonicalWeeklySchedule =
+                    normalizedMetadata.weeklySchedule &&
+                    typeof normalizedMetadata.weeklySchedule === 'object' &&
+                    !Array.isArray(normalizedMetadata.weeklySchedule);
+                const hasLegacyWeeklyOpenHours =
+                    normalizedMetadata.weeklyOpenHours &&
+                    typeof normalizedMetadata.weeklyOpenHours === 'object' &&
+                    !Array.isArray(normalizedMetadata.weeklyOpenHours);
+                const hasGlobalTimeRange =
+                    /^\d{2}:\d{2}$/.test(metadataStartTime) &&
+                    /^\d{2}:\d{2}$/.test(metadataEndTime) &&
+                    metadataStartTime < metadataEndTime;
+
+                if (hasCanonicalWeeklySchedule || hasLegacyWeeklyOpenHours || hasGlobalTimeRange) {
+                    const weeklyScheduleCandidate = resolveWeeklyScheduleSource(normalizedMetadata, incomingMetadata);
+
+                    const normalizedScheduleResult = normalizeWeeklyScheduleInput(weeklyScheduleCandidate, {
+                        fallbackStart: metadataStartTime,
+                        fallbackEnd: metadataEndTime
+                    });
+
+                    if (normalizedScheduleResult.error) {
+                        return res.status(400).json({ message: normalizedScheduleResult.error });
+                    }
+
+                    normalizedMetadata.weeklySchedule = normalizedScheduleResult.value;
+                }
+
+                const normalizedContactEmail = normalizeNullableText(
+                    contactEmail ?? normalizedMetadata.contactEmail ?? req.authUser?.email
+                );
+
+                if (normalizedContactEmail && !isValidEmail(normalizedContactEmail)) {
+                    return res.status(400).json({ message: 'contactEmail is invalid' });
+                }
+
+                if (normalizedContactEmail) {
+                    normalizedMetadata.contactEmail = normalizedContactEmail;
+                }
+
+                const requestedWardId = normalizeNullableText(wardId ?? ward_id ?? normalizedMetadata.wardId);
+                const detectedWard = await detectWardByCoordinates(normalizedLatitude, normalizedLongitude);
+                const resolvedWardId = normalizeNullableText(detectedWard?.wardId || requestedWardId);
+
+                if (!resolvedWardId) {
+                    return res.status(400).json({ message: 'Selected location must be inside a valid ward boundary' });
+                }
+
+                if (requestedWardId && requestedWardId !== resolvedWardId) {
+                    return res.status(400).json({ message: 'Selected ward does not match chosen map location' });
+                }
+
+                const duplicateLocationResult = await pool.query(
+                    `
+                        SELECT id, status::text AS status
+                        FROM venues
+                        WHERE id <> $3
+                          AND COALESCE(status::text, '') IN ('pending', 'approved')
+                          AND ABS(latitude - $1) <= 0.00003
+                          AND ABS(longitude - $2) <= 0.00003
+                        ORDER BY COALESCE(submitted_at, created_at) DESC, id DESC
+                        LIMIT 1
+                    `,
+                    [normalizedLatitude, normalizedLongitude, venueId]
+                );
+
+                if (duplicateLocationResult.rows.length) {
+                    const existingStatus = String(duplicateLocationResult.rows[0].status || '').toLowerCase();
+                    return res.status(409).json({
+                        message:
+                            existingStatus === 'pending'
+                                ? 'A venue submission at this location is already waiting for admin review.'
+                                : 'A venue at this location has already been approved. Please pick a different location.'
+                    });
+                }
+
+                normalizedMetadata.category = normalizedCategoryName || normalizedMetadata.category || null;
+                normalizedMetadata.categoryId = resolvedCategoryId;
+                normalizedMetadata.wardId = resolvedWardId;
+                normalizedMetadata.wardName = String(detectedWard?.wardName || normalizedMetadata.wardName || '').trim() || null;
+
+                const proposedSnapshot = normalizeVenueUpdateSnapshot({
+                    name: normalizedName,
+                    title: String(title || '').trim() || normalizedName,
+                    address: normalizedAddress,
+                    description: normalizeNullableText(description),
+                    phone: normalizeNullableText(phone),
+                    latitude: normalizedLatitude,
+                    longitude: normalizedLongitude,
+                    wardId: resolvedWardId,
+                    categoryId: resolvedCategoryId,
+                    coverImageUrl,
+                    businessLicenseImageUrl,
+                    metadata: normalizedMetadata
+                });
+
+                const oldSnapshot = normalizeVenueUpdateSnapshot({
+                    name: venue.name,
+                    title: venue.title,
+                    address: venue.address,
+                    description: venue.description,
+                    phone: venue.phone,
+                    latitude: venue.latitude,
+                    longitude: venue.longitude,
+                    wardId: venue.ward_id,
+                    categoryId: venue.category_id,
+                    coverImageUrl: venue.cover_image_url,
+                    businessLicenseImageUrl: venue.business_license_image_url,
+                    metadata: existingMetadata
+                });
+
+                if (areJsonValuesEqual(oldSnapshot, proposedSnapshot)) {
+                    return res.status(400).json({ message: 'No changes detected. Please update at least one field.' });
+                }
+
+                const pendingRequestResult = await pool.query(
+                    `
+                        SELECT id
+                        FROM venue_update_requests
+                        WHERE venue_id = $1
+                          AND status = 'pending'
+                        ORDER BY COALESCE(submitted_at, created_at) DESC, id DESC
+                        LIMIT 1
+                    `,
+                    [venueId]
+                );
+
+                let requestRecord = null;
+
+                if (pendingRequestResult.rows.length) {
+                    const existingRequestId = Number(pendingRequestResult.rows[0].id);
+                    const updateResult = await pool.query(
+                        `
+                            UPDATE venue_update_requests
+                            SET
+                                submitted_by_user_id = $2,
+                                old_snapshot = $3::jsonb,
+                                proposed_snapshot = $4::jsonb,
+                                status = 'pending',
+                                rejection_reason = NULL,
+                                reviewed_by = NULL,
+                                reviewed_at = NULL,
+                                submitted_at = now(),
+                                updated_at = now()
+                            WHERE id = $1
+                            RETURNING *
+                        `,
+                        [existingRequestId, currentUserId, oldSnapshot, proposedSnapshot]
+                    );
+
+                    requestRecord = updateResult.rows[0] || null;
+                } else {
+                    const insertResult = await pool.query(
+                        `
+                            INSERT INTO venue_update_requests (
+                                venue_id,
+                                submitted_by_user_id,
+                                old_snapshot,
+                                proposed_snapshot,
+                                status,
+                                submitted_at,
+                                created_at,
+                                updated_at
+                            )
+                            VALUES (
+                                $1,
+                                $2,
+                                $3::jsonb,
+                                $4::jsonb,
+                                'pending',
+                                now(),
+                                now(),
+                                now()
+                            )
+                            RETURNING *
+                        `,
+                        [venueId, currentUserId, oldSnapshot, proposedSnapshot]
+                    );
+
+                    requestRecord = insertResult.rows[0] || null;
+                }
+
+                return res.json({
+                    message: 'Update request submitted successfully and is awaiting admin review.',
+                    updateRequest: requestRecord,
+                    proposedWardName: detectedWard?.wardName || null
+                });
+            } catch (error) {
+                if (isUndefinedTableError(error)) {
+                    return res.status(500).json({
+                        message: 'Venue update workflow is not initialized. Please run backend migrations.'
+                    });
+                }
+
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
+        async function deleteMerchantVenue(req, res) {
+            const venueId = Number(req.params.venueId);
+
+            if (!Number.isFinite(venueId)) {
+                return res.status(400).json({ message: 'Invalid venue id' });
+            }
+
+            try {
+                const currentUserId = await getAuthenticatedChatUserId(req);
+                const isAdmin = normalizeRole(req.authUser?.role) === 'admin';
+
+                if (!currentUserId && !isAdmin) {
+                    return res.status(401).json({ message: 'Missing authentication token' });
+                }
+
+                const venueHasOwnerUserColumn = await hasVenueOwnerUserColumn();
+                const resolvedOwnerUserSql = buildResolvedVenueOwnerUserSql('venues');
+                const ownerSelect = venueHasOwnerUserColumn
+                    ? `${resolvedOwnerUserSql} AS owner_user_id,`
+                    : `NULL::uuid AS owner_user_id,`;
+
+                const venueResult = await pool.query(
+                    `
+                        SELECT
+                            venues.id,
+                            venues.name,
+                            venues.title,
+                            ${ownerSelect}
+                            venues.submitted_by_user_id,
+                            venues.status::text AS status
+                        FROM venues
+                        WHERE venues.id = $1
+                        LIMIT 1
+                    `,
+                    [venueId]
+                );
+
+                if (!venueResult.rows.length) {
+                    return res.status(404).json({ message: 'Venue not found' });
+                }
+
+                const venue = venueResult.rows[0];
+                const ownerCandidateIds = extractVenueOwnerCandidateIds(venue);
+                const isOwner = Boolean(currentUserId && ownerCandidateIds.includes(String(currentUserId || '').trim()));
+
+                if (!isAdmin && !isOwner) {
+                    return res.status(403).json({ message: 'You do not have permission to delete this venue' });
+                }
+
+                const hiddenResult = await pool.query(
+                    `
+                        UPDATE venues
+                        SET
+                            status = 'hidden',
+                            updated_at = now()
+                        WHERE id = $1
+                        RETURNING id
+                    `,
+                    [venueId]
+                );
+
+                if (!hiddenResult.rows.length) {
+                    return res.status(404).json({ message: 'Venue not found' });
+                }
+
+                try {
+                    await pool.query(
+                        `
+                            UPDATE venue_update_requests
+                            SET
+                                status = CASE WHEN status = 'pending' THEN 'rejected' ELSE status END,
+                                rejection_reason = CASE
+                                    WHEN status = 'pending' THEN COALESCE(rejection_reason, 'Deleted by merchant')
+                                    ELSE rejection_reason
+                                END,
+                                reviewed_by = CASE
+                                    WHEN status = 'pending' THEN COALESCE($2, 'merchant')
+                                    ELSE reviewed_by
+                                END,
+                                reviewed_at = CASE
+                                    WHEN status = 'pending' THEN now()
+                                    ELSE reviewed_at
+                                END,
+                                updated_at = now()
+                            WHERE venue_id = $1
+                        `,
+                        [venueId, currentUserId]
+                    );
+                } catch (updateRequestError) {
+                    if (!isUndefinedTableError(updateRequestError)) {
+                        throw updateRequestError;
+                    }
+                }
+
+                invalidateVenueCommunityBundleCacheByVenueId(venueId);
+                publicCompactApprovedVenuesCache = { timestamp: 0, data: null };
+                publicVenueDetailCache.delete(`public:${venueId}`);
+                publicVenueDetailCache.delete(`admin:${venueId}`);
+                publicVenueForDetailCache.delete(`public:${venueId}`);
+                publicVenueForDetailCache.delete(`admin:${venueId}`);
+
+                return res.json({
+                    message: 'Venue deleted successfully',
+                    deletedVenueId: venueId
+                });
+            } catch (error) {
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
+        async function listAdminVenueUpdateRequests(req, res) {
+            try {
+                const normalizedStatuses = normalizeVenueUpdateRequestStatusList(req.query.status);
+                const statusFilter = normalizedStatuses.length ? normalizedStatuses : ['pending'];
+
+                const result = await pool.query(
+                    `
+                        SELECT
+                            requests.id,
+                            requests.venue_id,
+                            requests.submitted_by_user_id,
+                            requests.old_snapshot,
+                            requests.proposed_snapshot,
+                            requests.status,
+                            requests.rejection_reason,
+                            requests.reviewed_by,
+                            requests.submitted_at,
+                            requests.reviewed_at,
+                            requests.created_at,
+                            requests.updated_at,
+                            submitted_users.email AS submitted_by_email,
+                            COALESCE(submitted_users.fullname, submitted_users.username) AS submitted_by_full_name,
+                            venues.name AS venue_name,
+                            venues.title AS venue_title,
+                            venues.address AS venue_address,
+                            venues.latitude AS venue_latitude,
+                            venues.longitude AS venue_longitude,
+                            venues.ward_id AS venue_ward_id,
+                            wards.name AS venue_ward_name,
+                            venues.category_id AS venue_category_id,
+                            place_categories.name AS venue_category_name,
+                            venues.status::text AS venue_status
+                        FROM venue_update_requests AS requests
+                        LEFT JOIN users AS submitted_users ON submitted_users.id::text = requests.submitted_by_user_id
+                        LEFT JOIN venues ON venues.id = requests.venue_id
+                        LEFT JOIN wards ON wards.ward_id = venues.ward_id
+                        LEFT JOIN place_categories ON place_categories.id = venues.category_id
+                        WHERE requests.status = ANY($1::text[])
+                        ORDER BY COALESCE(requests.submitted_at, requests.created_at) DESC, requests.id DESC
+                    `,
+                    [statusFilter]
+                );
+
+                return res.json(result.rows);
+            } catch (error) {
+                if (isUndefinedTableError(error)) {
+                    return res.json([]);
+                }
+
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
+        async function listMerchantVenueUpdateRequests(req, res) {
+            try {
+                const currentUserId = await getAuthenticatedChatUserId(req);
+
+                if (!currentUserId) {
+                    return res.status(401).json({ message: 'Missing authentication token' });
+                }
+
+                const normalizedStatuses = normalizeVenueUpdateRequestStatusList(req.query.status);
+                const statusFilter = normalizedStatuses.length ? normalizedStatuses : ['rejected'];
+
+                const result = await pool.query(
+                    `
+                        SELECT
+                            requests.id,
+                            requests.venue_id,
+                            requests.submitted_by_user_id,
+                            requests.old_snapshot,
+                            requests.proposed_snapshot,
+                            requests.status,
+                            requests.rejection_reason,
+                            requests.reviewed_by,
+                            requests.submitted_at,
+                            requests.reviewed_at,
+                            requests.created_at,
+                            requests.updated_at,
+                            venues.name AS venue_name,
+                            venues.title AS venue_title,
+                            venues.cover_image_url AS venue_cover_image_url,
+                            venues.status::text AS venue_status
+                        FROM venue_update_requests AS requests
+                        LEFT JOIN venues ON venues.id = requests.venue_id
+                        WHERE requests.submitted_by_user_id = $1
+                          AND requests.status = ANY($2::text[])
+                        ORDER BY COALESCE(requests.submitted_at, requests.created_at) DESC, requests.id DESC
+                    `,
+                    [String(currentUserId), statusFilter]
+                );
+
+                return res.json(result.rows);
+            } catch (error) {
+                if (isUndefinedTableError(error)) {
+                    return res.json([]);
+                }
+
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
+        async function moderateVenueUpdateRequest(req, res) {
+            const requestId = Number(req.params.requestId);
+            const action = String(req.body.action || '').trim().toLowerCase();
+
+            if (!Number.isFinite(requestId)) {
+                return res.status(400).json({ message: 'Invalid update request id' });
+            }
+
+            if (!['approve', 'reject'].includes(action)) {
+                return res.status(400).json({ message: 'action must be approve or reject' });
+            }
+
+            const reviewer = req.authUser?.email || req.authUser?.id || 'admin';
+            const normalizedRejectionReason = normalizeNullableText(req.body.rejectionReason);
+
+            if (action === 'reject' && !normalizedRejectionReason) {
+                return res.status(400).json({
+                    message: 'Rejection reason is required when rejecting an update request'
+                });
+            }
+
+            let client = null;
+
+            try {
+                client = await pool.connect();
+                await client.query('BEGIN');
+
+                const requestResult = await client.query(
+                    `
+                        SELECT *
+                        FROM venue_update_requests
+                        WHERE id = $1
+                        LIMIT 1
+                    `,
+                    [requestId]
+                );
+
+                if (!requestResult.rows.length) {
+                    await client.query('ROLLBACK');
+                    return res.status(404).json({ message: 'Venue update request not found' });
+                }
+
+                const updateRequest = requestResult.rows[0];
+                if (String(updateRequest.status || '').toLowerCase() !== 'pending') {
+                    await client.query('ROLLBACK');
+                    return res.status(409).json({ message: 'This update request has already been reviewed' });
+                }
+
+                if (action === 'reject') {
+                    const rejectResult = await client.query(
+                        `
+                            UPDATE venue_update_requests
+                            SET
+                                status = 'rejected',
+                                rejection_reason = $3,
+                                reviewed_by = $2,
+                                reviewed_at = now(),
+                                updated_at = now()
+                            WHERE id = $1
+                            RETURNING *
+                        `,
+                        [requestId, reviewer, normalizedRejectionReason]
+                    );
+
+                    await client.query('COMMIT');
+
+                    return res.json({
+                        message: 'Venue update request rejected successfully',
+                        updateRequest: rejectResult.rows[0]
+                    });
+                }
+
+                const proposedSnapshot = normalizeVenueUpdateSnapshot(updateRequest.proposed_snapshot);
+                const targetVenueId = Number(updateRequest.venue_id);
+
+                if (!Number.isFinite(targetVenueId)) {
+                    await client.query('ROLLBACK');
+                    return res.status(400).json({ message: 'Invalid venue reference in update request' });
+                }
+
+                if (!Number.isFinite(proposedSnapshot.latitude) || !Number.isFinite(proposedSnapshot.longitude)) {
+                    await client.query('ROLLBACK');
+                    return res.status(400).json({ message: 'Proposed location is invalid' });
+                }
+
+                const duplicateLocationResult = await client.query(
+                    `
+                        SELECT id, status::text AS status
+                        FROM venues
+                        WHERE id <> $3
+                          AND COALESCE(status::text, '') IN ('pending', 'approved')
+                          AND ABS(latitude - $1) <= 0.00003
+                          AND ABS(longitude - $2) <= 0.00003
+                        ORDER BY COALESCE(submitted_at, created_at) DESC, id DESC
+                        LIMIT 1
+                    `,
+                    [proposedSnapshot.latitude, proposedSnapshot.longitude, targetVenueId]
+                );
+
+                if (duplicateLocationResult.rows.length) {
+                    await client.query('ROLLBACK');
+                    return res.status(409).json({
+                        message: 'Cannot approve because another venue already uses this location'
+                    });
+                }
+
+                const venueUpdateResult = await client.query(
+                    `
+                        UPDATE venues
+                        SET
+                            name = $2,
+                            title = $3,
+                            address = $4,
+                            description = $5,
+                            phone = $6,
+                            latitude = $7,
+                            longitude = $8,
+                            ward_id = $9,
+                            category_id = $10,
+                            cover_image_url = $11,
+                            business_license_image_url = $12,
+                            metadata = $13::jsonb,
+                            status = 'approved',
+                            approved_at = now(),
+                            rejected_at = NULL,
+                            rejection_reason = NULL,
+                            updated_at = now()
+                        WHERE id = $1
+                        RETURNING id
+                    `,
+                    [
+                        targetVenueId,
+                        proposedSnapshot.name,
+                        proposedSnapshot.title || proposedSnapshot.name,
+                        proposedSnapshot.address,
+                        proposedSnapshot.description,
+                        proposedSnapshot.phone,
+                        proposedSnapshot.latitude,
+                        proposedSnapshot.longitude,
+                        proposedSnapshot.wardId,
+                        Number.isNaN(proposedSnapshot.categoryId) ? null : proposedSnapshot.categoryId,
+                        proposedSnapshot.coverImageUrl,
+                        proposedSnapshot.businessLicenseImageUrl,
+                        proposedSnapshot.metadata,
+                    ]
+                );
+
+                if (!venueUpdateResult.rows.length) {
+                    await client.query('ROLLBACK');
+                    return res.status(404).json({ message: 'Venue not found for this update request' });
+                }
+
+                const requestUpdateResult = await client.query(
+                    `
+                        UPDATE venue_update_requests
+                        SET
+                            status = 'approved',
+                            rejection_reason = NULL,
+                            reviewed_by = $2,
+                            reviewed_at = now(),
+                            updated_at = now()
+                        WHERE id = $1
+                        RETURNING *
+                    `,
+                    [requestId, reviewer]
+                );
+
+                await client.query('COMMIT');
+
+                const details = await pool.query(
+                    `
+                        SELECT
+                            venues.id,
+                            venues.name,
+                            venues.title,
+                            venues.address,
+                            venues.description,
+                            venues.phone,
+                            venues.latitude,
+                            venues.longitude,
+                            venues.ward_id,
+                            wards.name AS ward_name,
+                            venues.category_id,
+                            place_categories.name AS category_name,
+                            place_categories.slug AS category_slug,
+                            venues.cover_image_url,
+                            venues.business_license_image_url,
+                            venues.metadata,
+                            venues.status::text AS status,
+                            venues.submitted_at,
+                            venues.approved_at,
+                            venues.rejected_at,
+                            venues.rejection_reason,
+                            venues.created_at,
+                            venues.updated_at
+                        FROM venues
+                        LEFT JOIN wards ON wards.ward_id = venues.ward_id
+                        LEFT JOIN place_categories ON place_categories.id = venues.category_id
+                        WHERE venues.id = $1
+                        LIMIT 1
+                    `,
+                    [targetVenueId]
+                );
+
+                invalidateVenueCommunityBundleCacheByVenueId(targetVenueId);
+                publicCompactApprovedVenuesCache = { timestamp: 0, data: null };
+                publicVenueDetailCache.delete(`public:${targetVenueId}`);
+                publicVenueDetailCache.delete(`admin:${targetVenueId}`);
+                publicVenueForDetailCache.delete(`public:${targetVenueId}`);
+                publicVenueForDetailCache.delete(`admin:${targetVenueId}`);
+
+                return res.json({
+                    message: 'Venue update approved successfully',
+                    venue: details.rows[0] || null,
+                    updateRequest: requestUpdateResult.rows[0] || null
+                });
+            } catch (error) {
+                if (client) {
+                    try {
+                        await client.query('ROLLBACK');
+                    } catch (_rollbackError) {
+                        // Ignore rollback errors.
+                    }
+                }
+
+                if (isUndefinedTableError(error)) {
+                    return res.status(500).json({
+                        message: 'Venue update workflow is not initialized. Please run backend migrations.'
+                    });
+                }
+
+                return res.status(500).json({ message: error.message });
+            } finally {
+                if (client) {
+                    client.release();
+                }
             }
         }
 
@@ -5560,6 +6724,19 @@ async function generateWardIdFromName(name) {
                     ? 'NULL::text AS business_license_image_url'
                     : venueColumnOrNull('business_license_image_url');
                 const metadataColumn = summaryMode ? 'NULL::jsonb AS metadata' : venueColumnOrNull('metadata');
+                const canJoinSubmitterUsers = hasVenueColumn('submitted_by_user_id');
+                const submitterEmailColumn = canJoinSubmitterUsers
+                    ? 'submitter_users.email AS submitter_email'
+                    : 'NULL AS submitter_email';
+                const submitterFullNameColumn = canJoinSubmitterUsers
+                    ? 'COALESCE(submitter_users.fullname, submitter_users.username) AS submitter_full_name'
+                    : 'NULL AS submitter_full_name';
+                const averageRatingColumn = hasVenueColumn('average_rating')
+                    ? 'venues.average_rating'
+                    : '0::numeric AS average_rating';
+                const totalReviewsColumn = hasVenueColumn('total_reviews')
+                    ? 'venues.total_reviews'
+                    : '0::bigint AS total_reviews';
 
                 const orderSubmittedAt = hasVenueColumn('submitted_at') ? 'venues.submitted_at' : 'NULL';
                 const orderCreatedAt = hasVenueColumn('created_at') ? 'venues.created_at' : 'NULL';
@@ -5582,8 +6759,13 @@ async function generateWardIdFromName(name) {
                     ${categoryNameColumn},
                     ${categorySlugColumn},
                     ${venueColumnOrNull('cover_image_url')},
+                    ${averageRatingColumn},
+                    ${totalReviewsColumn},
                     ${businessLicenseColumn},
                     ${metadataColumn},
+                    ${venueColumnOrNull('submitted_by_user_id')},
+                    ${submitterEmailColumn},
+                    ${submitterFullNameColumn},
                     ${statusColumn},
                     ${venueColumnOrNull('submitted_at')},
                     ${venueColumnOrNull('approved_at')},
@@ -5594,6 +6776,7 @@ async function generateWardIdFromName(name) {
                 FROM venues
                 ${canJoinWards ? 'LEFT JOIN wards ON wards.ward_id = venues.ward_id' : ''}
                 ${canJoinPlaceCategories ? 'LEFT JOIN place_categories ON place_categories.id = venues.category_id' : ''}
+                ${canJoinSubmitterUsers ? 'LEFT JOIN users AS submitter_users ON submitter_users.id::text = venues.submitted_by_user_id' : ''}
                 ${whereClause}
                 ORDER BY COALESCE(${orderSubmittedAt}, ${orderCreatedAt}) DESC, ${orderId} DESC
             `,
@@ -5642,23 +6825,142 @@ async function generateWardIdFromName(name) {
                     `
                         SELECT
                             r.id,
-                            r.rating,
+                            r.venue_id,
+                            r.user_id,
+                            r.author_name,
+                            r.title,
                             r.comment,
-                            r.author_profile_id,
+                            r.rating,
+                            r.image_urls,
                             r.created_at,
                             r.updated_at,
-                            COALESCE(p.full_name, p.display_name, p.username, 'Anonymous') AS author_name
-                        FROM reviews AS r
-                        LEFT JOIN profiles AS p ON p.id = r.author_profile_id
+                            COALESCE(reply_stats.reply_count, 0)::int AS reply_count
+                        FROM venue_public_reviews AS r
+                        LEFT JOIN (
+                            SELECT review_id, COUNT(*)::int AS reply_count
+                            FROM venue_review_replies
+                            GROUP BY review_id
+                        ) AS reply_stats ON reply_stats.review_id = r.id
                         WHERE r.venue_id = $1
                         ORDER BY ${sortClause}
                     `,
                     [venueId]
                 );
 
+                const statsResult = await pool.query(
+                    `
+                        SELECT
+                            COALESCE(AVG(rating)::numeric(10,2), 0) AS average_rating,
+                            COUNT(*)::int AS total_reviews
+                        FROM venue_public_reviews
+                        WHERE venue_id = $1
+                    `,
+                    [venueId]
+                );
+
+                const reviewIds = reviewResult.rows
+                    .map((review) => Number(review.id))
+                    .filter((reviewId) => Number.isInteger(reviewId));
+
+                let adminUserIds = new Set();
+
+                try {
+                    const adminUsersResult = await pool.query(
+                        `
+                            SELECT id::text AS id
+                            FROM users
+                            WHERE LOWER(COALESCE(role::text, '')) = 'admin'
+                        `
+                    );
+
+                    adminUserIds = new Set(
+                        adminUsersResult.rows
+                            .map((row) => String(row.id || '').trim())
+                            .filter(Boolean)
+                    );
+                } catch {
+                    adminUserIds = new Set();
+                }
+
+                let repliesByReviewId = new Map();
+
+                if (reviewIds.length) {
+                    const repliesResult = await pool.query(
+                        `
+                            SELECT
+                                replies.id,
+                                replies.review_id,
+                                replies.user_id,
+                                replies.author_name,
+                                replies.rating,
+                                replies.title,
+                                replies.content,
+                                replies.image_urls,
+                                replies.created_at,
+                                replies.updated_at
+                            FROM venue_review_replies AS replies
+                            WHERE replies.review_id = ANY($1::bigint[])
+                            ORDER BY replies.created_at ASC, replies.id ASC
+                        `,
+                        [reviewIds]
+                    );
+
+                    repliesByReviewId = repliesResult.rows.reduce((acc, reply) => {
+                        const parentReviewId = Number(reply.review_id);
+
+                        if (!acc.has(parentReviewId)) {
+                            acc.set(parentReviewId, []);
+                        }
+
+                        const normalizedReplyUserId = String(reply.user_id || '').trim();
+                        const isAdminReply = normalizedReplyUserId
+                            ? adminUserIds.has(normalizedReplyUserId)
+                            : false;
+
+                        acc.get(parentReviewId).push({
+                            id: reply.id,
+                            review_id: reply.review_id,
+                            user_id: reply.user_id,
+                            author_name: String(reply.author_name || '').trim() || 'Anonymous',
+                            rating: Number(reply.rating || 0),
+                            title: reply.title || '',
+                            content: reply.content || '',
+                            image_urls: normalizeStringArray(reply.image_urls),
+                            is_admin: isAdminReply,
+                            author_role: isAdminReply ? 'admin' : 'user',
+                            created_at: reply.created_at,
+                            updated_at: reply.updated_at
+                        });
+
+                        return acc;
+                    }, new Map());
+                }
+
+                const reviewItems = reviewResult.rows.map((review) => {
+                    const normalizedReviewId = Number(review.id);
+                    const normalizedReviewUserId = String(review.user_id || '').trim();
+                    const isAdminReviewAuthor = normalizedReviewUserId
+                        ? adminUserIds.has(normalizedReviewUserId)
+                        : false;
+
+                    return {
+                        ...review,
+                        rating: Number(review.rating || 0),
+                        image_urls: normalizeStringArray(review.image_urls),
+                        reply_count: Number(review.reply_count || 0),
+                        is_admin: isAdminReviewAuthor,
+                        author_role: isAdminReviewAuthor ? 'admin' : 'user',
+                        replies: repliesByReviewId.get(normalizedReviewId) || []
+                    };
+                });
+
                 return res.json({
-                    items: reviewResult.rows,
-                    total: reviewResult.rows.length,
+                    items: reviewItems,
+                    total: reviewItems.length,
+                    stats: {
+                        averageRating: Number(statsResult.rows[0]?.average_rating || 0),
+                        totalReviews: Number(statsResult.rows[0]?.total_reviews || 0)
+                    },
                     sort
                 });
             } catch (error) {
@@ -5666,6 +6968,10 @@ async function generateWardIdFromName(name) {
                     return res.json({
                         items: [],
                         total: 0,
+                        stats: {
+                            averageRating: 0,
+                            totalReviews: 0
+                        },
                         sort
                     });
                 }
@@ -5699,6 +7005,8 @@ async function generateWardIdFromName(name) {
                             place_categories.name AS category_name,
                             place_categories.slug AS category_slug,
                             venues.cover_image_url,
+                            venues.average_rating,
+                            venues.total_reviews,
                             venues.business_license_image_url,
                             venues.metadata,
                             venues.status::text AS status,
@@ -5930,6 +7238,13 @@ async function generateWardIdFromName(name) {
             try {
                 if (action === 'reject') {
                     const normalizedRejectionReason = normalizeNullableText(req.body.rejectionReason);
+
+                    if (!normalizedRejectionReason) {
+                        return res.status(400).json({
+                            message: 'Rejection reason is required when rejecting a post'
+                        });
+                    }
+
                     const result = await pool.query(
                         `
                           UPDATE venues
@@ -6388,7 +7703,7 @@ async function generateWardIdFromName(name) {
                 const metadataDerivedCategory =
                     metadataContextTypeRaw === 'venue'
                         ? 'venue_report'
-                        : metadataContextTypeRaw === 'review'
+                        : ['review', 'review_reply', 'reply'].includes(metadataContextTypeRaw)
                             ? 'review_report'
                             : '';
                 if (metadataObject && typeof metadataObject === 'object' && !Array.isArray(metadataObject)) {
@@ -6816,7 +8131,7 @@ async function generateWardIdFromName(name) {
                     const feedback = feedbackResult.rows[0];
                     const primaryContactEmail = normalizeNullableText(feedback.contact_email);
                     const reporterEmail = normalizeNullableText(feedback.reporter_email);
-                    const recipientEmail = [reporterEmail, primaryContactEmail].find((candidate) =>
+                    const recipientEmail = [primaryContactEmail, reporterEmail].find((candidate) =>
                         isValidEmail(candidate)
                     );
 
@@ -7911,6 +9226,7 @@ async function generateWardIdFromName(name) {
         registerVersionedRoute('get', '/merchant-services', listPublicMerchantServices);
         registerVersionedRoute('get', '/feedback/types', listPublicFeedbackTypes);
         registerVersionedRoute('get', '/venues', authenticateOptional, listPublicVenues);
+        registerVersionedRoute('get', '/venues/update-requests', authenticateRequest, checkUserStatus, listMerchantVenueUpdateRequests);
         registerVersionedRoute('get', '/venues/:venueId', authenticateOptional, getVenueDetails);
     registerVersionedRoute('get', '/venues/:venueId/reviews', authenticateOptional, listPublicVenueReviews);
         registerVersionedRoute('get', '/venues/:venueId', getVenueDetails);
@@ -7923,7 +9239,11 @@ async function generateWardIdFromName(name) {
         registerVersionedRoute('post', '/venues/:venueId/reviews/:reviewId/like', authenticateOptional, requireAuth, toggleVenueReviewLike);
         registerVersionedRoute('post', '/venues/:venueId/reviews/:reviewId/replies', authenticateOptional, requireAuth, createVenueReviewReply);
     registerVersionedRoute('post', '/venues/:venueId/reviews/:reviewId/replies/:replyId/like', authenticateOptional, requireAuth, toggleVenueReviewReplyLike);
+        registerVersionedRoute('delete', '/venues/:venueId/reviews/:reviewId/replies/:replyId', authenticateOptional, requireAuth, deleteVenueReviewReply);
         registerVersionedRoute('delete', '/venues/:venueId/reviews/:reviewId', authenticateOptional, requireAuth, deleteVenueReview);
+        registerVersionedRoute('get', '/venues/:venueId/edit-draft', authenticateRequest, checkUserStatus, getMerchantVenueEditDraft);
+        registerVersionedRoute('post', '/venues/:venueId/update-request', authenticateRequest, checkUserStatus, submitMerchantVenueUpdateRequest);
+        registerVersionedRoute('delete', '/venues/:venueId', authenticateRequest, checkUserStatus, deleteMerchantVenue);
         registerVersionedRoute('post', '/venues', authenticateOptionalLenient, createVenueSubmission);
         registerVersionedRoute('post', '/feedback', authenticateOptional, submitFeedbackReport);
 
@@ -7939,6 +9259,9 @@ async function generateWardIdFromName(name) {
         registerVersionedRoute('patch', '/admin/merchant-services/:serviceId', authenticateRequest, requireAdminRole, updateAdminMerchantService);
         registerVersionedRoute('delete', '/admin/merchant-services/:serviceId', authenticateRequest, requireAdminRole, deleteAdminMerchantService);
         registerVersionedRoute('get', '/admin/venues', authenticateRequest, requireAdminRole, listAdminVenues);
+        registerVersionedRoute('get', '/admin/venues/:venueId/reviews', authenticateRequest, requireAdminRole, listAdminVenueReviews);
+        registerVersionedRoute('get', '/admin/venues/update-requests', authenticateRequest, requireAdminRole, listAdminVenueUpdateRequests);
+        registerVersionedRoute('patch', '/admin/venues/update-requests/:requestId/moderation', authenticateRequest, requireAdminRole, moderateVenueUpdateRequest);
         registerVersionedRoute('get', '/admin/venues/:venueId', authenticateRequest, requireAdminRole, getAdminVenueDetail);
         registerVersionedRoute('patch', '/admin/venues/:venueId/moderation', authenticateRequest, requireAdminRole, moderateVenueSubmission);
         registerVersionedRoute('get', '/admin/feedback/types', authenticateRequest, requireAdminRole, listAdminFeedbackTypes);

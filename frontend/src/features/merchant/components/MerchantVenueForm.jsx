@@ -3,7 +3,7 @@ import ImageUploader from './ImageUploader';
 import ServiceSelector from './ServiceSelector';
 import BusinessLicenseUploader from './BusinessLicenseUploader';
 import LocationPickerModal from '../../../shared/components/modals/LocationPickerModal';
-import { createVenueRequest } from '../../../services/api/venuesApi';
+import { createVenueRequest, fetchVenueEditDraft, submitVenueUpdateRequest } from '../../../services/api/venuesApi';
 import { fetchPlaceCategories } from '../../../services/api/placeCategoriesApi';
 import { fetchMerchantServices } from '../../../services/api/merchantServicesApi';
 import { fetchWards } from '../../../services/api/wardsApi';
@@ -38,7 +38,210 @@ function buildDefaultWeeklyOverrideMap() {
   }, {});
 }
 
-function MerchantVenueForm() {
+function resolveApiOrigin() {
+  const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api/v1';
+
+  try {
+    return new URL(configuredBaseUrl).origin;
+  } catch {
+    return 'http://localhost:5000';
+  }
+}
+
+function resolveAssetUrl(rawUrl) {
+  const normalizedUrl = String(rawUrl || '').trim();
+
+  if (!normalizedUrl || normalizedUrl.toLowerCase() === 'nan' || normalizedUrl.toLowerCase() === 'null') {
+    return '';
+  }
+
+  if (/^(data:|blob:|https?:\/\/)/i.test(normalizedUrl)) {
+    return normalizedUrl;
+  }
+
+  const apiOrigin = resolveApiOrigin();
+  if (normalizedUrl.startsWith('/')) {
+    return `${apiOrigin}${normalizedUrl}`;
+  }
+
+  return `${apiOrigin}/${normalizedUrl}`;
+}
+
+function normalizeVenueMetadata(metadata) {
+  if (metadata && typeof metadata === 'object' && !Array.isArray(metadata)) {
+    return metadata;
+  }
+
+  if (typeof metadata === 'string') {
+    try {
+      const parsed = JSON.parse(metadata);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch {
+      return {};
+    }
+  }
+
+  return {};
+}
+
+function normalizeServiceSelections(selectedServices) {
+  if (!Array.isArray(selectedServices)) {
+    return [];
+  }
+
+  return [...new Set(selectedServices
+    .map((serviceId) => Number(serviceId))
+    .filter((serviceId) => Number.isInteger(serviceId) && serviceId > 0))];
+}
+
+function normalizeWeeklyDaySchedule(rawDaySchedule, fallbackStart, fallbackEnd) {
+  const source = rawDaySchedule && typeof rawDaySchedule === 'object' ? rawDaySchedule : {};
+  const isClosed = Boolean(source.isClosed ?? source.closed ?? source.is_off);
+  const openTimeCandidate = String(source.openTime ?? source.open ?? source.start ?? '').trim();
+  const closeTimeCandidate = String(source.closeTime ?? source.close ?? source.end ?? '').trim();
+  const hasOpenTime = /^\d{2}:\d{2}$/.test(openTimeCandidate);
+  const hasCloseTime = /^\d{2}:\d{2}$/.test(closeTimeCandidate);
+
+  if (isClosed) {
+    return {
+      isClosed: true,
+      openTime: '',
+      closeTime: ''
+    };
+  }
+
+  return {
+    isClosed: false,
+    openTime: hasOpenTime ? openTimeCandidate : fallbackStart,
+    closeTime: hasCloseTime ? closeTimeCandidate : fallbackEnd
+  };
+}
+
+function normalizeWeeklyOpenHours(metadata) {
+  const sourceMetadata = normalizeVenueMetadata(metadata);
+  const fallbackStart = /^\d{2}:\d{2}$/.test(String(sourceMetadata.startTime || '').trim())
+    ? String(sourceMetadata.startTime || '').trim()
+    : '';
+  const fallbackEnd = /^\d{2}:\d{2}$/.test(String(sourceMetadata.endTime || '').trim())
+    ? String(sourceMetadata.endTime || '').trim()
+    : '';
+  const sourceWeekly = sourceMetadata.weeklyOpenHours && typeof sourceMetadata.weeklyOpenHours === 'object'
+    ? sourceMetadata.weeklyOpenHours
+    : sourceMetadata.weeklySchedule && typeof sourceMetadata.weeklySchedule === 'object'
+      ? sourceMetadata.weeklySchedule
+      : {};
+
+  return WEEK_DAYS.reduce((accumulator, day) => {
+    accumulator[day.key] = normalizeWeeklyDaySchedule(sourceWeekly?.[day.key], fallbackStart, fallbackEnd);
+    return accumulator;
+  }, {});
+}
+
+function resolveExistingGalleryImageUrls(venue, metadata) {
+  const metadataObject = normalizeVenueMetadata(metadata);
+  const candidates = [];
+
+  if (Array.isArray(venue?.venue_images)) {
+    candidates.push(...venue.venue_images);
+  }
+
+  if (Array.isArray(metadataObject.galleryImages)) {
+    candidates.push(...metadataObject.galleryImages);
+  }
+
+  if (Array.isArray(metadataObject.images)) {
+    candidates.push(...metadataObject.images);
+  }
+
+  if (venue?.cover_image_url) {
+    candidates.unshift(venue.cover_image_url);
+  }
+
+  return [...new Set(candidates
+    .map((item) => String(item || '').trim())
+    .filter(Boolean))];
+}
+
+function derivePrimaryTimeRangeFromWeeklyHours(weeklyOpenHours) {
+  for (const day of WEEK_DAYS) {
+    const daySchedule = weeklyOpenHours?.[day.key] || {};
+    const isClosed = Boolean(daySchedule.isClosed);
+
+    if (isClosed) {
+      continue;
+    }
+
+    const openTime = String(daySchedule.openTime || '').trim();
+    const closeTime = String(daySchedule.closeTime || '').trim();
+
+    if (/^\d{2}:\d{2}$/.test(openTime) && /^\d{2}:\d{2}$/.test(closeTime) && openTime < closeTime) {
+      return {
+        startTime: openTime,
+        endTime: closeTime
+      };
+    }
+  }
+
+  return {
+    startTime: '',
+    endTime: ''
+  };
+}
+
+function normalizeWeeklyOpenHoursForPayload(weeklyOpenHours, fallbackStart, fallbackEnd) {
+  const hasFallbackRange =
+    /^\d{2}:\d{2}$/.test(String(fallbackStart || '').trim()) &&
+    /^\d{2}:\d{2}$/.test(String(fallbackEnd || '').trim()) &&
+    String(fallbackStart) < String(fallbackEnd);
+
+  return WEEK_DAYS.reduce((accumulator, day) => {
+    const daySchedule = weeklyOpenHours?.[day.key] || {};
+    const isClosed = Boolean(daySchedule.isClosed);
+    const openTime = String(daySchedule.openTime || '').trim();
+    const closeTime = String(daySchedule.closeTime || '').trim();
+    const isValidRange = /^\d{2}:\d{2}$/.test(openTime) && /^\d{2}:\d{2}$/.test(closeTime) && openTime < closeTime;
+
+    if (isClosed) {
+      accumulator[day.key] = {
+        isClosed: true,
+        openTime: '',
+        closeTime: ''
+      };
+      return accumulator;
+    }
+
+    if (isValidRange) {
+      accumulator[day.key] = {
+        isClosed: false,
+        openTime,
+        closeTime
+      };
+      return accumulator;
+    }
+
+    if (hasFallbackRange) {
+      accumulator[day.key] = {
+        isClosed: false,
+        openTime: String(fallbackStart),
+        closeTime: String(fallbackEnd)
+      };
+      return accumulator;
+    }
+
+    accumulator[day.key] = {
+      isClosed: true,
+      openTime: '',
+      closeTime: ''
+    };
+
+    return accumulator;
+  }, {});
+}
+
+function MerchantVenueForm({ editVenueId = null }) {
+  const isEditMode = false;
   const [activeWeekDay, setActiveWeekDay] = useState(WEEK_DAYS[0].key);
   const [formData, setFormData] = useState({
     venueName: '',
@@ -56,7 +259,10 @@ function MerchantVenueForm() {
     description: '',
     selectedServices: [],
     images: [],
-    businessLicense: null
+    businessLicense: null,
+    existingCoverImageUrl: '',
+    existingGalleryImageUrls: [],
+    existingBusinessLicenseUrl: ''
   });
   const [weeklyManualOverrides, setWeeklyManualOverrides] = useState(buildDefaultWeeklyOverrideMap());
 
@@ -74,13 +280,30 @@ function MerchantVenueForm() {
   const [wardsLoading, setWardsLoading] = useState(true);
   const [wardLoadError, setWardLoadError] = useState('');
   const [isResubmitLocked, setIsResubmitLocked] = useState(false);
+  const [loadingDraft, setLoadingDraft] = useState(false);
+  const [draftLoadError, setDraftLoadError] = useState('');
+  const [pendingUpdateRequest, setPendingUpdateRequest] = useState(null);
+  const existingImageCount = Math.min(Array.isArray(formData.existingGalleryImageUrls) ? formData.existingGalleryImageUrls.length : 0, 6);
+  const remainingUploadSlots = Math.max(0, 6 - existingImageCount);
 
   const handleWeeklyHoursChange = (dayKey, field, value) => {
     unlockResubmitIfNeeded();
-    setWeeklyManualOverrides((prev) => ({
-      ...prev,
-      [dayKey]: true
-    }));
+    setWeeklyManualOverrides((prev) => {
+      const next = {
+        ...prev,
+        [dayKey]: true
+      };
+
+      if (dayKey === 'monday') {
+        WEEK_DAYS.forEach((day) => {
+          if (day.key !== 'monday') {
+            next[day.key] = false;
+          }
+        });
+      }
+
+      return next;
+    });
 
     setFormData((prev) => {
       const currentDay = prev.weeklyOpenHours?.[dayKey] || {
@@ -99,12 +322,29 @@ function MerchantVenueForm() {
         nextDay.closeTime = '';
       }
 
+      const nextWeeklyOpenHours = {
+        ...prev.weeklyOpenHours,
+        [dayKey]: nextDay
+      };
+
+      if (dayKey === 'monday') {
+        WEEK_DAYS.forEach((day) => {
+          if (day.key === 'monday') {
+            return;
+          }
+
+          nextWeeklyOpenHours[day.key] = {
+            ...(nextWeeklyOpenHours[day.key] || {}),
+            isClosed: nextDay.isClosed,
+            openTime: nextDay.isClosed ? '' : nextDay.openTime,
+            closeTime: nextDay.isClosed ? '' : nextDay.closeTime
+          };
+        });
+      }
+
       return {
         ...prev,
-        weeklyOpenHours: {
-          ...prev.weeklyOpenHours,
-          [dayKey]: nextDay
-        }
+        weeklyOpenHours: nextWeeklyOpenHours
       };
     });
 
@@ -203,6 +443,138 @@ function MerchantVenueForm() {
 
     loadWards();
   }, []);
+
+  useEffect(() => {
+    if (!isEditMode) {
+      setLoadingDraft(false);
+      setDraftLoadError('');
+      setPendingUpdateRequest(null);
+      return;
+    }
+
+    let isMounted = true;
+
+    async function loadEditDraft() {
+      setLoadingDraft(true);
+      setDraftLoadError('');
+
+      try {
+        const response = await fetchVenueEditDraft(editVenueId);
+        const venue = response?.venue || null;
+        const pendingRequest = response?.pendingUpdateRequest || null;
+
+        if (!venue) {
+          throw new Error('Could not load venue details for editing');
+        }
+
+        const pendingSnapshot = pendingRequest?.proposed_snapshot && typeof pendingRequest.proposed_snapshot === 'object'
+          ? pendingRequest.proposed_snapshot
+          : null;
+
+        const venueMetadata = normalizeVenueMetadata(venue.metadata);
+        const snapshotMetadata = normalizeVenueMetadata(pendingSnapshot?.metadata);
+        const mergedMetadata = {
+          ...venueMetadata,
+          ...snapshotMetadata
+        };
+        const snapshotLatitude = Number(pendingSnapshot?.latitude);
+        const snapshotLongitude = Number(pendingSnapshot?.longitude);
+        const venueLatitude = Number(venue.latitude);
+        const venueLongitude = Number(venue.longitude);
+        const resolvedLatitude = Number.isFinite(snapshotLatitude)
+          ? snapshotLatitude
+          : Number.isFinite(venueLatitude)
+            ? venueLatitude
+            : null;
+        const resolvedLongitude = Number.isFinite(snapshotLongitude)
+          ? snapshotLongitude
+          : Number.isFinite(venueLongitude)
+            ? venueLongitude
+            : null;
+        const resolvedCoverImageUrl = String(
+          pendingSnapshot?.coverImageUrl || venue.cover_image_url || ''
+        ).trim();
+        const resolvedBusinessLicenseImageUrl = String(
+          pendingSnapshot?.businessLicenseImageUrl || venue.business_license_image_url || ''
+        ).trim();
+        const resolvedGalleryImageUrls = resolveExistingGalleryImageUrls(
+          {
+            ...venue,
+            cover_image_url: resolvedCoverImageUrl
+          },
+          {
+            ...mergedMetadata,
+            galleryImages: Array.isArray(snapshotMetadata.galleryImages)
+              ? snapshotMetadata.galleryImages
+              : mergedMetadata.galleryImages
+          }
+        );
+        const resolvedWeeklyOpenHours = normalizeWeeklyOpenHours(mergedMetadata);
+        const resolvedWeeklyOverrides = WEEK_DAYS.reduce((accumulator, day) => {
+          const daySchedule = resolvedWeeklyOpenHours[day.key];
+          accumulator[day.key] = Boolean(daySchedule?.isClosed || daySchedule?.openTime || daySchedule?.closeTime);
+          return accumulator;
+        }, {});
+
+        const nextFormData = {
+          venueName: String(pendingSnapshot?.name || pendingSnapshot?.title || venue.name || venue.title || '').trim(),
+          category: String(
+            pendingSnapshot?.categoryId ?? venue.category_id ?? mergedMetadata.categoryId ?? ''
+          ).trim(),
+          address: String(pendingSnapshot?.address || venue.address || '').trim(),
+          wardId: String(pendingSnapshot?.wardId || venue.ward_id || mergedMetadata.wardId || '').trim(),
+          latitude: resolvedLatitude,
+          longitude: resolvedLongitude,
+          phone: String(pendingSnapshot?.phone || venue.phone || '').trim(),
+          minPrice: mergedMetadata.minPrice !== undefined && mergedMetadata.minPrice !== null ? String(mergedMetadata.minPrice) : '',
+          maxPrice: mergedMetadata.maxPrice !== undefined && mergedMetadata.maxPrice !== null ? String(mergedMetadata.maxPrice) : '',
+          startTime: String(mergedMetadata.startTime || '').trim(),
+          endTime: String(mergedMetadata.endTime || '').trim(),
+          weeklyOpenHours: resolvedWeeklyOpenHours,
+          description: String(pendingSnapshot?.description || venue.description || '').trim(),
+          selectedServices: normalizeServiceSelections(mergedMetadata.selectedServices),
+          images: [],
+          businessLicense: null,
+          existingCoverImageUrl: resolvedCoverImageUrl,
+          existingGalleryImageUrls: resolvedGalleryImageUrls,
+          existingBusinessLicenseUrl: resolvedBusinessLicenseImageUrl
+        };
+
+        if (!isMounted) {
+          return;
+        }
+
+        setFormData(nextFormData);
+        setWeeklyManualOverrides(resolvedWeeklyOverrides);
+        setFormErrors({});
+        setSubmitStatus(
+          pendingRequest?.status === 'pending'
+            ? {
+                type: 'success',
+                message: 'An existing pending location update was loaded. Submitting again will replace that pending request.'
+              }
+            : null
+        );
+        setPendingUpdateRequest(pendingRequest);
+      } catch (error) {
+        if (!isMounted) {
+          return;
+        }
+
+        setDraftLoadError(error.response?.data?.message || error.message || 'Could not load this venue for editing.');
+      } finally {
+        if (isMounted) {
+          setLoadingDraft(false);
+        }
+      }
+    }
+
+    loadEditDraft();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [editVenueId, isEditMode]);
 
   const unlockResubmitIfNeeded = () => {
     if (isResubmitLocked) {
@@ -303,7 +675,8 @@ function MerchantVenueForm() {
       errors.wardId = 'Selected ward is not available';
     }
     if (!formData.phone.trim()) errors.phone = 'Phone number is required';
-    if (!formData.businessLicense) errors.businessLicense = 'Business license is required';
+    const hasBusinessLicense = Boolean(formData.businessLicense || formData.existingBusinessLicenseUrl);
+    if (!hasBusinessLicense) errors.businessLicense = 'Business license is required';
     
     // Location picking is mandatory
     if (formData.latitude === null || formData.longitude === null) {
@@ -323,13 +696,6 @@ function MerchantVenueForm() {
       
       if (!isNaN(minVal) && !isNaN(maxVal) && minVal >= maxVal) {
         errors.maxPrice = 'Max price must be higher than min price';
-      }
-    }
-
-    // Operating hours validation
-    if (formData.startTime && formData.endTime) {
-      if (formData.startTime >= formData.endTime) {
-        errors.endTime = 'End time must be after start time';
       }
     }
 
@@ -368,6 +734,88 @@ function MerchantVenueForm() {
     setFormData((prev) => ({
       ...prev,
       images
+    }));
+
+    if (submitStatus?.type === 'success') {
+      setSubmitStatus(null);
+    }
+  };
+
+  const handleSetExistingCoverImage = (targetImageUrl) => {
+    const normalizedTarget = String(targetImageUrl || '').trim();
+    if (!normalizedTarget) {
+      return;
+    }
+
+    unlockResubmitIfNeeded();
+    setFormData((prev) => {
+      const currentGallery = Array.isArray(prev.existingGalleryImageUrls)
+        ? prev.existingGalleryImageUrls
+        : [];
+      const targetIndex = currentGallery.findIndex(
+        (imageUrl) => String(imageUrl || '').trim() === normalizedTarget
+      );
+
+      const nextGallery = targetIndex > 0
+        ? [currentGallery[targetIndex], ...currentGallery.filter((_, index) => index !== targetIndex)]
+        : currentGallery;
+
+      return {
+        ...prev,
+        existingGalleryImageUrls: nextGallery,
+        existingCoverImageUrl: normalizedTarget
+      };
+    });
+
+    if (submitStatus?.type === 'success') {
+      setSubmitStatus(null);
+    }
+  };
+
+  const handleRemoveExistingGalleryImage = (targetImageUrl) => {
+    const normalizedTarget = String(targetImageUrl || '').trim();
+    if (!normalizedTarget) {
+      return;
+    }
+
+    unlockResubmitIfNeeded();
+
+    setFormData((prev) => {
+      const currentGallery = Array.isArray(prev.existingGalleryImageUrls)
+        ? prev.existingGalleryImageUrls
+        : [];
+      const targetIndex = currentGallery.findIndex(
+        (imageUrl) => String(imageUrl || '').trim() === normalizedTarget
+      );
+
+      if (targetIndex < 0) {
+        return prev;
+      }
+
+      const nextGallery = currentGallery.filter((_, index) => index !== targetIndex);
+      const currentCover = String(prev.existingCoverImageUrl || '').trim();
+      const nextCover =
+        currentCover && currentCover !== normalizedTarget
+          ? currentCover
+          : String(nextGallery[0] || '').trim();
+
+      return {
+        ...prev,
+        existingGalleryImageUrls: nextGallery,
+        existingCoverImageUrl: nextCover
+      };
+    });
+
+    if (submitStatus?.type === 'success') {
+      setSubmitStatus(null);
+    }
+  };
+
+  const handleRemoveExistingBusinessLicense = () => {
+    unlockResubmitIfNeeded();
+    setFormData((prev) => ({
+      ...prev,
+      existingBusinessLicenseUrl: ''
     }));
 
     if (submitStatus?.type === 'success') {
@@ -442,7 +890,7 @@ function MerchantVenueForm() {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    if (isResubmitLocked) {
+    if (!isEditMode && isResubmitLocked) {
       setSubmitStatus({
         type: 'error',
         message: 'This venue has already been submitted. Update any field before submitting again.'
@@ -462,13 +910,40 @@ function MerchantVenueForm() {
     setSubmitStatus(null);
 
     try {
-      let coverImageUrl = '';
-      let galleryImageUrls = [];
-      let businessLicenseImageUrl = '';
+      let galleryImageUrls = Array.isArray(formData.existingGalleryImageUrls)
+        ? formData.existingGalleryImageUrls
+        : [];
+      let coverImageUrl = String(formData.existingCoverImageUrl || galleryImageUrls[0] || '').trim();
+      let businessLicenseImageUrl = String(formData.existingBusinessLicenseUrl || '').trim();
+
+      const normalizedExistingGallery = [...new Set(
+        galleryImageUrls
+          .map((imageUrl) => String(imageUrl || '').trim())
+          .filter(Boolean)
+      )];
+      galleryImageUrls = normalizedExistingGallery.slice(0, 6);
 
       if (formData.images.length > 0) {
-        galleryImageUrls = await Promise.all(formData.images.map((imageFile) => toDataUrl(imageFile)));
-        coverImageUrl = galleryImageUrls[0] || '';
+        const uploadedGalleryImages = await Promise.all(formData.images.map((imageFile) => toDataUrl(imageFile)));
+        const normalizedUploadedGallery = [...new Set(
+          uploadedGalleryImages
+            .map((imageUrl) => String(imageUrl || '').trim())
+            .filter(Boolean)
+        )];
+
+        const combinedGallery = [...new Set([...galleryImageUrls, ...normalizedUploadedGallery])];
+        galleryImageUrls = combinedGallery.length > 6 ? combinedGallery.slice(combinedGallery.length - 6) : combinedGallery;
+
+        const normalizedPreferredCover = String(coverImageUrl || '').trim();
+        if (normalizedPreferredCover && galleryImageUrls.includes(normalizedPreferredCover)) {
+          coverImageUrl = normalizedPreferredCover;
+        } else if (normalizedUploadedGallery.length) {
+          coverImageUrl = galleryImageUrls.includes(normalizedUploadedGallery[0])
+            ? normalizedUploadedGallery[0]
+            : (galleryImageUrls[0] || '');
+        } else {
+          coverImageUrl = galleryImageUrls[0] || '';
+        }
       }
 
       if (formData.businessLicense) {
@@ -479,9 +954,18 @@ function MerchantVenueForm() {
         placeCategories.find((category) => String(category.id) === String(formData.category)) || null;
       const selectedWard =
         wards.find((ward) => String(ward.ward_id) === String(formData.wardId)) || null;
+      const derivedTimeRange = derivePrimaryTimeRangeFromWeeklyHours(formData.weeklyOpenHours);
+      const metadataStartTime = derivedTimeRange.startTime || String(formData.startTime || '').trim();
+      const metadataEndTime = derivedTimeRange.endTime || String(formData.endTime || '').trim();
+      const normalizedWeeklyOpenHoursPayload = normalizeWeeklyOpenHoursForPayload(
+        formData.weeklyOpenHours,
+        metadataStartTime,
+        metadataEndTime
+      );
 
-      const response = await createVenueRequest({
+      const payload = {
         name: formData.venueName,
+        title: formData.venueName,
         address: formData.address,
         wardId: selectedWard?.ward_id || null,
         categoryId: selectedCategory?.id || null,
@@ -499,14 +983,35 @@ function MerchantVenueForm() {
           wardName: selectedWard?.name || null,
           minPrice: formData.minPrice ? Number(formData.minPrice) : null,
           maxPrice: formData.maxPrice ? Number(formData.maxPrice) : null,
-          startTime: formData.startTime || null,
-          endTime: formData.endTime || null,
-          weeklyOpenHours: formData.weeklyOpenHours,
+          startTime: metadataStartTime || null,
+          endTime: metadataEndTime || null,
+          weeklyOpenHours: normalizedWeeklyOpenHoursPayload,
           selectedServices: formData.selectedServices,
-          imagesCount: formData.images.length,
+          imagesCount: galleryImageUrls.length,
           galleryImages: galleryImageUrls
         }
-      });
+      };
+
+      if (isEditMode) {
+        const response = await submitVenueUpdateRequest(editVenueId, payload);
+
+        setSubmitStatus({
+          type: 'success',
+          message: response.message || 'Venue update request submitted successfully. Awaiting admin review.'
+        });
+        setPendingUpdateRequest(response.updateRequest || pendingUpdateRequest || null);
+        setFormData((prev) => ({
+          ...prev,
+          images: [],
+          businessLicense: null,
+          existingGalleryImageUrls: galleryImageUrls,
+          existingCoverImageUrl: coverImageUrl,
+          existingBusinessLicenseUrl: businessLicenseImageUrl
+        }));
+        return;
+      }
+
+      const response = await createVenueRequest(payload);
 
       setSubmitStatus({
         type: 'success',
@@ -532,7 +1037,10 @@ function MerchantVenueForm() {
           description: '',
           selectedServices: [],
           images: [],
-          businessLicense: null
+          businessLicense: null,
+          existingCoverImageUrl: '',
+          existingGalleryImageUrls: [],
+          existingBusinessLicenseUrl: ''
         });
         setWeeklyManualOverrides(buildDefaultWeeklyOverrideMap());
         setFormErrors({});
@@ -551,9 +1059,19 @@ function MerchantVenueForm() {
   return (
     <div className="merchant-venue-form-container">
       <div className="form-header">
-        <h1>Register Your Venue</h1>
-        <p>Fill in all details to get your venue listed on Smart City Discovery</p>
+        <h1>{isEditMode ? 'Edit Venue Submission' : 'Register Your Venue'}</h1>
+        <p>
+          {isEditMode
+            ? 'Update your venue information. Changes will be sent to admin for moderation before going live.'
+            : 'Fill in all details to get your venue listed on Smart City Discovery'}
+        </p>
       </div>
+
+      {loadingDraft ? <p className="form-note">Loading venue draft...</p> : null}
+      {draftLoadError ? <p className="error-text">{draftLoadError}</p> : null}
+      {isEditMode && pendingUpdateRequest?.status === 'pending' ? (
+        <p className="form-note">A location update for this venue is currently pending. Submitting now will replace that pending request.</p>
+      ) : null}
 
       <form className="merchant-venue-form" onSubmit={handleSubmit}>
         {/* Section 1: Images */}
@@ -562,7 +1080,54 @@ function MerchantVenueForm() {
             <h2>1. Photos</h2>
             <p className="section-hint">Upload up to 6 photos of your venue</p>
           </div>
-          <ImageUploader maxImages={6} onImagesChange={handleImagesChange} />
+
+          {isEditMode && formData.existingGalleryImageUrls.length ? (
+            <div className="merchant-existing-media-grid">
+              {formData.existingGalleryImageUrls.slice(0, 6).map((imageUrl) => {
+                const normalizedImageUrl = String(imageUrl || '').trim();
+                const isCover = normalizedImageUrl === String(formData.existingCoverImageUrl || '').trim();
+
+                return (
+                  <div key={normalizedImageUrl} className="merchant-existing-media-card">
+                    <img
+                      src={resolveAssetUrl(normalizedImageUrl)}
+                      alt="Existing venue"
+                      className="merchant-existing-media-item"
+                    />
+
+                    <div className="merchant-existing-media-actions">
+                      {isCover ? (
+                        <span className="merchant-existing-cover-badge">Cover</span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="merchant-existing-action-btn"
+                          onClick={() => handleSetExistingCoverImage(normalizedImageUrl)}
+                        >
+                          Set Cover
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        className="merchant-existing-action-btn danger"
+                        onClick={() => handleRemoveExistingGalleryImage(normalizedImageUrl)}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+              <p className="form-note">Existing images are shown above. New uploads will be added with existing photos (maximum 6 total).</p>
+            </div>
+          ) : null}
+
+          {remainingUploadSlots > 0 ? (
+            <ImageUploader maxImages={remainingUploadSlots} onImagesChange={handleImagesChange} />
+          ) : (
+            <p className="form-note">You already have 6 images. Remove at least one existing image above to upload a new one.</p>
+          )}
         </div>
 
         {/* Section 2: Basic Info */}
@@ -698,35 +1263,6 @@ function MerchantVenueForm() {
                 ✓ Selected: ({formData.latitude.toFixed(4)}, {formData.longitude.toFixed(4)})
               </p>
             )}
-          </div>
-
-          <div className="form-row">
-            <div className="form-group">
-              <label htmlFor="startTime">Start Time</label>
-              <input
-                type="time"
-                id="startTime"
-                name="startTime"
-                value={formData.startTime}
-                onChange={handleInputChange}
-                className="form-input"
-              />
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="endTime">
-                End Time
-                {formErrors.endTime && <span className="error-text"> - {formErrors.endTime}</span>}
-              </label>
-              <input
-                type="time"
-                id="endTime"
-                name="endTime"
-                value={formData.endTime}
-                onChange={handleInputChange}
-                className={`form-input ${formErrors.endTime ? 'input-error' : ''}`}
-              />
-            </div>
           </div>
 
           <div className="weekly-open-hours-card">
@@ -870,6 +1406,25 @@ function MerchantVenueForm() {
           <div className="section-header">
             <h2>5. Verification</h2>
           </div>
+
+          {isEditMode && formData.existingBusinessLicenseUrl ? (
+            <div className="merchant-existing-license">
+              <img
+                src={resolveAssetUrl(formData.existingBusinessLicenseUrl)}
+                alt="Existing business license"
+                className="merchant-existing-license-image"
+              />
+              <button
+                type="button"
+                className="merchant-existing-action-btn danger"
+                onClick={handleRemoveExistingBusinessLicense}
+              >
+                Remove Current License
+              </button>
+              <p className="form-note">Current business license on file. Upload a new file only if you need to replace it.</p>
+            </div>
+          ) : null}
+
           <BusinessLicenseUploader onLicenseChange={handleBusinessLicenseChange} />
         </div>
 
@@ -878,12 +1433,24 @@ function MerchantVenueForm() {
           <div className="form-submit-block">
             <button
               type="submit"
-              disabled={isSubmitting || isResubmitLocked}
+              disabled={isSubmitting || loadingDraft || (!isEditMode && isResubmitLocked)}
               className="btn-submit"
             >
-              {isSubmitting ? 'Submitting...' : isResubmitLocked ? 'Submitted' : 'Submit Venue for Review'}
+              {isSubmitting
+                ? isEditMode
+                  ? 'Submitting update...'
+                  : 'Submitting...'
+                : !isEditMode && isResubmitLocked
+                  ? 'Submitted'
+                  : isEditMode
+                    ? 'Submit Location Update for Review'
+                    : 'Submit Venue for Review'}
             </button>
-            <p className="form-note">Your venue will be reviewed by our admin team before going live.</p>
+            <p className="form-note">
+              {isEditMode
+                ? 'Your edited location and details will be reviewed by admin before applying to the live venue.'
+                : 'Your venue will be reviewed by our admin team before going live.'}
+            </p>
           </div>
 
           <div className={`submit-status-inline ${submitStatus?.type || 'idle'}`} aria-live="polite">
