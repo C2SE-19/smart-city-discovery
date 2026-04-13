@@ -53,9 +53,7 @@ function AdminUserManagementPage() {
     role: 'user',
     gender: '',
   });
-  const [deletingUserId, setDeletingUserId] = useState(null);
   const [expandedRow, setExpandedRow] = useState(null);
-  const [updatingUserId, setUpdatingUserId] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 10;
 
@@ -195,7 +193,7 @@ function AdminUserManagementPage() {
       return;
     }
 
-    const emailRegex = /^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$/;
+    const emailRegex = /^[\w.-]+@([\w-]+\.)+[\w-]{2,4}$/;
     if (!emailRegex.test(email)) {
       setSubmitStatus('');
       setAddFormError('Email không hợp lệ.');
@@ -275,7 +273,7 @@ function AdminUserManagementPage() {
       if (!/[A-Z]/.test(password)) passwordErrors.push('1 chữ hoa');
       if (!/[a-z]/.test(password)) passwordErrors.push('1 chữ thường');
       if (!/[0-9]/.test(password)) passwordErrors.push('1 chữ số');
-      if (!/[!@#\$%\^&\*]/.test(password)) passwordErrors.push('1 ký tự đặc biệt (!@#$%^&*)');
+      if (!/[!@#$%^&*]/.test(password)) passwordErrors.push('1 ký tự đặc biệt (!@#$%^&*)');
 
       if (passwordErrors.length > 0) {
         setSubmitStatus('');
@@ -344,40 +342,12 @@ function AdminUserManagementPage() {
     }
   };
 
-  const handleRoleChange = async (userId, newRole) => {
-    setUpdatingUserId(userId);
-    setSubmitStatus('');
-
-    const user = users.find((u) => Number(u.id) === Number(userId));
-    if (!user) {
-      setSubmitStatus('User not found');
-      setUpdatingUserId(null);
-      return;
-    }
-
-    try {
-      await updateAdminUser(userId, {
-        fullname: user.fullname || user.username,
-        email: user.email,
-        role: newRole
-      });
-      setUsers((prev) => prev.map((u) => (Number(u.id) === Number(userId) ? { ...u, role: newRole } : u)));
-      setSubmitStatus('User role updated successfully');
-    } catch (err) {
-      console.error('Failed to update user role', err);
-      setSubmitStatus(err?.response?.data?.message || 'Failed to update role');
-    } finally {
-      setUpdatingUserId(null);
-    }
-  };
-
   const handleDelete = async (userId) => {
     const confirmDelete = window.confirm('Bạn có chắc muốn xóa người dùng này?');
     if (!confirmDelete) {
       return;
     }
 
-    setDeletingUserId(userId);
     setSubmitStatus('');
 
     try {
@@ -387,8 +357,6 @@ function AdminUserManagementPage() {
     } catch (err) {
       console.error('Failed to delete user', err);
       setSubmitStatus(err?.response?.data?.message || 'Xóa người dùng thất bại');
-    } finally {
-      setDeletingUserId(null);
     }
   };
 

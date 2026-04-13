@@ -1,10 +1,9 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+﻿import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import Cropper from 'react-easy-crop';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
-import translations from '../../constants/translations';
 import { APP_ROUTES } from '../../constants/routes';
 import axios from 'axios';
 import UserPreferenceWizard from '../../components/preferences/UserPreferenceWizard';
@@ -14,38 +13,38 @@ import './ProfilePage.css';
 const COPY = {
   vi: {
     menu: {
-      overview: 'Tổng Quan',
-      account: 'Thông tin tài khoản',
-      favorites: 'Yêu Thích',
-      ratings: 'Đánh giá',
-      posts: 'Bài viết của tôi',
-      support: 'Góp ý & hỗ trợ'
+      overview: 'Tá»•ng Quan',
+      account: 'ThÃ´ng tin tÃ i khoáº£n',
+      favorites: 'YÃªu ThÃ­ch',
+      ratings: 'ÄÃ¡nh giÃ¡',
+      posts: 'BÃ i viáº¿t cá»§a tÃ´i',
+      support: 'GÃ³p Ã½ & há»— trá»£'
     },
     headings: {
-      personal: 'Thông tin cá nhân',
-      favorites: 'Yêu Thích',
-      ratings: 'Đánh giá của tôi',
-      posts: 'Bài viết của tôi',
-      support: 'Góp ý & Hỗ trợ'
+      personal: 'ThÃ´ng tin cÃ¡ nhÃ¢n',
+      favorites: 'YÃªu ThÃ­ch',
+      ratings: 'ÄÃ¡nh giÃ¡ cá»§a tÃ´i',
+      posts: 'BÃ i viáº¿t cá»§a tÃ´i',
+      support: 'GÃ³p Ã½ & Há»— trá»£'
     },
     placeholder: {
-      favorites: 'Các địa điểm yêu thích của bạn sẽ hiển thị ở đây',
-      ratings: 'Các đánh giá bạn đã gửi sẽ hiển thị ở đây',
-      posts: 'Các bài viết của bạn sẽ hiển thị ở đây',
-      support: 'Liên hệ với chúng tôi để được hỗ trợ tốt nhất'
+      favorites: 'CÃ¡c Ä‘á»‹a Ä‘iá»ƒm yÃªu thÃ­ch cá»§a báº¡n sáº½ hiá»ƒn thá»‹ á»Ÿ Ä‘Ã¢y',
+      ratings: 'CÃ¡c Ä‘Ã¡nh giÃ¡ báº¡n Ä‘Ã£ gá»­i sáº½ hiá»ƒn thá»‹ á»Ÿ Ä‘Ã¢y',
+      posts: 'CÃ¡c bÃ i viáº¿t cá»§a báº¡n sáº½ hiá»ƒn thá»‹ á»Ÿ Ä‘Ã¢y',
+      support: 'LiÃªn há»‡ vá»›i chÃºng tÃ´i Ä‘á»ƒ Ä‘Æ°á»£c há»— trá»£ tá»‘t nháº¥t'
     },
     labels: {
-      name: 'Họ và tên',
+      name: 'Há» vÃ  tÃªn',
       email: 'Email',
-      phone: 'Số điện thoại',
-      address: 'Địa chỉ'
+      phone: 'Sá»‘ Ä‘iá»‡n thoáº¡i',
+      address: 'Äá»‹a chá»‰'
     },
-    loading: 'Đang tải thông tin...',
-    edit: '✎ Chỉnh sửa',
-    save: 'Lưu',
-    cancel: 'Hủy',
-    ratingTitle: 'Đánh giá',
-    ratingCount: '4.7 (0 đánh giá)'
+    loading: 'Äang táº£i thÃ´ng tin...',
+    edit: 'âœŽ Chá»‰nh sá»­a',
+    save: 'LÆ°u',
+    cancel: 'Há»§y',
+    ratingTitle: 'ÄÃ¡nh giÃ¡',
+    ratingCount: '4.7 (0 Ä‘Ã¡nh giÃ¡)'
   },
   en: {
     menu: {
@@ -76,7 +75,7 @@ const COPY = {
       address: 'Address'
     },
     loading: 'Loading profile...',
-    edit: '✎ Edit',
+    edit: 'âœŽ Edit',
     save: 'Save',
     cancel: 'Cancel',
     ratingTitle: 'Ratings',
@@ -91,7 +90,6 @@ function ProfilePage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { theme } = useTheme();
-  const t = translations[language];
   const copy = COPY[language] || COPY.vi;
 
   const handleFavoriteCardClick = (item) => {
@@ -110,50 +108,50 @@ function ProfilePage() {
     language === 'vi'
       ? {
           labels: {
-            currentPassword: 'Mật khẩu hiện tại',
-            newPassword: 'Mật khẩu mới',
-            confirmPassword: 'Xác nhận mật khẩu mới'
+            currentPassword: 'Máº­t kháº©u hiá»‡n táº¡i',
+            newPassword: 'Máº­t kháº©u má»›i',
+            confirmPassword: 'XÃ¡c nháº­n máº­t kháº©u má»›i'
           },
           helpers: {
-            emailLocked: 'Email đã khóa, không thể thay đổi.',
+            emailLocked: 'Email Ä‘Ã£ khÃ³a, khÃ´ng thá»ƒ thay Ä‘á»•i.',
             passwordRule:
-              '(Mật khẩu phải từ 8 ký tự, có 1 chữ viết hoa và ký tự đặc biệt.)'
+              '(Máº­t kháº©u pháº£i tá»« 8 kÃ½ tá»±, cÃ³ 1 chá»¯ viáº¿t hoa vÃ  kÃ½ tá»± Ä‘áº·c biá»‡t.)'
           },
           placeholders: {
-            phone: 'Nhập số điện thoại',
-            currentPassword: 'Nhập mật khẩu hiện tại',
-            newPassword: 'Ít nhất 8 ký tự',
-            confirmPassword: 'Nhập lại mật khẩu mới'
+            phone: 'Nháº­p sá»‘ Ä‘iá»‡n thoáº¡i',
+            currentPassword: 'Nháº­p máº­t kháº©u hiá»‡n táº¡i',
+            newPassword: 'Ãt nháº¥t 8 kÃ½ tá»±',
+            confirmPassword: 'Nháº­p láº¡i máº­t kháº©u má»›i'
           },
           actions: {
-            show: 'Hiện',
-            hide: 'Ẩn',
-            showPasswordForm: 'Thay đổi mật khẩu',
-            hidePasswordForm: 'Ẩn đổi mật khẩu',
+            show: 'Hiá»‡n',
+            hide: 'áº¨n',
+            showPasswordForm: 'Thay Ä‘á»•i máº­t kháº©u',
+            hidePasswordForm: 'áº¨n Ä‘á»•i máº­t kháº©u',
             editInterests: 'Edit interests',
-            removeFavorite: 'Bỏ yêu thích',
-            confirm: 'Có',
-            decline: 'Không'
+            removeFavorite: 'Bá» yÃªu thÃ­ch',
+            confirm: 'CÃ³',
+            decline: 'KhÃ´ng'
           },
           favorites: {
-            removeTitle: 'Bỏ yêu thích',
-            removeMessage: 'Bạn có muốn bỏ yêu thích mục "{name}" không?',
-            unnamed: 'Không có tên'
+            removeTitle: 'Bá» yÃªu thÃ­ch',
+            removeMessage: 'Báº¡n cÃ³ muá»‘n bá» yÃªu thÃ­ch má»¥c "{name}" khÃ´ng?',
+            unnamed: 'KhÃ´ng cÃ³ tÃªn'
           },
           messages: {
-            nameRequired: 'Vui lòng nhập họ tên.',
-            emailInvalid: 'Email không đúng định dạng.',
-            phoneInvalid: 'Số điện thoại không đúng định dạng.',
+            nameRequired: 'Vui lÃ²ng nháº­p há» tÃªn.',
+            emailInvalid: 'Email khÃ´ng Ä‘Ãºng Ä‘á»‹nh dáº¡ng.',
+            phoneInvalid: 'Sá»‘ Ä‘iá»‡n thoáº¡i khÃ´ng Ä‘Ãºng Ä‘á»‹nh dáº¡ng.',
             passwordRequired:
-              'Vui lòng nhập đầy đủ mật khẩu hiện tại, mật khẩu mới và xác nhận.',
-            passwordLength: 'Mật khẩu mới phải có ít nhất 8 ký tự.',
-            passwordUpper: 'Mật khẩu mới phải có ít nhất 1 chữ in hoa (A-Z).',
-            passwordSpecial: 'Mật khẩu mới phải có ít nhất 1 ký tự đặc biệt.',
-            passwordMismatch: 'Xác nhận mật khẩu không khớp.',
-            saveSuccess: 'Lưu thành công.',
-            saveFailed: 'Cập nhật thất bại. Vui lòng thử lại.',
-            favoriteRemoved: 'Đã bỏ yêu thích.',
-            favoriteRemoveFailed: 'Không thể bỏ yêu thích. Vui lòng thử lại.'
+              'Vui lÃ²ng nháº­p Ä‘áº§y Ä‘á»§ máº­t kháº©u hiá»‡n táº¡i, máº­t kháº©u má»›i vÃ  xÃ¡c nháº­n.',
+            passwordLength: 'Máº­t kháº©u má»›i pháº£i cÃ³ Ã­t nháº¥t 8 kÃ½ tá»±.',
+            passwordUpper: 'Máº­t kháº©u má»›i pháº£i cÃ³ Ã­t nháº¥t 1 chá»¯ in hoa (A-Z).',
+            passwordSpecial: 'Máº­t kháº©u má»›i pháº£i cÃ³ Ã­t nháº¥t 1 kÃ½ tá»± Ä‘áº·c biá»‡t.',
+            passwordMismatch: 'XÃ¡c nháº­n máº­t kháº©u khÃ´ng khá»›p.',
+            saveSuccess: 'LÆ°u thÃ nh cÃ´ng.',
+            saveFailed: 'Cáº­p nháº­t tháº¥t báº¡i. Vui lÃ²ng thá»­ láº¡i.',
+            favoriteRemoved: 'ÄÃ£ bá» yÃªu thÃ­ch.',
+            favoriteRemoveFailed: 'KhÃ´ng thá»ƒ bá» yÃªu thÃ­ch. Vui lÃ²ng thá»­ láº¡i.'
           }
         }
       : {
@@ -204,11 +202,11 @@ function ProfilePage() {
           }
         };
   const MenuItems = [
-    { id: 'overview', label: copy.menu.overview, icon: '🏠' },
-    { id: 'account-info', label: copy.menu.account, icon: '👤' },
-    { id: 'favorites', label: copy.menu.favorites, icon: '❤️' },
-    { id: 'ratings', label: copy.menu.ratings, icon: '⭐' },
-    { id: 'support', label: copy.menu.support, icon: '💬' }
+    { id: 'overview', label: copy.menu.overview, icon: 'ðŸ ' },
+    { id: 'account-info', label: copy.menu.account, icon: 'ðŸ‘¤' },
+    { id: 'favorites', label: copy.menu.favorites, icon: 'â¤ï¸' },
+    { id: 'ratings', label: copy.menu.ratings, icon: 'â­' },
+    { id: 'support', label: copy.menu.support, icon: 'ðŸ’¬' }
   ];
   const [activeMenu, setActiveMenu] = useState('account-info');
   const [isEditing, setIsEditing] = useState(false);
@@ -419,61 +417,6 @@ function ProfilePage() {
     });
   };
 
-  const validateProfile = (data) => {
-    if (!data.name || !data.name.trim()) {
-      return 'Vui lòng nhập họ tên.';
-    }
-
-    const emailValue = (data.email || '').trim();
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailValue || !emailRegex.test(emailValue)) {
-      return 'Email không đúng định dạng.';
-    }
-
-    const phoneValue = (data.phone || '').trim();
-    if (phoneValue && !/^\d+$/.test(phoneValue)) {
-      return 'Số điện thoại không đúng định dạng.';
-    }
-
-    if (phoneValue) {
-      if (phoneValue.length !== 10) {
-        return 'Số điện thoại không đúng định dạng.';
-      }
-    }
-
-    return '';
-  };
-
-  const validatePasswordChange = (data) => {
-    const { currentPassword, newPassword, confirmPassword } = data;
-    const hasAny = currentPassword || newPassword || confirmPassword;
-    if (!hasAny) {
-      return '';
-    }
-
-    if (!currentPassword || !newPassword || !confirmPassword) {
-      return 'Vui lòng nhập đầy đủ mật khẩu hiện tại, mật khẩu mới và xác nhận.';
-    }
-
-    if (newPassword.length < 8) {
-      return 'Mật khẩu mới phải có ít nhất 8 ký tự.';
-    }
-
-    if (!/[A-Z]/.test(newPassword)) {
-      return 'Mật khẩu mới phải có ít nhất 1 chữ in hoa (A-Z).';
-    }
-
-    if (!/[!@#$%^&*()_+\-=\[\]{};:\'",.<>?\/\\|`~]/.test(newPassword)) {
-      return 'Mật khẩu mới phải có ít nhất 1 ký tự đặc biệt.';
-    }
-
-    if (newPassword !== confirmPassword) {
-      return 'Xác nhận mật khẩu không khớp.';
-    }
-
-    return '';
-  };
-
   const validateProfileLocalized = (data) => {
     if (!data.name || !data.name.trim()) {
       return ui.messages.nameRequired;
@@ -512,7 +455,7 @@ function ProfilePage() {
       return ui.messages.passwordUpper;
     }
 
-    if (!/[!@#$%^&*()_+\-=\[\]{};:\'",.<>?\/\\|`~]/.test(newPassword)) {
+    if (!/[!@#$%^&*()_+\-=[\]{};:'",.<>?/\\|`~]/.test(newPassword)) {
       return ui.messages.passwordSpecial;
     }
 
@@ -723,7 +666,7 @@ function ProfilePage() {
 
   const handleUploadCroppedAvatar = async () => {
     if (!token) {
-      setError('Bạn cần đăng nhập để cập nhật ảnh đại diện.');
+      setError('Báº¡n cáº§n Ä‘Äƒng nháº­p Ä‘á»ƒ cáº­p nháº­t áº£nh Ä‘áº¡i diá»‡n.');
       setSuccessMessage('');
       setTimeout(() => setError(''), 1500);
       return;
@@ -736,7 +679,7 @@ function ProfilePage() {
 
       const blob = await getCroppedAvatarBlob();
       if (!blob) {
-        setError('Không thể cắt ảnh. Vui lòng thử lại.');
+        setError('KhÃ´ng thá»ƒ cáº¯t áº£nh. Vui lÃ²ng thá»­ láº¡i.');
         setTimeout(() => setError(''), 1500);
         return;
       }
@@ -761,12 +704,12 @@ function ProfilePage() {
         updateUser({ avatarUrl: nextAvatar });
       }
       setAvatarCropOpen(false);
-      setSuccessMessage('Cập nhật ảnh đại diện thành công.');
+      setSuccessMessage('Cáº­p nháº­t áº£nh Ä‘áº¡i diá»‡n thÃ nh cÃ´ng.');
       setTimeout(() => setSuccessMessage(''), 1200);
     } catch (err) {
       console.error('Avatar upload error:', err);
       const apiMessage = err.response?.data?.message;
-      setError(apiMessage || 'Tải ảnh thất bại. Vui lòng thử lại.');
+      setError(apiMessage || 'Táº£i áº£nh tháº¥t báº¡i. Vui lÃ²ng thá»­ láº¡i.');
       setTimeout(() => setError(''), 1500);
     } finally {
       setAvatarUploading(false);
@@ -781,7 +724,7 @@ function ProfilePage() {
   const handleEditAvatar = async () => {
     setAvatarMenuOpen(false);
     if (!displayAvatarUrl) {
-      setError('Chưa có avatar để chỉnh sửa.');
+      setError('ChÆ°a cÃ³ avatar Ä‘á»ƒ chá»‰nh sá»­a.');
       setTimeout(() => setError(''), 1500);
       return;
     }
@@ -800,7 +743,7 @@ function ProfilePage() {
       reader.readAsDataURL(blob);
     } catch (err) {
       console.error('Avatar load error:', err);
-      setError('Không thể tải ảnh để chỉnh sửa.');
+      setError('KhÃ´ng thá»ƒ táº£i áº£nh Ä‘á»ƒ chá»‰nh sá»­a.');
       setTimeout(() => setError(''), 1500);
     }
   };
@@ -1169,7 +1112,7 @@ function ProfilePage() {
           <div className="user-info">
             <h1 className="user-name">
               {user?.fullname || 'User'}
-              <span className="verify-badge">✓</span>
+              <span className="verify-badge">âœ“</span>
             </h1>
           </div>
           <div className="avatar-menu">
@@ -1202,7 +1145,7 @@ function ProfilePage() {
             <div className="avatar-crop-header">
               <h3>Crop avatar</h3>
               <button type="button" className="avatar-crop-close" onClick={() => setAvatarCropOpen(false)}>
-                ×
+                Ã—
               </button>
             </div>
             <div className="avatar-cropper">
@@ -1291,3 +1234,4 @@ function ProfilePage() {
 }
 
 export default ProfilePage;
+

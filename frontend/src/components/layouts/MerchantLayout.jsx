@@ -1,4 +1,4 @@
-import { Link, NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
+import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useEffect, useRef, useState } from 'react';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -10,7 +10,6 @@ import '../layouts/LandingLayout.css';
 
 function MerchantLayout() {
   const navigate = useNavigate();
-  const location = useLocation();
   const { language, changeLanguage } = useLanguage();
   const { theme, toggleTheme } = useTheme();
   const { user, logout } = useAuth();

@@ -788,8 +788,6 @@ function LandingLayout() {
                     <div className="landing-chat-list">
                       {recentChats.map((thread) => {
                         const lastMessage = thread.lastMessage || thread.messages?.[thread.messages.length - 1];
-                        const groupKey = resolveThreadGroupKey(thread);
-                        const isPinned = (chatPrefs?.pinnedKeys || []).includes(groupKey);
                         return (
                           <div className="landing-chat-item-shell" key={`header-chat-${thread.id || thread.venueId}`}>
                           <button
