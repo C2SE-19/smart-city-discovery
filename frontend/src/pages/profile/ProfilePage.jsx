@@ -93,6 +93,19 @@ function ProfilePage() {
   const { theme } = useTheme();
   const t = translations[language];
   const copy = COPY[language] || COPY.vi;
+
+  const handleFavoriteCardClick = (item) => {
+    if (String(item?.itemType || '').toLowerCase() !== 'place' || !item?.itemId) {
+      return;
+    }
+    navigate(`/venues/${item.itemId}`);
+  };
+
+  const handleFavoriteRemoveClick = (event, item) => {
+    event.stopPropagation();
+    setConfirmFavorite(item);
+  };
+
   const ui =
     language === 'vi'
       ? {
@@ -1040,11 +1053,23 @@ function ProfilePage() {
               <>
                 <div className="favorites-grid">
                   {favorites.map((item) => (
-                    <article key={`${item.itemType}-${item.itemId}`} className="favorite-card">
+                    <article
+                      key={`${item.itemType}-${item.itemId}`}
+                      className="favorite-card"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => handleFavoriteCardClick(item)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          handleFavoriteCardClick(item);
+                        }
+                      }}
+                    >
                       <button
                         type="button"
                         className="favorite-remove"
-                        onClick={() => setConfirmFavorite(item)}
+                        onClick={(event) => handleFavoriteRemoveClick(event, item)}
                         aria-label={ui.actions.removeFavorite}
                       >
                         <span aria-hidden="true">-</span>
