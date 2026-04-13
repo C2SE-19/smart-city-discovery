@@ -4359,6 +4359,141 @@ async function generateWardIdFromName(name) {
             );
         }
 
+        const SEMANTIC_REFINE_DIMENSION_ALIASES = {
+            budget: 'budget',
+            price: 'budget',
+            cost: 'budget',
+            amount: 'budget',
+            spending: 'budget',
+            service: 'service',
+            services: 'service',
+            amenity: 'service',
+            amenities: 'service',
+            feature: 'service',
+            features: 'service',
+            location: 'location',
+            area: 'location',
+            district: 'location',
+            ward: 'location',
+            neighborhood: 'location',
+            open_now: 'open_now',
+            open: 'open_now',
+            opening: 'open_now',
+            currently_open: 'open_now',
+            cuisine: 'cuisine',
+            food: 'cuisine',
+            food_type: 'cuisine',
+            activity: 'activity',
+            purpose: 'activity',
+            time: 'time',
+            time_window: 'time',
+            schedule: 'time',
+            weather: 'weather',
+            distance: 'distance',
+            radius: 'distance',
+            name: 'name',
+            brand: 'name',
+            keyword: 'keyword',
+            keywords: 'keyword',
+            must_have: 'keyword'
+        };
+
+        function normalizeSemanticRefineDimension(value) {
+            const normalized = String(value || '')
+                .trim()
+                .toLowerCase()
+                .replace(/[\s\-]+/g, '_');
+
+            if (!normalized) {
+                return '';
+            }
+
+            return SEMANTIC_REFINE_DIMENSION_ALIASES[normalized] || normalized;
+        }
+
+        function normalizeSemanticRefineDimensionList(values) {
+            if (!Array.isArray(values)) {
+                return [];
+            }
+
+            const unique = new Set();
+            values.forEach((value) => {
+                const normalized = normalizeSemanticRefineDimension(value);
+                if (normalized) {
+                    unique.add(normalized);
+                }
+            });
+
+            return [...unique];
+        }
+
+        function resolveRequiredRefineDimensions(constraints = {}) {
+            const required = new Set();
+
+            if (Number.isFinite(constraints.maxBudgetVnd) || Number.isFinite(constraints.minBudgetVnd)) {
+                required.add('budget');
+            }
+
+            if (Number.isFinite(constraints.maxDistanceKm)) {
+                required.add('distance');
+            }
+
+            if (constraints.requireOpenNow) {
+                required.add('open_now');
+            }
+
+            if (
+                constraints.requireLocationMatch
+                || (Array.isArray(constraints.locationKeywords) && constraints.locationKeywords.length > 0)
+                || (Array.isArray(constraints.locationPhrases) && constraints.locationPhrases.length > 0)
+            ) {
+                required.add('location');
+            }
+
+            if (
+                constraints.requireServiceMatch
+                || (Array.isArray(constraints.serviceKeywords) && constraints.serviceKeywords.length > 0)
+            ) {
+                required.add('service');
+            }
+
+            if (
+                constraints.requireActivityMatch
+                || (Array.isArray(constraints.activityKeywords) && constraints.activityKeywords.length > 0)
+            ) {
+                required.add('activity');
+            }
+
+            if (
+                constraints.requireFoodVenue
+                || (Array.isArray(constraints.cuisineKeywords) && constraints.cuisineKeywords.length > 0)
+                || (Array.isArray(constraints.dishStyleKeywords) && constraints.dishStyleKeywords.length > 0)
+            ) {
+                required.add('cuisine');
+            }
+
+            if (Array.isArray(constraints.nameKeywords) && constraints.nameKeywords.length > 0) {
+                required.add('name');
+            }
+
+            if (
+                constraints.requireKeywordMatch
+                || (Array.isArray(constraints.includeKeywords) && constraints.includeKeywords.length > 0)
+            ) {
+                required.add('keyword');
+            }
+
+            if (Array.isArray(constraints.preferredTimeWindows) && constraints.preferredTimeWindows.length > 0) {
+                required.add('time');
+            }
+
+            if (Array.isArray(constraints.preferredWeatherBuckets) && constraints.preferredWeatherBuckets.length > 0) {
+                required.add('weather');
+            }
+
+            return [...required];
+        }
+
         function buildSemanticVenueProfileForRefine(venue, currentTime = new Date()) {
             const metadata = normalizeVenueMetadataObject(venue?.metadata);
             const fields = buildVenueSearchFields(venue);
@@ -4414,6 +4549,9 @@ async function generateWardIdFromName(name) {
                     const venueId = Number(source.venueId ?? source.id);
                     const scoreRaw = Number(source.score ?? source.confidence ?? source.matchScore);
                     const reason = String(source.reason || source.explanation || source.matchReason || '').trim();
+                    const matchedDimensions = normalizeSemanticRefineDimensionList(
+                        source.matchedDimensions || source.dimensions || source.signals
+                    );
 
                     if (!Number.isFinite(venueId) || venueId <= 0) {
                         return null;
@@ -4422,7 +4560,8 @@ async function generateWardIdFromName(name) {
                     return {
                         venueId,
                         score: Number.isFinite(scoreRaw) ? Math.max(0, Math.min(1, scoreRaw)) : 0.75,
-                        reason
+                        reason,
+                        matchedDimensions
                     };
                 })
                 .filter(Boolean);
@@ -4438,6 +4577,7 @@ async function generateWardIdFromName(name) {
                     confidence: 0,
                     summary: 'Semantic refine is unavailable at the moment.',
                     matches: [],
+                    requiredDimensions: [],
                     model: null,
                     fallbackModelUsed: false
                 };
@@ -4454,6 +4594,7 @@ async function generateWardIdFromName(name) {
                     confidence: 0,
                     summary: 'No venue candidates available for semantic refine.',
                     matches: [],
+                    requiredDimensions: [],
                     model: null,
                     fallbackModelUsed: false
                 };
@@ -4476,11 +4617,13 @@ async function generateWardIdFromName(name) {
                                         'You are a strict semantic matcher for venue recommendation refine requests.',
                                         'Read the full sentence intent, not isolated tokens.',
                                         'Only return venues that satisfy explicit user requirements from the whole sentence.',
+                                        'Extract requiredDimensions from the user sentence and keep them strict.',
                                         'If intent is unclear, vague, or contradictory, set understood=false and return empty matches.',
                                         'Do not guess or broaden by assumptions.',
                                         'Return strict JSON with keys:',
                                         'understood (boolean), confidence (number 0..1), summary (string),',
-                                        'matches (array of { venueId:number, score:number 0..1, reason:string }).'
+                                        'requiredDimensions (array of strings from: budget, service, location, open_now, cuisine, activity, time, distance, weather, name, keyword),',
+                                        'matches (array of { venueId:number, score:number 0..1, reason:string, matchedDimensions:string[] }).'
                                     ].join(' ')
                                 },
                                 {
@@ -4510,6 +4653,9 @@ async function generateWardIdFromName(name) {
                     const confidence = Number.isFinite(confidenceRaw)
                         ? Math.max(0, Math.min(1, confidenceRaw))
                         : Boolean(parsedPayload?.understood) ? 0.7 : 0;
+                    const requiredDimensions = normalizeSemanticRefineDimensionList(
+                        parsedPayload?.requiredDimensions || parsedPayload?.intentDimensions
+                    );
                     const matches = normalizeSemanticRefineVenueMatches(
                         parsedPayload?.matches || parsedPayload?.results || parsedPayload?.venues
                     );
@@ -4520,6 +4666,7 @@ async function generateWardIdFromName(name) {
                         confidence,
                         summary,
                         matches,
+                        requiredDimensions,
                         model,
                         fallbackModelUsed: modelIndex > 0
                     };
@@ -4533,6 +4680,7 @@ async function generateWardIdFromName(name) {
                 confidence: 0,
                 summary: 'Unable to confidently understand this refine sentence.',
                 matches: [],
+                requiredDimensions: [],
                 model: null,
                 fallbackModelUsed: false
             };
@@ -4602,7 +4750,22 @@ async function generateWardIdFromName(name) {
                 passes: true,
                 refineScore: 0,
                 reasons: [],
-                hardFailures: []
+                hardFailures: [],
+                matchedDimensions: [],
+                failedDimensions: []
+            };
+
+            const matchedDimensionSet = new Set();
+            const failedDimensionSet = new Set();
+            const markMatchedDimension = (dimension) => {
+                if (dimension) {
+                    matchedDimensionSet.add(dimension);
+                }
+            };
+            const markFailedDimension = (dimension) => {
+                if (dimension) {
+                    failedDimensionSet.add(dimension);
+                }
             };
 
             const venueSearchFields = buildVenueSearchFields(venue);
@@ -4647,9 +4810,11 @@ async function generateWardIdFromName(name) {
             if (constraints.requireOpenNow) {
                 if (hasRealtimeSchedule && isOpenNow === false) {
                     result.hardFailures.push('Closed now');
+                    markFailedDimension('open_now');
                 } else if (hasRealtimeSchedule && isOpenNow) {
                     result.refineScore += 1.4;
                     result.reasons.push(`Open now (${openingTimeRange})`);
+                    markMatchedDimension('open_now');
                 }
             }
 
@@ -4659,20 +4824,25 @@ async function generateWardIdFromName(name) {
 
                 if (locationPhrases.length > 0 && phraseHits <= 0) {
                     result.hardFailures.push('Location mismatch');
+                    markFailedDimension('location');
                 } else if (constraints.requireLocationMatch && phraseHits <= 0 && keywordHits <= 0) {
                     result.hardFailures.push('Location mismatch');
+                    markFailedDimension('location');
                 } else if (phraseHits > 0 || keywordHits > 0) {
                     result.refineScore += 1.1 + Math.min(0.9, phraseHits * 0.35 + keywordHits * 0.2);
                     result.reasons.push('Matches location preference');
+                    markMatchedDimension('location');
                 }
             }
 
             if (constraints.requireFoodVenue) {
                 if (!isVenueLikelyFoodPlace(venueSearchFields)) {
                     result.hardFailures.push('Not a food venue');
+                    markFailedDimension('cuisine');
                 } else {
                     result.refineScore += 1.1;
                     result.reasons.push('Matches food intent');
+                    markMatchedDimension('cuisine');
                 }
             }
 
@@ -4682,9 +4852,11 @@ async function generateWardIdFromName(name) {
 
                 if (constraints.requireActivityMatch && activityWeightedScore <= 0) {
                     result.hardFailures.push('Activity mismatch');
+                    markFailedDimension('activity');
                 } else if (activityWeightedScore > 0) {
                     result.refineScore += 1.15 + Math.min(activityWeightedScore, 2.4) * 0.32;
                     result.reasons.push('Matches activity intent');
+                    markMatchedDimension('activity');
                 }
             }
 
@@ -4699,9 +4871,11 @@ async function generateWardIdFromName(name) {
 
                 if (constraints.requireServiceMatch && serviceWeightedScore <= 0) {
                     result.hardFailures.push('Service mismatch');
+                    markFailedDimension('service');
                 } else if (serviceWeightedScore > 0) {
                     result.refineScore += Math.min(1.85, 0.82 + serviceWeightedScore * 0.24);
                     result.reasons.push('Matches service needs');
+                    markMatchedDimension('service');
                 }
             }
 
@@ -4710,9 +4884,11 @@ async function generateWardIdFromName(name) {
 
                 if (constraints.requireNameMatch && nameHits <= 0) {
                     result.hardFailures.push('Name mismatch');
+                    markFailedDimension('name');
                 } else if (nameHits > 0) {
                     result.refineScore += Math.min(1.4, 0.9 + nameHits * 0.2);
                     result.reasons.push('Matches place name request');
+                    markMatchedDimension('name');
                 }
             }
 
@@ -4722,9 +4898,11 @@ async function generateWardIdFromName(name) {
 
                 if (cuisineWeightedScore <= 0) {
                     result.hardFailures.push('Cuisine mismatch');
+                    markFailedDimension('cuisine');
                 } else {
                     result.refineScore += 1.1 + Math.min(cuisineWeightedScore, 2.2) * 0.45;
                     result.reasons.push('Matches requested cuisine');
+                    markMatchedDimension('cuisine');
                 }
             }
 
@@ -4735,6 +4913,7 @@ async function generateWardIdFromName(name) {
                 if (dishStyleWeightedScore > 0) {
                     result.refineScore += Math.min(1.25, 0.65 + dishStyleWeightedScore * 0.28);
                     result.reasons.push('Matches dish style');
+                    markMatchedDimension('cuisine');
                 } else {
                     result.refineScore -= 0.18;
                 }
@@ -4742,6 +4921,7 @@ async function generateWardIdFromName(name) {
 
             if (excludeKeywords.length && countKeywordHits(text, excludeKeywords) > 0) {
                 result.hardFailures.push('Contains excluded terms');
+                markFailedDimension('keyword');
             }
 
             if (includeKeywords.length) {
@@ -4750,9 +4930,11 @@ async function generateWardIdFromName(name) {
 
                 if (constraints.requireKeywordMatch && includeWeightedScore <= 0) {
                     result.hardFailures.push('Missing refine keywords');
+                    markFailedDimension('keyword');
                 } else if (includeWeightedScore > 0) {
                     result.refineScore += Math.min(1.25, includeWeightedScore * 0.3);
                     result.reasons.push('Matches refine keywords');
+                    markMatchedDimension('keyword');
                 }
             }
 
@@ -4761,8 +4943,10 @@ async function generateWardIdFromName(name) {
                 if (currentWeatherBucket && preferredWeatherBuckets.includes(currentWeatherBucket)) {
                     result.refineScore += 0.85;
                     result.reasons.push(`Matches weather preference (${currentWeatherBucket})`);
+                    markMatchedDimension('weather');
                 } else if (currentWeatherBucket) {
                     result.refineScore -= 0.4;
+                    markFailedDimension('weather');
                 }
             }
 
@@ -4770,6 +4954,7 @@ async function generateWardIdFromName(name) {
                 if (preferredTimeWindows.includes(currentTimeWindowKey)) {
                     result.refineScore += 0.75;
                     result.reasons.push(`Matches preferred time (${resolveTimeWindowLabel(currentTimeWindowKey)})`);
+                    markMatchedDimension('time');
                 } else {
                     const timeKeywordHits = preferredTimeWindows.reduce((score, timeWindow) => {
                         return score + countKeywordHits(text, USER_PREFERENCE_TIME_KEYWORDS[timeWindow] || []);
@@ -4778,8 +4963,10 @@ async function generateWardIdFromName(name) {
                     if (timeKeywordHits > 0) {
                         result.refineScore += Math.min(0.9, timeKeywordHits * 0.2);
                         result.reasons.push('Matches time-related signals');
+                        markMatchedDimension('time');
                     } else {
                         result.refineScore -= 0.15;
+                        markFailedDimension('time');
                     }
                 }
             }
@@ -4789,20 +4976,26 @@ async function generateWardIdFromName(name) {
                 if (strictBudgetFloor) {
                     if (!Number.isFinite(budgetRange.minPrice)) {
                         result.hardFailures.push('Missing minimum budget data for strict floor');
+                        markFailedDimension('budget');
                     } else if (budgetRange.minPrice < constraints.minBudgetVnd) {
                         result.hardFailures.push('Under strict budget floor');
+                        markFailedDimension('budget');
                     } else {
                         result.refineScore += 1.4;
                         result.reasons.push(`Strict budget floor (${constraints.minBudgetVnd.toLocaleString('vi-VN')} VND+)`);
+                        markMatchedDimension('budget');
                     }
                 } else {
                     if (Number.isFinite(budgetRange.maxPrice) && budgetRange.maxPrice < constraints.minBudgetVnd) {
                         result.hardFailures.push('Under budget floor');
+                        markFailedDimension('budget');
                     } else if (Number.isFinite(budgetRange.minPrice) && budgetRange.minPrice >= constraints.minBudgetVnd) {
                         result.refineScore += 1.1;
                         result.reasons.push(`Budget floor fit (${constraints.minBudgetVnd.toLocaleString('vi-VN')} VND+)`);
+                        markMatchedDimension('budget');
                     } else if (Number.isFinite(budgetRange.maxPrice) && budgetRange.maxPrice >= constraints.minBudgetVnd) {
                         result.refineScore += 0.35;
+                        markMatchedDimension('budget');
                     }
                 }
             }
@@ -4811,28 +5004,37 @@ async function generateWardIdFromName(name) {
                 if (strictBudgetCap) {
                     if (Number.isFinite(budgetRange.minPrice) && budgetRange.minPrice > constraints.maxBudgetVnd) {
                         result.hardFailures.push('Over strict budget cap');
+                        markFailedDimension('budget');
                     } else if (Number.isFinite(budgetRange.maxPrice) && budgetRange.maxPrice > constraints.maxBudgetVnd) {
                         result.hardFailures.push('Over strict budget cap');
+                        markFailedDimension('budget');
                     } else if (Number.isFinite(budgetRange.maxPrice) && budgetRange.maxPrice <= constraints.maxBudgetVnd) {
                         result.refineScore += 1.7;
                         result.reasons.push(`Strict budget fit (${constraints.maxBudgetVnd.toLocaleString('vi-VN')} VND)`);
+                        markMatchedDimension('budget');
                     } else if (Number.isFinite(budgetRange.minPrice) && budgetRange.minPrice <= constraints.maxBudgetVnd) {
                         result.refineScore += 0.35;
                         result.reasons.push('Likely fits strict budget');
+                        markMatchedDimension('budget');
                     } else {
                         result.refineScore -= 0.25;
+                        markFailedDimension('budget');
                     }
                 } else {
                     if (Number.isFinite(budgetRange.minPrice) && budgetRange.minPrice > constraints.maxBudgetVnd) {
                         result.hardFailures.push('Over budget cap');
+                        markFailedDimension('budget');
                     } else if (Number.isFinite(budgetRange.maxPrice) && budgetRange.maxPrice <= constraints.maxBudgetVnd) {
                         result.refineScore += 1.5;
                         result.reasons.push(`Budget fit (${constraints.maxBudgetVnd.toLocaleString('vi-VN')} VND)`);
+                        markMatchedDimension('budget');
                     } else if (Number.isFinite(budgetRange.minPrice) && budgetRange.minPrice <= constraints.maxBudgetVnd) {
                         result.refineScore += 0.5;
                         result.reasons.push('Partially fits budget');
+                        markMatchedDimension('budget');
                     } else {
                         result.refineScore -= 0.2;
+                        markFailedDimension('budget');
                     }
                 }
             }
@@ -4844,19 +5046,24 @@ async function generateWardIdFromName(name) {
                 if (Number.isFinite(distanceKm)) {
                     if (distanceKm > constraints.maxDistanceKm) {
                         result.hardFailures.push('Too far for refine distance');
+                        markFailedDimension('distance');
                     } else {
                         result.refineScore += Math.max(
                             0.35,
                             1.15 - distanceKm / Math.max(constraints.maxDistanceKm, 0.5)
                         );
                         result.reasons.push(`Within ${constraints.maxDistanceKm} km`);
+                        markMatchedDimension('distance');
                     }
                 } else {
                     result.refineScore -= 0.15;
+                    markFailedDimension('distance');
                 }
             }
 
             result.passes = result.hardFailures.length === 0;
+            result.matchedDimensions = [...matchedDimensionSet];
+            result.failedDimensions = [...failedDimensionSet];
             return result;
         }
 
@@ -12170,6 +12377,8 @@ async function generateWardIdFromName(name) {
                                 hasRealtimeSchedule: scoring.hasRealtimeSchedule,
                                 passesRefine: refineEvaluation.passes,
                                 hardFailures: refineEvaluation.hardFailures,
+                                matchedRefineDimensions: refineEvaluation.matchedDimensions,
+                                failedRefineDimensions: refineEvaluation.failedDimensions,
                                 recommendationReasons: mergedReasons
                             };
                         })
@@ -12219,21 +12428,68 @@ async function generateWardIdFromName(name) {
                         .filter(Boolean)
                 );
 
+                const requiredRefineDimensionsFromConstraints = resolveRequiredRefineDimensions(refineConstraints);
+                const requiredRefineDimensions = Array.isArray(semanticRefine.requiredDimensions) && semanticRefine.requiredDimensions.length
+                    ? semanticRefine.requiredDimensions
+                    : requiredRefineDimensionsFromConstraints;
+                const requiresConcurrentDimensionMatch = requiredRefineDimensions.length >= 2;
+                const semanticScoreThreshold = requiresConcurrentDimensionMatch ? 0.62 : 0.48;
+
                 if (!semanticRefine.understood) {
                     refinedVenues = [];
                 } else if (semanticMatchMap.size > 0) {
                     refinedVenues = scoredVenueCandidates
-                        .filter((venue) => semanticMatchMap.has(Number(venue.id)))
+                        .filter((venue) => {
+                            const semanticMatch = semanticMatchMap.get(Number(venue.id));
+                            if (!semanticMatch) {
+                                return false;
+                            }
+
+                            const semanticScore = Number(semanticMatch.score || 0);
+                            if (semanticScore < semanticScoreThreshold) {
+                                return false;
+                            }
+
+                            const matchedDimensions = new Set([
+                                ...(Array.isArray(venue.matchedRefineDimensions) ? venue.matchedRefineDimensions : []),
+                                ...(Array.isArray(semanticMatch.matchedDimensions) ? semanticMatch.matchedDimensions : [])
+                            ]);
+                            const failedDimensions = new Set(
+                                Array.isArray(venue.failedRefineDimensions) ? venue.failedRefineDimensions : []
+                            );
+
+                            if (requiresConcurrentDimensionMatch) {
+                                const allRequiredMatched = requiredRefineDimensions.every(
+                                    (dimension) => matchedDimensions.has(dimension) && !failedDimensions.has(dimension)
+                                );
+
+                                if (!allRequiredMatched) {
+                                    return false;
+                                }
+                            }
+
+                            if (requiredRefineDimensionsFromConstraints.length >= 2 && !venue.passesRefine) {
+                                return false;
+                            }
+
+                            return true;
+                        })
                         .map((venue) => {
                             const semanticMatch = semanticMatchMap.get(Number(venue.id));
                             const semanticScore = Number(semanticMatch?.score || 0);
                             const semanticReason = String(semanticMatch?.reason || '').trim();
+                            const semanticDimensions = Array.isArray(semanticMatch?.matchedDimensions)
+                                ? semanticMatch.matchedDimensions
+                                : [];
 
                             return {
                                 ...venue,
-                                finalScore: Number((venue.finalScore + semanticScore * 3.2).toFixed(4)),
+                                finalScore: Number((venue.finalScore + semanticScore * 3.45).toFixed(4)),
                                 recommendationReasons: [...new Set([
                                     ...(Array.isArray(venue.recommendationReasons) ? venue.recommendationReasons : []),
+                                    semanticDimensions.length
+                                        ? `Semantic dimensions: ${semanticDimensions.join(', ')}`
+                                        : '',
                                     semanticReason ? `Semantic match: ${semanticReason}` : ''
                                 ].filter(Boolean))].slice(0, 5)
                             };
@@ -12297,6 +12553,7 @@ async function generateWardIdFromName(name) {
                         semanticFallbackModelUsed: Boolean(semanticRefine.fallbackModelUsed),
                         understood: Boolean(semanticRefine.understood),
                         confidence: Number(semanticRefine.confidence || 0),
+                        requiredDimensions: requiredRefineDimensions,
                         scope: refineScope,
                         summary: refineSummary,
                         constraints: refineConstraints
