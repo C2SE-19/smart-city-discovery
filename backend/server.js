@@ -243,7 +243,7 @@ async function checkUserStatus(req, res, next) {
         const userId = req.user.id;
         console.log('🔍 checkUserStatus: Checking user:', userId);
         const result = await pool.query(
-            'SELECT status, pause_until, blocked_reason FROM users WHERE id = $1',
+                'SELECT status, pause_until, blocked_reason FROM users WHERE id = $1',
             [userId]
         );
 
@@ -1034,6 +1034,43 @@ function normalizeVenueMetadataObject(metadata) {
     return {};
 }
 
+function normalizeKeywordStringArray(value) {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+
+    const extracted = value.flatMap((item) => {
+        if (typeof item === 'string' || typeof item === 'number') {
+            return [item];
+        }
+
+        if (item && typeof item === 'object') {
+            const candidates = [
+                item.name,
+                item.label,
+                item.title,
+                item.value,
+                item.text,
+                item.serviceName,
+                item.service_name,
+                item.keyword,
+                item.tag,
+                item.slug
+            ];
+
+            return candidates.filter((candidate) => typeof candidate === 'string' || typeof candidate === 'number');
+        }
+
+        return [];
+    });
+
+    return [...new Set(
+        extracted
+            .map((item) => String(item || '').trim())
+            .filter(Boolean)
+    )];
+}
+
 function normalizeStringArray(value) {
     if (!Array.isArray(value)) {
         return [];
@@ -1459,7 +1496,7 @@ function extractVenueWeeklySchedule(metadata) {
     }
 
     return WEEKLY_SCHEDULE_DAYS.map((day) => {
-        const daySchedule = source[day.key] || {};
+        const daySchedule = source?.[day.key] || {};
         const start = String(daySchedule.start || '').trim() || (hasFallbackRange ? fallbackStart : '');
         const end = String(daySchedule.end || '').trim() || (hasFallbackRange ? fallbackEnd : '');
         const off = Boolean(daySchedule.off) || start === 'OFF' || end === 'OFF';
@@ -1621,6 +1658,24 @@ function normalizePaginationValue(value, fallback, { min = 1, max = 100 } = {}) 
     }
 
     return Math.min(Math.max(parsed, min), max);
+}
+
+function normalizeBooleanQueryValue(value, fallback = false) {
+    if (value === undefined || value === null || value === '') {
+        return fallback;
+    }
+
+    const normalized = String(value).trim().toLowerCase();
+
+    if (['1', 'true', 'yes', 'on'].includes(normalized)) {
+        return true;
+    }
+
+    if (['0', 'false', 'no', 'off'].includes(normalized)) {
+        return false;
+    }
+
+    return fallback;
 }
 
 function shouldUseDatabaseSsl() {
@@ -2608,12 +2663,164 @@ async function generateWardIdFromName(name) {
         const PUBLIC_VENUES_COMPACT_CACHE_TTL_MS = 3000;
         const PUBLIC_VENUE_DETAIL_CACHE_TTL_MS = 8000;
     const PUBLIC_VENUE_COMMUNITY_CACHE_TTL_MS = 5000;
+        const OPEN_WEATHER_ENDPOINT = 'https://api.openweathermap.org/data/2.5/weather';
+        const OPEN_WEATHER_TIMEOUT_MS = 7000;
+        const OPEN_WEATHER_CACHE_TTL_MS = 5 * 60 * 1000;
+        const OPEN_WEATHER_DEFAULT_LATITUDE = 16.0544;
+        const OPEN_WEATHER_DEFAULT_LONGITUDE = 108.2022;
+        const RECOMMENDATION_REFINE_AI_ENDPOINT = 'https://api.openai.com/v1/chat/completions';
+        const RECOMMENDATION_REFINE_AI_TIMEOUT_MS = 8000;
+        const RECOMMENDATION_REFINE_AI_FALLBACK_MODELS = ['gpt-4.1-mini', 'gpt-4o-mini'];
         let publicWardsSummaryCache = { timestamp: 0, data: null };
         let publicWardsFullCache = { timestamp: 0, data: null };
         let publicCompactApprovedVenuesCache = { timestamp: 0, data: null };
         const publicVenueDetailCache = new Map();
         const publicVenueForDetailCache = new Map();
     const publicVenueCommunityBundleCache = new Map();
+        const openWeatherCache = new Map();
+
+        function resolveOpenWeatherApiKey() {
+            return String(process.env.OPENWEATHER_API_KEY || process.env.OPEN_WEATHER_API_KEY || '').trim();
+        }
+
+        function normalizeWeatherCoordinate(value, fallback, { min, max }) {
+            if (value === undefined || value === null || value === '') {
+                return fallback;
+            }
+
+            const numeric = Number(value);
+            if (!Number.isFinite(numeric) || numeric < min || numeric > max) {
+                return Number.NaN;
+            }
+
+            return numeric;
+        }
+
+        function buildOpenWeatherCacheKey(latitude, longitude) {
+            const lat = Number(latitude);
+            const lon = Number(longitude);
+            return `${lat.toFixed(3)}:${lon.toFixed(3)}`;
+        }
+
+        function mapOpenWeatherPayload(payload, latitude, longitude) {
+            const temperature = Number(payload?.main?.temp);
+            const feelsLike = Number(payload?.main?.feels_like);
+            const humidity = Number(payload?.main?.humidity);
+            const windSpeed = Number(payload?.wind?.speed);
+            const timezoneOffsetSeconds = Number(payload?.timezone);
+            const observedAtUnix = Number(payload?.dt);
+            const weather = payload?.weather?.[0] || {};
+            const normalizedOffset = Number.isFinite(timezoneOffsetSeconds) ? timezoneOffsetSeconds : 0;
+
+            return {
+                latitude: Number(latitude.toFixed(6)),
+                longitude: Number(longitude.toFixed(6)),
+                city: String(payload?.name || '').trim() || 'Da Nang',
+                country: String(payload?.sys?.country || '').trim() || 'VN',
+                conditionMain: String(weather?.main || '').trim() || 'Unknown',
+                conditionDescription: String(weather?.description || '').trim() || 'Unknown weather',
+                iconCode: String(weather?.icon || '').trim() || null,
+                temperatureC: Number.isFinite(temperature) ? Number(temperature.toFixed(1)) : null,
+                feelsLikeC: Number.isFinite(feelsLike) ? Number(feelsLike.toFixed(1)) : null,
+                humidity: Number.isFinite(humidity) ? Math.round(humidity) : null,
+                windSpeed: Number.isFinite(windSpeed) ? Number(windSpeed.toFixed(1)) : null,
+                timezoneOffsetSeconds: normalizedOffset,
+                observedAt: Number.isFinite(observedAtUnix)
+                    ? new Date(observedAtUnix * 1000).toISOString()
+                    : new Date().toISOString()
+            };
+        }
+
+        function buildFallbackWeatherPayload(latitude, longitude, source = 'fallback') {
+            const now = new Date();
+            const { nowMinutes } = getZonedNowSnapshot(now, VENUE_OPENING_TIMEZONE);
+            const isLateAfternoon = nowMinutes >= 16 * 60 && nowMinutes <= 19 * 60;
+            const isNight = nowMinutes >= 19 * 60 || nowMinutes < 5 * 60;
+
+            const conditionMain = isNight ? 'Clouds' : isLateAfternoon ? 'Clouds' : 'Clear';
+            const conditionDescription = isNight
+                ? 'cloudy night in Da Nang'
+                : isLateAfternoon
+                    ? 'partly cloudy in Da Nang'
+                    : 'sunny in Da Nang';
+
+            return {
+                latitude: Number(latitude.toFixed(6)),
+                longitude: Number(longitude.toFixed(6)),
+                city: 'Da Nang',
+                country: 'VN',
+                conditionMain,
+                conditionDescription,
+                iconCode: isNight ? '03n' : conditionMain === 'Clear' ? '01d' : '02d',
+                temperatureC: isNight ? 27 : isLateAfternoon ? 30 : 32,
+                feelsLikeC: isNight ? 29 : isLateAfternoon ? 33 : 35,
+                humidity: isNight ? 78 : 70,
+                windSpeed: 3.4,
+                timezoneOffsetSeconds: 7 * 3600,
+                observedAt: now.toISOString(),
+                source
+            };
+        }
+
+        async function getCurrentWeatherSnapshot(options = {}) {
+            const latitude = normalizeWeatherCoordinate(
+                options.latitude,
+                OPEN_WEATHER_DEFAULT_LATITUDE,
+                { min: -90, max: 90 }
+            );
+            const longitude = normalizeWeatherCoordinate(
+                options.longitude,
+                OPEN_WEATHER_DEFAULT_LONGITUDE,
+                { min: -180, max: 180 }
+            );
+
+            if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+                const coordinateError = new Error('Invalid latitude or longitude value.');
+                coordinateError.code = 'WEATHER_INVALID_COORDINATES';
+                throw coordinateError;
+            }
+
+            const cacheKey = buildOpenWeatherCacheKey(latitude, longitude);
+            const cached = getCachedMapValue(openWeatherCache, cacheKey, OPEN_WEATHER_CACHE_TTL_MS);
+            if (cached) {
+                return {
+                    ...cached,
+                    source: 'cache'
+                };
+            }
+
+            const openWeatherApiKey = resolveOpenWeatherApiKey();
+            if (!openWeatherApiKey) {
+                const fallbackPayload = buildFallbackWeatherPayload(latitude, longitude, 'fallback_no_key');
+                setCachedMapValue(openWeatherCache, cacheKey, fallbackPayload);
+                return fallbackPayload;
+            }
+
+            try {
+                const response = await axios.get(OPEN_WEATHER_ENDPOINT, {
+                    params: {
+                        lat: latitude,
+                        lon: longitude,
+                        appid: openWeatherApiKey,
+                        units: 'metric',
+                        lang: 'en'
+                    },
+                    timeout: OPEN_WEATHER_TIMEOUT_MS
+                });
+
+                const mappedPayload = mapOpenWeatherPayload(response?.data || {}, latitude, longitude);
+                setCachedMapValue(openWeatherCache, cacheKey, mappedPayload);
+
+                return {
+                    ...mappedPayload,
+                    source: 'live'
+                };
+            } catch (_error) {
+                const fallbackPayload = buildFallbackWeatherPayload(latitude, longitude, 'fallback_network');
+                setCachedMapValue(openWeatherCache, cacheKey, fallbackPayload);
+                return fallbackPayload;
+            }
+        }
 
         function getCachedMapValue(cacheMap, cacheKey, ttlMs) {
             const cached = cacheMap.get(cacheKey);
@@ -2804,12 +3011,28 @@ async function generateWardIdFromName(name) {
 
         function buildVenueRecommendationText(venue) {
             const metadata = normalizeVenueMetadataObject(venue.metadata);
-            const serviceNames = normalizeStringArray(metadata.selectedServiceNames).join(' ');
+            const serviceNames = normalizeKeywordStringArray([
+                ...(Array.isArray(metadata.selectedServiceNames) ? metadata.selectedServiceNames : []),
+                ...(Array.isArray(metadata.servicesOffered) ? metadata.servicesOffered : []),
+                ...(Array.isArray(metadata.services) ? metadata.services : []),
+                ...(Array.isArray(metadata.amenities) ? metadata.amenities : [])
+            ]).join(' ');
+            const descriptionText = [
+                venue.description,
+                metadata.description,
+                metadata.shortDescription,
+                metadata.summary,
+                metadata.overview,
+                metadata.introduction
+            ]
+                .map((item) => String(item || '').trim())
+                .filter(Boolean)
+                .join(' ');
 
             return [
                 venue.name,
                 venue.title,
-                venue.description,
+                descriptionText,
                 venue.address,
                 venue.category_name,
                 venue.ward_name,
@@ -2820,17 +3043,119 @@ async function generateWardIdFromName(name) {
                 .join(' ');
         }
 
-        function scoreVenueByUserPreference(venue, preference, userLatitude, userLongitude) {
+        function resolveCurrentPreferenceTimeWindowKey(now = new Date()) {
+            const { nowMinutes } = getZonedNowSnapshot(now, VENUE_OPENING_TIMEZONE);
+
+            if (nowMinutes < 11 * 60) {
+                return 'morning';
+            }
+
+            if (nowMinutes < 14 * 60) {
+                return 'noon';
+            }
+
+            if (nowMinutes < 18 * 60) {
+                return 'afternoon';
+            }
+
+            if (nowMinutes < 22 * 60) {
+                return 'evening';
+            }
+
+            return 'late_night';
+        }
+
+        function resolveTimeWindowLabel(timeWindowKey) {
+            return USER_PREFERENCE_TIME_WINDOWS.find((item) => item.key === timeWindowKey)?.label || timeWindowKey;
+        }
+
+        function normalizeWeatherBucket(weatherMain) {
+            const normalized = String(weatherMain || '').trim().toLowerCase();
+
+            if (!normalized) {
+                return '';
+            }
+
+            if (['rain', 'drizzle', 'thunderstorm', 'squall'].includes(normalized)) {
+                return 'rainy';
+            }
+
+            if (['clear'].includes(normalized)) {
+                return 'clear';
+            }
+
+            if (['clouds', 'mist', 'fog', 'haze', 'smoke', 'dust'].includes(normalized)) {
+                return 'cloudy';
+            }
+
+            return '';
+        }
+
+        function scoreVenueByWeatherContext(venue, weatherMain) {
+            const weatherBucket = normalizeWeatherBucket(weatherMain);
+
+            if (!weatherBucket) {
+                return { score: 0, reason: '' };
+            }
+
+            const text = buildVenueRecommendationText(venue);
+            const indoorKeywords = [
+                'indoor', 'museum', 'cafe', 'shopping', 'mall', 'cinema', 'spa', 'library',
+                'bao tang', 'quan cafe', 'trung tam thuong mai', 'rap phim'
+            ];
+            const outdoorKeywords = [
+                'beach', 'park', 'walk', 'outdoor', 'river', 'garden', 'hiking',
+                'bien', 'cong vien', 'ngoai troi', 'duong dao'
+            ];
+
+            const indoorHits = countKeywordHits(text, indoorKeywords);
+            const outdoorHits = countKeywordHits(text, outdoorKeywords);
+
+            if (weatherBucket === 'rainy') {
+                return {
+                    score: indoorHits * 0.7 - outdoorHits * 0.3,
+                    reason: indoorHits > 0 ? 'Weather fit: better for rainy conditions' : ''
+                };
+            }
+
+            if (weatherBucket === 'clear') {
+                return {
+                    score: outdoorHits * 0.55 + indoorHits * 0.1,
+                    reason: outdoorHits > 0 ? 'Weather fit: good in clear weather' : ''
+                };
+            }
+
+            return {
+                score: indoorHits * 0.35 + outdoorHits * 0.35,
+                reason: indoorHits + outdoorHits > 0 ? 'Weather fit: suitable in cloudy weather' : ''
+            };
+        }
+
+        function scoreVenueByUserPreference(venue, preference, userLatitude, userLongitude, context = {}) {
             const text = buildVenueRecommendationText(venue);
             const ageRangeKey = preference.ageRangeKey;
             const interestKeys = preference.interests;
             const visitTimes = preference.preferredTimes;
+            const currentTime = context.currentTime instanceof Date ? context.currentTime : new Date();
+            const currentTimeWindowKey =
+                String(context.currentTimeWindowKey || '').trim() || resolveCurrentPreferenceTimeWindowKey(currentTime);
+            const weatherMain = String(context.weatherMain || '').trim();
+            const preferOpenNow = Boolean(context.preferOpenNow);
+
+            const realtimeOpeningPayload = buildVenueRealtimeOpeningPayload(venue.metadata, currentTime);
+            const hasRealtimeSchedule = Array.isArray(realtimeOpeningPayload?.weeklySchedule) && realtimeOpeningPayload.weeklySchedule.length > 0;
+            const isOpenNow = hasRealtimeSchedule ? Boolean(realtimeOpeningPayload?.current?.isOpen) : null;
+            const openingTimeRange =
+                String(realtimeOpeningPayload?.current?.start || '').trim() && String(realtimeOpeningPayload?.current?.end || '').trim()
+                    ? `${realtimeOpeningPayload.current.start} - ${realtimeOpeningPayload.current.end}`
+                    : 'N/A - N/A';
 
             let interestScore = 0;
             let timeScore = 0;
             let ageScore = 0;
             let genderScore = 0;
             let nearbyScore = 0;
+            let openingScore = 0;
 
             const matchedInterestLabels = [];
             const matchedTimeLabels = [];
@@ -2854,10 +3179,15 @@ async function generateWardIdFromName(name) {
                 const hits = countKeywordHits(text, timeKeywords);
                 if (hits > 0) {
                     timeScore += 0.6 + Math.min(hits, 2) * 0.15;
-                    const label = USER_PREFERENCE_TIME_WINDOWS.find((item) => item.key === timeWindowKey)?.label || timeWindowKey;
+                    const label = resolveTimeWindowLabel(timeWindowKey);
                     matchedTimeLabels.push(label);
                 }
             });
+
+            if (currentTimeWindowKey && visitTimes.includes(currentTimeWindowKey)) {
+                timeScore += 0.95;
+                matchedTimeLabels.push(`Now (${resolveTimeWindowLabel(currentTimeWindowKey)})`);
+            }
 
             const adultHits = countKeywordHits(text, USER_PREFERENCE_ADULT_KEYWORDS);
             const familyHits = countKeywordHits(text, USER_PREFERENCE_FAMILY_KEYWORDS);
@@ -2867,6 +3197,9 @@ async function generateWardIdFromName(name) {
                 return {
                     score: -100,
                     distanceKm: null,
+                    isOpenNow,
+                    openingTimeRange,
+                    hasRealtimeSchedule,
                     reasons: ['Filtered by age safety rule']
                 };
             }
@@ -2908,20 +3241,32 @@ async function generateWardIdFromName(name) {
                 ? Math.max(0, Math.min(1, ratingValue / 5)) * 0.6
                 : 0;
 
+            if (hasRealtimeSchedule) {
+                if (isOpenNow) {
+                    openingScore += 1.2;
+                } else {
+                    openingScore -= preferOpenNow ? 2.8 : 0.8;
+                }
+            }
+
+            const weatherScoring = scoreVenueByWeatherContext(venue, weatherMain);
+
             const score =
                 interestScore * 2.2
                 + timeScore * 1.3
                 + ageScore
                 + genderScore
                 + nearbyScore * 2.1
+                + openingScore * 1.6
+                + weatherScoring.score * 1.25
                 + ratingScore;
 
             const reasons = [];
             if (matchedInterestLabels.length) {
-                reasons.push(`Matches interests: ${matchedInterestLabels.slice(0, 2).join(', ')}`);
+                reasons.push(`Matches interests: ${[...new Set(matchedInterestLabels)].slice(0, 2).join(', ')}`);
             }
             if (matchedTimeLabels.length) {
-                reasons.push(`Fits your time: ${matchedTimeLabels.slice(0, 2).join(', ')}`);
+                reasons.push(`Fits your time: ${[...new Set(matchedTimeLabels)].slice(0, 2).join(', ')}`);
             }
             if (ageReason) {
                 reasons.push(ageReason);
@@ -2929,12 +3274,1671 @@ async function generateWardIdFromName(name) {
             if (Number.isFinite(distanceKm)) {
                 reasons.push(`Nearby: ${distanceKm.toFixed(1)} km`);
             }
+            if (hasRealtimeSchedule) {
+                reasons.push(isOpenNow ? `Open now (${openingTimeRange})` : `Closed now (${openingTimeRange})`);
+            }
+            if (weatherScoring.reason) {
+                reasons.push(weatherScoring.reason);
+            }
 
             return {
                 score,
                 distanceKm: Number.isFinite(distanceKm) ? Number(distanceKm.toFixed(2)) : null,
+                isOpenNow,
+                openingTimeRange,
+                hasRealtimeSchedule,
+                currentTimeWindowKey,
                 reasons
             };
+        }
+
+        function normalizeRefineKeywordList(values) {
+            const rawItems = Array.isArray(values)
+                ? values
+                : String(values || '').split(',');
+
+            return [...new Set(
+                rawItems
+                    .map((item) => normalizeRecommendationText(item))
+                    .filter(Boolean)
+            )].slice(0, 16);
+        }
+
+        const REFINE_QUERY_ALIAS_REPLACEMENTS = [
+            [/\bqan\b/g, 'quan'],
+            [/\bqan\s+an\b/g, 'quan an'],
+            [/\bqtr\b/g, 'quan tri'],
+            [/\bko\b/g, 'khong'],
+            [/\bhok\b/g, 'khong'],
+            [/\bhong\b/g, 'khong'],
+            [/\bdc\b/g, 'duoc'],
+            [/\bmk\b/g, 'minh'],
+            [/\bbmy\b/g, 'banh mi'],
+            [/\bbmi\b/g, 'banh mi'],
+            [/\bbanh\s+my\b/g, 'banh mi'],
+            [/\bcf\b/g, 'ca phe'],
+            [/\bcfe\b/g, 'ca phe'],
+            [/\bcoffee\s+shop\b/g, 'ca phe'],
+            [/\bks\b/g, 'khach san'],
+            [/\bhotel\b/g, 'khach san'],
+            [/\brestaurant\b/g, 'nha hang'],
+            [/\bpet\s+friendly\b/g, 'pet friendly'],
+            [/\bwi\s*fi\b/g, 'wifi']
+        ];
+
+        function normalizeRefineQueryInput(queryText) {
+            let normalized = normalizeRecommendationText(queryText);
+
+            REFINE_QUERY_ALIAS_REPLACEMENTS.forEach(([pattern, replacement]) => {
+                normalized = normalized.replace(pattern, replacement);
+            });
+
+            return normalized.replace(/\s+/g, ' ').trim();
+        }
+
+        function convertHumanAmountToVnd(amountText, unitText = '') {
+            const amount = Number(String(amountText || '').replace(',', '.'));
+            if (!Number.isFinite(amount) || amount <= 0) {
+                return null;
+            }
+
+            const unit = String(unitText || '').trim().toLowerCase();
+            if (['k', 'nghin', '000'].includes(unit)) {
+                return Math.round(amount * 1000);
+            }
+
+            if (['tr', 'trieu', 'm', 'million'].includes(unit)) {
+                return Math.round(amount * 1000000);
+            }
+
+            // Treat small raw values in budget phrases as thousand-VND shorthand (e.g. "under 100").
+            if (amount <= 500) {
+                return Math.round(amount * 1000);
+            }
+
+            return Math.round(amount);
+        }
+
+        function isStrictBudgetFloorQuery(normalizedQuery) {
+            return /(?:tren|hon|from|at least|min|minimum|gia tu)/.test(normalizedQuery);
+        }
+
+        function parseBudgetFloorFromRefineQuery(normalizedQuery) {
+            const floorBudgetMatch = normalizedQuery.match(
+                /(?:gia\s*)?(?:tren|hon|from|at least|min|minimum|gia tu|tu)\s*(\d+(?:[.,]\d+)?)\s*(k|nghin|000|tr|trieu|m|million)?/
+            );
+
+            if (floorBudgetMatch) {
+                return convertHumanAmountToVnd(floorBudgetMatch[1], floorBudgetMatch[2]);
+            }
+
+            return null;
+        }
+
+        function parseBudgetCapFromRefineQuery(normalizedQuery) {
+            const strictBudgetMatch = normalizedQuery.match(
+                /(?:duoi|toi da|max|under|below|less than|within)\s*(\d+(?:[.,]\d+)?)\s*(k|nghin|000|tr|trieu|m|million)?/
+            );
+
+            if (strictBudgetMatch) {
+                return convertHumanAmountToVnd(strictBudgetMatch[1], strictBudgetMatch[2]);
+            }
+
+            const rangeUpperMatch = normalizedQuery.match(
+                /(?:den|to)\s*(\d+(?:[.,]\d+)?)\s*(k|nghin|000|tr|trieu|m|million)?/
+            );
+
+            if (rangeUpperMatch) {
+                return convertHumanAmountToVnd(rangeUpperMatch[1], rangeUpperMatch[2]);
+            }
+
+            if (isStrictBudgetFloorQuery(normalizedQuery) && !isStrictBudgetCapQuery(normalizedQuery)) {
+                return null;
+            }
+
+            const looseBudgetMatch = normalizedQuery.match(/(\d+(?:[.,]\d+)?)\s*(k|nghin|000|tr|trieu|m|million)\b/);
+            const hasBudgetSignal = /\b(gia|budget|price|vnd|dong)\b/.test(normalizedQuery);
+
+            if (looseBudgetMatch && hasBudgetSignal) {
+                return convertHumanAmountToVnd(looseBudgetMatch[1], looseBudgetMatch[2]);
+            }
+
+            return null;
+        }
+
+        function parseDistanceCapKmFromRefineQuery(normalizedQuery) {
+            const distanceMatch = normalizedQuery.match(
+                /(?:duoi|toi da|max|within|under|gan|near|around)\s*(\d+(?:[.,]\d+)?)\s*(km|kilometer|kilomet)/
+            ) || normalizedQuery.match(/(\d+(?:[.,]\d+)?)\s*(km|kilometer|kilomet)\b/);
+
+            if (!distanceMatch) {
+                return null;
+            }
+
+            const parsed = Number(String(distanceMatch[1] || '').replace(',', '.'));
+            if (!Number.isFinite(parsed) || parsed <= 0) {
+                return null;
+            }
+
+            return Number(parsed.toFixed(2));
+        }
+
+        const REFINE_CUISINE_HINTS = [
+            ['hotpot', ['lau', 'hotpot', 'shabu']],
+            ['bbq', ['nuong', 'bbq', 'grill']],
+            ['seafood', ['hai san', 'seafood']],
+            ['coffee', ['ca phe', 'cafe', 'coffee']],
+            ['banh mi', ['banh mi', 'sandwich']],
+            ['street food', ['an vat', 'street food', 'snack']],
+            ['vegetarian', ['chay', 'vegetarian', 'vegan']],
+            ['japanese', ['nhat', 'japanese', 'sushi', 'ramen']],
+            ['korean', ['han quoc', 'korean']],
+            ['chinese', ['trung', 'chinese', 'dim sum']],
+            ['dessert', ['dessert', 'banh ngot', 'sweet', 'tra sua', 'milk tea']]
+        ];
+
+        const REFINE_QUERY_STOPWORDS = new Set([
+            'toi', 'muon', 'tim', 'quan', 'nha', 'hang', 'cho', 'minh', 'giup', 'de', 'va', 'voi',
+            'duoi', 'toi da', 'max', 'under', 'below', 'less', 'than', 'within', 'gan', 'near', 'around', 'tren', 'hon', 'from', 'least', 'minimum', 'min',
+            'open', 'now', 'dang', 'mo', 'con', 'cua', 'place', 'places', 'restaurant', 'restaurants',
+            'food', 'do', 'an', 'gia', 'budget', 'price', 'duoc', 'khong', 'the', 'co', 'o', 'tai',
+            'mon', 'may', 'ten', 'named', 'called', 'name', 'dia', 'diem',
+            'want', 'find', 'show', 'please', 'help', 'me', 'you', 'for', 'and', 'the', 'with', 'friendly',
+            'eat', 'eating', 'meal', 'meals', 'dining', 'eatery',
+            'khi', 'buoi', 'mua', 'rain', 'rainy', 'sunny', 'clear', 'cloudy',
+            'sang', 'trua', 'chieu', 'toi', 'dem', 'morning', 'noon', 'afternoon', 'evening', 'night',
+            'kiem', 'search', 'searching', 'lookup', 'looking', 'look', 'where',
+            'nearby', 'nearest', 'close', 'closer', 'aroundme', 'around_me'
+        ]);
+
+        const REFINE_FOOD_INTENT_PATTERN = /(?:\bquan an\b|\bnha hang\b|\bam thuc\b|\bdo an\b|\ban uong\b|\ban toi\b|\ban trua\b|\ban sang\b|\beat(?:ing)?\b|\bfood\b|\brestaurants?\b|\beatery\b|\bdining\b|\bmeals?\b|\blunch\b|\bdinner\b|\bbreakfast\b)/;
+
+        const REFINE_FOOD_KEYWORDS = [
+            'food', 'restaurant', 'dining', 'eatery', 'cuisine',
+            'quan an', 'nha hang', 'am thuc', 'do an', 'an uong', 'quan nhau',
+            'lau', 'nuong', 'hai san', 'bun', 'pho', 'com', 'mi quang', 'cao lau', 'banh mi',
+            'ca phe', 'cafe', 'coffee', 'tra sua', 'milk tea', 'dessert', 'an vat', 'snack'
+        ];
+
+        const REFINE_FOOD_CATEGORY_KEYWORDS = [
+            'food', 'restaurant', 'dining', 'am thuc', 'quan an', 'nha hang',
+            'coffee', 'cafe', 'beverage', 'drink', 'do uong'
+        ];
+
+        const REFINE_ACTIVITY_HINTS = [
+            ['swimming', ['boi', 'di boi', 'cho boi', 'be boi', 'ho boi', 'swim', 'swimming', 'cong vien nuoc', 'water park', 'suoi']],
+            ['amusement', ['khu vui choi', 'vui choi', 'giai tri', 'entertainment', 'theme park', 'arcade', 'game center', 'playground']],
+            ['nature', ['ngoai troi', 'outdoor', 'hiking', 'trekking', 'camping', 'beach', 'bien', 'river', 'cong vien']]
+        ];
+
+        const REFINE_SERVICE_HINTS = [
+            ['wifi', ['wifi', 'wi fi', 'internet', 'lam viec', 'work', 'workspace', 'co wifi']],
+            ['parking', ['bai do xe', 'giu xe', 'parking', 'car park', 'do oto', 'do xe may']],
+            ['delivery', ['giao hang', 'ship', 'delivery', 'takeaway', 'mang ve']],
+            ['private room', ['phong rieng', 'private room', 'vip room']],
+            ['pet friendly', ['pet friendly', 'cho thu cung', 'mang pet', 'pet']],
+            ['family', ['tre em', 'kid friendly', 'gia dinh', 'family friendly', 'baby chair']],
+            ['booking', ['dat ban', 'booking', 'reservation', 'reserve']]
+        ];
+
+        const REFINE_DISH_STYLE_HINTS = [
+            ['spicy', ['cay', 'spicy', 'sa te', 'sate', 'hot flavor']],
+            ['soupy', ['mon nuoc', 'nuoc dung', 'soup', 'broth', 'pho', 'bun', 'hu tieu', 'mi nuoc']],
+            ['drink', ['do uong', 'beverage', 'drink', 'juice', 'tea', 'tra sua', 'milk tea', 'coffee', 'ca phe']]
+        ];
+
+        const REFINE_WEATHER_BUCKET_HINTS = [
+            ['rainy', ['mua', 'rain', 'rainy', 'drizzle', 'thunderstorm']],
+            ['clear', ['nang', 'sunny', 'clear']],
+            ['cloudy', ['nhieu may', 'cloudy', 'mist', 'fog', 'haze']]
+        ];
+
+        const REFINE_TIME_WINDOW_HINTS = [
+            ['morning', ['buoi sang', 'an sang', 'morning', 'breakfast']],
+            ['noon', ['buoi trua', 'an trua', 'noon', 'lunch']],
+            ['afternoon', ['buoi chieu', 'afternoon']],
+            ['evening', ['buoi toi', 'toi nay', 'an toi', 'evening', 'dinner']],
+            ['late_night', ['khuya', 'dem', 'late night', 'night', 'midnight']]
+        ];
+
+        function normalizeRefinePhraseList(values, limit = 8) {
+            const rawItems = Array.isArray(values)
+                ? values
+                : String(values || '').split(',');
+
+            return [...new Set(
+                rawItems
+                    .map((item) => normalizeRecommendationText(item))
+                    .filter((item) => item.length >= 2)
+            )].slice(0, limit);
+        }
+
+        function normalizeRefineWeatherBucketList(values) {
+            const rawItems = Array.isArray(values) ? values : String(values || '').split(',');
+            const supported = new Set(['rainy', 'clear', 'cloudy']);
+
+            return [...new Set(
+                rawItems
+                    .map((item) => normalizeWeatherBucket(item) || normalizeRecommendationText(item))
+                    .filter((item) => supported.has(item))
+            )].slice(0, 3);
+        }
+
+        function normalizeRefineTimeWindowList(values) {
+            const rawItems = Array.isArray(values) ? values : String(values || '').split(',');
+            const supported = new Set(USER_PREFERENCE_TIME_WINDOWS.map((item) => item.key));
+
+            return [...new Set(
+                rawItems
+                    .map((item) => normalizeRecommendationText(item).replace(/\s+/g, '_'))
+                    .map((item) => {
+                        if (item === 'late_night' || item === 'latenight') {
+                            return 'late_night';
+                        }
+                        return item;
+                    })
+                    .filter((item) => supported.has(item))
+            )].slice(0, 4);
+        }
+
+        function detectHintKeywordsFromQuery(normalizedQuery, hintPairs = []) {
+            const matched = [];
+
+            hintPairs.forEach(([, keywords]) => {
+                if (countKeywordHits(normalizedQuery, keywords) > 0) {
+                    matched.push(...keywords);
+                }
+            });
+
+            return normalizeRefineKeywordList(matched);
+        }
+
+        function detectWeatherBucketsFromQuery(normalizedQuery) {
+            return [...new Set(
+                REFINE_WEATHER_BUCKET_HINTS
+                    .filter(([, keywords]) => countKeywordHits(normalizedQuery, keywords) > 0)
+                    .map(([bucket]) => bucket)
+            )];
+        }
+
+        function detectTimeWindowsFromQuery(normalizedQuery) {
+            return [...new Set(
+                REFINE_TIME_WINDOW_HINTS
+                    .filter(([, keywords]) => countKeywordHits(normalizedQuery, keywords) > 0)
+                    .map(([timeWindow]) => timeWindow)
+            )];
+        }
+
+        function detectExplicitActivityIntent(normalizedQuery) {
+            return REFINE_ACTIVITY_HINTS.some(([, keywords]) => countKeywordHits(normalizedQuery, keywords) > 0);
+        }
+
+        function isStrictBudgetCapQuery(normalizedQuery) {
+            return /(?:duoi|toi da|max|under|below|less than|at most|khong qua)/.test(normalizedQuery);
+        }
+
+        function sanitizeRefineLocationPhrase(rawValue) {
+            let phrase = normalizeRecommendationText(rawValue);
+
+            if (!phrase) {
+                return '';
+            }
+
+            phrase = phrase
+                .split(/\b(?:duoi|toi da|max|under|below|within|open|dang|mo|weather|thoi tiet|cay|spicy|food|restaurant|budget|price|sang|trua|chieu|toi|dem|morning|noon|afternoon|evening|night)\b/)[0]
+                .trim();
+
+            if (!phrase) {
+                return '';
+            }
+
+            const tokens = phrase
+                .split(' ')
+                .map((token) => token.trim())
+                .filter(Boolean)
+                .slice(0, 6);
+
+            return tokens.length >= 2 ? tokens.join(' ') : '';
+        }
+
+        function extractLocationPhrasesFromRefineQuery(normalizedQuery) {
+            const candidates = [];
+
+            const anchoredMatches = normalizedQuery.matchAll(
+                /(?:phuong|ward|district|duong|street|road|hem|alley)\s+[a-z0-9\s]{2,40}/g
+            );
+
+            for (const match of anchoredMatches) {
+                candidates.push(match[0]);
+            }
+
+            const prepositionMatches = normalizedQuery.matchAll(
+                /(?:\bo\b|\btai\b|\bat\b|\bin\b|\bnear\b|\bgan\b)\s+([a-z0-9\s]{2,40})/g
+            );
+
+            for (const match of prepositionMatches) {
+                candidates.push(match[1]);
+            }
+
+            return [...new Set(
+                candidates
+                    .map((candidate) => sanitizeRefineLocationPhrase(candidate))
+                    .filter(Boolean)
+            )].slice(0, 4);
+        }
+
+        function extractLocationKeywordsFromPhrases(locationPhrases = []) {
+            return normalizeRefineKeywordList(
+                locationPhrases
+                    .flatMap((phrase) => phrase.split(' '))
+                    .filter((token) => token.length >= 3)
+                    .filter((token) => !REFINE_QUERY_STOPWORDS.has(token))
+            ).slice(0, 12);
+        }
+
+        function extractNameKeywordsFromRefineQuery(normalizedQuery) {
+            const candidates = [];
+
+            const anchoredMatches = normalizedQuery.matchAll(
+                /(?:ten|name|named|called)\s+([a-z0-9\s]{2,40})/g
+            );
+
+            for (const match of anchoredMatches) {
+                candidates.push(match[1]);
+            }
+
+            return normalizeRefineKeywordList(
+                candidates
+                    .flatMap((phrase) => normalizeRecommendationText(phrase).split(' '))
+                    .filter((token) => token.length >= 2)
+                    .filter((token) => !REFINE_QUERY_STOPWORDS.has(token))
+            ).slice(0, 8);
+        }
+
+        function detectFoodIntent(normalizedQuery) {
+            if (REFINE_FOOD_INTENT_PATTERN.test(normalizedQuery)) {
+                return true;
+            }
+
+            const tokens = String(normalizedQuery || '')
+                .split(' ')
+                .map((token) => token.trim())
+                .filter(Boolean);
+            const hasStandaloneEatToken = tokens.includes('an') || tokens.includes('eat') || tokens.includes('eating');
+
+            return hasStandaloneEatToken && tokens.length <= 2;
+        }
+
+        function buildVenueSearchFields(venue) {
+            const metadata = normalizeVenueMetadataObject(venue?.metadata);
+            const serviceNames = normalizeKeywordStringArray([
+                ...(Array.isArray(metadata.selectedServiceNames) ? metadata.selectedServiceNames : []),
+                ...(Array.isArray(metadata.servicesOffered) ? metadata.servicesOffered : []),
+                ...(Array.isArray(metadata.services) ? metadata.services : []),
+                ...(Array.isArray(metadata.amenities) ? metadata.amenities : [])
+            ]).join(' ');
+            const metadataKeywords = normalizeKeywordStringArray([
+                ...(Array.isArray(metadata.tags) ? metadata.tags : []),
+                ...(Array.isArray(metadata.keywords) ? metadata.keywords : []),
+                ...(Array.isArray(metadata.highlights) ? metadata.highlights : []),
+                ...(Array.isArray(metadata.features) ? metadata.features : [])
+            ]).join(' ');
+
+            const nameText = [venue?.name, venue?.title]
+                .map((item) => String(item || '').trim())
+                .filter(Boolean)
+                .join(' ');
+            const categoryText = String(venue?.category_name || '').trim();
+            const descriptionText = [
+                venue?.description,
+                metadata.description,
+                metadata.shortDescription,
+                metadata.summary,
+                metadata.overview,
+                metadata.introduction
+            ]
+                .map((item) => String(item || '').trim())
+                .filter(Boolean)
+                .join(' ');
+            const addressText = [venue?.address, venue?.ward_name]
+                .map((item) => String(item || '').trim())
+                .filter(Boolean)
+                .join(' ');
+
+            return {
+                nameText,
+                categoryText,
+                descriptionText,
+                addressText,
+                serviceNames,
+                metadataKeywords,
+                fullText: [
+                    nameText,
+                    categoryText,
+                    descriptionText,
+                    serviceNames,
+                    metadataKeywords,
+                    addressText
+                ]
+                    .filter(Boolean)
+                    .join(' ')
+            };
+        }
+
+        function scoreKeywordHitsByVenueFields(fields, keywords = []) {
+            return {
+                nameHits: countKeywordHits(fields.nameText, keywords),
+                categoryHits: countKeywordHits(fields.categoryText, keywords),
+                descriptionHits: countKeywordHits(fields.descriptionText, keywords),
+                serviceHits: countKeywordHits(fields.serviceNames, keywords),
+                metadataHits: countKeywordHits(fields.metadataKeywords, keywords)
+            };
+        }
+
+        function resolveWeightedFieldHitScore(fieldHits) {
+            return (
+                fieldHits.nameHits * 1.25
+                + fieldHits.categoryHits * 1.05
+                + fieldHits.descriptionHits * 1.15
+                + fieldHits.serviceHits * 1.85
+                + fieldHits.metadataHits * 0.75
+            );
+        }
+
+        function isVenueLikelyFoodPlace(fields) {
+            const normalizedCategory = normalizeRecommendationText(fields.categoryText);
+            const categoryHits = countKeywordHits(fields.categoryText, REFINE_FOOD_CATEGORY_KEYWORDS);
+            const foodFieldHits = scoreKeywordHitsByVenueFields(fields, REFINE_FOOD_KEYWORDS);
+            const weightedFoodScore = resolveWeightedFieldHitScore(foodFieldHits);
+
+            if (categoryHits > 0) {
+                return true;
+            }
+
+            if (normalizedCategory) {
+                return weightedFoodScore >= 2.2;
+            }
+
+            return weightedFoodScore >= 1;
+        }
+
+        function detectCuisineKeywords(normalizedQuery) {
+            const matched = [];
+
+            REFINE_CUISINE_HINTS.forEach(([, keywords]) => {
+                if (countKeywordHits(normalizedQuery, keywords) > 0) {
+                    matched.push(...keywords);
+                }
+            });
+
+            return normalizeRefineKeywordList(matched);
+        }
+
+        function tokenizeRefineQueryKeywords(normalizedQuery) {
+            return [...new Set(
+                normalizedQuery
+                    .split(' ')
+                    .map((token) => token.trim())
+                    .filter((token) => token.length >= 3)
+                    .filter((token) => !/[0-9]/.test(token))
+                    .filter((token) => !REFINE_QUERY_STOPWORDS.has(token))
+            )].slice(0, 12);
+        }
+
+        function expandStructuredKeywordTokens(values = []) {
+            return normalizeRefineKeywordList(
+                values
+                    .flatMap((value) => normalizeRecommendationText(value).split(' '))
+                    .filter((token) => token.length >= 3)
+                    .filter((token) => !REFINE_QUERY_STOPWORDS.has(token))
+            );
+        }
+
+        function buildHeuristicRefineConstraints(queryText) {
+            const normalizedQuery = normalizeRefineQueryInput(queryText);
+            const budgetCapVnd = parseBudgetCapFromRefineQuery(normalizedQuery);
+            const budgetFloorVnd = parseBudgetFloorFromRefineQuery(normalizedQuery);
+            const distanceCapKm = parseDistanceCapKmFromRefineQuery(normalizedQuery);
+            const strictBudgetCap = Number.isFinite(budgetCapVnd) && isStrictBudgetCapQuery(normalizedQuery);
+            const strictBudgetFloor = Number.isFinite(budgetFloorVnd) && isStrictBudgetFloorQuery(normalizedQuery);
+            const requireOpenNow =
+                /(?:open now|dang mo|con mo|mo cua|mo den khuya|open late)/.test(normalizedQuery)
+                && !/(?:khong can mo|not open now|closed is fine)/.test(normalizedQuery);
+            const requireFoodVenue = detectFoodIntent(normalizedQuery);
+
+            const cuisineKeywords = detectCuisineKeywords(normalizedQuery);
+            const activityKeywords = detectHintKeywordsFromQuery(normalizedQuery, REFINE_ACTIVITY_HINTS);
+            const dishStyleKeywords = detectHintKeywordsFromQuery(normalizedQuery, REFINE_DISH_STYLE_HINTS);
+            const serviceKeywords = detectHintKeywordsFromQuery(normalizedQuery, REFINE_SERVICE_HINTS);
+            const nameKeywords = extractNameKeywordsFromRefineQuery(normalizedQuery);
+            const preferredWeatherBuckets = detectWeatherBucketsFromQuery(normalizedQuery);
+            const preferredTimeWindows = detectTimeWindowsFromQuery(normalizedQuery);
+            const locationPhrases = extractLocationPhrasesFromRefineQuery(normalizedQuery);
+            const locationKeywords = extractLocationKeywordsFromPhrases(locationPhrases);
+            const requireLocationMatch = locationPhrases.length > 0;
+            const requireActivityMatch = activityKeywords.length > 0;
+            const requireServiceMatch = serviceKeywords.length > 0;
+            const requireNameMatch = nameKeywords.length > 0;
+
+            const blockedIncludeTokens = new Set([
+                ...cuisineKeywords,
+                ...activityKeywords,
+                ...dishStyleKeywords,
+                ...serviceKeywords,
+                ...nameKeywords,
+                ...locationKeywords
+            ]);
+
+            expandStructuredKeywordTokens([
+                ...cuisineKeywords,
+                ...activityKeywords,
+                ...dishStyleKeywords,
+                ...serviceKeywords,
+                ...nameKeywords,
+                ...locationKeywords
+            ]).forEach((token) => blockedIncludeTokens.add(token));
+
+            const includeKeywords = tokenizeRefineQueryKeywords(normalizedQuery).filter(
+                (token) => !blockedIncludeTokens.has(token)
+            );
+            const hasStructuredConstraints =
+                Number.isFinite(budgetCapVnd)
+                || Number.isFinite(budgetFloorVnd)
+                || Number.isFinite(distanceCapKm)
+                || requireOpenNow
+                || locationPhrases.length > 0
+                || activityKeywords.length > 0
+                || dishStyleKeywords.length > 0
+                || cuisineKeywords.length > 0
+                || serviceKeywords.length > 0
+                || nameKeywords.length > 0;
+            const requireKeywordMatch = includeKeywords.length > 0 && !hasStructuredConstraints;
+
+            return {
+                maxBudgetVnd: Number.isFinite(budgetCapVnd) ? budgetCapVnd : null,
+                minBudgetVnd: Number.isFinite(budgetFloorVnd) ? budgetFloorVnd : null,
+                maxDistanceKm: Number.isFinite(distanceCapKm) ? distanceCapKm : null,
+                strictBudgetCap,
+                strictBudgetFloor,
+                requireOpenNow,
+                requireFoodVenue: Boolean(requireFoodVenue || cuisineKeywords.length > 0 || dishStyleKeywords.length > 0),
+                requireLocationMatch,
+                requireActivityMatch,
+                requireServiceMatch,
+                requireNameMatch,
+                requireKeywordMatch,
+                locationKeywords,
+                locationPhrases,
+                activityKeywords,
+                dishStyleKeywords,
+                serviceKeywords,
+                nameKeywords,
+                preferredWeatherBuckets,
+                preferredTimeWindows,
+                cuisineKeywords,
+                includeKeywords,
+                excludeKeywords: []
+            };
+        }
+
+        function extractJsonObjectFromModelResponse(content) {
+            const raw = String(content || '').trim();
+            if (!raw) {
+                return '';
+            }
+
+            const fencedMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+            const candidate = fencedMatch ? fencedMatch[1] : raw;
+            const startIndex = candidate.indexOf('{');
+            const endIndex = candidate.lastIndexOf('}');
+
+            if (startIndex === -1 || endIndex === -1 || endIndex <= startIndex) {
+                return candidate.trim();
+            }
+
+            return candidate.slice(startIndex, endIndex + 1).trim();
+        }
+
+        function normalizeRefineConstraintsPayload(payload) {
+            const source = payload && typeof payload === 'object' && !Array.isArray(payload)
+                ? payload
+                : {};
+
+            const budgetCandidate = Number(source.maxBudgetVnd ?? source.maxBudget ?? source.budgetCapVnd);
+            const budgetFloorCandidate = Number(source.minBudgetVnd ?? source.minBudget ?? source.budgetFloorVnd);
+            const distanceCandidate = Number(source.maxDistanceKm ?? source.distanceKm ?? source.maxDistance);
+
+            return {
+                maxBudgetVnd: Number.isFinite(budgetCandidate) && budgetCandidate > 0
+                    ? Math.round(budgetCandidate)
+                    : null,
+                minBudgetVnd: Number.isFinite(budgetFloorCandidate) && budgetFloorCandidate > 0
+                    ? Math.round(budgetFloorCandidate)
+                    : null,
+                maxDistanceKm: Number.isFinite(distanceCandidate) && distanceCandidate > 0
+                    ? Number(distanceCandidate.toFixed(2))
+                    : null,
+                strictBudgetCap: Boolean(source.strictBudgetCap ?? source.requireStrictBudget),
+                strictBudgetFloor: Boolean(source.strictBudgetFloor ?? source.requireMinBudget),
+                requireOpenNow: Boolean(source.requireOpenNow),
+                requireFoodVenue: Boolean(source.requireFoodVenue ?? source.requireRestaurantOnly),
+                requireLocationMatch: Boolean(source.requireLocationMatch),
+                requireActivityMatch: Boolean(source.requireActivityMatch),
+                requireServiceMatch: Boolean(source.requireServiceMatch),
+                requireNameMatch: Boolean(source.requireNameMatch),
+                requireKeywordMatch: Boolean(source.requireKeywordMatch ?? source.strictIncludeMatch),
+                locationKeywords: normalizeRefineKeywordList(source.locationKeywords),
+                locationPhrases: normalizeRefinePhraseList(source.locationPhrases),
+                activityKeywords: normalizeRefineKeywordList(source.activityKeywords),
+                dishStyleKeywords: normalizeRefineKeywordList(source.dishStyleKeywords),
+                serviceKeywords: normalizeRefineKeywordList(source.serviceKeywords),
+                nameKeywords: normalizeRefineKeywordList(source.nameKeywords),
+                preferredWeatherBuckets: normalizeRefineWeatherBucketList(source.preferredWeatherBuckets ?? source.weatherBuckets),
+                preferredTimeWindows: normalizeRefineTimeWindowList(source.preferredTimeWindows ?? source.timeWindows),
+                cuisineKeywords: normalizeRefineKeywordList(source.cuisineKeywords),
+                includeKeywords: normalizeRefineKeywordList(source.includeKeywords),
+                excludeKeywords: normalizeRefineKeywordList(source.excludeKeywords)
+            };
+        }
+
+        function mergeRefineConstraints(baseConstraints, overrideConstraints) {
+            const mergedLocationKeywords = normalizeRefineKeywordList([
+                ...(baseConstraints.locationKeywords || []),
+                ...(overrideConstraints.locationKeywords || [])
+            ]);
+            const mergedLocationPhrases = normalizeRefinePhraseList([
+                ...(baseConstraints.locationPhrases || []),
+                ...(overrideConstraints.locationPhrases || [])
+            ]);
+            const mergedActivityKeywords = normalizeRefineKeywordList([
+                ...(baseConstraints.activityKeywords || []),
+                ...(overrideConstraints.activityKeywords || [])
+            ]);
+            const mergedDishStyleKeywords = normalizeRefineKeywordList([
+                ...(baseConstraints.dishStyleKeywords || []),
+                ...(overrideConstraints.dishStyleKeywords || [])
+            ]);
+            const mergedServiceKeywords = normalizeRefineKeywordList([
+                ...(baseConstraints.serviceKeywords || []),
+                ...(overrideConstraints.serviceKeywords || [])
+            ]);
+            const mergedNameKeywords = normalizeRefineKeywordList([
+                ...(baseConstraints.nameKeywords || []),
+                ...(overrideConstraints.nameKeywords || [])
+            ]);
+            const mergedPreferredWeatherBuckets = normalizeRefineWeatherBucketList([
+                ...(baseConstraints.preferredWeatherBuckets || []),
+                ...(overrideConstraints.preferredWeatherBuckets || [])
+            ]);
+            const mergedPreferredTimeWindows = normalizeRefineTimeWindowList([
+                ...(baseConstraints.preferredTimeWindows || []),
+                ...(overrideConstraints.preferredTimeWindows || [])
+            ]);
+            const mergedCuisineKeywords = normalizeRefineKeywordList([
+                ...(baseConstraints.cuisineKeywords || []),
+                ...(overrideConstraints.cuisineKeywords || [])
+            ]);
+            const mergedIncludeKeywords = normalizeRefineKeywordList([
+                ...(baseConstraints.includeKeywords || []),
+                ...(overrideConstraints.includeKeywords || [])
+            ]);
+            const mergedExcludeKeywords = normalizeRefineKeywordList([
+                ...(baseConstraints.excludeKeywords || []),
+                ...(overrideConstraints.excludeKeywords || [])
+            ]);
+
+            const mergedBudgetCap = Number.isFinite(overrideConstraints.maxBudgetVnd)
+                ? overrideConstraints.maxBudgetVnd
+                : baseConstraints.maxBudgetVnd;
+            const mergedBudgetFloor = Number.isFinite(overrideConstraints.minBudgetVnd)
+                ? overrideConstraints.minBudgetVnd
+                : baseConstraints.minBudgetVnd;
+            const mergedDistanceCap = Number.isFinite(overrideConstraints.maxDistanceKm)
+                ? overrideConstraints.maxDistanceKm
+                : baseConstraints.maxDistanceKm;
+
+            return {
+                maxBudgetVnd: Number.isFinite(mergedBudgetCap) ? Math.round(mergedBudgetCap) : null,
+                minBudgetVnd: Number.isFinite(mergedBudgetFloor) ? Math.round(mergedBudgetFloor) : null,
+                maxDistanceKm: Number.isFinite(mergedDistanceCap) ? Number(mergedDistanceCap.toFixed(2)) : null,
+                strictBudgetCap: Boolean(baseConstraints.strictBudgetCap || overrideConstraints.strictBudgetCap),
+                strictBudgetFloor: Boolean(baseConstraints.strictBudgetFloor || overrideConstraints.strictBudgetFloor),
+                requireOpenNow: Boolean(baseConstraints.requireOpenNow || overrideConstraints.requireOpenNow),
+                requireFoodVenue: Boolean(baseConstraints.requireFoodVenue || overrideConstraints.requireFoodVenue),
+                requireLocationMatch: Boolean(baseConstraints.requireLocationMatch || overrideConstraints.requireLocationMatch),
+                requireActivityMatch: Boolean(baseConstraints.requireActivityMatch || overrideConstraints.requireActivityMatch),
+                requireServiceMatch: Boolean(baseConstraints.requireServiceMatch || overrideConstraints.requireServiceMatch),
+                requireNameMatch: Boolean(baseConstraints.requireNameMatch || overrideConstraints.requireNameMatch),
+                requireKeywordMatch: Boolean(baseConstraints.requireKeywordMatch || overrideConstraints.requireKeywordMatch),
+                locationKeywords: mergedLocationKeywords,
+                locationPhrases: mergedLocationPhrases,
+                activityKeywords: mergedActivityKeywords,
+                dishStyleKeywords: mergedDishStyleKeywords,
+                serviceKeywords: mergedServiceKeywords,
+                nameKeywords: mergedNameKeywords,
+                preferredWeatherBuckets: mergedPreferredWeatherBuckets,
+                preferredTimeWindows: mergedPreferredTimeWindows,
+                cuisineKeywords: mergedCuisineKeywords,
+                includeKeywords: mergedIncludeKeywords,
+                excludeKeywords: mergedExcludeKeywords
+            };
+        }
+
+        function postProcessRefineConstraints(queryText, constraintsInput) {
+            const normalizedQuery = normalizeRefineQueryInput(queryText);
+            const normalized = normalizeRefineConstraintsPayload(constraintsInput);
+
+            const locationPhrases = [...new Set(
+                normalizeRefinePhraseList(normalized.locationPhrases)
+                    .map((phrase) => sanitizeRefineLocationPhrase(phrase))
+                    .filter(Boolean)
+            )];
+            const locationKeywords = normalizeRefineKeywordList(normalized.locationKeywords);
+            const dishStyleKeywords = normalizeRefineKeywordList(normalized.dishStyleKeywords);
+            const serviceKeywords = normalizeRefineKeywordList(normalized.serviceKeywords);
+            const nameKeywords = normalizeRefineKeywordList(normalized.nameKeywords);
+            const cuisineKeywords = normalizeRefineKeywordList(normalized.cuisineKeywords);
+            let activityKeywords = normalizeRefineKeywordList(normalized.activityKeywords)
+                .filter((token) => !cuisineKeywords.includes(token))
+                .filter((token) => !serviceKeywords.includes(token));
+            const excludeKeywords = normalizeRefineKeywordList(normalized.excludeKeywords);
+            const explicitActivityIntent = detectExplicitActivityIntent(normalizedQuery);
+
+            if (!explicitActivityIntent) {
+                activityKeywords = [];
+            }
+
+            const blockedIncludeTokens = new Set([
+                ...locationKeywords,
+                ...activityKeywords,
+                ...dishStyleKeywords,
+                ...serviceKeywords,
+                ...nameKeywords,
+                ...cuisineKeywords
+            ]);
+
+            expandStructuredKeywordTokens([
+                ...locationKeywords,
+                ...activityKeywords,
+                ...dishStyleKeywords,
+                ...serviceKeywords,
+                ...nameKeywords,
+                ...cuisineKeywords
+            ]).forEach((token) => blockedIncludeTokens.add(token));
+
+            const includeKeywords = normalizeRefineKeywordList(normalized.includeKeywords)
+                .filter((token) => !blockedIncludeTokens.has(token));
+
+            const hasStructuredConstraints =
+                Number.isFinite(normalized.maxBudgetVnd)
+                || Number.isFinite(normalized.minBudgetVnd)
+                || Number.isFinite(normalized.maxDistanceKm)
+                || Boolean(normalized.requireOpenNow)
+                || locationPhrases.length > 0
+                || activityKeywords.length > 0
+                || dishStyleKeywords.length > 0
+                || serviceKeywords.length > 0
+                || nameKeywords.length > 0
+                || cuisineKeywords.length > 0;
+
+            const strictBudgetCap = Boolean(
+                normalized.strictBudgetCap
+                || (Number.isFinite(normalized.maxBudgetVnd) && isStrictBudgetCapQuery(normalizedQuery))
+            );
+            const strictBudgetFloor = Boolean(
+                normalized.strictBudgetFloor
+                || (Number.isFinite(normalized.minBudgetVnd) && isStrictBudgetFloorQuery(normalizedQuery))
+            );
+
+            let maxBudgetVnd = Number.isFinite(normalized.maxBudgetVnd) ? normalized.maxBudgetVnd : null;
+            let minBudgetVnd = Number.isFinite(normalized.minBudgetVnd) ? normalized.minBudgetVnd : null;
+
+            if (Number.isFinite(maxBudgetVnd) && Number.isFinite(minBudgetVnd) && minBudgetVnd > maxBudgetVnd) {
+                if (strictBudgetFloor && !strictBudgetCap) {
+                    maxBudgetVnd = null;
+                } else if (strictBudgetCap && !strictBudgetFloor) {
+                    minBudgetVnd = null;
+                } else {
+                    const fallbackMin = Math.min(minBudgetVnd, maxBudgetVnd);
+                    const fallbackMax = Math.max(minBudgetVnd, maxBudgetVnd);
+                    minBudgetVnd = fallbackMin;
+                    maxBudgetVnd = fallbackMax;
+                }
+            }
+
+            return {
+                maxBudgetVnd,
+                minBudgetVnd,
+                maxDistanceKm: Number.isFinite(normalized.maxDistanceKm) ? normalized.maxDistanceKm : null,
+                strictBudgetCap,
+                strictBudgetFloor,
+                requireOpenNow: Boolean(normalized.requireOpenNow),
+                requireFoodVenue: Boolean(
+                    normalized.requireFoodVenue
+                    || cuisineKeywords.length > 0
+                    || dishStyleKeywords.length > 0
+                    || detectFoodIntent(normalizedQuery)
+                ),
+                requireLocationMatch: Boolean(normalized.requireLocationMatch || locationPhrases.length > 0),
+                requireActivityMatch: Boolean((normalized.requireActivityMatch || activityKeywords.length > 0) && explicitActivityIntent),
+                requireServiceMatch: Boolean(normalized.requireServiceMatch || serviceKeywords.length > 0),
+                requireNameMatch: Boolean(normalized.requireNameMatch || nameKeywords.length > 0),
+                requireKeywordMatch: Boolean(
+                    normalized.requireKeywordMatch
+                    && includeKeywords.length > 0
+                    && !hasStructuredConstraints
+                ),
+                locationKeywords,
+                locationPhrases,
+                activityKeywords,
+                dishStyleKeywords,
+                serviceKeywords,
+                nameKeywords,
+                preferredWeatherBuckets: normalizeRefineWeatherBucketList(normalized.preferredWeatherBuckets),
+                preferredTimeWindows: normalizeRefineTimeWindowList(normalized.preferredTimeWindows),
+                cuisineKeywords,
+                includeKeywords,
+                excludeKeywords
+            };
+        }
+
+        function resolveRecommendationRefineModelCandidates() {
+            const configuredModels = [
+                process.env.OPENAI_RECOMMENDER_MODEL,
+                process.env.OPENAI_MODEL
+            ]
+                .map((value) => String(value || '').trim())
+                .filter(Boolean);
+
+            return [...new Set([
+                ...configuredModels,
+                ...RECOMMENDATION_REFINE_AI_FALLBACK_MODELS
+            ])];
+        }
+
+        function shouldUseRecommendationRefineLlm() {
+            const rawValue = String(process.env.RECOMMENDATION_REFINE_USE_LLM || '')
+                .trim()
+                .toLowerCase();
+
+            return ['1', 'true', 'yes', 'on'].includes(rawValue);
+        }
+
+        function buildRecommendationRefineJsonSchemaPrompt() {
+            return [
+                'Return strict JSON object only with keys:',
+                'maxBudgetVnd (number|null), minBudgetVnd (number|null), maxDistanceKm (number|null), requireOpenNow (boolean),',
+                'strictBudgetCap (boolean), requireFoodVenue (boolean), requireLocationMatch (boolean),',
+                'strictBudgetFloor (boolean), requireActivityMatch (boolean), requireServiceMatch (boolean), requireNameMatch (boolean), requireKeywordMatch (boolean),',
+                'locationKeywords (string[]), locationPhrases (string[]), activityKeywords (string[]), dishStyleKeywords (string[]), serviceKeywords (string[]), nameKeywords (string[]),',
+                'preferredWeatherBuckets (string[]), preferredTimeWindows (string[]),',
+                'cuisineKeywords (string[]), includeKeywords (string[]), excludeKeywords (string[]).'
+            ].join(' ');
+        }
+
+        async function callRecommendationRefineLlmPass({
+            openAiApiKey,
+            model,
+            systemPrompt,
+            userPrompt
+        }) {
+            const response = await axios.post(
+                RECOMMENDATION_REFINE_AI_ENDPOINT,
+                {
+                    model,
+                    temperature: 0,
+                    response_format: { type: 'json_object' },
+                    messages: [
+                        {
+                            role: 'system',
+                            content: systemPrompt
+                        },
+                        {
+                            role: 'user',
+                            content: userPrompt
+                        }
+                    ]
+                },
+                {
+                    headers: {
+                        Authorization: `Bearer ${openAiApiKey}`,
+                        'Content-Type': 'application/json'
+                    },
+                    timeout: RECOMMENDATION_REFINE_AI_TIMEOUT_MS
+                }
+            );
+
+            const content = response?.data?.choices?.[0]?.message?.content;
+            const jsonText = extractJsonObjectFromModelResponse(content);
+            return normalizeRefineConstraintsPayload(JSON.parse(jsonText || '{}'));
+        }
+
+        async function parseRecommendationRefineConstraints(queryText) {
+            const normalizedIntentQuery = normalizeRefineQueryInput(queryText);
+            const heuristicConstraints = postProcessRefineConstraints(
+                queryText,
+                buildHeuristicRefineConstraints(queryText)
+            );
+            const llmRefineEnabled = shouldUseRecommendationRefineLlm();
+            const openAiApiKey = String(process.env.OPENAI_API_KEY || '').trim();
+            const modelCandidates = resolveRecommendationRefineModelCandidates();
+
+            if (!llmRefineEnabled) {
+                return {
+                    constraints: heuristicConstraints,
+                    agent: {
+                        mode: 'data_heuristic',
+                        model: null,
+                        passes: 0
+                    }
+                };
+            }
+
+            if (!openAiApiKey || !modelCandidates.length) {
+                return {
+                    constraints: heuristicConstraints,
+                    agent: {
+                        mode: 'heuristic',
+                        model: null,
+                        passes: 0
+                    }
+                };
+            }
+
+            const schemaPrompt = buildRecommendationRefineJsonSchemaPrompt();
+
+            for (let modelIndex = 0; modelIndex < modelCandidates.length; modelIndex += 1) {
+                const model = modelCandidates[modelIndex];
+
+                let passOneConstraints;
+                try {
+                    const passOnePayload = await callRecommendationRefineLlmPass({
+                        openAiApiKey,
+                        model,
+                        systemPrompt: [
+                            'You parse user refine requests for venue recommendation constraints.',
+                            'You are pass 1 of 2.',
+                            'Understand Vietnamese, teencode abbreviations, and English, including mixed phrases.',
+                            'Extract only constraints implied by user intent.',
+                            schemaPrompt
+                        ].join(' '),
+                        userPrompt: JSON.stringify({
+                            query: String(queryText || ''),
+                            normalizedQuery: normalizedIntentQuery
+                        })
+                    });
+
+                    passOneConstraints = postProcessRefineConstraints(
+                        queryText,
+                        mergeRefineConstraints(heuristicConstraints, passOnePayload)
+                    );
+                } catch (_passOneError) {
+                    continue;
+                }
+
+                try {
+                    const passTwoPayload = await callRecommendationRefineLlmPass({
+                        openAiApiKey,
+                        model,
+                        systemPrompt: [
+                            'You are the second-pass validator for recommendation refine constraints.',
+                            'Review and repair constraints from pass 1.',
+                            'Resolve contradictions and avoid over-filtering.',
+                            'Rules:',
+                            '1) If locationPhrases is not empty, requireLocationMatch must be true.',
+                            '2) If activityKeywords is not empty, requireActivityMatch must be true.',
+                            '3) If serviceKeywords is not empty, requireServiceMatch must be true.',
+                            '4) If nameKeywords is not empty, requireNameMatch must be true.',
+                            '5) If maxBudgetVnd is present and query says under/below/duoi/toi da/khong qua, strictBudgetCap must be true.',
+                            '6) If minBudgetVnd is present and query says tren/hon/from/at least/minimum, strictBudgetFloor must be true.',
+                            '7) Do not force requireKeywordMatch when structured constraints exist.',
+                            '8) Remove duplicate overlap between location/activity/dish/service/name/cuisine/include keywords.',
+                            schemaPrompt
+                        ].join(' '),
+                        userPrompt: JSON.stringify({
+                            query: String(queryText || ''),
+                            normalizedQuery: normalizedIntentQuery,
+                            heuristicConstraints,
+                            passOneConstraints
+                        })
+                    });
+
+                    return {
+                        constraints: postProcessRefineConstraints(
+                            queryText,
+                            mergeRefineConstraints(passOneConstraints, passTwoPayload)
+                        ),
+                        agent: {
+                            mode: 'llm_two_pass',
+                            model,
+                            passes: 2,
+                            fallbackModelUsed: modelIndex > 0
+                        }
+                    };
+                } catch (_passTwoError) {
+                    return {
+                        constraints: passOneConstraints,
+                        agent: {
+                            mode: 'llm_one_pass',
+                            model,
+                            passes: 1,
+                            fallbackModelUsed: modelIndex > 0
+                        }
+                    };
+                }
+            }
+
+            return {
+                constraints: heuristicConstraints,
+                agent: {
+                    mode: 'heuristic_fallback',
+                    model: null,
+                    passes: 0
+                }
+            };
+        }
+
+        function hasStructuredRefineSignals(constraints = {}) {
+            return Boolean(
+                Number.isFinite(constraints.maxBudgetVnd)
+                || Number.isFinite(constraints.minBudgetVnd)
+                || Number.isFinite(constraints.maxDistanceKm)
+                || Boolean(constraints.requireOpenNow)
+                || Boolean(constraints.requireFoodVenue)
+                || (Array.isArray(constraints.locationKeywords) && constraints.locationKeywords.length > 0)
+                || (Array.isArray(constraints.locationPhrases) && constraints.locationPhrases.length > 0)
+                || (Array.isArray(constraints.activityKeywords) && constraints.activityKeywords.length > 0)
+                || (Array.isArray(constraints.dishStyleKeywords) && constraints.dishStyleKeywords.length > 0)
+                || (Array.isArray(constraints.serviceKeywords) && constraints.serviceKeywords.length > 0)
+                || (Array.isArray(constraints.nameKeywords) && constraints.nameKeywords.length > 0)
+                || (Array.isArray(constraints.preferredWeatherBuckets) && constraints.preferredWeatherBuckets.length > 0)
+                || (Array.isArray(constraints.preferredTimeWindows) && constraints.preferredTimeWindows.length > 0)
+                || (Array.isArray(constraints.cuisineKeywords) && constraints.cuisineKeywords.length > 0)
+                || (Array.isArray(constraints.includeKeywords) && constraints.includeKeywords.length > 0)
+                || (Array.isArray(constraints.excludeKeywords) && constraints.excludeKeywords.length > 0)
+            );
+        }
+
+        function buildSemanticVenueProfileForRefine(venue, currentTime = new Date()) {
+            const metadata = normalizeVenueMetadataObject(venue?.metadata);
+            const fields = buildVenueSearchFields(venue);
+            const budgetRange = resolveVenueBudgetRange(venue);
+            const openingPayload = buildVenueRealtimeOpeningPayload(venue?.metadata, currentTime);
+            const hasRealtimeSchedule = Array.isArray(openingPayload?.weeklySchedule) && openingPayload.weeklySchedule.length > 0;
+            const isOpenNow = hasRealtimeSchedule ? Boolean(openingPayload?.current?.isOpen) : null;
+            const openingTimeRange =
+                String(openingPayload?.current?.start || '').trim() && String(openingPayload?.current?.end || '').trim()
+                    ? `${openingPayload.current.start} - ${openingPayload.current.end}`
+                    : '';
+
+            const serviceNames = normalizeKeywordStringArray([
+                ...(Array.isArray(metadata.selectedServiceNames) ? metadata.selectedServiceNames : []),
+                ...(Array.isArray(metadata.servicesOffered) ? metadata.servicesOffered : []),
+                ...(Array.isArray(metadata.services) ? metadata.services : []),
+                ...(Array.isArray(metadata.amenities) ? metadata.amenities : [])
+            ]).slice(0, 16);
+
+            const keywordSignals = normalizeKeywordStringArray([
+                ...(Array.isArray(metadata.tags) ? metadata.tags : []),
+                ...(Array.isArray(metadata.keywords) ? metadata.keywords : []),
+                ...(Array.isArray(metadata.features) ? metadata.features : []),
+                ...(Array.isArray(metadata.highlights) ? metadata.highlights : [])
+            ]).slice(0, 16);
+
+            return {
+                venueId: Number(venue?.id),
+                name: String(venue?.name || '').trim(),
+                title: String(venue?.title || '').trim(),
+                category: String(venue?.category_name || '').trim(),
+                address: String(venue?.address || '').trim(),
+                ward: String(venue?.ward_name || '').trim(),
+                description: String(fields.descriptionText || '').trim(),
+                services: serviceNames,
+                keywords: keywordSignals,
+                priceMinVnd: budgetRange.minPrice,
+                priceMaxVnd: budgetRange.maxPrice,
+                openNow: isOpenNow,
+                openingHours: openingTimeRange,
+                averageRating: Number(venue?.average_rating || venue?.averageRating || 0)
+            };
+        }
+
+        function normalizeSemanticRefineVenueMatches(values) {
+            if (!Array.isArray(values)) {
+                return [];
+            }
+
+            return values
+                .map((item) => {
+                    const source = item && typeof item === 'object' ? item : {};
+                    const venueId = Number(source.venueId ?? source.id);
+                    const scoreRaw = Number(source.score ?? source.confidence ?? source.matchScore);
+                    const reason = String(source.reason || source.explanation || source.matchReason || '').trim();
+
+                    if (!Number.isFinite(venueId) || venueId <= 0) {
+                        return null;
+                    }
+
+                    return {
+                        venueId,
+                        score: Number.isFinite(scoreRaw) ? Math.max(0, Math.min(1, scoreRaw)) : 0.75,
+                        reason
+                    };
+                })
+                .filter(Boolean);
+        }
+
+        async function runSemanticVenueRefine({ queryText, candidateVenues, currentTime }) {
+            const openAiApiKey = String(process.env.OPENAI_API_KEY || '').trim();
+            const modelCandidates = resolveRecommendationRefineModelCandidates();
+
+            if (!openAiApiKey || !modelCandidates.length) {
+                return {
+                    understood: false,
+                    confidence: 0,
+                    summary: 'Semantic refine is unavailable at the moment.',
+                    matches: [],
+                    model: null,
+                    fallbackModelUsed: false
+                };
+            }
+
+            const venueProfiles = (Array.isArray(candidateVenues) ? candidateVenues : [])
+                .map((venue) => buildSemanticVenueProfileForRefine(venue, currentTime))
+                .filter((item) => Number.isFinite(item.venueId) && item.venueId > 0)
+                .slice(0, 120);
+
+            if (!venueProfiles.length) {
+                return {
+                    understood: false,
+                    confidence: 0,
+                    summary: 'No venue candidates available for semantic refine.',
+                    matches: [],
+                    model: null,
+                    fallbackModelUsed: false
+                };
+            }
+
+            for (let modelIndex = 0; modelIndex < modelCandidates.length; modelIndex += 1) {
+                const model = modelCandidates[modelIndex];
+
+                try {
+                    const response = await axios.post(
+                        RECOMMENDATION_REFINE_AI_ENDPOINT,
+                        {
+                            model,
+                            temperature: 0,
+                            response_format: { type: 'json_object' },
+                            messages: [
+                                {
+                                    role: 'system',
+                                    content: [
+                                        'You are a strict semantic matcher for venue recommendation refine requests.',
+                                        'Read the full sentence intent, not isolated tokens.',
+                                        'Only return venues that satisfy explicit user requirements from the whole sentence.',
+                                        'If intent is unclear, vague, or contradictory, set understood=false and return empty matches.',
+                                        'Do not guess or broaden by assumptions.',
+                                        'Return strict JSON with keys:',
+                                        'understood (boolean), confidence (number 0..1), summary (string),',
+                                        'matches (array of { venueId:number, score:number 0..1, reason:string }).'
+                                    ].join(' ')
+                                },
+                                {
+                                    role: 'user',
+                                    content: JSON.stringify({
+                                        query: String(queryText || '').trim(),
+                                        venues: venueProfiles
+                                    })
+                                }
+                            ]
+                        },
+                        {
+                            headers: {
+                                Authorization: `Bearer ${openAiApiKey}`,
+                                'Content-Type': 'application/json'
+                            },
+                            timeout: Math.max(12000, RECOMMENDATION_REFINE_AI_TIMEOUT_MS + 4000)
+                        }
+                    );
+
+                    const content = response?.data?.choices?.[0]?.message?.content;
+                    const jsonText = extractJsonObjectFromModelResponse(content);
+                    const parsedPayload = JSON.parse(jsonText || '{}');
+
+                    const summary = String(parsedPayload?.summary || parsedPayload?.understandingSummary || '').trim();
+                    const confidenceRaw = Number(parsedPayload?.confidence);
+                    const confidence = Number.isFinite(confidenceRaw)
+                        ? Math.max(0, Math.min(1, confidenceRaw))
+                        : Boolean(parsedPayload?.understood) ? 0.7 : 0;
+                    const matches = normalizeSemanticRefineVenueMatches(
+                        parsedPayload?.matches || parsedPayload?.results || parsedPayload?.venues
+                    );
+                    const understood = Boolean(parsedPayload?.understood) && confidence >= 0.45 && (Boolean(summary) || matches.length > 0);
+
+                    return {
+                        understood,
+                        confidence,
+                        summary,
+                        matches,
+                        model,
+                        fallbackModelUsed: modelIndex > 0
+                    };
+                } catch (_semanticError) {
+                    continue;
+                }
+            }
+
+            return {
+                understood: false,
+                confidence: 0,
+                summary: 'Unable to confidently understand this refine sentence.',
+                matches: [],
+                model: null,
+                fallbackModelUsed: false
+            };
+        }
+
+        function resolveVenueBudgetRange(venue) {
+            const metadata = normalizeVenueMetadataObject(venue?.metadata);
+            let minPrice = Number(metadata.minPrice ?? metadata.min_price);
+            let maxPrice = Number(metadata.maxPrice ?? metadata.max_price);
+
+            if (!Number.isFinite(minPrice) || minPrice <= 0) {
+                minPrice = null;
+            }
+
+            if (!Number.isFinite(maxPrice) || maxPrice <= 0) {
+                maxPrice = null;
+            }
+
+            if (minPrice === null || maxPrice === null) {
+                const textCandidates = [
+                    metadata.priceRange,
+                    metadata.price,
+                    metadata.price_range,
+                    venue?.price_range,
+                    venue?.price
+                ]
+                    .map((item) => String(item || '').trim().toLowerCase())
+                    .filter(Boolean);
+
+                const parsedValues = [];
+                const amountPattern = /(\d+(?:[.,]\d+)?)\s*(k|nghin|000|tr|trieu|m|million)?/g;
+
+                textCandidates.forEach((item) => {
+                    const matches = [...item.matchAll(amountPattern)];
+                    matches.forEach((match) => {
+                        const converted = convertHumanAmountToVnd(match[1], match[2]);
+                        if (Number.isFinite(converted) && converted > 0) {
+                            parsedValues.push(converted);
+                        }
+                    });
+                });
+
+                if (parsedValues.length) {
+                    if (minPrice === null) {
+                        minPrice = Math.min(...parsedValues);
+                    }
+                    if (maxPrice === null) {
+                        maxPrice = Math.max(...parsedValues);
+                    }
+                }
+            }
+
+            if (Number.isFinite(minPrice) && Number.isFinite(maxPrice) && minPrice > maxPrice) {
+                const temp = minPrice;
+                minPrice = maxPrice;
+                maxPrice = temp;
+            }
+
+            return {
+                minPrice: Number.isFinite(minPrice) ? minPrice : null,
+                maxPrice: Number.isFinite(maxPrice) ? maxPrice : null
+            };
+        }
+
+        function evaluateVenueAgainstRefineConstraints(venue, constraints, context = {}) {
+            const result = {
+                passes: true,
+                refineScore: 0,
+                reasons: [],
+                hardFailures: []
+            };
+
+            const venueSearchFields = buildVenueSearchFields(venue);
+            const text = venueSearchFields.fullText;
+            const userLatitude = Number(context.userLatitude);
+            const userLongitude = Number(context.userLongitude);
+            const currentTime = context.currentTime instanceof Date ? context.currentTime : new Date();
+            const weatherMain = String(context.weatherMain || '').trim();
+            const currentTimeWindowKey = resolveCurrentPreferenceTimeWindowKey(currentTime);
+            const locationText = `${venueSearchFields.addressText || ''} ${venue.ward_name || ''}`.trim();
+            const normalizedLocationText = normalizeRecommendationText(locationText);
+
+            const strictBudgetCap = Boolean(constraints.strictBudgetCap);
+            const strictBudgetFloor = Boolean(constraints.strictBudgetFloor);
+            const cuisineKeywords = Array.isArray(constraints.cuisineKeywords) ? constraints.cuisineKeywords : [];
+            const includeKeywords = Array.isArray(constraints.includeKeywords) ? constraints.includeKeywords : [];
+            const excludeKeywords = Array.isArray(constraints.excludeKeywords) ? constraints.excludeKeywords : [];
+            const locationKeywords = Array.isArray(constraints.locationKeywords) ? constraints.locationKeywords : [];
+            const locationPhrases = Array.isArray(constraints.locationPhrases) ? constraints.locationPhrases : [];
+            const activityKeywords = Array.isArray(constraints.activityKeywords) ? constraints.activityKeywords : [];
+            const dishStyleKeywords = Array.isArray(constraints.dishStyleKeywords) ? constraints.dishStyleKeywords : [];
+            const serviceKeywords = Array.isArray(constraints.serviceKeywords) ? constraints.serviceKeywords : [];
+            const nameKeywords = Array.isArray(constraints.nameKeywords) ? constraints.nameKeywords : [];
+            const preferredWeatherBuckets = Array.isArray(constraints.preferredWeatherBuckets)
+                ? constraints.preferredWeatherBuckets
+                : [];
+            const preferredTimeWindows = Array.isArray(constraints.preferredTimeWindows)
+                ? constraints.preferredTimeWindows
+                : [];
+
+            const openingPayload = buildVenueRealtimeOpeningPayload(venue.metadata, currentTime);
+            const hasRealtimeSchedule = Array.isArray(openingPayload?.weeklySchedule) && openingPayload.weeklySchedule.length > 0;
+            const isOpenNow = hasRealtimeSchedule ? Boolean(openingPayload.current?.isOpen) : null;
+            const openingTimeRange =
+                String(openingPayload?.current?.start || '').trim() && String(openingPayload?.current?.end || '').trim()
+                    ? `${openingPayload.current.start} - ${openingPayload.current.end}`
+                    : 'N/A - N/A';
+
+            result.isOpenNow = isOpenNow;
+            result.openingTimeRange = openingTimeRange;
+
+            if (constraints.requireOpenNow) {
+                if (hasRealtimeSchedule && isOpenNow === false) {
+                    result.hardFailures.push('Closed now');
+                } else if (hasRealtimeSchedule && isOpenNow) {
+                    result.refineScore += 1.4;
+                    result.reasons.push(`Open now (${openingTimeRange})`);
+                }
+            }
+
+            if (constraints.requireLocationMatch || locationPhrases.length || locationKeywords.length) {
+                const phraseHits = locationPhrases.filter((phrase) => normalizedLocationText.includes(phrase)).length;
+                const keywordHits = countKeywordHits(locationText, locationKeywords);
+
+                if (locationPhrases.length > 0 && phraseHits <= 0) {
+                    result.hardFailures.push('Location mismatch');
+                } else if (constraints.requireLocationMatch && phraseHits <= 0 && keywordHits <= 0) {
+                    result.hardFailures.push('Location mismatch');
+                } else if (phraseHits > 0 || keywordHits > 0) {
+                    result.refineScore += 1.1 + Math.min(0.9, phraseHits * 0.35 + keywordHits * 0.2);
+                    result.reasons.push('Matches location preference');
+                }
+            }
+
+            if (constraints.requireFoodVenue) {
+                if (!isVenueLikelyFoodPlace(venueSearchFields)) {
+                    result.hardFailures.push('Not a food venue');
+                } else {
+                    result.refineScore += 1.1;
+                    result.reasons.push('Matches food intent');
+                }
+            }
+
+            if (activityKeywords.length) {
+                const activityFieldHits = scoreKeywordHitsByVenueFields(venueSearchFields, activityKeywords);
+                const activityWeightedScore = resolveWeightedFieldHitScore(activityFieldHits);
+
+                if (constraints.requireActivityMatch && activityWeightedScore <= 0) {
+                    result.hardFailures.push('Activity mismatch');
+                } else if (activityWeightedScore > 0) {
+                    result.refineScore += 1.15 + Math.min(activityWeightedScore, 2.4) * 0.32;
+                    result.reasons.push('Matches activity intent');
+                }
+            }
+
+            if (serviceKeywords.length) {
+                const serviceFieldHits = scoreKeywordHitsByVenueFields(venueSearchFields, serviceKeywords);
+                const serviceWeightedScore =
+                    serviceFieldHits.serviceHits * 2.35
+                    + serviceFieldHits.metadataHits * 1.2
+                    + serviceFieldHits.descriptionHits * 0.95
+                    + serviceFieldHits.categoryHits * 0.45
+                    + serviceFieldHits.nameHits * 0.35;
+
+                if (constraints.requireServiceMatch && serviceWeightedScore <= 0) {
+                    result.hardFailures.push('Service mismatch');
+                } else if (serviceWeightedScore > 0) {
+                    result.refineScore += Math.min(1.85, 0.82 + serviceWeightedScore * 0.24);
+                    result.reasons.push('Matches service needs');
+                }
+            }
+
+            if (nameKeywords.length) {
+                const nameHits = countKeywordHits(venueSearchFields.nameText, nameKeywords);
+
+                if (constraints.requireNameMatch && nameHits <= 0) {
+                    result.hardFailures.push('Name mismatch');
+                } else if (nameHits > 0) {
+                    result.refineScore += Math.min(1.4, 0.9 + nameHits * 0.2);
+                    result.reasons.push('Matches place name request');
+                }
+            }
+
+            if (cuisineKeywords.length) {
+                const cuisineFieldHits = scoreKeywordHitsByVenueFields(venueSearchFields, cuisineKeywords);
+                const cuisineWeightedScore = resolveWeightedFieldHitScore(cuisineFieldHits);
+
+                if (cuisineWeightedScore <= 0) {
+                    result.hardFailures.push('Cuisine mismatch');
+                } else {
+                    result.refineScore += 1.1 + Math.min(cuisineWeightedScore, 2.2) * 0.45;
+                    result.reasons.push('Matches requested cuisine');
+                }
+            }
+
+            if (dishStyleKeywords.length) {
+                const dishStyleFieldHits = scoreKeywordHitsByVenueFields(venueSearchFields, dishStyleKeywords);
+                const dishStyleWeightedScore = resolveWeightedFieldHitScore(dishStyleFieldHits);
+
+                if (dishStyleWeightedScore > 0) {
+                    result.refineScore += Math.min(1.25, 0.65 + dishStyleWeightedScore * 0.28);
+                    result.reasons.push('Matches dish style');
+                } else {
+                    result.refineScore -= 0.18;
+                }
+            }
+
+            if (excludeKeywords.length && countKeywordHits(text, excludeKeywords) > 0) {
+                result.hardFailures.push('Contains excluded terms');
+            }
+
+            if (includeKeywords.length) {
+                const includeFieldHits = scoreKeywordHitsByVenueFields(venueSearchFields, includeKeywords);
+                const includeWeightedScore = resolveWeightedFieldHitScore(includeFieldHits);
+
+                if (constraints.requireKeywordMatch && includeWeightedScore <= 0) {
+                    result.hardFailures.push('Missing refine keywords');
+                } else if (includeWeightedScore > 0) {
+                    result.refineScore += Math.min(1.25, includeWeightedScore * 0.3);
+                    result.reasons.push('Matches refine keywords');
+                }
+            }
+
+            if (preferredWeatherBuckets.length) {
+                const currentWeatherBucket = normalizeWeatherBucket(weatherMain);
+                if (currentWeatherBucket && preferredWeatherBuckets.includes(currentWeatherBucket)) {
+                    result.refineScore += 0.85;
+                    result.reasons.push(`Matches weather preference (${currentWeatherBucket})`);
+                } else if (currentWeatherBucket) {
+                    result.refineScore -= 0.4;
+                }
+            }
+
+            if (preferredTimeWindows.length) {
+                if (preferredTimeWindows.includes(currentTimeWindowKey)) {
+                    result.refineScore += 0.75;
+                    result.reasons.push(`Matches preferred time (${resolveTimeWindowLabel(currentTimeWindowKey)})`);
+                } else {
+                    const timeKeywordHits = preferredTimeWindows.reduce((score, timeWindow) => {
+                        return score + countKeywordHits(text, USER_PREFERENCE_TIME_KEYWORDS[timeWindow] || []);
+                    }, 0);
+
+                    if (timeKeywordHits > 0) {
+                        result.refineScore += Math.min(0.9, timeKeywordHits * 0.2);
+                        result.reasons.push('Matches time-related signals');
+                    } else {
+                        result.refineScore -= 0.15;
+                    }
+                }
+            }
+
+            const budgetRange = resolveVenueBudgetRange(venue);
+            if (Number.isFinite(constraints.minBudgetVnd)) {
+                if (strictBudgetFloor) {
+                    if (!Number.isFinite(budgetRange.minPrice)) {
+                        result.hardFailures.push('Missing minimum budget data for strict floor');
+                    } else if (budgetRange.minPrice < constraints.minBudgetVnd) {
+                        result.hardFailures.push('Under strict budget floor');
+                    } else {
+                        result.refineScore += 1.4;
+                        result.reasons.push(`Strict budget floor (${constraints.minBudgetVnd.toLocaleString('vi-VN')} VND+)`);
+                    }
+                } else {
+                    if (Number.isFinite(budgetRange.maxPrice) && budgetRange.maxPrice < constraints.minBudgetVnd) {
+                        result.hardFailures.push('Under budget floor');
+                    } else if (Number.isFinite(budgetRange.minPrice) && budgetRange.minPrice >= constraints.minBudgetVnd) {
+                        result.refineScore += 1.1;
+                        result.reasons.push(`Budget floor fit (${constraints.minBudgetVnd.toLocaleString('vi-VN')} VND+)`);
+                    } else if (Number.isFinite(budgetRange.maxPrice) && budgetRange.maxPrice >= constraints.minBudgetVnd) {
+                        result.refineScore += 0.35;
+                    }
+                }
+            }
+
+            if (Number.isFinite(constraints.maxBudgetVnd)) {
+                if (strictBudgetCap) {
+                    if (Number.isFinite(budgetRange.minPrice) && budgetRange.minPrice > constraints.maxBudgetVnd) {
+                        result.hardFailures.push('Over strict budget cap');
+                    } else if (Number.isFinite(budgetRange.maxPrice) && budgetRange.maxPrice > constraints.maxBudgetVnd) {
+                        result.hardFailures.push('Over strict budget cap');
+                    } else if (Number.isFinite(budgetRange.maxPrice) && budgetRange.maxPrice <= constraints.maxBudgetVnd) {
+                        result.refineScore += 1.7;
+                        result.reasons.push(`Strict budget fit (${constraints.maxBudgetVnd.toLocaleString('vi-VN')} VND)`);
+                    } else if (Number.isFinite(budgetRange.minPrice) && budgetRange.minPrice <= constraints.maxBudgetVnd) {
+                        result.refineScore += 0.35;
+                        result.reasons.push('Likely fits strict budget');
+                    } else {
+                        result.refineScore -= 0.25;
+                    }
+                } else {
+                    if (Number.isFinite(budgetRange.minPrice) && budgetRange.minPrice > constraints.maxBudgetVnd) {
+                        result.hardFailures.push('Over budget cap');
+                    } else if (Number.isFinite(budgetRange.maxPrice) && budgetRange.maxPrice <= constraints.maxBudgetVnd) {
+                        result.refineScore += 1.5;
+                        result.reasons.push(`Budget fit (${constraints.maxBudgetVnd.toLocaleString('vi-VN')} VND)`);
+                    } else if (Number.isFinite(budgetRange.minPrice) && budgetRange.minPrice <= constraints.maxBudgetVnd) {
+                        result.refineScore += 0.5;
+                        result.reasons.push('Partially fits budget');
+                    } else {
+                        result.refineScore -= 0.2;
+                    }
+                }
+            }
+
+            const distanceKm = computeDistanceKm(userLatitude, userLongitude, venue.latitude, venue.longitude);
+            result.distanceKm = Number.isFinite(distanceKm) ? Number(distanceKm.toFixed(2)) : null;
+
+            if (Number.isFinite(constraints.maxDistanceKm)) {
+                if (Number.isFinite(distanceKm)) {
+                    if (distanceKm > constraints.maxDistanceKm) {
+                        result.hardFailures.push('Too far for refine distance');
+                    } else {
+                        result.refineScore += Math.max(
+                            0.35,
+                            1.15 - distanceKm / Math.max(constraints.maxDistanceKm, 0.5)
+                        );
+                        result.reasons.push(`Within ${constraints.maxDistanceKm} km`);
+                    }
+                } else {
+                    result.refineScore -= 0.15;
+                }
+            }
+
+            result.passes = result.hardFailures.length === 0;
+            return result;
+        }
+
+        function buildRefineConstraintsSummary(constraints) {
+            const pieces = [];
+            const locationPhrases = Array.isArray(constraints.locationPhrases) ? constraints.locationPhrases : [];
+            const activityKeywords = Array.isArray(constraints.activityKeywords) ? constraints.activityKeywords : [];
+            const dishStyleKeywords = Array.isArray(constraints.dishStyleKeywords) ? constraints.dishStyleKeywords : [];
+            const serviceKeywords = Array.isArray(constraints.serviceKeywords) ? constraints.serviceKeywords : [];
+            const nameKeywords = Array.isArray(constraints.nameKeywords) ? constraints.nameKeywords : [];
+            const preferredWeatherBuckets = Array.isArray(constraints.preferredWeatherBuckets)
+                ? constraints.preferredWeatherBuckets
+                : [];
+            const preferredTimeWindows = Array.isArray(constraints.preferredTimeWindows)
+                ? constraints.preferredTimeWindows
+                : [];
+            const cuisineKeywords = Array.isArray(constraints.cuisineKeywords) ? constraints.cuisineKeywords : [];
+            const includeKeywords = Array.isArray(constraints.includeKeywords) ? constraints.includeKeywords : [];
+
+            if (Number.isFinite(constraints.maxBudgetVnd)) {
+                pieces.push(`under ${constraints.maxBudgetVnd.toLocaleString('vi-VN')} VND`);
+                if (constraints.strictBudgetCap) {
+                    pieces.push('strict budget');
+                }
+            }
+
+            if (Number.isFinite(constraints.minBudgetVnd)) {
+                pieces.push(`over ${constraints.minBudgetVnd.toLocaleString('vi-VN')} VND`);
+                if (constraints.strictBudgetFloor) {
+                    pieces.push('strict min budget');
+                }
+            }
+
+            if (Number.isFinite(constraints.maxDistanceKm)) {
+                pieces.push(`within ${constraints.maxDistanceKm} km`);
+            }
+
+            if (constraints.requireOpenNow) {
+                pieces.push('open now');
+            }
+
+            if (constraints.requireFoodVenue) {
+                pieces.push('food places');
+            }
+
+            if (locationPhrases.length) {
+                pieces.push(`location: ${locationPhrases.slice(0, 2).join(', ')}`);
+            }
+
+            if (activityKeywords.length) {
+                pieces.push(`activity: ${activityKeywords.slice(0, 3).join(', ')}`);
+            }
+
+            if (dishStyleKeywords.length) {
+                pieces.push(`style: ${dishStyleKeywords.slice(0, 3).join(', ')}`);
+            }
+
+            if (serviceKeywords.length) {
+                pieces.push(`services: ${serviceKeywords.slice(0, 3).join(', ')}`);
+            }
+
+            if (nameKeywords.length) {
+                pieces.push(`name: ${nameKeywords.slice(0, 3).join(', ')}`);
+            }
+
+            if (preferredWeatherBuckets.length) {
+                pieces.push(`weather: ${preferredWeatherBuckets.slice(0, 2).join(', ')}`);
+            }
+
+            if (preferredTimeWindows.length) {
+                pieces.push(`time: ${preferredTimeWindows.slice(0, 2).map((key) => resolveTimeWindowLabel(key)).join(', ')}`);
+            }
+
+            if (cuisineKeywords.length) {
+                pieces.push(`cuisine: ${cuisineKeywords.slice(0, 3).join(', ')}`);
+            }
+
+            if (includeKeywords.length) {
+                pieces.push(`keywords: ${includeKeywords.slice(0, 3).join(', ')}`);
+            }
+
+            return pieces.length ? pieces.join(' | ') : 'No hard constraints detected';
         }
 
         function diversifyRecommendedVenues(scoredVenues, limit) {
@@ -9592,6 +11596,59 @@ async function generateWardIdFromName(name) {
             }
         });
 
+        const getCurrentWeatherHandler = async (req, res) => {
+            const latitudeQuery = req.query?.latitude;
+            const longitudeQuery = req.query?.longitude;
+            const hasLatitudeQuery = latitudeQuery !== undefined && latitudeQuery !== null && latitudeQuery !== '';
+            const hasLongitudeQuery = longitudeQuery !== undefined && longitudeQuery !== null && longitudeQuery !== '';
+
+            if (hasLatitudeQuery !== hasLongitudeQuery) {
+                return res.status(400).json({ message: 'latitude and longitude must be provided together.' });
+            }
+
+            let latitude = OPEN_WEATHER_DEFAULT_LATITUDE;
+            let longitude = OPEN_WEATHER_DEFAULT_LONGITUDE;
+
+            if (hasLatitudeQuery && hasLongitudeQuery) {
+                latitude = Number(latitudeQuery);
+                longitude = Number(longitudeQuery);
+
+                if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
+                    return res.status(400).json({ message: 'Invalid latitude value.' });
+                }
+
+                if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+                    return res.status(400).json({ message: 'Invalid longitude value.' });
+                }
+            }
+
+            try {
+                const weather = await getCurrentWeatherSnapshot({ latitude, longitude });
+
+                return res.json({
+                    success: true,
+                    weather
+                });
+            } catch (error) {
+                if (error?.code === 'WEATHER_API_KEY_MISSING') {
+                    return res.status(503).json({
+                        message: 'OpenWeather API key is not configured. Please set OPENWEATHER_API_KEY in backend/.env.'
+                    });
+                }
+
+                if (error?.code === 'WEATHER_INVALID_COORDINATES') {
+                    return res.status(400).json({ message: error.message });
+                }
+
+                const providerStatusCode = Number(error?.response?.status);
+                if (providerStatusCode === 401 || providerStatusCode === 403) {
+                    return res.status(502).json({ message: 'OpenWeather rejected the request. Please verify API credentials.' });
+                }
+
+                return res.status(502).json({ message: 'Unable to fetch weather right now.' });
+            }
+        };
+
         const getUserPreferenceOptionsHandler = (_req, res) => {
             return res.json(buildUserPreferenceOptionsPayload());
         };
@@ -9732,10 +11789,25 @@ async function generateWardIdFromName(name) {
             const limit = normalizePaginationValue(req.query?.limit, 12, { min: 4, max: 24 });
             const latitudeQuery = req.query?.latitude;
             const longitudeQuery = req.query?.longitude;
+            const preferOpenNow = normalizeBooleanQueryValue(req.query?.preferOpenNow, false);
+            const weatherMain = String(req.query?.weatherMain || '').trim();
+            const currentTimeIsoInput = String(req.query?.currentTimeIso || '').trim();
 
             if (!userId) {
                 return res.status(401).json({ message: 'Unauthorized' });
             }
+
+            let currentTime = new Date();
+            if (currentTimeIsoInput) {
+                const parsedCurrentTime = new Date(currentTimeIsoInput);
+                if (Number.isNaN(parsedCurrentTime.getTime())) {
+                    return res.status(400).json({ message: 'Invalid currentTimeIso value.' });
+                }
+
+                currentTime = parsedCurrentTime;
+            }
+
+            const currentTimeWindowKey = resolveCurrentPreferenceTimeWindowKey(currentTime);
 
             const hasLatitudeQuery = latitudeQuery !== undefined && latitudeQuery !== null && latitudeQuery !== '';
             const hasLongitudeQuery = longitudeQuery !== undefined && longitudeQuery !== null && longitudeQuery !== '';
@@ -9829,16 +11901,26 @@ async function generateWardIdFromName(name) {
                             venue,
                             preference,
                             effectiveLatitude,
-                            effectiveLongitude
+                            effectiveLongitude,
+                            {
+                                currentTime,
+                                currentTimeWindowKey,
+                                weatherMain,
+                                preferOpenNow
+                            }
                         );
 
                         return {
                             ...venue,
                             recommendationScore: Number(scoring.score.toFixed(4)),
                             distanceKm: scoring.distanceKm,
+                            isOpenNow: scoring.isOpenNow,
+                            openingTimeRange: scoring.openingTimeRange,
+                            hasRealtimeSchedule: scoring.hasRealtimeSchedule,
                             recommendationReasons: scoring.reasons
                         };
                     })
+                    .filter((venue) => !(preferOpenNow && venue.hasRealtimeSchedule && venue.isOpenNow === false))
                     .filter((venue) => venue.recommendationScore > 0.15)
                     .sort((first, second) => {
                         if (second.recommendationScore !== first.recommendationScore) {
@@ -9868,6 +11950,8 @@ async function generateWardIdFromName(name) {
                     total_reviews: venue.total_reviews,
                     recommendationScore: venue.recommendationScore,
                     distanceKm: venue.distanceKm,
+                    isOpenNow: venue.isOpenNow,
+                    openingTimeRange: venue.openingTimeRange,
                     recommendationReasons: venue.recommendationReasons
                 }));
 
@@ -9875,7 +11959,349 @@ async function generateWardIdFromName(name) {
                     success: true,
                     preferencesCompleted: true,
                     preference,
+                    context: {
+                        evaluatedAt: currentTime.toISOString(),
+                        currentTimeWindowKey,
+                        currentTimeWindowLabel: resolveTimeWindowLabel(currentTimeWindowKey),
+                        weatherMain: weatherMain || null,
+                        preferOpenNow
+                    },
                     recommendations: diversifiedVenues
+                });
+            } catch (error) {
+                if (isUndefinedTableError(error)) {
+                    return res.status(500).json({
+                        message: 'User preference schema is missing. Please run backend migrations.'
+                    });
+                }
+
+                return res.status(500).json({ message: error.message });
+            }
+        };
+
+        const refineUserRecommendationsHandler = async (req, res) => {
+            const userId = String(req.user?.id || '').trim();
+            const refineQuery = String(req.body?.query || '').trim();
+            const limit = normalizePaginationValue(req.body?.limit, 24, { min: 4, max: 40 });
+            const latitudeInput = req.body?.latitude;
+            const longitudeInput = req.body?.longitude;
+            const weatherMain = String(req.body?.weatherMain || '').trim();
+            const currentTimeIsoInput = String(req.body?.currentTimeIso || '').trim();
+            const baseVenueIdsFilter = parsePositiveIntegerList(req.body?.baseVenueIds);
+
+            if (!userId) {
+                return res.status(401).json({ message: 'Unauthorized' });
+            }
+
+            if (!refineQuery || refineQuery.length < 2) {
+                return res.status(400).json({ message: 'Please provide a refine query with at least 2 characters.' });
+            }
+
+            if (baseVenueIdsFilter.invalid) {
+                return res.status(400).json({ message: 'baseVenueIds must contain positive integers only.' });
+            }
+
+            const hasLatitudeInput = latitudeInput !== undefined && latitudeInput !== null && latitudeInput !== '';
+            const hasLongitudeInput = longitudeInput !== undefined && longitudeInput !== null && longitudeInput !== '';
+
+            if (hasLatitudeInput !== hasLongitudeInput) {
+                return res.status(400).json({ message: 'latitude and longitude must be provided together.' });
+            }
+
+            let requestLatitude = null;
+            let requestLongitude = null;
+
+            if (hasLatitudeInput && hasLongitudeInput) {
+                requestLatitude = Number(latitudeInput);
+                requestLongitude = Number(longitudeInput);
+
+                if (!Number.isFinite(requestLatitude) || requestLatitude < -90 || requestLatitude > 90) {
+                    return res.status(400).json({ message: 'Invalid latitude value.' });
+                }
+
+                if (!Number.isFinite(requestLongitude) || requestLongitude < -180 || requestLongitude > 180) {
+                    return res.status(400).json({ message: 'Invalid longitude value.' });
+                }
+            }
+
+            let currentTime = new Date();
+            if (currentTimeIsoInput) {
+                const parsedCurrentTime = new Date(currentTimeIsoInput);
+                if (Number.isNaN(parsedCurrentTime.getTime())) {
+                    return res.status(400).json({ message: 'Invalid currentTimeIso value.' });
+                }
+
+                currentTime = parsedCurrentTime;
+            }
+
+            const currentTimeWindowKey = resolveCurrentPreferenceTimeWindowKey(currentTime);
+
+            try {
+                const preference = await getUserPreferenceRecordByUserId(userId);
+
+                if (!preference || !preference.onboardingCompleted) {
+                    return res.json({
+                        success: true,
+                        preferencesCompleted: false,
+                        recommendations: []
+                    });
+                }
+
+                const effectiveLatitude = Number.isFinite(requestLatitude)
+                    ? requestLatitude
+                    : preference.lastKnownLatitude;
+                const effectiveLongitude = Number.isFinite(requestLongitude)
+                    ? requestLongitude
+                    : preference.lastKnownLongitude;
+
+                if (Number.isFinite(requestLatitude) && Number.isFinite(requestLongitude)) {
+                    await pool.query(
+                        `
+                            UPDATE user_ai_preferences
+                            SET
+                                last_known_latitude = $2,
+                                last_known_longitude = $3,
+                                updated_at = NOW()
+                            WHERE user_id = $1
+                        `,
+                        [userId, requestLatitude, requestLongitude]
+                    );
+                }
+
+                const parsedRefine = await parseRecommendationRefineConstraints(refineQuery);
+                const refineConstraints = parsedRefine.constraints || buildHeuristicRefineConstraints(refineQuery);
+
+                const venueSelectSql = `
+                    SELECT
+                        venues.id,
+                        venues.name,
+                        venues.title,
+                        venues.address,
+                        venues.description,
+                        venues.latitude,
+                        venues.longitude,
+                        venues.ward_id,
+                        wards.name AS ward_name,
+                        venues.category_id,
+                        place_categories.name AS category_name,
+                        venues.cover_image_url,
+                        venues.metadata,
+                        venues.average_rating,
+                        venues.total_reviews,
+                        venues.status::text AS status,
+                        venues.created_at,
+                        venues.updated_at
+                    FROM venues
+                    LEFT JOIN wards ON wards.ward_id = venues.ward_id
+                    LEFT JOIN place_categories ON place_categories.id = venues.category_id
+                    WHERE venues.status::text = 'approved'
+                `;
+
+                let venueResult;
+                let refineScope = baseVenueIdsFilter.values.length ? 'base_scope' : 'global_scope';
+                if (baseVenueIdsFilter.values.length) {
+                    venueResult = await pool.query(
+                        `${venueSelectSql}
+                         AND venues.id = ANY($1::bigint[])
+                         ORDER BY COALESCE(venues.approved_at, venues.created_at) DESC, venues.id DESC
+                        `,
+                        [baseVenueIdsFilter.values]
+                    );
+                } else {
+                    venueResult = await pool.query(
+                        `${venueSelectSql}
+                         ORDER BY COALESCE(venues.approved_at, venues.created_at) DESC, venues.id DESC
+                         LIMIT 320
+                        `
+                    );
+                }
+
+                const sortScoredRefineVenues = (first, second) => {
+                    if (second.finalScore !== first.finalScore) {
+                        return second.finalScore - first.finalScore;
+                    }
+
+                    const secondRating = Number(second.average_rating || 0);
+                    const firstRating = Number(first.average_rating || 0);
+                    return secondRating - firstRating;
+                };
+
+                const computeScoredRefineVenuesFromRows = (venueRows) => {
+                    return venueRows
+                        .map((row) => normalizeVenueCoordinates(row))
+                        .map((venue) => {
+                            const scoring = scoreVenueByUserPreference(
+                                venue,
+                                preference,
+                                effectiveLatitude,
+                                effectiveLongitude,
+                                {
+                                    currentTime,
+                                    currentTimeWindowKey,
+                                    weatherMain,
+                                    preferOpenNow: refineConstraints.requireOpenNow
+                                }
+                            );
+                            const refineEvaluation = evaluateVenueAgainstRefineConstraints(
+                                venue,
+                                refineConstraints,
+                                {
+                                    userLatitude: effectiveLatitude,
+                                    userLongitude: effectiveLongitude,
+                                    currentTime,
+                                    weatherMain
+                                }
+                            );
+
+                            const finalScore = Number((scoring.score + refineEvaluation.refineScore * 1.65).toFixed(4));
+                            const mergedReasons = [...new Set([
+                                ...(Array.isArray(scoring.reasons) ? scoring.reasons : []),
+                                ...(Array.isArray(refineEvaluation.reasons) ? refineEvaluation.reasons : [])
+                            ])].slice(0, 5);
+
+                            return {
+                                ...venue,
+                                recommendationScore: Number(scoring.score.toFixed(4)),
+                                refineScore: Number(refineEvaluation.refineScore.toFixed(4)),
+                                finalScore,
+                                distanceKm: scoring.distanceKm,
+                                isOpenNow: refineEvaluation.isOpenNow,
+                                openingTimeRange: refineEvaluation.openingTimeRange,
+                                hasRealtimeSchedule: scoring.hasRealtimeSchedule,
+                                passesRefine: refineEvaluation.passes,
+                                hardFailures: refineEvaluation.hardFailures,
+                                recommendationReasons: mergedReasons
+                            };
+                        })
+                        .filter((venue) => venue.recommendationScore > 0.05);
+                };
+
+                let scoredVenueCandidates = computeScoredRefineVenuesFromRows(venueResult.rows);
+                let refinedVenues = scoredVenueCandidates
+                    .filter((venue) => venue.passesRefine)
+                    .sort(sortScoredRefineVenues);
+
+                // If base-scope refinement yields no result, expand to broader candidate pool.
+                if (!refinedVenues.length && baseVenueIdsFilter.values.length) {
+                    const expandedVenueResult = await pool.query(
+                        `${venueSelectSql}
+                         ORDER BY COALESCE(venues.approved_at, venues.created_at) DESC, venues.id DESC
+                         LIMIT 320
+                        `
+                    );
+
+                    scoredVenueCandidates = computeScoredRefineVenuesFromRows(expandedVenueResult.rows);
+                    refinedVenues = scoredVenueCandidates
+                        .filter((venue) => venue.passesRefine)
+                        .sort(sortScoredRefineVenues);
+
+                    if (refinedVenues.length) {
+                        refineScope = 'expanded_scope';
+                    }
+                }
+
+                const semanticRefine = await runSemanticVenueRefine({
+                    queryText: refineQuery,
+                    candidateVenues: [...scoredVenueCandidates].sort(sortScoredRefineVenues).slice(0, 120),
+                    currentTime
+                });
+
+                const semanticMatchMap = new Map(
+                    (Array.isArray(semanticRefine.matches) ? semanticRefine.matches : [])
+                        .map((item) => {
+                            const venueId = Number(item?.venueId);
+                            if (!Number.isFinite(venueId) || venueId <= 0) {
+                                return null;
+                            }
+
+                            return [venueId, item];
+                        })
+                        .filter(Boolean)
+                );
+
+                if (!semanticRefine.understood) {
+                    refinedVenues = [];
+                } else if (semanticMatchMap.size > 0) {
+                    refinedVenues = scoredVenueCandidates
+                        .filter((venue) => semanticMatchMap.has(Number(venue.id)))
+                        .map((venue) => {
+                            const semanticMatch = semanticMatchMap.get(Number(venue.id));
+                            const semanticScore = Number(semanticMatch?.score || 0);
+                            const semanticReason = String(semanticMatch?.reason || '').trim();
+
+                            return {
+                                ...venue,
+                                finalScore: Number((venue.finalScore + semanticScore * 3.2).toFixed(4)),
+                                recommendationReasons: [...new Set([
+                                    ...(Array.isArray(venue.recommendationReasons) ? venue.recommendationReasons : []),
+                                    semanticReason ? `Semantic match: ${semanticReason}` : ''
+                                ].filter(Boolean))].slice(0, 5)
+                            };
+                        })
+                        .sort(sortScoredRefineVenues);
+                } else {
+                    refinedVenues = [];
+                }
+
+                const fallbackConstraintSummary = buildRefineConstraintsSummary(refineConstraints);
+                const hasConstraintSignals = hasStructuredRefineSignals(refineConstraints);
+                const semanticSummary = String(semanticRefine.summary || '').trim();
+                const refineSummary = semanticSummary
+                    || (semanticRefine.understood
+                        ? (hasConstraintSignals ? fallbackConstraintSummary : 'Semantic intent understood. Strict sentence-level filtering applied.')
+                        : 'Unable to confidently understand this refine sentence. Please rewrite with clearer details.');
+
+                const recommendations = refinedVenues.slice(0, limit).map((venue) => ({
+                    id: venue.id,
+                    name: venue.name,
+                    title: venue.title,
+                    address: venue.address,
+                    description: venue.description,
+                    latitude: venue.latitude,
+                    longitude: venue.longitude,
+                    ward_id: venue.ward_id,
+                    ward_name: venue.ward_name,
+                    category_id: venue.category_id,
+                    category_name: venue.category_name,
+                    cover_image_url: venue.cover_image_url,
+                    metadata: venue.metadata,
+                    average_rating: venue.average_rating,
+                    total_reviews: venue.total_reviews,
+                    recommendationScore: venue.recommendationScore,
+                    refineScore: venue.refineScore,
+                    finalScore: venue.finalScore,
+                    distanceKm: venue.distanceKm,
+                    isOpenNow: venue.isOpenNow,
+                    openingTimeRange: venue.openingTimeRange,
+                    recommendationReasons: venue.recommendationReasons
+                }));
+
+                return res.json({
+                    success: true,
+                    preferencesCompleted: true,
+                    preference,
+                    context: {
+                        evaluatedAt: currentTime.toISOString(),
+                        currentTimeWindowKey,
+                        currentTimeWindowLabel: resolveTimeWindowLabel(currentTimeWindowKey),
+                        weatherMain: weatherMain || null,
+                        preferOpenNow: refineConstraints.requireOpenNow
+                    },
+                    refine: {
+                        query: refineQuery,
+                        parsedBy: `${parsedRefine.agent?.mode || 'heuristic'}+semantic_sentence`,
+                        model: parsedRefine.agent?.model || null,
+                        passes: Number(parsedRefine.agent?.passes || 0),
+                        fallbackModelUsed: Boolean(parsedRefine.agent?.fallbackModelUsed),
+                        semanticModel: semanticRefine.model || null,
+                        semanticFallbackModelUsed: Boolean(semanticRefine.fallbackModelUsed),
+                        understood: Boolean(semanticRefine.understood),
+                        confidence: Number(semanticRefine.confidence || 0),
+                        scope: refineScope,
+                        summary: refineSummary,
+                        constraints: refineConstraints
+                    },
+                    recommendations
                 });
             } catch (error) {
                 if (isUndefinedTableError(error)) {
@@ -9892,6 +12318,8 @@ async function generateWardIdFromName(name) {
         registerVersionedRoute('get', '/users/preferences', authenticateRequest, checkUserStatus, requireAuth, getUserPreferenceHandler);
         registerVersionedRoute('put', '/users/preferences', authenticateRequest, checkUserStatus, requireAuth, saveUserPreferenceHandler);
         registerVersionedRoute('get', '/users/recommendations', authenticateRequest, checkUserStatus, requireAuth, listUserRecommendationsHandler);
+        registerVersionedRoute('post', '/users/recommendations/refine', authenticateRequest, checkUserStatus, requireAuth, refineUserRecommendationsHandler);
+        registerVersionedRoute('get', '/weather/current', getCurrentWeatherHandler);
 
         app.put('/api/users/password', authenticateOptional, requireAuth, async (req, res) => {
             const userId = req.user.id;

@@ -111,6 +111,7 @@ const PAGE_I18N = {
 };
 const CHAT_DELETE_SYNC_KEY = 'chat_thread_deleted_sync';
 const ACTIVE_CHAT_THREAD_SYNC_KEY = 'active_chat_thread_sync';
+const VENUE_DESCRIPTION_COLLAPSE_LIMIT = 210;
 
 function normalizeModerationText(value) {
 	return String(value || '')
@@ -362,6 +363,46 @@ function resolveCoverImage(venue) {
 	return candidates[0] || FALLBACK_VENUE_IMAGE;
 }
 
+function resolveVenueDescription(venue) {
+	const metadata = normalizeVenueMetadata(venue?.metadata);
+	const candidates = [
+		venue?.description,
+		metadata.description,
+		metadata.shortDescription,
+		metadata.summary,
+		metadata.overview,
+		metadata.introduction
+	]
+		.map((item) => String(item || '').replace(/\s+/g, ' ').trim())
+		.filter(Boolean);
+
+	return candidates[0] || '';
+}
+
+function truncateVenueDescription(description, maxLength = VENUE_DESCRIPTION_COLLAPSE_LIMIT) {
+	const normalized = String(description || '').replace(/\s+/g, ' ').trim();
+
+	if (!normalized) {
+		return {
+			text: '',
+			truncated: false
+		};
+	}
+
+	if (normalized.length <= maxLength) {
+		return {
+			text: normalized,
+			truncated: false
+		};
+	}
+
+	const clipped = normalized.slice(0, maxLength).replace(/\s+\S*$/, '').trim();
+	return {
+		text: `${clipped}...`,
+		truncated: true
+	};
+}
+
 function resolveWeeklySchedule(venue) {
 	const metadata = normalizeVenueMetadata(venue?.metadata);
 	const canonicalSource =
@@ -574,6 +615,7 @@ function VenueDetailPage() {
 	const [showChatWidget, setShowChatWidget] = useState(false);
 	const [activeChatThreadId, setActiveChatThreadId] = useState(null);
 	const [syncedChatThread, setSyncedChatThread] = useState(null);
+	const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
 	const [reviewForm, setReviewForm] = useState({
 		rating: null,
 		title: '',
@@ -592,6 +634,15 @@ function VenueDetailPage() {
 	const weeklySchedule = useMemo(() => resolveWeeklySchedule(venue), [venue]);
 	const todaySchedule = useMemo(() => resolveTodaySchedule(weeklySchedule), [weeklySchedule]);
 	const venuePriceRange = useMemo(() => resolveVenuePriceRange(venue), [venue]);
+	const fullVenueDescription = useMemo(() => resolveVenueDescription(venue), [venue]);
+	const collapsedVenueDescription = useMemo(
+		() => truncateVenueDescription(fullVenueDescription),
+		[fullVenueDescription]
+	);
+	const visibleVenueDescription =
+		isDescriptionExpanded || !collapsedVenueDescription.truncated
+			? fullVenueDescription
+			: collapsedVenueDescription.text;
 	const chatVenueMeta = useMemo(
 		() => (venue ? buildVenueChatMeta(venue, { price: venuePriceRange }) : null),
 		[venue, venuePriceRange]
@@ -936,6 +987,10 @@ function VenueDetailPage() {
 			mounted = false;
 		};
 	}, [apiBase, venueId]);
+
+	useEffect(() => {
+		setIsDescriptionExpanded(false);
+	}, [venueId]);
 
 	useEffect(() => {
 		let active = true;
@@ -1757,15 +1812,15 @@ function VenueDetailPage() {
 	}, [reviews, showReplyModal, activeReplyReview?.id]);
 
 	if (loading) {
-		return <section className={`venue-detail-page theme-${theme}`}><p>Đang tải chi tiết quán...</p></section>;
+		return <section className={`venue-detail-page theme-${theme}`}><p>Loading venue details...</p></section>;
 	}
 
 	if (error || !venue) {
 		return (
 			<section className={`venue-detail-page theme-${theme}`}>
 				<div className="venue-detail-error-box">
-					<p>{error || 'Không tìm thấy địa điểm.'}</p>
-					<button type="button" onClick={() => navigate(-1)}>Quay lại</button>
+					<p>{error || 'Venue not found.'}</p>
+					<button type="button" onClick={() => navigate(-1)}>Back</button>
 				</div>
 			</section>
 		);
@@ -1781,6 +1836,12 @@ function VenueDetailPage() {
 
 	return (
 		<section className={`venue-detail-page theme-${theme}`}>
+			<div className="venue-detail-topbar">
+				<button type="button" className="venue-detail-back-btn" onClick={() => navigate(-1)}>
+					← Back
+				</button>
+			</div>
+
 			<article className="venue-detail-hero-card">
 				<div className="venue-detail-cover-wrap">
 					<img src={resolveCoverImage(venue)} alt={resolveVenueName(venue)} className="venue-detail-cover" />
@@ -1969,6 +2030,21 @@ function VenueDetailPage() {
 					<div className="venue-detail-rating-row">
 						<StarRatingDisplay rating={communityStats.averageRating || 0} />
 						<span>{Number(communityStats.averageRating || 0).toFixed(1)}/5 ({communityStats.totalReviews} đánh giá)</span>
+					</div>
+
+					<div className="venue-detail-description-wrap">
+						<p className="venue-detail-description">
+							<strong>Description :</strong> {visibleVenueDescription || 'Description is being updated.'}
+						</p>
+						{collapsedVenueDescription.truncated ? (
+							<button
+								type="button"
+								className="venue-detail-description-toggle"
+								onClick={() => setIsDescriptionExpanded((current) => !current)}
+							>
+								{isDescriptionExpanded ? 'Show less' : 'Show more'}
+							</button>
+						) : null}
 					</div>
 
 					{favoriteError ? <p className="venue-form-error">{favoriteError}</p> : null}
