@@ -19,3 +19,8 @@ export async function fetchForYouRecommendations(params = {}) {
   const response = await apiClient.get('/users/recommendations', { params });
   return response.data;
 }
+
+export async function refineForYouRecommendations(payload = {}) {
+  const response = await apiClient.post('/users/recommendations/refine', payload);
+  return response.data;
+}
