@@ -1921,7 +1921,6 @@ function VenueDetailPage() {
 										chatMessages.map((message) => {
 											const contextLine = buildChatContextLine(message, chatVenueMeta);
 											const resolvedMessageVenueName = String(message?.venueName || '').trim();
-											const resolvedMessageVenueAddress = String(message?.venueAddress || '').trim();
 											const shouldShowVenueContext = Boolean(contextLine || resolvedMessageVenueName);
 
 											return (

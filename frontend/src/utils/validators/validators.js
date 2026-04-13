@@ -2,7 +2,7 @@
 export const validatePassword = (password, language = 'en') => {
   const minLength = 8;
   const hasUpperCase = /[A-Z]/.test(password);
-  const hasSpecialChar = /[!@#$%^&*()_+\-=\[\]{};:'",.<>?\/\\|`~]/.test(password);
+  const hasSpecialChar = /[!@#$%^&*()_+\-=[\]{};:'",.<>?/\\|`~]/.test(password);
   
   const errors = [];
   

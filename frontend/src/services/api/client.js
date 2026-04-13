@@ -44,7 +44,7 @@ apiClient.interceptors.request.use(
         config.headers = config.headers || {};
         config.headers.Authorization = `Bearer ${token}`;
       }
-    } catch (error) {
+    } catch {
       // Ignore malformed localStorage auth payloads and continue request.
     }
 

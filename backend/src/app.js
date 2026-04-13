@@ -5,12 +5,15 @@ const errorHandler = require('./middlewares/error-handler');
 const notFoundHandler = require('./middlewares/not-found-handler');
 const apiRoutes = require('./routes');
 const legacyRoutes = require('./routes/legacy.routes');
-
 const app = express();
 const corsOptions = env.corsOrigin === '*' ? {} : { origin: env.corsOrigin };
+const chatRoute = require("./routes/chat.route");
 
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '20mb' }));
+
+// Chat route - BEFORE /api routes to have priority
+app.use("/api/chat", chatRoute);
 
 app.get('/', (req, res) => {
   res.json({
