@@ -3,6 +3,7 @@ import { GoogleOAuthProvider } from '@react-oauth/google';
 import { LanguageProvider } from './contexts/LanguageContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { AuthProvider } from './contexts/AuthContext';
+import ErrorBoundary from './components/shared/ErrorBoundary';
 import LandingLayout from './components/layouts/LandingLayout';
 import WorkspaceLayout from './components/layouts/WorkspaceLayout';
 import MerchantLayout from './components/layouts/MerchantLayout';
@@ -30,14 +31,16 @@ import FeedbackSupportPage from './pages/feedback/FeedbackSupportPage';
 import TermsPage from './pages/terms/TermsPage';
 import { APP_ROUTES } from './constants/routes';
 import { ROLES } from './constants/roles';
+import ChatWidget from './components/chat/ChatWidget';
 
 function App() {
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
   const appContent = (
-    <AuthProvider>
-      <ThemeProvider>
-        <LanguageProvider>
-          <BrowserRouter>
+    <ErrorBoundary>
+      <AuthProvider>
+        <ThemeProvider>
+          <LanguageProvider>
+            <BrowserRouter>
             <Routes>
           <Route element={<LandingLayout />}>
           <Route path={APP_ROUTES.HOME} element={<OverviewPage />} />
@@ -149,10 +152,12 @@ function App() {
 
         <Route path="*" element={<Navigate replace to={APP_ROUTES.HOME} />} />
       </Routes>
+            <ChatWidget />
           </BrowserRouter>
         </LanguageProvider>
       </ThemeProvider>
     </AuthProvider>
+    </ErrorBoundary>
   );
 
   if (!googleClientId) {

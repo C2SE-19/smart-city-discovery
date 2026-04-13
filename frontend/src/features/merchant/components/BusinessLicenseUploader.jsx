@@ -2,7 +2,6 @@ import { useState } from 'react';
 import '../styles/BusinessLicenseUploader.css';
 
 function BusinessLicenseUploader({ onLicenseChange }) {
-  const [license, setLicense] = useState(null);
   const [preview, setPreview] = useState(null);
 
   const handleLicenseSelect = (event) => {
@@ -20,8 +19,6 @@ function BusinessLicenseUploader({ onLicenseChange }) {
       return;
     }
 
-    setLicense(file);
-
     const reader = new FileReader();
     reader.onload = (e) => {
       setPreview(e.target.result);
@@ -34,7 +31,6 @@ function BusinessLicenseUploader({ onLicenseChange }) {
   };
 
   const removeLicense = () => {
-    setLicense(null);
     setPreview(null);
 
     if (onLicenseChange) {

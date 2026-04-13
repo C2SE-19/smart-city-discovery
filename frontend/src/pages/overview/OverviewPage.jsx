@@ -211,17 +211,6 @@ function resolveVenuePriceRange(venue) {
   return directCandidates[0] ? `$ ${directCandidates[0]}` : '$ N/A';
 }
 
-function renderRatingStars(rating) {
-  const safeRating = Number.isFinite(rating) ? rating : 0;
-  const filledStars = Math.max(0, Math.min(5, Math.round(safeRating)));
-
-  return Array.from({ length: 5 }, (_, index) => (
-    <span key={`overview-rating-star-${index + 1}`} className={`overview-rating-star ${index < filledStars ? 'is-active' : ''}`}>
-      ★
-    </span>
-  ));
-}
-
 function FilterGroup({ title, options, selectedValues, optionValue, optionLabel, onToggle }) {
   return (
     <section className="overview-filter-group">
@@ -258,8 +247,6 @@ function VenueCard({ venue, isFavorite, onToggleFavorite, onExplore }) {
   const venueName = venue.name || venue.title || 'Untitled venue';
   const venueAddress = venue.address || 'Address not available';
   const wardName = venue.ward_name || venue.wardName;
-  const ratingValue = Number(venue.average_rating ?? venue.averageRating ?? 0);
-  const reviewCount = Number(venue.total_reviews ?? venue.totalReviews ?? venue.review_count ?? venue.reviewCount ?? 0);
   const { isOpen, timeRange } = resolveVenueOpenState(venue);
   const priceRange = resolveVenuePriceRange(venue);
 
@@ -528,11 +515,6 @@ function OverviewPage() {
     selectedWardIds.length +
     selectedServiceIds.length +
     (searchInput.trim() ? 1 : 0);
-  const appliedFilterCount =
-    appliedCategoryIds.length +
-    appliedWardIds.length +
-    appliedServiceIds.length +
-    (submittedSearch.trim() ? 1 : 0);
   const isSearchMode = searchTriggered;
 
   const searchPageSize = 8;
