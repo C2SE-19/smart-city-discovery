@@ -10,8 +10,10 @@ import { fetchWards } from '../../services/api/wardsApi';
 import { fetchVenues } from '../../services/api/venuesApi';
 import {
   fetchForYouRecommendations,
+  refineForYouRecommendations,
   fetchUserPreferences
 } from '../../services/api/userPreferencesApi';
+import { fetchCurrentWeather } from '../../services/api/weatherApi';
 import OverviewCityMapCard from '../../components/map/OverviewCityMapCard';
 import heroFoodImage from '../../assets/images/anh1.png';
 import UserPreferenceWizard from '../../components/preferences/UserPreferenceWizard';
@@ -102,6 +104,68 @@ function toFavoriteVenuePayload(venue) {
     image: getVenueImage(venue),
     price: 'N/A',
     description: venue.description || venue.address || ''
+  };
+}
+
+const DEFAULT_CITY_COORDINATES = {
+  latitude: 16.0544,
+  longitude: 108.2022
+};
+
+const DEFAULT_CITY_LABEL = 'Da Nang, Vietnam';
+
+const WEATHER_EMOJI_BY_MAIN = {
+  clear: '☀️',
+  clouds: '☁️',
+  rain: '🌧️',
+  drizzle: '🌦️',
+  thunderstorm: '⛈️',
+  mist: '🌫️',
+  fog: '🌫️',
+  haze: '🌫️',
+  snow: '❄️'
+};
+
+function resolveWeatherEmoji(conditionMain) {
+  const weatherKey = String(conditionMain || '').trim().toLowerCase();
+  return WEATHER_EMOJI_BY_MAIN[weatherKey] || '🌡️';
+}
+
+function formatDistanceKm(value) {
+  const distanceKm = Number(value);
+  if (!Number.isFinite(distanceKm) || distanceKm < 0) {
+    return 'N/A';
+  }
+
+  if (distanceKm < 1) {
+    return `${(distanceKm * 1000).toFixed(0)} m`;
+  }
+
+  return `${distanceKm.toFixed(1)} km`;
+}
+
+function formatLocationClockByOffset(offsetSeconds) {
+  const parsedOffset = Number(offsetSeconds);
+  const resolvedOffset = Number.isFinite(parsedOffset) ? parsedOffset : 0;
+  const utcShiftedDate = new Date(Date.now() + resolvedOffset * 1000);
+
+  return new Intl.DateTimeFormat('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+    timeZone: 'UTC'
+  }).format(utcShiftedDate);
+}
+
+function buildLocalFallbackWeather() {
+  return {
+    city: 'Da Nang',
+    country: 'VN',
+    conditionMain: 'Clear',
+    conditionDescription: 'sunny in Da Nang',
+    temperatureC: 31,
+    timezoneOffsetSeconds: 7 * 3600
   };
 }
 
@@ -254,7 +318,7 @@ function FilterGroup({ title, options, selectedValues, optionValue, optionLabel,
   );
 }
 
-function VenueCard({ venue, isFavorite, onToggleFavorite, onExplore }) {
+function VenueCard({ venue, isFavorite, onToggleFavorite, onExplore, showDistance = false }) {
   const venueName = venue.name || venue.title || 'Untitled venue';
   const venueAddress = venue.address || 'Address not available';
   const wardName = venue.ward_name || venue.wardName;
@@ -262,6 +326,7 @@ function VenueCard({ venue, isFavorite, onToggleFavorite, onExplore }) {
   const reviewCount = Number(venue.total_reviews ?? venue.totalReviews ?? venue.review_count ?? venue.reviewCount ?? 0);
   const { isOpen, timeRange } = resolveVenueOpenState(venue);
   const priceRange = resolveVenuePriceRange(venue);
+  const distanceLabel = formatDistanceKm(venue.distanceKm);
 
   return (
     <article
@@ -319,11 +384,18 @@ function VenueCard({ venue, isFavorite, onToggleFavorite, onExplore }) {
         <div className="overview-dynamic-meta">
           <p className="overview-meta-item">
             <strong className={`overview-open-status ${isOpen ? 'is-open' : 'is-closed'}`}>
-              {isOpen ? 'Dang mo cua' : 'Da dong cua'}
+              {isOpen ? 'Open now' : 'Closed now'}
             </strong>
             <span>{timeRange}</span>
             <span className="overview-opening-alert">!</span>
           </p>
+
+          {showDistance ? (
+            <p className="overview-meta-item">
+              <strong>Distance</strong>
+              <span>{distanceLabel}</span>
+            </p>
+          ) : null}
 
           <p className="overview-meta-item overview-meta-price">
             <span>{priceRange}</span>
@@ -360,6 +432,9 @@ function OverviewPage() {
   const [venueError, setVenueError] = useState('');
   const [currentLocation, setCurrentLocation] = useState(null);
   const [currentWeather, setCurrentWeather] = useState(null);
+  const [weatherLoading, setWeatherLoading] = useState(false);
+  const [weatherError, setWeatherError] = useState('');
+  const [locationClock, setLocationClock] = useState('');
   const [showImageSearch, setShowImageSearch] = useState(false);
   const [selectedImage, setSelectedImage] = useState(null);
   const [previewUrl, setPreviewUrl] = useState('');
@@ -372,6 +447,17 @@ function OverviewPage() {
   const [forYouVenues, setForYouVenues] = useState([]);
   const [forYouLoading, setForYouLoading] = useState(false);
   const [forYouError, setForYouError] = useState('');
+  const [aiSuggestMode, setAiSuggestMode] = useState(false);
+  const [aiSuggestLoading, setAiSuggestLoading] = useState(false);
+  const [aiSuggestError, setAiSuggestError] = useState('');
+  const [aiSuggestedVenues, setAiSuggestedVenues] = useState([]);
+  const [aiBaseVenues, setAiBaseVenues] = useState([]);
+  const [aiVisibleCount, setAiVisibleCount] = useState(8);
+  const [aiContext, setAiContext] = useState(null);
+  const [aiRefineInput, setAiRefineInput] = useState('');
+  const [aiRefineLoading, setAiRefineLoading] = useState(false);
+  const [aiRefineError, setAiRefineError] = useState('');
+  const [aiRefineMeta, setAiRefineMeta] = useState(null);
   const [geoCoordinates, setGeoCoordinates] = useState({ latitude: null, longitude: null });
   const [sliderPager, setSliderPager] = useState({});
   const sliderRefs = useRef(new Map());
@@ -533,7 +619,32 @@ function OverviewPage() {
     appliedWardIds.length +
     appliedServiceIds.length +
     (submittedSearch.trim() ? 1 : 0);
-  const isSearchMode = searchTriggered;
+  const isSearchMode = searchTriggered && !aiSuggestMode;
+  const isCondensedMode = isSearchMode || aiSuggestMode;
+
+  const weatherDisplayText = useMemo(() => {
+    if (weatherLoading) {
+      return 'Loading weather...';
+    }
+
+    if (!currentWeather) {
+      return 'Weather unavailable';
+    }
+
+    const temperature = Number(currentWeather.temperatureC);
+    const temperatureText = Number.isFinite(temperature)
+      ? `${Math.round(temperature)}°C`
+      : 'N/A';
+    const description = String(currentWeather.conditionDescription || currentWeather.conditionMain || 'Unknown weather')
+      .trim();
+
+    return `${temperatureText} • ${description}`;
+  }, [currentWeather, weatherLoading]);
+
+  const weatherEmoji = useMemo(
+    () => resolveWeatherEmoji(currentWeather?.conditionMain),
+    [currentWeather?.conditionMain]
+  );
 
   const searchPageSize = 8;
   const totalSearchPages = Math.max(1, Math.ceil(displayedVenues.length / searchPageSize));
@@ -541,6 +652,12 @@ function OverviewPage() {
     const start = (searchPage - 1) * searchPageSize;
     return displayedVenues.slice(start, start + searchPageSize);
   }, [displayedVenues, searchPage]);
+
+  const visibleAiVenues = useMemo(
+    () => aiSuggestedVenues.slice(0, aiVisibleCount),
+    [aiSuggestedVenues, aiVisibleCount]
+  );
+  const hasMoreAiVenues = aiSuggestedVenues.length > 8 && visibleAiVenues.length < aiSuggestedVenues.length;
 
   const userPreferenceSignal = useMemo(() => {
     if (!userPreference) {
@@ -823,6 +940,15 @@ function OverviewPage() {
     setSearchInput('');
     setSubmittedSearch('');
     setSearchTriggered(false);
+    setAiSuggestMode(false);
+    setAiSuggestError('');
+    setAiSuggestedVenues([]);
+    setAiBaseVenues([]);
+    setAiVisibleCount(8);
+    setAiContext(null);
+    setAiRefineInput('');
+    setAiRefineError('');
+    setAiRefineMeta(null);
     setShowFilterPanel(false);
     setSearchPage(1);
   }, [location.state?.resetOverview]);
@@ -891,6 +1017,12 @@ function OverviewPage() {
   };
 
   const applySearch = () => {
+    setAiSuggestMode(false);
+    setAiSuggestError('');
+    setAiBaseVenues([]);
+    setAiRefineInput('');
+    setAiRefineError('');
+    setAiRefineMeta(null);
     setSubmittedSearch(searchInput.trim());
     setAppliedCategoryIds(selectedCategoryIds);
     setAppliedWardIds(selectedWardIds);
@@ -900,6 +1032,12 @@ function OverviewPage() {
   };
 
   const clearAllFilters = () => {
+    setAiSuggestMode(false);
+    setAiSuggestError('');
+    setAiBaseVenues([]);
+    setAiRefineInput('');
+    setAiRefineError('');
+    setAiRefineMeta(null);
     setSelectedCategoryIds([]);
     setSelectedWardIds([]);
     setSelectedServiceIds([]);
@@ -911,34 +1049,250 @@ function OverviewPage() {
     setSearchTriggered(true);
   };
 
-  // retrieve user's location and (dummy) weather
-  useEffect(() => {
-    const weatherLabel = translations[language]?.weather?.sunny || 'Sunny';
-
-    if (!navigator.geolocation) {
-      setCurrentLocation('Da Nang, Son Tra');
-      setCurrentWeather(`29°C, ${weatherLabel}`);
+  const handleAiSuggest = async () => {
+    if (!token) {
+      navigate('/login');
       return;
     }
 
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const latitude = Number(position?.coords?.latitude);
-        const longitude = Number(position?.coords?.longitude);
+    if (preferencesLoading) {
+      return;
+    }
 
-        if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
-          setGeoCoordinates({ latitude, longitude });
+    if (!userPreference?.onboardingCompleted) {
+      setShowPreferenceWizard(true);
+      return;
+    }
+
+    setAiSuggestMode(true);
+    setAiSuggestLoading(true);
+    setAiSuggestError('');
+    setAiSuggestedVenues([]);
+    setAiBaseVenues([]);
+    setAiVisibleCount(8);
+    setAiRefineInput('');
+    setAiRefineError('');
+    setAiRefineMeta(null);
+    setSearchTriggered(false);
+    setShowFilterPanel(false);
+
+    try {
+      const params = {
+        limit: 24,
+        preferOpenNow: true,
+        currentTimeIso: new Date().toISOString()
+      };
+
+      const latitude = Number(geoCoordinates.latitude);
+      const longitude = Number(geoCoordinates.longitude);
+
+      if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+        params.latitude = latitude;
+        params.longitude = longitude;
+      }
+
+      const weatherMain = String(currentWeather?.conditionMain || '').trim();
+      if (weatherMain) {
+        params.weatherMain = weatherMain;
+      }
+
+      const response = await fetchForYouRecommendations(params);
+      const recommendedVenues = Array.isArray(response?.recommendations) ? response.recommendations : [];
+
+      setAiContext(response?.context || null);
+      setAiSuggestedVenues(recommendedVenues);
+      setAiBaseVenues(recommendedVenues);
+      setAiVisibleCount(8);
+
+      if (!response?.preferencesCompleted) {
+        setShowPreferenceWizard(true);
+      }
+    } catch (error) {
+      setAiContext(null);
+      setAiSuggestedVenues([]);
+      setAiBaseVenues([]);
+      setAiSuggestError(error?.response?.data?.message || 'Unable to load AI suggestions right now.');
+    } finally {
+      setAiSuggestLoading(false);
+    }
+  };
+
+  const handleClearAiRefine = () => {
+    setAiRefineInput('');
+    setAiRefineError('');
+    setAiRefineMeta(null);
+    setAiVisibleCount(8);
+
+    if (aiBaseVenues.length) {
+      setAiSuggestedVenues(aiBaseVenues);
+    }
+  };
+
+  const handleRunAiRefine = async () => {
+    if (!token) {
+      navigate('/login');
+      return;
+    }
+
+    const refineText = aiRefineInput.trim();
+    if (!refineText) {
+      setAiRefineError('Please enter a refine request first.');
+      return;
+    }
+
+    const baseSource = aiBaseVenues.length ? aiBaseVenues : aiSuggestedVenues;
+    if (!baseSource.length) {
+      setAiRefineError('No AI suggestions available to refine. Please run AI Suggest first.');
+      return;
+    }
+
+    setAiRefineLoading(true);
+    setAiRefineError('');
+
+    try {
+      const payload = {
+        query: refineText,
+        baseVenueIds: baseSource
+          .map((venue) => Number(venue?.id))
+          .filter((venueId) => Number.isFinite(venueId)),
+        limit: 24,
+        currentTimeIso: new Date().toISOString()
+      };
+
+      const latitude = Number(geoCoordinates.latitude);
+      const longitude = Number(geoCoordinates.longitude);
+      if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+        payload.latitude = latitude;
+        payload.longitude = longitude;
+      }
+
+      const weatherMain = String(currentWeather?.conditionMain || '').trim();
+      if (weatherMain) {
+        payload.weatherMain = weatherMain;
+      }
+
+      const response = await refineForYouRecommendations(payload);
+      const refinedVenues = Array.isArray(response?.recommendations) ? response.recommendations : [];
+
+      if (response?.context) {
+        setAiContext(response.context);
+      }
+
+      if (response?.refine) {
+        setAiRefineMeta(response.refine);
+      }
+
+      setAiSuggestedVenues(refinedVenues);
+      setAiVisibleCount(8);
+
+      if (response?.refine?.understood === false) {
+        setAiRefineError(
+          response?.refine?.summary
+          || 'AI could not confidently understand this refine sentence. Please rewrite with clearer details.'
+        );
+        return;
+      }
+
+      if (!refinedVenues.length) {
+        setAiRefineError('No places matched this refine request. Try broader wording.');
+      }
+    } catch (error) {
+      setAiRefineError(error?.response?.data?.message || 'Unable to refine AI suggestions right now.');
+    } finally {
+      setAiRefineLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const resolveUserCoordinates = () =>
+      new Promise((resolve) => {
+        if (!navigator.geolocation) {
+          resolve(DEFAULT_CITY_COORDINATES);
+          return;
         }
 
-        setCurrentLocation('Da Nang, Son Tra');
-        setCurrentWeather(`29°C, ${weatherLabel}`);
-      },
-      () => {
-        setCurrentLocation('Da Nang, Son Tra');
-        setCurrentWeather(`29°C, ${weatherLabel}`);
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            const latitude = Number(position?.coords?.latitude);
+            const longitude = Number(position?.coords?.longitude);
+
+            if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+              resolve({ latitude, longitude });
+              return;
+            }
+
+            resolve(DEFAULT_CITY_COORDINATES);
+          },
+          () => resolve(DEFAULT_CITY_COORDINATES),
+          {
+            enableHighAccuracy: true,
+            timeout: 8000,
+            maximumAge: 60 * 1000
+          }
+        );
+      });
+
+    const loadRealtimeWeather = async () => {
+      setWeatherLoading(true);
+      setWeatherError('');
+
+      try {
+        const coordinates = await resolveUserCoordinates();
+        if (!isMounted) {
+          return;
+        }
+
+        setGeoCoordinates(coordinates);
+
+        const response = await fetchCurrentWeather({
+          latitude: coordinates.latitude,
+          longitude: coordinates.longitude
+        });
+
+        if (!isMounted) {
+          return;
+        }
+
+        const weatherPayload = response?.weather || null;
+        setCurrentWeather(weatherPayload || buildLocalFallbackWeather());
+        setCurrentLocation(DEFAULT_CITY_LABEL);
+        setWeatherError('');
+      } catch (error) {
+        if (!isMounted) {
+          return;
+        }
+
+        setCurrentWeather(buildLocalFallbackWeather());
+        setCurrentLocation(DEFAULT_CITY_LABEL);
+        setWeatherError('');
+      } finally {
+        if (isMounted) {
+          setWeatherLoading(false);
+        }
       }
-    );
-  }, [language]);
+    };
+
+    loadRealtimeWeather();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const updateClock = () => {
+      setLocationClock(formatLocationClockByOffset(currentWeather?.timezoneOffsetSeconds));
+    };
+
+    updateClock();
+    const timer = window.setInterval(updateClock, 1000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [currentWeather?.timezoneOffsetSeconds]);
 
   const handlePickImage = (source) => {
     setImageError('');
@@ -1108,8 +1462,8 @@ function OverviewPage() {
   }, []);
 
   return (
-    <div className={`overview-page ${isSearchMode ? 'is-search' : ''}`.trim()}>
-      {!isSearchMode && (
+    <div className={`overview-page ${isCondensedMode ? 'is-search' : ''}`.trim()}>
+      {!isCondensedMode && (
         <section className="overview-hero">
           <div className="overview-hero-visual">
             <div className="overview-hero-plate">
@@ -1241,23 +1595,25 @@ function OverviewPage() {
         </div>
       )}
 
-      <section className={`overview-search ${isSearchMode ? 'is-searching' : ''}`.trim()}>
+      <section className={`overview-search ${isCondensedMode ? 'is-searching' : ''}`.trim()}>
         <div className="overview-search-top">
           <div className="overview-search-headline">
             <h2>Explore with live filters</h2>
             <p>Search by place categories, ward naming, and merchant services.</p>
           </div>
 
-          {currentLocation && currentWeather && (
+          {currentLocation && (
             <div className="overview-location-info overview-location-inline">
-              <span className="overview-location-text">{currentLocation}</span>
-              <span className="overview-weather">
-                {(currentWeather.includes(t.weather.sunny) || currentWeather.includes(t.weather.clear)) && '☀️'}
-                {currentWeather.includes(t.weather.rainy) && '🌧️'}
-                {currentWeather.includes(t.weather.cloudy) && '☁️'}
-                {!(currentWeather.includes(t.weather.sunny) || currentWeather.includes(t.weather.clear) || currentWeather.includes(t.weather.rainy) || currentWeather.includes(t.weather.cloudy)) && '🌡️'}
-                {currentWeather}
+              <span className="overview-location-text">
+                <span aria-hidden="true">📍</span>
+                <span>{currentLocation}</span>
               </span>
+              <span className="overview-weather">
+                <span className="overview-weather-icon" aria-hidden="true">{weatherEmoji}</span>
+                <span className="overview-weather-text">{weatherDisplayText}</span>
+                {locationClock ? <span className="overview-location-time">{locationClock}</span> : null}
+              </span>
+              {weatherError ? <span className="overview-weather-error">{weatherError}</span> : null}
             </div>
           )}
         </div>
@@ -1296,9 +1652,10 @@ function OverviewPage() {
             type="button"
             className="overview-search-ai"
             aria-label={t.search.aiSuggest}
-            onClick={() => alert('AI suggestion not implemented yet')}
+            onClick={handleAiSuggest}
+            disabled={aiSuggestLoading || preferencesLoading}
           >
-            {t.search.aiSuggest}
+            {aiSuggestLoading ? 'Thinking...' : t.search.aiSuggest}
           </button>
         </div>
 
@@ -1346,7 +1703,7 @@ function OverviewPage() {
         ) : null}
       </section>
 
-      {!isSearchMode && token ? (
+      {!isCondensedMode && token ? (
         <section className="overview-section overview-content-lane overview-for-you-section">
           <div className="overview-section-heading">
             <h2>For You</h2>
@@ -1423,7 +1780,134 @@ function OverviewPage() {
         </section>
       ) : null}
 
-      {isSearchMode ? (
+      {aiSuggestMode ? (
+        <section className="overview-section overview-search-result-section overview-ai-result-section">
+          <div className="overview-section-heading">
+            <h2>AI Suggested for You</h2>
+            <span />
+            <p className="overview-section-subcopy">
+              Personalized picks based on profile, nearby distance, real-time weather, current time, and opening hours.
+            </p>
+            {aiContext?.currentTimeWindowLabel ? (
+              <p className="overview-ai-context-copy">
+                Best for now: {aiContext.currentTimeWindowLabel}
+                {aiContext.weatherMain ? ` • Weather: ${aiContext.weatherMain}` : ''}
+              </p>
+            ) : null}
+          </div>
+
+          <div className="overview-ai-refine-panel">
+            <label htmlFor="overview-ai-refine-input" className="overview-ai-refine-label">
+              Chat refine
+            </label>
+            <div className="overview-ai-refine-row">
+              <input
+                id="overview-ai-refine-input"
+                type="text"
+                className="overview-ai-refine-input"
+                value={aiRefineInput}
+                onChange={(event) => {
+                  setAiRefineInput(event.target.value);
+                  if (aiRefineError) {
+                    setAiRefineError('');
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    if (!aiRefineLoading) {
+                      handleRunAiRefine();
+                    }
+                  }
+                }}
+                placeholder='Try: "I want hotpot under 100k, open now"'
+              />
+              <button
+                type="button"
+                className="overview-ai-refine-run"
+                onClick={handleRunAiRefine}
+                disabled={aiRefineLoading || aiSuggestLoading || !(aiBaseVenues.length || aiSuggestedVenues.length)}
+              >
+                {aiRefineLoading ? (
+                  <span className="overview-ai-refine-btn-loading" aria-live="polite">
+                    <span className="overview-ai-refine-btn-spinner" aria-hidden="true" />
+                    Refining...
+                  </span>
+                ) : (
+                  'Run refine'
+                )}
+              </button>
+              {aiRefineMeta ? (
+                <button
+                  type="button"
+                  className="overview-ai-refine-clear"
+                  onClick={handleClearAiRefine}
+                  disabled={aiRefineLoading}
+                >
+                  Clear refine
+                </button>
+              ) : null}
+            </div>
+
+            {aiRefineLoading ? (
+              <p className="overview-ai-refine-progress">Analyzing venue services and descriptions...</p>
+            ) : null}
+
+            {aiRefineMeta?.summary ? (
+              <p className="overview-ai-refine-summary">
+                Refine analysis: {aiRefineMeta.summary}
+              </p>
+            ) : null}
+            {aiRefineError ? <p className="overview-inline-error">{aiRefineError}</p> : null}
+          </div>
+
+          {aiSuggestLoading ? (
+            <div className="overview-ai-loading" role="status" aria-live="polite">
+              <div className="overview-ai-loading-orbit" aria-hidden="true">
+                <span />
+                <span />
+                <span />
+              </div>
+              <p>AI is analyzing your profile, location, weather, and open venues...</p>
+            </div>
+          ) : null}
+
+          {!aiSuggestLoading && aiSuggestError ? <p className="overview-inline-error">{aiSuggestError}</p> : null}
+
+          {!aiSuggestLoading && !aiSuggestError && visibleAiVenues.length > 0 ? (
+            <div className="overview-search-results">
+              <div className="overview-dynamic-grid overview-search-grid overview-ai-grid">
+                {visibleAiVenues.map((venue) => (
+                  <VenueCard
+                    key={`ai-${venue.id}`}
+                    venue={venue}
+                    isFavorite={isFavorite('place', venue.id)}
+                    onToggleFavorite={handleToggleFavorite}
+                    onExplore={handleExploreVenue}
+                    showDistance
+                  />
+                ))}
+              </div>
+
+              {hasMoreAiVenues ? (
+                <div className="overview-ai-show-more-wrap">
+                  <button
+                    type="button"
+                    className="overview-ai-show-more"
+                    onClick={() => setAiVisibleCount((prev) => Math.min(prev + 8, aiSuggestedVenues.length))}
+                  >
+                    khác
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {!aiSuggestLoading && !aiSuggestError && !visibleAiVenues.length ? (
+            <p className="overview-empty-copy">No AI suggestions available right now. Try again after updating your preferences.</p>
+          ) : null}
+        </section>
+      ) : isSearchMode ? (
         <section className="overview-section overview-search-result-section">
           <div className="overview-section-heading">
             <h2>Search Results</h2>
@@ -1587,7 +2071,7 @@ function OverviewPage() {
         </section>
       )}
 
-      {!isSearchMode && (
+      {!isCondensedMode && (
         <section className="overview-section overview-map-section">
           <div className="overview-section-heading">
             <h2>City map</h2>
