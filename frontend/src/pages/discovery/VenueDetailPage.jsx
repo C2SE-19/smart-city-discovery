@@ -15,7 +15,6 @@ import {
 import { submitFeedback } from '../../services/feedbackService';
 import { APP_ROUTES } from '../../constants/routes';
 import { useAuth } from '../../contexts/AuthContext';
-import { useLanguage } from '../../contexts/LanguageContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { normalizeVenueMetadata } from '../../components/map/cityMapUtils';
 import { fetchVenueChatThread, markChatThreadRead, sendVenueChatMessage } from '../../services/api/chatApi';
@@ -25,13 +24,13 @@ const FALLBACK_VENUE_IMAGE =
 	'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=1200&q=80';
 
 const WEEK_DAYS = [
-	{ key: 'monday', label: 'Thứ hai' },
-	{ key: 'tuesday', label: 'Thứ ba' },
-	{ key: 'wednesday', label: 'Thứ tư' },
-	{ key: 'thursday', label: 'Thứ năm' },
-	{ key: 'friday', label: 'Thứ sáu' },
-	{ key: 'saturday', label: 'Thứ bảy' },
-	{ key: 'sunday', label: 'Chủ nhật' }
+	{ key: 'monday', label: 'Monday' },
+	{ key: 'tuesday', label: 'Tuesday' },
+	{ key: 'wednesday', label: 'Wednesday' },
+	{ key: 'thursday', label: 'Thursday' },
+	{ key: 'friday', label: 'Friday' },
+	{ key: 'saturday', label: 'Saturday' },
+	{ key: 'sunday', label: 'Sunday' }
 ];
 
 const REVIEW_BLOCKED_TERMS = [
@@ -47,46 +46,46 @@ const REVIEW_BLOCKED_TERMS = [
 ];
 
 const VENUE_REPORT_REASON_OPTIONS = [
-	{ value: 'incorrect_info', label: 'Thông tin sai' },
-	{ value: 'spam_ads', label: 'Spam / quảng cáo' },
-	{ value: 'inappropriate_content', label: 'Nội dung không phù hợp' },
-	{ value: 'duplicate', label: 'Trùng lặp' },
-	{ value: 'other', label: 'Khác' }
+	{ value: 'incorrect_info', label: 'Incorrect information' },
+	{ value: 'spam_ads', label: 'Spam / advertising' },
+	{ value: 'inappropriate_content', label: 'Inappropriate content' },
+	{ value: 'duplicate', label: 'Duplicate entry' },
+	{ value: 'other', label: 'Other' }
 ];
 
 const REVIEW_REPORT_REASON_OPTIONS = [
-	{ value: 'inappropriate_language', label: 'Ngôn từ không phù hợp' },
-	{ value: 'spam_ads', label: 'Spam / quảng cáo' },
-	{ value: 'incorrect_info', label: 'Thông tin không đúng' },
-	{ value: 'other', label: 'Khác' }
+	{ value: 'inappropriate_language', label: 'Inappropriate language' },
+	{ value: 'spam_ads', label: 'Spam / advertising' },
+	{ value: 'incorrect_info', label: 'Incorrect information' },
+	{ value: 'other', label: 'Other' }
 ];
 
 const REPORT_SEVERITY_OPTIONS = [
-	{ value: 'low', label: 'Thấp', stars: '★' },
-	{ value: 'medium', label: 'Trung bình', stars: '★★' },
-	{ value: 'high', label: 'Nghiêm trọng', stars: '★★★' }
+	{ value: 'low', label: 'Low', stars: '★' },
+	{ value: 'medium', label: 'Medium', stars: '★★' },
+	{ value: 'high', label: 'High', stars: '★★★' }
 ];
 
 const PAGE_I18N = {
 	vi: {
-		replyRequired: 'Nội dung thảo luận không được để trống.',
-		replyBlocked: 'Nội dung thảo luận chứa từ ngữ không phù hợp.',
-		replySubmitFail: 'Không thể gửi thảo luận.',
-		repliesEmpty: 'Chưa có thảo luận nào.',
-		repliesLoginHint: 'Đăng nhập để thảo luận.',
-		discuss: 'Thảo luận',
-		replyTitle: 'Thảo luận bình luận',
-		rating: 'Đánh giá sao',
-		notSelected: 'Chưa chọn',
-		title: 'Tiêu đề',
-		detailComment: 'Mô tả chi tiết bình luận',
-		uploadMedia: 'Ảnh & Video',
-		maxSixImages: 'Tối đa 6 ảnh',
-		submitComment: 'Bình luận',
-		submitting: 'Đang gửi...',
-		replyPlaceholder: 'Mô tả chi tiết bình luận ...',
-		reviewCommentPlaceholder: 'Mô tả chi tiết bình luận ...',
-		replyTitlePlaceholder: 'Tiêu đề'
+		replyRequired: 'Discussion content is required.',
+		replyBlocked: 'Discussion contains inappropriate words.',
+		replySubmitFail: 'Unable to send discussion.',
+		repliesEmpty: 'No discussions yet.',
+		repliesLoginHint: 'Please sign in to discuss.',
+		discuss: 'Discuss',
+		replyTitle: 'Discuss review',
+		rating: 'Rating',
+		notSelected: 'Not selected',
+		title: 'Title',
+		detailComment: 'Detailed comment',
+		uploadMedia: 'Photo & Video',
+		maxSixImages: 'Up to 6 images',
+		submitComment: 'Comment',
+		submitting: 'Submitting...',
+		replyPlaceholder: 'Write detailed discussion...',
+		reviewCommentPlaceholder: 'Write detailed comment...',
+		replyTitlePlaceholder: 'Title'
 	},
 	en: {
 		replyRequired: 'Discussion content is required.',
@@ -337,7 +336,7 @@ function StarRatingDisplay({ rating, className = '' }) {
 	const starItems = resolveStarDisplayItems(rating);
 
 	return (
-		<span className={`venue-star-display ${className}`.trim()} aria-label={`${normalizeHalfStarRating(rating)} trên 5 sao`}>
+		<span className={`venue-star-display ${className}`.trim()} aria-label={`${normalizeHalfStarRating(rating)} out of 5 stars`}>
 			{starItems.map((starType, index) => (
 				<span key={`venue-star-${index + 1}`} className={`venue-star-display-item is-${starType}`} aria-hidden="true">
 					★
@@ -348,7 +347,7 @@ function StarRatingDisplay({ rating, className = '' }) {
 }
 
 function resolveVenueName(venue) {
-	return venue?.name || venue?.title || 'Địa điểm chưa đặt tên';
+	return venue?.name || venue?.title || 'Unnamed venue';
 }
 
 function resolveCoverImage(venue) {
@@ -456,7 +455,7 @@ function resolveWeeklySchedule(venue) {
 
 function formatDisplayTime(value) {
 	if (!value || value === 'OFF') {
-		return 'Đóng cửa';
+		return 'Closed';
 	}
 
 	return value;
@@ -478,14 +477,14 @@ function resolveVenuePriceRange(venue) {
 	const maxPrice = Number(metadata.maxPrice ?? metadata.max_price);
 
 	if (Number.isFinite(minPrice) && Number.isFinite(maxPrice) && minPrice > 0 && maxPrice >= minPrice) {
-		return `${minPrice.toLocaleString('vi-VN')}đ - ${maxPrice.toLocaleString('vi-VN')}đ`;
+		return `${minPrice.toLocaleString('en-US')} VND - ${maxPrice.toLocaleString('en-US')} VND`;
 	}
 
 	const directCandidates = [venue?.price, venue?.price_range, metadata.price, metadata.priceRange]
 		.map((item) => String(item || '').trim())
 		.filter(Boolean);
 
-	return directCandidates[0] || 'Đang cập nhật';
+	return directCandidates[0] || 'Updating';
 }
 
 function resolveChatOwnerName(venue) {
@@ -507,7 +506,7 @@ function resolveChatOwnerName(venue) {
 		.map((item) => String(item || '').trim())
 		.filter(Boolean);
 
-	return candidates[0] || 'Chủ quán';
+	return candidates[0] || 'Venue owner';
 }
 
 function buildVenueChatMeta(venue, fallback = {}) {
@@ -528,11 +527,11 @@ function buildChatContextLine(message, fallbackVenueMeta = null) {
 	const resolvedContextLabel = String(message?.contextLabel || '').trim();
 
 	if (resolvedVenueName) {
-		return `Về quán: ${resolvedVenueName}${resolvedVenueAddress ? ` · ${resolvedVenueAddress}` : ''}`;
+		return `Venue: ${resolvedVenueName}${resolvedVenueAddress ? ` · ${resolvedVenueAddress}` : ''}`;
 	}
 
 	if (resolvedContextLabel) {
-		return `Chủ đề: ${resolvedContextLabel}`;
+		return `Topic: ${resolvedContextLabel}`;
 	}
 
 	return '';
@@ -548,7 +547,6 @@ function VenueDetailPage() {
 	const location = useLocation();
 	const navigate = useNavigate();
 	const { token, user } = useAuth();
-	const { language } = useLanguage();
 	const { theme } = useTheme();
 	const apiUrl = useMemo(() => import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api', []);
 	const apiBase = useMemo(() => apiUrl.replace(/\/api\/v1$|\/api$/i, ''), [apiUrl]);
@@ -598,7 +596,7 @@ function VenueDetailPage() {
 		content: '',
 		images: []
 	});
-	const i18n = PAGE_I18N[language] || PAGE_I18N.vi;
+	const i18n = PAGE_I18N.en;
 	const [favoriteLoading, setFavoriteLoading] = useState(false);
 	const [isFavorite, setIsFavorite] = useState(false);
 	const [favoriteError, setFavoriteError] = useState('');
@@ -795,7 +793,7 @@ function VenueDetailPage() {
 		}
 
 		if (!venueReportForm.reason) {
-			setVenueReportStatus({ type: 'error', message: 'Vui lòng chọn lý do báo cáo.' });
+			setVenueReportStatus({ type: 'error', message: 'Please select a report reason.' });
 			return;
 		}
 
@@ -803,17 +801,17 @@ function VenueDetailPage() {
 		setVenueReportStatus({ type: '', message: '' });
 
 		const selectedReasonLabel =
-			VENUE_REPORT_REASON_OPTIONS.find((item) => item.value === venueReportForm.reason)?.label || 'Khác';
+			VENUE_REPORT_REASON_OPTIONS.find((item) => item.value === venueReportForm.reason)?.label || 'Other';
 		const selectedSeverityLabel =
-			REPORT_SEVERITY_OPTIONS.find((item) => item.value === venueReportForm.severity)?.label || 'Thấp';
+			REPORT_SEVERITY_OPTIONS.find((item) => item.value === venueReportForm.severity)?.label || 'Low';
 		const detailText = String(venueReportForm.description || '').trim();
 
 		const reportMessage = [
-			`Báo cáo địa điểm: ${resolveVenueName(venue)}`,
-			`Lý do: ${selectedReasonLabel}`,
-			`Mức độ: ${selectedSeverityLabel}`,
-			`Địa chỉ: ${venue?.address || 'Không có'}`,
-			detailText ? `Mô tả chi tiết: ${detailText}` : ''
+			`Venue report: ${resolveVenueName(venue)}`,
+			`Reason: ${selectedReasonLabel}`,
+			`Severity: ${selectedSeverityLabel}`,
+			`Address: ${venue?.address || 'N/A'}`,
+			detailText ? `Details: ${detailText}` : ''
 		]
 			.filter(Boolean)
 			.join('\n');
@@ -833,14 +831,14 @@ function VenueDetailPage() {
 				}
 			});
 
-			setVenueReportStatus({ type: 'success', message: 'Đã gửi báo cáo địa điểm thành công.' });
+			setVenueReportStatus({ type: 'success', message: 'Venue report submitted successfully.' });
 			window.setTimeout(() => {
 				setShowVenueReportModal(false);
 			}, 700);
 		} catch (submitError) {
 			setVenueReportStatus({
 				type: 'error',
-				message: submitError?.response?.data?.message || 'Không thể gửi báo cáo địa điểm lúc này.'
+				message: submitError?.response?.data?.message || 'Unable to submit venue report right now.'
 			});
 		} finally {
 			setSubmittingVenueReport(false);
@@ -855,7 +853,7 @@ function VenueDetailPage() {
 		}
 
 		if (!reviewReportForm.reason) {
-			setReviewReportStatus({ type: 'error', message: 'Vui lòng chọn lý do báo lỗi.' });
+			setReviewReportStatus({ type: 'error', message: 'Please select a report reason.' });
 			return;
 		}
 
@@ -863,14 +861,14 @@ function VenueDetailPage() {
 		setReviewReportStatus({ type: '', message: '' });
 
 		const selectedReasonLabel =
-			REVIEW_REPORT_REASON_OPTIONS.find((item) => item.value === reviewReportForm.reason)?.label || 'Khác';
+			REVIEW_REPORT_REASON_OPTIONS.find((item) => item.value === reviewReportForm.reason)?.label || 'Other';
 		const detailText = String(reviewReportForm.description || '').trim();
 		const message = [
-			`Báo lỗi bình luận #${activeReviewToReport.id || 'N/A'}`,
-			`Lý do: ${selectedReasonLabel}`,
-			`Người bình luận: ${activeReviewToReport.authorName || 'Ẩn danh'}`,
-			`Nội dung: ${activeReviewToReport.comment || ''}`,
-			detailText ? `Mô tả chi tiết: ${detailText}` : ''
+			`Review report #${activeReviewToReport.id || 'N/A'}`,
+			`Reason: ${selectedReasonLabel}`,
+			`Author: ${activeReviewToReport.authorName || 'Anonymous'}`,
+			`Content: ${activeReviewToReport.comment || ''}`,
+			detailText ? `Details: ${detailText}` : ''
 		]
 			.filter(Boolean)
 			.join('\n');
@@ -888,14 +886,14 @@ function VenueDetailPage() {
 				}
 			});
 
-			setReviewReportStatus({ type: 'success', message: 'Đã gửi báo lỗi bình luận thành công.' });
+			setReviewReportStatus({ type: 'success', message: 'Review report submitted successfully.' });
 			window.setTimeout(() => {
 				setShowReviewReportModal(false);
 			}, 700);
 		} catch (submitError) {
 			setReviewReportStatus({
 				type: 'error',
-				message: submitError?.response?.data?.message || 'Không thể gửi báo lỗi bình luận lúc này.'
+				message: submitError?.response?.data?.message || 'Unable to submit review report right now.'
 			});
 		} finally {
 			setSubmittingReviewReport(false);
@@ -971,7 +969,7 @@ function VenueDetailPage() {
 					setError(
 						detailError?.response?.data?.message ||
 						communityError?.response?.data?.message ||
-						'Không thể tải chi tiết địa điểm.'
+						'Unable to load venue details.'
 					);
 				}
 			} finally {
@@ -1114,7 +1112,7 @@ function VenueDetailPage() {
 				setActiveChatThreadId(null);
 				setChatContextOptions([]);
 				setSelectedChatContextValue('');
-				setChatError(requestError?.response?.data?.message || 'Khong the tai hoi thoai.');
+				setChatError(requestError?.response?.data?.message || 'Unable to load chat conversation.');
 			} finally {
 				if (active && showLoader) {
 					setChatLoading(false);
@@ -1259,7 +1257,7 @@ function VenueDetailPage() {
 					return;
 				}
 
-				setOpeningError(requestError?.response?.data?.message || 'Không thể tải giờ hoạt động realtime.');
+				setOpeningError(requestError?.response?.data?.message || 'Unable to load real-time opening hours.');
 			} finally {
 				if (active) {
 					setOpeningLoading(false);
@@ -1331,7 +1329,7 @@ function VenueDetailPage() {
 			setFavoriteCollection(favorites.filter((item) => String(item.itemType || '').toLowerCase() === 'place'));
 		} catch {
 			setFavoriteCollection([]);
-			setFavoriteCollectionError('Không thể tải danh sách quán yêu thích.');
+			setFavoriteCollectionError('Unable to load favorite venues.');
 		} finally {
 			setFavoriteCollectionLoading(false);
 		}
@@ -1366,7 +1364,7 @@ function VenueDetailPage() {
 				setIsFavorite(false);
 			}
 		} catch {
-			setFavoriteCollectionError('Không thể bỏ yêu thích quán này.');
+			setFavoriteCollectionError('Unable to remove this venue from favorites.');
 		}
 	};
 
@@ -1412,10 +1410,10 @@ function VenueDetailPage() {
 			}
 		} catch (requestError) {
 			if (requestError?.response?.status === 401) {
-				setFavoriteError('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.');
+				setFavoriteError('Your session has expired. Please sign in again.');
 				navigate(APP_ROUTES.LOGIN);
 			} else {
-				setFavoriteError(requestError?.response?.data?.message || 'Nút yêu thích đang lỗi. Vui lòng thử lại.');
+				setFavoriteError(requestError?.response?.data?.message || 'Favorite action failed. Please try again.');
 			}
 		} finally {
 			setFavoriteLoading(false);
@@ -1436,7 +1434,7 @@ function VenueDetailPage() {
 		}
 
 		if (!canUseVenueChat) {
-			setChatError('Quán này chưa được gắn chủ sở hữu nên chưa thể sử dụng chat.');
+			setChatError('This venue is not linked to an owner, so chat is unavailable.');
 			return;
 		}
 
@@ -1467,7 +1465,7 @@ function VenueDetailPage() {
 				await markChatThreadRead(response.thread.id, token).catch(() => {});
 			}
 		} catch (requestError) {
-			setChatError(requestError?.response?.data?.message || 'Khong the gui tin nhan.');
+			setChatError(requestError?.response?.data?.message || 'Unable to send message.');
 		} finally {
 			setChatSending(false);
 		}
@@ -1481,13 +1479,13 @@ function VenueDetailPage() {
 		const normalizedComment = reviewForm.comment.trim();
 
 		if (!normalizedComment) {
-			setReviewError('Vui lòng nhập nội dung bình luận.');
+			setReviewError('Please enter your review comment.');
 			return;
 		}
 
 		const blockedTerm = findBlockedTerm(`${normalizedTitle} ${normalizedComment}`);
 		if (blockedTerm) {
-			setReviewError('Nội dung bình luận có từ ngữ không phù hợp. Vui lòng chỉnh sửa lại.');
+			setReviewError('Your review contains inappropriate words. Please revise and try again.');
 			return;
 		}
 
@@ -1581,7 +1579,7 @@ function VenueDetailPage() {
 			setEditingReviewId(null);
 			setShowCommentModal(false);
 		} catch (submitError) {
-			setReviewError(submitError?.response?.data?.message || 'Gửi bình luận thất bại.');
+			setReviewError(submitError?.response?.data?.message || 'Failed to submit review.');
 		} finally {
 			setSubmittingReview(false);
 		}
@@ -1640,7 +1638,7 @@ function VenueDetailPage() {
 				)
 			);
 		} catch (error) {
-			setReviewActionError(error?.response?.data?.message || 'Không thể cập nhật lượt thích.');
+			setReviewActionError(error?.response?.data?.message || 'Unable to update like status.');
 		}
 	};
 
@@ -1674,7 +1672,7 @@ function VenueDetailPage() {
 				)
 			);
 		} catch (error) {
-			setReviewActionError(error?.response?.data?.message || 'Không thể cập nhật lượt thích.');
+			setReviewActionError(error?.response?.data?.message || 'Unable to update like status.');
 		}
 	};
 
@@ -1684,7 +1682,7 @@ function VenueDetailPage() {
 		setReplyForm({
 			rating: null,
 			title: '',
-			content: `@${reply?.authorName || 'Ẩn danh'} `,
+			content: `@${reply?.authorName || 'Anonymous'} `,
 			images: []
 		});
 		setShowReplyModal(true);
@@ -1762,7 +1760,7 @@ function VenueDetailPage() {
 			return;
 		}
 
-		const confirmed = window.confirm('Bạn có chắc muốn xóa bình luận này không?');
+		const confirmed = window.confirm('Are you sure you want to delete this review?');
 		if (!confirmed) {
 			return;
 		}
@@ -1772,7 +1770,7 @@ function VenueDetailPage() {
 			await deleteVenueReview(venueId, review.id);
 			await reloadCommunityData();
 		} catch (error) {
-			setReviewActionError(error?.response?.data?.message || 'Không thể xóa bình luận.');
+			setReviewActionError(error?.response?.data?.message || 'Unable to delete this review.');
 		}
 	};
 
@@ -1830,7 +1828,7 @@ function VenueDetailPage() {
 	const isRealtimeReady = Boolean(currentOpen);
 	const displayStart = currentOpen?.start || todaySchedule?.open || 'N/A';
 	const displayEnd = currentOpen?.end || todaySchedule?.close || 'N/A';
-	const displayStatusText = !isRealtimeReady ? 'Đang cập nhật' : currentOpen?.isOpen ? 'Đang mở cửa' : 'Đã đóng cửa';
+	const displayStatusText = !isRealtimeReady ? 'Updating' : currentOpen?.isOpen ? 'Open now' : 'Closed now';
 	const showOpenState = isRealtimeReady ? currentOpen?.isOpen : !todaySchedule?.off;
 	const displaySchedule = openingRealtime?.weeklySchedule || weeklySchedule;
 
@@ -1860,7 +1858,7 @@ function VenueDetailPage() {
 
 								setShowChatWidget((current) => !current);
 							}}
-							aria-label="Mở chat với quán"
+							aria-label="Open venue chat"
 						>
 							💬
 						</button>
@@ -1869,7 +1867,7 @@ function VenueDetailPage() {
 							className={`venue-icon-btn ${isFavorite ? 'is-active' : ''}`}
 							onClick={handleToggleFavorite}
 							disabled={favoriteLoading}
-							aria-label="Yêu thích"
+							aria-label="Favorite"
 						>
 							{isFavorite ? '♥' : '♡'}
 						</button>
@@ -1883,8 +1881,8 @@ function VenueDetailPage() {
 										<img src={resolveCoverImage(venue)} alt={resolveVenueName(venue)} loading="lazy" />
 									</div>
 									<div>
-										<strong>{chatVenueMeta?.ownerName || 'Chủ quán'}</strong>
-										<p>{showOpenState ? 'Đang mở cửa' : 'Đã đóng cửa'} · {venue.ward_name || 'Đang cập nhật khu vực'}</p>
+										<strong>{chatVenueMeta?.ownerName || 'Venue owner'}</strong>
+										<p>{showOpenState ? 'Open now' : 'Closed now'} · {venue.ward_name || 'Area updating'}</p>
 									</div>
 								</div>
 								<div className="venue-chat-widget-actions">
@@ -1892,7 +1890,7 @@ function VenueDetailPage() {
 										type="button"
 										className="venue-chat-widget-minimize"
 										onClick={() => setShowChatWidget(false)}
-										aria-label="Thu gọn chat"
+										aria-label="Collapse chat"
 									>
 										−
 									</button>
@@ -1901,17 +1899,17 @@ function VenueDetailPage() {
 
 							<div className="venue-chat-widget-body">
 								<div className="venue-chat-widget-intro">
-									<p className="venue-chat-widget-intro-title">Thông tin quán đang nhắn</p>
+									<p className="venue-chat-widget-intro-title">Current venue info</p>
 									<p><strong>{resolveVenueName(venue)}</strong></p>
-									<p>📍 {venue.address || 'Chưa có địa chỉ'}</p>
+									<p>📍 {venue.address || 'No address yet'}</p>
 									<p>💲 {venuePriceRange}</p>
-									<p>⭐ {Number(communityStats.averageRating || 0).toFixed(1)}/5 · {communityStats.totalReviews} đánh giá</p>
+									<p>⭐ {Number(communityStats.averageRating || 0).toFixed(1)}/5 · {communityStats.totalReviews} reviews</p>
 								</div>
 
 								<div className="venue-chat-widget-messages" ref={chatListRef}>
 									{chatLoading ? (
 										<div className="venue-chat-widget-empty">
-											<p>Dang tai tin nhan...</p>
+													<p>Loading messages...</p>
 										</div>
 									) : chatError ? (
 										<div className="venue-chat-widget-empty">
@@ -1930,7 +1928,7 @@ function VenueDetailPage() {
 											>
 												<header>
 													<strong>{message.author}</strong>
-													<span>{new Date(message.createdAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</span>
+													<span>{new Date(message.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</span>
 												</header>
                                                 {shouldShowVenueContext ? <p className="venue-chat-widget-context">{contextLine}</p> : null}
 														<p>{message.content}</p>
@@ -1943,11 +1941,11 @@ function VenueDetailPage() {
 										</div>
 									) : isCurrentUserVenueOwner && !effectiveSelectedChatThreadId ? (
 										<div className="venue-chat-widget-empty">
-											<p>Hãy mở đoạn chat từ icon tin nhắn trên header để trả lời khách.</p>
+											<p>Open chat from the header message icon to reply as venue owner.</p>
 										</div>
 									) : (
 										<div className="venue-chat-widget-empty">
-											<p>Bắt đầu chat với quán này. Tin nhắn sẽ được gom theo chủ quán.</p>
+											<p>Start chatting with this venue. Messages are grouped by venue owner.</p>
 										</div>
 									)}
 								</div>
@@ -1957,11 +1955,11 @@ function VenueDetailPage() {
 										rows="3"
 										value={chatInput}
 										onChange={(event) => setChatInput(event.target.value)}
-										placeholder="Nhập tin nhắn cho quán..."
+										placeholder="Type your message to this venue..."
 										disabled={!authToken || !canUseVenueChat}
 									/>
 									<div className="venue-chat-widget-form-footer">
-										<span>{chatMessages.length} tin nhắn</span>
+										<span>{chatMessages.length} messages</span>
 										<select
 											className="venue-chat-widget-context-select"
 											value={selectedChatContextValue}
@@ -1980,11 +1978,11 @@ function VenueDetailPage() {
                                                 type="submit"
                                                 disabled={chatSending || chatLoading || !chatInput.trim() || !canUseVenueChat || (isCurrentUserVenueOwner && !activeChatThreadId)}
                                             >
-                                                {chatSending ? 'Đang gửi...' : 'Gửi'}
+												{chatSending ? 'Sending...' : 'Send'}
                                             </button>
                                         ) : (
                                             <button type="button" onClick={() => navigate(APP_ROUTES.LOGIN)}>
-                                                Đăng nhập
+												Sign in
                                             </button>
                                         )}
 									</div>
@@ -1999,12 +1997,12 @@ function VenueDetailPage() {
 							type="button"
 							className="venue-detail-address-link"
 							onClick={handleGoToMapLocation}
-							title="Bấm để nhảy tới vị trí trên bản đồ"
+							title="Click to open this location on the city map"
 						>
 							📍 {venue.address}
 						</button>
 					) : (
-						<p className="venue-detail-address">📍 Chưa có địa chỉ</p>
+						<p className="venue-detail-address">📍 No address yet</p>
 					)}
 					{venue.ward_name ? <p className="venue-detail-ward">🗺️ {venue.ward_name}</p> : null}
 
@@ -2019,7 +2017,7 @@ function VenueDetailPage() {
 							type="button"
 							className="venue-open-info-btn"
 							onClick={() => setShowOpeningHoursModal(true)}
-							aria-label="Xem giờ hoạt động chi tiết"
+							aria-label="View opening hours details"
 						>
 							!
 						</button>
@@ -2029,7 +2027,7 @@ function VenueDetailPage() {
 
 					<div className="venue-detail-rating-row">
 						<StarRatingDisplay rating={communityStats.averageRating || 0} />
-						<span>{Number(communityStats.averageRating || 0).toFixed(1)}/5 ({communityStats.totalReviews} đánh giá)</span>
+						<span>{Number(communityStats.averageRating || 0).toFixed(1)}/5 ({communityStats.totalReviews} reviews)</span>
 					</div>
 
 					<div className="venue-detail-description-wrap">
@@ -2055,7 +2053,7 @@ function VenueDetailPage() {
 							className="venue-report-btn"
 							onClick={openVenueReportModal}
 						>
-							⚑ Báo cáo
+							⚑ Report
 						</button>
 					</div>
 				</div>
@@ -2068,7 +2066,7 @@ function VenueDetailPage() {
 					onClick={handleOpenFavoriteCollection}
 					disabled={favoriteCollectionLoading}
 				>
-					{isFavorite ? '♥' : '♡'} Yêu thích & Bộ sưu tập
+					{isFavorite ? '♥' : '♡'} Favorites & Collections
 				</button>
 				<button
 					type="button"
@@ -2080,30 +2078,30 @@ function VenueDetailPage() {
 						setShowCommentModal(true);
 					}}
 				>
-					💬 Bình luận
+					💬 Review
 				</button>
-				<button type="button" className="venue-action-btn" onClick={() => setShowImagesModal(true)}>🖼️ Hình ảnh</button>
+				<button type="button" className="venue-action-btn" onClick={() => setShowImagesModal(true)}>🖼️ Images</button>
 				<button
 					type="button"
 					className="venue-action-btn"
 					onClick={() => setShowShareModal(true)}
 				>
-					↗ Chia sẻ
+					↗ Share
 				</button>
 			</div>
 
 			<section className="venue-detail-reviews-section">
-				<h2>Bình luận</h2>
+				<h2>Reviews</h2>
 				{reviewActionError ? <p className="venue-form-error">{reviewActionError}</p> : null}
 
-				{!reviews.length ? <p>Chưa có bình luận nào cho quán này.</p> : null}
+				{!reviews.length ? <p>No reviews for this venue yet.</p> : null}
 
 				<div className="venue-review-list">
 					{reviews.map((review) => (
 						<article key={`review-${review.id}`} className="venue-review-card">
 							<header>
-								<strong>{review.authorName || 'Ẩn danh'}</strong>
-								<span>{new Date(review.createdAt || review.created_at).toLocaleString('vi-VN')}</span>
+								<strong>{review.authorName || 'Anonymous'}</strong>
+								<span>{new Date(review.createdAt || review.created_at).toLocaleString('en-US')}</span>
 							</header>
 							<p className="venue-review-stars"><StarRatingDisplay rating={review.rating} /> · {Number(review.rating || 0).toFixed(1)}</p>
 							{review.title ? <h3>{review.title}</h3> : null}
@@ -2129,7 +2127,7 @@ function VenueDetailPage() {
 									onClick={() => handleToggleReviewLike(review)}
 								>
 									<span aria-hidden="true">♥</span>
-									<span>Thích</span>
+									<span>Like</span>
 									<strong>{Number(review.likeCount || 0)}</strong>
 								</button>
 
@@ -2149,7 +2147,7 @@ function VenueDetailPage() {
 									onClick={() => openReviewReportModal(review)}
 								>
 									<span aria-hidden="true">⚠</span>
-									<span>Báo lỗi</span>
+									<span>Report</span>
 								</button>
 
 								{review.canDelete ? (
@@ -2159,7 +2157,7 @@ function VenueDetailPage() {
 										onClick={() => handleEditReview(review)}
 									>
 										<span aria-hidden="true">✎</span>
-										<span>Sửa</span>
+										<span>Edit</span>
 									</button>
 								) : null}
 
@@ -2170,7 +2168,7 @@ function VenueDetailPage() {
 										onClick={() => handleDeleteReview(review)}
 									>
 										<span aria-hidden="true">🗑</span>
-										<span>Xóa</span>
+										<span>Delete</span>
 									</button>
 								) : null}
 							</div>
@@ -2179,8 +2177,8 @@ function VenueDetailPage() {
 								<div className="venue-review-reply-preview-list">
 									{review.replies.map((reply) => (
 										<div key={`reply-preview-${review.id}-${reply.id}`} className="venue-review-reply-item">
-											<strong>{reply.authorName || 'Ẩn danh'}</strong>
-											<span>{new Date(reply.createdAt || reply.created_at).toLocaleString('vi-VN')}</span>
+											<strong>{reply.authorName || 'Anonymous'}</strong>
+											<span>{new Date(reply.createdAt || reply.created_at).toLocaleString('en-US')}</span>
 											{Number(reply.rating || 0) > 0 ? <p className="venue-review-stars"><StarRatingDisplay rating={reply.rating} /> · {Number(reply.rating || 0).toFixed(1)}</p> : null}
 											{reply.title ? <h4 className="venue-review-reply-title">{reply.title}</h4> : null}
 											<p>{reply.content}</p>
@@ -2203,7 +2201,7 @@ function VenueDetailPage() {
 													onClick={() => handleToggleReplyLike(review, reply)}
 												>
 													<span aria-hidden="true">♥</span>
-													<span>Thích</span>
+													<span>Like</span>
 													<strong>{Number(reply.likeCount || 0)}</strong>
 												</button>
 
@@ -2229,19 +2227,19 @@ function VenueDetailPage() {
 				<div className="venue-modal-overlay" onClick={() => setShowVenueReportModal(false)}>
 					<div className="venue-modal-card venue-report-modal-card" onClick={(event) => event.stopPropagation()}>
 						<header className="venue-report-modal-head">
-							<h3>🚨 Báo cáo địa điểm</h3>
+							<h3>🚨 Report venue</h3>
 							<button type="button" onClick={() => setShowVenueReportModal(false)}>×</button>
 						</header>
 
 						<form className="venue-report-modal-form" onSubmit={handleSubmitVenueReport}>
 							<label>
-								Lý do báo cáo
+								Report reason
 								<select
 									value={venueReportForm.reason}
 									onChange={(event) => setVenueReportForm((prev) => ({ ...prev, reason: event.target.value }))}
 									required
 								>
-									<option value="">— Chọn lý do —</option>
+									<option value="">— Select reason —</option>
 									{VENUE_REPORT_REASON_OPTIONS.map((item) => (
 										<option key={`venue-report-reason-${item.value}`} value={item.value}>
 											{item.label}
@@ -2251,18 +2249,18 @@ function VenueDetailPage() {
 							</label>
 
 							<label>
-								Mô tả chi tiết
+								Detailed description
 								<textarea
 									rows="4"
 									value={venueReportForm.description}
 									onChange={(event) => setVenueReportForm((prev) => ({ ...prev, description: event.target.value }))}
-									placeholder="Mô tả chi tiết vấn đề bạn gặp phải..."
+									placeholder="Describe the issue in detail..."
 								/>
 							</label>
 
 							<div className="venue-report-upload-row">
 								<label className="venue-report-upload-btn">
-									📷 Tải ảnh lên
+									📷 Upload image
 									<input
 										type="file"
 										accept="image/png,image/jpeg,image/webp"
@@ -2274,7 +2272,7 @@ function VenueDetailPage() {
 								</label>
 								{venueReportAttachmentPreview ? (
 									<div className="venue-report-upload-preview">
-										<img src={venueReportAttachmentPreview} alt="Ảnh minh họa báo cáo" />
+										<img src={venueReportAttachmentPreview} alt="Report attachment preview" />
 										<button
 											type="button"
 											onClick={() => setVenueReportForm((prev) => ({ ...prev, attachment: null }))}
@@ -2286,7 +2284,7 @@ function VenueDetailPage() {
 							</div>
 
 							<div className="venue-report-severity-row">
-								<span>Hoặc chọn nhanh:</span>
+								<span>Quick severity:</span>
 								<div>
 									{REPORT_SEVERITY_OPTIONS.map((item) => (
 										<button
@@ -2301,7 +2299,7 @@ function VenueDetailPage() {
 								</div>
 							</div>
 
-							<p className="venue-report-warning">⚠️ Báo cáo sai có thể bị hạn chế tài khoản</p>
+							<p className="venue-report-warning">⚠️ False reports may lead to account restrictions</p>
 
 							{venueReportStatus.message ? (
 								<p className={`venue-report-status ${venueReportStatus.type}`}>{venueReportStatus.message}</p>
@@ -2309,10 +2307,10 @@ function VenueDetailPage() {
 
 							<div className="venue-report-actions">
 								<button type="button" onClick={() => setShowVenueReportModal(false)}>
-									Hủy
+									Cancel
 								</button>
 								<button type="submit" className="is-danger" disabled={submittingVenueReport}>
-									{submittingVenueReport ? 'Đang gửi...' : 'Gửi báo cáo'}
+									{submittingVenueReport ? 'Submitting...' : 'Submit report'}
 								</button>
 							</div>
 						</form>
@@ -2324,20 +2322,20 @@ function VenueDetailPage() {
 				<div className="venue-modal-overlay" onClick={() => setShowReviewReportModal(false)}>
 					<div className="venue-modal-card venue-comment-report-modal" onClick={(event) => event.stopPropagation()}>
 						<header className="venue-report-modal-head">
-							<h3>🚨 Báo lỗi bình luận</h3>
+							<h3>🚨 Report review</h3>
 							<button type="button" onClick={() => setShowReviewReportModal(false)}>×</button>
 						</header>
 
-						<p className="venue-report-intro">Vui lòng chọn lý do và mô tả chi tiết khi báo lỗi bình luận này.</p>
+						<p className="venue-report-intro">Please select a reason and describe the review issue in detail.</p>
 
 						<div className="venue-comment-report-preview">
-							<strong>{activeReviewToReport.authorName || 'Ẩn danh'}</strong>
+							<strong>{activeReviewToReport.authorName || 'Anonymous'}</strong>
 							<p>{activeReviewToReport.comment || ''}</p>
 						</div>
 
 						<form className="venue-report-modal-form" onSubmit={handleSubmitReviewReport}>
 							<fieldset className="venue-report-radio-grid">
-								<legend>Lý do báo lỗi:</legend>
+								<legend>Report reason:</legend>
 								{REVIEW_REPORT_REASON_OPTIONS.map((item) => (
 									<label key={`review-report-reason-${item.value}`}>
 										<input
@@ -2357,11 +2355,11 @@ function VenueDetailPage() {
 									rows="3"
 									value={reviewReportForm.description}
 									onChange={(event) => setReviewReportForm((prev) => ({ ...prev, description: event.target.value }))}
-									placeholder="Mô tả chi tiết vấn đề bạn gặp phải..."
+									placeholder="Describe the issue in detail..."
 								/>
 							</label>
 
-							<p className="venue-report-warning">⚠️ Việc gửi báo cáo sai sự thật có thể dẫn đến hạn chế tài khoản</p>
+							<p className="venue-report-warning">⚠️ False reports may lead to account restrictions</p>
 
 							{reviewReportStatus.message ? (
 								<p className={`venue-report-status ${reviewReportStatus.type}`}>{reviewReportStatus.message}</p>
@@ -2369,10 +2367,10 @@ function VenueDetailPage() {
 
 							<div className="venue-report-actions">
 								<button type="button" onClick={() => setShowReviewReportModal(false)}>
-									Hủy
+									Cancel
 								</button>
 								<button type="submit" className="is-danger" disabled={submittingReviewReport}>
-									{submittingReviewReport ? 'Đang gửi...' : 'Gửi báo lỗi'}
+									{submittingReviewReport ? 'Submitting...' : 'Submit report'}
 								</button>
 							</div>
 						</form>
@@ -2392,7 +2390,7 @@ function VenueDetailPage() {
 							<button type="button" className="venue-modal-close" onClick={() => setShowOpeningHoursModal(false)}>×</button>
 						</div>
 
-						{openingLoading ? <p>Đang tải...</p> : null}
+						{openingLoading ? <p>Loading...</p> : null}
 						{openingError ? <p>{openingError}</p> : null}
 
 						{!openingLoading && !openingError ? (
@@ -2407,7 +2405,7 @@ function VenueDetailPage() {
 								<div className="venue-schedule-horizontal-times">
 									{displaySchedule.map((item) => (
 										<div key={`schedule-time-${item.key}`} className="venue-schedule-cell">
-											{item.off ? 'Đóng cửa' : `${item.open} - ${item.close}`}
+											{item.off ? 'Closed' : `${item.open} - ${item.close}`}
 										</div>
 									))}
 								</div>
@@ -2421,19 +2419,19 @@ function VenueDetailPage() {
 				<div className="venue-modal-overlay" onClick={closeCommentModal}>
 					<div className="venue-modal-card venue-modal-comment" onClick={(event) => event.stopPropagation()}>
 						<button type="button" className="venue-modal-close" onClick={closeCommentModal}>×</button>
-						<h3>{editingReviewId ? 'Chỉnh sửa bình luận' : 'Viết Bình Luận'}</h3>
+						<h3>{editingReviewId ? 'Edit review' : 'Write a review'}</h3>
 
 						<div className="venue-comment-hero-card">
 							<img src={resolveCoverImage(venue)} alt={resolveVenueName(venue)} loading="lazy" />
 							<div className="venue-comment-hero-content">
 								<h4>{resolveVenueName(venue)}</h4>
-								<p>📍 {venue.address || 'Chưa có địa chỉ'}</p>
+								<p>📍 {venue.address || 'No address yet'}</p>
 								<p className="venue-comment-hero-opening">
-									<span className={showOpenState ? 'is-open' : 'is-close'}>{showOpenState ? 'Đang mở cửa' : 'Đã đóng cửa'}</span>
+									<span className={showOpenState ? 'is-open' : 'is-close'}>{showOpenState ? 'Open now' : 'Closed now'}</span>
 									{formatDisplayTime(displayStart)} - {formatDisplayTime(displayEnd)}
 								</p>
 								<p>💲 {venuePriceRange}</p>
-								<p><StarRatingDisplay rating={communityStats.averageRating || 0} /> {Number(communityStats.averageRating || 0).toFixed(1)}/5 ({communityStats.totalReviews} đánh giá)</p>
+								<p><StarRatingDisplay rating={communityStats.averageRating || 0} /> {Number(communityStats.averageRating || 0).toFixed(1)}/5 ({communityStats.totalReviews} reviews)</p>
 							</div>
 						</div>
 
@@ -2448,12 +2446,12 @@ function VenueDetailPage() {
 										onChange={handlePickReviewImages}
 									/>
 									<span className="venue-comment-upload-icon">📷</span>
-									<span>Ảnh & Video</span>
+									<span>Photo & Video</span>
 									{reviewImagePreviews.length ? (
 										<div className="venue-review-upload-preview-grid">
 											{reviewImagePreviews.map((item) => (
 												<div key={item.id} className="venue-review-upload-preview-item">
-													<img src={item.url} alt="Ảnh bình luận" loading="lazy" />
+													<img src={item.url} alt="Review image" loading="lazy" />
 													<button
 														type="button"
 														onClick={(event) => {
@@ -2467,13 +2465,13 @@ function VenueDetailPage() {
 											))}
 										</div>
 									) : null}
-									<small>{reviewForm.images.length ? `Đã chọn ${reviewForm.images.length}/6 ảnh` : 'Tối đa 6 ảnh'}</small>
+									<small>{reviewForm.images.length ? `${reviewForm.images.length}/6 selected` : 'Up to 6 images'}</small>
 								</label>
 
 								<div className="venue-comment-fields">
 									<label className="venue-comment-rating-row">
-										Đánh giá sao
-										<div className="venue-star-rating-picker" role="radiogroup" aria-label="Đánh giá sao">
+										Rating
+										<div className="venue-star-rating-picker" role="radiogroup" aria-label="Star rating">
 											{[1, 2, 3, 4, 5].map((value) => (
 												(() => {
 													const normalizedSelectedRating = normalizeHalfStarRating(reviewForm.rating);
@@ -2486,7 +2484,7 @@ function VenueDetailPage() {
 													type="button"
 													className={`venue-star-btn ${isFull ? 'is-active' : ''} ${isHalf ? 'is-half-active' : ''}`}
 													onClick={(event) => handleSelectRating(event, value)}
-													aria-label={`${value} sao`}
+													aria-label={`${value} stars`}
 												>
 													★
 												</button>
@@ -2494,26 +2492,26 @@ function VenueDetailPage() {
 												})()
 											))}
 										</div>
-										<span className="venue-rating-hint">{reviewForm.rating ? `${normalizeHalfStarRating(reviewForm.rating)}/5` : 'Chưa chọn'}</span>
+										<span className="venue-rating-hint">{reviewForm.rating ? `${normalizeHalfStarRating(reviewForm.rating)}/5` : 'Not selected'}</span>
 									</label>
 
 									<label>
-										Tiêu đề
+										Title
 										<input
 											type="text"
 											value={reviewForm.title}
 											onChange={(event) => handleChangeReviewField('title', event.target.value)}
-											placeholder="Tiêu đề"
+											placeholder="Title"
 										/>
 									</label>
 
 									<label>
-										Mô tả chi tiết bình luận
+										Detailed review comment
 										<textarea
 											rows="5"
 											value={reviewForm.comment}
 											onChange={(event) => handleChangeReviewField('comment', event.target.value)}
-											placeholder="Mô tả chi tiết bình luận ..."
+											placeholder="Write your detailed review..."
 										/>
 									</label>
 								</div>
@@ -2522,7 +2520,7 @@ function VenueDetailPage() {
 							{reviewError ? <p className="venue-form-error">{reviewError}</p> : null}
 
 							<button type="submit" disabled={submittingReview}>
-								{submittingReview ? 'Đang gửi...' : editingReviewId ? 'Lưu chỉnh sửa' : 'Bình luận'}
+								{submittingReview ? 'Submitting...' : editingReviewId ? 'Save changes' : 'Submit review'}
 							</button>
 						</form>
 					</div>
@@ -2558,7 +2556,7 @@ function VenueDetailPage() {
 											<div className="venue-review-upload-preview-grid">
 												{replyImagePreviews.map((item) => (
 													<div key={item.id} className="venue-review-upload-preview-item">
-														<img src={item.url} alt="Ảnh thảo luận" loading="lazy" />
+														<img src={item.url} alt="Discussion image" loading="lazy" />
 														<button
 															type="button"
 															onClick={(event) => {
@@ -2578,7 +2576,7 @@ function VenueDetailPage() {
 									<div className="venue-comment-fields">
 										<label className="venue-comment-rating-row">
 											{i18n.rating}
-											<div className="venue-star-rating-picker" role="radiogroup" aria-label="Đánh giá sao cho thảo luận">
+											<div className="venue-star-rating-picker" role="radiogroup" aria-label="Discussion star rating">
 												{[1, 2, 3, 4, 5].map((value) => (
 													(() => {
 														const normalizedSelectedRating = normalizeHalfStarRating(replyForm.rating);
@@ -2591,7 +2589,7 @@ function VenueDetailPage() {
 														type="button"
 														className={`venue-star-btn ${isFull ? 'is-active' : ''} ${isHalf ? 'is-half-active' : ''}`}
 														onClick={(event) => handleSelectReplyRating(event, value)}
-														aria-label={`${value} sao`}
+														aria-label={`${value} stars`}
 													>
 														★
 													</button>
@@ -2639,11 +2637,11 @@ function VenueDetailPage() {
 				<div className="venue-modal-overlay" onClick={() => setShowImagesModal(false)}>
 					<div className="venue-modal-card venue-modal-images" onClick={(event) => event.stopPropagation()}>
 						<button type="button" className="venue-modal-close" onClick={() => setShowImagesModal(false)}>×</button>
-						<h3>Hình ảnh</h3>
+						<h3>Images</h3>
 
 						<section className="venue-image-group-section">
-							<h4>Hình ảnh từ quán</h4>
-							{!venueGalleryImages.length ? <p>Chưa có hình ảnh nào từ quán.</p> : null}
+							<h4>Images from venue</h4>
+							{!venueGalleryImages.length ? <p>No images from this venue yet.</p> : null}
 							{venueGalleryImages.length ? (
 								<div className="venue-images-grid">
 									{venueGalleryImages.map((imageUrl) => (
@@ -2663,8 +2661,8 @@ function VenueDetailPage() {
 						</section>
 
 						<section className="venue-image-group-section">
-							<h4>Hình ảnh từ đánh giá</h4>
-							{!allReviewImages.length ? <p>Chưa có hình ảnh nào từ bình luận.</p> : null}
+							<h4>Images from reviews</h4>
+							{!allReviewImages.length ? <p>No images from reviews yet.</p> : null}
 							{allReviewImages.length ? (
 								<div className="venue-images-grid">
 									{allReviewImages.map((imageUrl) => (
@@ -2690,8 +2688,8 @@ function VenueDetailPage() {
 				<div className="venue-modal-overlay" onClick={() => setShowShareModal(false)}>
 					<div className="venue-modal-card venue-modal-share" onClick={(event) => event.stopPropagation()}>
 						<button type="button" className="venue-modal-close" onClick={() => setShowShareModal(false)}>×</button>
-						<h3>Chia sẻ</h3>
-						<p className="venue-share-subtitle">Vui lòng chọn hình thức chia sẻ</p>
+						<h3>Share</h3>
+						<p className="venue-share-subtitle">Choose a sharing method</p>
 
 						<div className="venue-share-icons">
 							<a
@@ -2699,7 +2697,7 @@ function VenueDetailPage() {
 								target="_blank"
 								rel="noreferrer"
 								className="venue-share-icon-btn is-facebook"
-								aria-label="Chia sẻ Facebook"
+								aria-label="Share on Facebook"
 							>
 								f
 							</a>
@@ -2708,17 +2706,17 @@ function VenueDetailPage() {
 								target="_blank"
 								rel="noreferrer"
 								className="venue-share-icon-btn is-google"
-								aria-label="Chia sẻ Gmail"
+								aria-label="Share via Gmail"
 							>
 								G
 							</a>
 						</div>
 
 						<div className="venue-share-copy-row">
-							<input type="text" readOnly value={shareUrl} aria-label="Đường dẫn chia sẻ" />
-							<button type="button" onClick={handleCopyShareLink}>Sao chép link</button>
+							<input type="text" readOnly value={shareUrl} aria-label="Share link" />
+							<button type="button" onClick={handleCopyShareLink}>Copy link</button>
 						</div>
-						{shareCopied ? <p className="venue-share-copy-success">Đã sao chép link.</p> : null}
+						{shareCopied ? <p className="venue-share-copy-success">Link copied.</p> : null}
 					</div>
 				</div>
 			) : null}
@@ -2727,13 +2725,13 @@ function VenueDetailPage() {
 				<div className="venue-modal-overlay" onClick={() => setShowFavoritesModal(false)}>
 					<div className="venue-modal-card venue-modal-favorites" onClick={(event) => event.stopPropagation()}>
 						<button type="button" className="venue-modal-close" onClick={() => setShowFavoritesModal(false)}>×</button>
-						<h3>Yêu thích & Bộ sưu tập</h3>
+						<h3>Favorites & Collections</h3>
 
-						{favoriteCollectionLoading ? <p>Đang tải danh sách quán yêu thích...</p> : null}
+						{favoriteCollectionLoading ? <p>Loading favorite venues...</p> : null}
 						{favoriteCollectionError ? <p className="venue-form-error">{favoriteCollectionError}</p> : null}
 
 						{!favoriteCollectionLoading && !favoriteCollectionError && !favoriteCollection.length ? (
-							<p>Bạn chưa có quán nào trong bộ sưu tập.</p>
+							<p>You do not have any venues in your collection yet.</p>
 						) : null}
 
 						{!favoriteCollectionLoading && favoriteCollection.length ? (
@@ -2750,8 +2748,8 @@ function VenueDetailPage() {
 											}}
 										/>
 										<div className="venue-favorite-item-body">
-											<strong>{item.name || 'Không có tên'}</strong>
-											<p>{item.description || 'Chưa có mô tả.'}</p>
+											<strong>{item.name || 'Untitled venue'}</strong>
+											<p>{item.description || 'No description yet.'}</p>
 											<div className="venue-favorite-item-actions">
 												<button
 													type="button"
@@ -2760,9 +2758,9 @@ function VenueDetailPage() {
 														navigate(`/venues/${item.itemId}`);
 													}}
 												>
-													Xem quán
+													View venue
 												</button>
-												<button type="button" onClick={() => handleRemoveFavoriteItem(item)}>Bỏ yêu thích</button>
+												<button type="button" onClick={() => handleRemoveFavoriteItem(item)}>Remove favorite</button>
 											</div>
 										</div>
 									</article>
