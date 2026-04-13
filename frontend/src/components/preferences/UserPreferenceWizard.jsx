@@ -191,14 +191,12 @@ export default function UserPreferenceWizard({
       } catch {
         nextOptions = FALLBACK_OPTIONS;
       } finally {
-        if (!active) {
-          return;
+        if (active) {
+          const normalizedOptions = normalizeOptionGroups(nextOptions);
+          setOptions(normalizedOptions);
+          setForm(buildInitialForm(nextPreference, normalizedOptions));
+          setLoadingOptions(false);
         }
-
-        const normalizedOptions = normalizeOptionGroups(nextOptions);
-        setOptions(normalizedOptions);
-        setForm(buildInitialForm(nextPreference, normalizedOptions));
-        setLoadingOptions(false);
       }
     };
 

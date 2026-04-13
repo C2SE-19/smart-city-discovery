@@ -12692,6 +12692,246 @@ async function generateWardIdFromName(name) {
             }
         });
 
+        // Chat API route
+        app.post('/api/chat', async (req, res) => {
+            function normalizeText(text) {
+                return String(text || '').trim().toLowerCase();
+            }
+
+            function includesAny(text, keywords) {
+                return keywords.some((keyword) => text.includes(keyword));
+            }
+
+            function buildWeatherQuery(messageText) {
+                const isRainyOrCold = includesAny(messageText, ['mưa', 'lạnh', 'se lạnh', 'mưa dầm', 'ẩm ướt']);
+                const isHotOrSunny = includesAny(messageText, ['nắng', 'nóng', 'sáng nắng', 'trời nóng']);
+
+                if (isRainyOrCold) {
+                    return {
+                        label: 'lạnh/mưa',
+                        suggestion: 'một bát bún, phở nóng, lẩu hoặc cháo ấm',
+                        searchText: 'bún phở lẩu cháo',
+                        category: 'food'
+                    };
+                }
+
+                if (isHotOrSunny) {
+                    return {
+                        label: 'nóng/nắng',
+                        suggestion: 'món mát, gỏi cuốn, hải sản hoặc chè',
+                        searchText: 'hải sản gỏi chè',
+                        category: 'food'
+                    };
+                }
+
+                return null;
+            }
+
+            function classifyIntent(messageText) {
+                const entertainmentKeywords = ['giải trí', 'khu giải trí', 'công viên', 'công viên nước', 'suối khoáng', 'trượt nước', 'khu vui chơi', 'bar', 'pub', 'club', 'karaoke', 'games', 'trò chơi', 'xem phim', 'rạp', 'đi chơi', 'cafe', 'coffee', 'beer', 'lounge', 'bắn cung', 'bi-a', 'bowling'];
+                const foodKeywords = ['ăn gì', 'nên ăn', 'món gì', 'quán', 'đồ ăn', 'ẩm thực', 'phở', 'bún', 'cơm', 'hải sản', 'chè', 'lẩu', 'gỏi', 'bánh', 'ăn tối', 'ăn trưa', 'ăn khuya', 'ăn sáng'];
+
+                if (includesAny(messageText, entertainmentKeywords)) {
+                    return 'entertainment';
+                }
+
+                if (includesAny(messageText, foodKeywords)) {
+                    return 'food';
+                }
+
+                return 'general';
+            }
+
+            async function findVenueMatches(searchText, limit = 5, categoryHint = 'any') {
+                const normalized = normalizeText(searchText);
+                if (!normalized) {
+                    return [];
+                }
+
+                const stopWords = new Set([
+                    'có', 'quán', 'không', 'nên', 'gì', 'đi', 'thì', 'ở', 'cho', 'còn', 'đã', 'mình', 'anh', 'chị', 'em', 'tôi', 'với', 'là', 'và', 'của', 'đây', 'ấy', 'này', 'mấy', 'khu', 'nơi', 'chỗ', 'thì', 'là', 'có'
+                ]);
+
+                const rawTerms = normalized.split(/\s+/).filter((term) => term.length > 0);
+                const filteredTerms = Array.from(
+                    new Set(rawTerms.filter((term) => term.length > 1 && !stopWords.has(term)))
+                );
+
+                const phraseSearch = filteredTerms.join(' ');
+                const params = [];
+                const conditions = [];
+
+                if (phraseSearch) {
+                    params.push(`%${phraseSearch}%`);
+                    conditions.push(`
+                        (
+                            LOWER(venues.name) LIKE $${params.length}
+                            OR LOWER(venues.title) LIKE $${params.length}
+                        )
+                    `);
+                }
+
+                filteredTerms.forEach((term) => {
+                    params.push(`%${term}%`);
+                    conditions.push(`
+                        (
+                            LOWER(venues.name) LIKE $${params.length}
+                            OR LOWER(venues.title) LIKE $${params.length}
+                            OR LOWER(venues.address) LIKE $${params.length}
+                        )
+                    `);
+                });
+
+                if (params.length === 0) {
+                    return [];
+                }
+
+                const categoryConditions = {
+                    food: `(
+                        (LOWER(place_categories.name) LIKE '%food%' OR LOWER(place_categories.name) LIKE '%ẩm thực%')
+                        OR EXISTS (
+                            SELECT 1
+                            FROM jsonb_array_elements_text(COALESCE(venues.metadata->'selectedServiceNames', '[]'::jsonb)) AS service_name(value)
+                            WHERE LOWER(value) LIKE '%food%' OR LOWER(value) LIKE '%ẩm thực%'
+                        )
+                    )`,
+                    entertainment: `(
+                        (LOWER(place_categories.name) LIKE '%entertainment%' 
+                         OR LOWER(place_categories.name) LIKE '%giải trí%'
+                         OR LOWER(place_categories.name) LIKE '%club%'
+                         OR LOWER(place_categories.name) LIKE '%bar%'
+                         OR LOWER(place_categories.name) LIKE '%karaoke%'
+                         OR LOWER(place_categories.name) LIKE '%công viên%'
+                         OR LOWER(place_categories.name) LIKE '%khu vui chơi%')
+                        OR EXISTS (
+                            SELECT 1
+                            FROM jsonb_array_elements_text(COALESCE(venues.metadata->'selectedServiceNames', '[]'::jsonb)) AS service_name(value)
+                            WHERE LOWER(value) LIKE '%giải trí%'
+                               OR LOWER(value) LIKE '%club%'
+                               OR LOWER(value) LIKE '%bar%'
+                               OR LOWER(value) LIKE '%karaoke%'
+                        )
+                    )`
+                };
+
+                const categoryFilter = categoryHint !== 'any' ? `AND ${categoryConditions[categoryHint] || 'TRUE'}` : '';
+                const query = `
+                    SELECT
+                        venues.id,
+                        COALESCE(NULLIF(venues.name, ''), venues.title) AS name,
+                        venues.title,
+                        venues.address,
+                        venues.description,
+                        wards.name AS ward_name,
+                        place_categories.name AS category_name,
+                        venues.cover_image_url
+                    FROM venues
+                    LEFT JOIN wards ON wards.ward_id = venues.ward_id
+                    LEFT JOIN place_categories ON place_categories.id = venues.category_id
+                    WHERE venues.status = 'approved'
+                      ${categoryFilter}
+                      AND (${conditions.join(' OR ')})
+                    ORDER BY venues.average_rating DESC NULLS LAST, venues.total_reviews DESC NULLS LAST
+                    LIMIT $${params.length + 1};
+                `;
+
+                const result = await pool.query(query, [...params, limit]);
+                return result.rows.map((row) => ({
+                    id: row.id,
+                    name: row.name || row.title || 'Không rõ tên quán',
+                    categoryName: row.category_name || 'Ẩm thực',
+                    wardName: row.ward_name || '',
+                    address: row.address || '',
+                    description: row.description || '',
+                    coverImageUrl: row.cover_image_url || ''
+                }));
+            }
+
+            try {
+                const { message } = req.body;
+                
+                // Comprehensive validation
+                if (!message || typeof message !== 'string' || !message.trim()) {
+                    return res.status(400).json({
+                        error: 'Message cannot be empty',
+                        reply: 'Vui lòng nhập tin nhắn để tôi có thể giúp bạn!',
+                        venueResults: []
+                    });
+                }
+
+                if (message.length > 500) {
+                    return res.status(400).json({
+                        error: 'Message too long (max 500 characters)',
+                        reply: 'Tin nhắn quá dài rồi! Vui lòng nhập ngắn hơn.',
+                        venueResults: []
+                    });
+                }
+
+                const normalizedMessage = normalizeText(message);
+                let venueResults = [];
+                let reply = null;
+
+                const intent = classifyIntent(normalizedMessage);
+                if (intent === 'entertainment') {
+                    venueResults = await findVenueMatches(normalizedMessage, 5, 'entertainment');
+                    if (venueResults.length) {
+                        reply = `Mình tìm thấy những địa điểm giải trí phù hợp với yêu cầu của bạn:`;
+                        return res.json({ reply, venueResults });
+                    }
+                }
+
+                const weatherQuery = buildWeatherQuery(normalizedMessage);
+                if (weatherQuery && intent !== 'entertainment') {
+                    venueResults = await findVenueMatches(weatherQuery.searchText, 5, weatherQuery.category || 'food');
+                    if (venueResults.length) {
+                        reply = `Thời tiết ${weatherQuery.label} thì bạn có thể thử ${weatherQuery.suggestion}. Dưới đây là một số gợi ý quán phù hợp:`;
+                        return res.json({ reply, venueResults });
+                    }
+                }
+
+                if (intent === 'food') {
+                    venueResults = await findVenueMatches(normalizedMessage, 5, 'food');
+                    if (venueResults.length) {
+                        reply = `Mình tìm thấy những quán phù hợp với yêu cầu của bạn:`;
+                        return res.json({ reply, venueResults });
+                    }
+                }
+
+                venueResults = await findVenueMatches(normalizedMessage, 5, intent === 'general' ? 'any' : intent);
+
+                const OpenAI = require('openai');
+                const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+                const systemPrompt = `You are a Smart City Discovery assistant for a Da Nang local discovery app. If the user asks about food, restaurants, or dishes, prioritize local venue recommendations from the app data. When you have venue matches, summarize them and tell the user how to find them in the app.`;
+                const messages = [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: message }
+                ];
+
+                const response = await client.chat.completions.create({
+                    model: 'gpt-3.5-turbo',
+                    messages,
+                    max_tokens: 500,
+                    temperature: 0.7,
+                });
+
+                reply = response.choices[0].message.content;
+                res.json({ reply, venueResults });
+            } catch (error) {
+                console.error('Chat API Error:', {
+                    message: error.message,
+                    code: error.code,
+                    status: error.status,
+                    timestamp: new Date().toISOString()
+                });
+                res.status(500).json({ 
+                    error: 'Something went wrong',
+                    reply: 'Xin lỗi, tôi gặp sự cố. Vui lòng thử lại sau!',
+                    venueResults: [] 
+                });
+            }
+        });
+
         const PORT = process.env.PORT || 5000;
         app.listen(PORT, () => {
             console.log(`🚀 Backend server is running at http://localhost:${PORT}`);

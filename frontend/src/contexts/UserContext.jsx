@@ -1,32 +1,30 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+﻿/* eslint-disable react-refresh/only-export-components */
+import { createContext, useContext, useState } from 'react';
 
 const UserContext = createContext();
 
 export function UserProvider({ children }) {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  // Load user từ localStorage khi component mount
-  useEffect(() => {
+  const [user, setUser] = useState(() => {
     const savedUser = localStorage.getItem('user');
-    if (savedUser) {
-      try {
-        setUser(JSON.parse(savedUser));
-      } catch (err) {
-        console.error('Lỗi parse user:', err);
-        localStorage.removeItem('user');
-      }
+    if (!savedUser) {
+      return null;
     }
-    setLoading(false);
-  }, []);
 
-  // Hàm đăng nhập
+    try {
+      return JSON.parse(savedUser);
+    } catch (err) {
+      console.error('Lỗi parse user:', err);
+      localStorage.removeItem('user');
+      return null;
+    }
+  });
+  const loading = false;
+
   const login = (userData) => {
     setUser(userData);
     localStorage.setItem('user', JSON.stringify(userData));
   };
 
-  // Hàm đăng xuất
   const logout = () => {
     setUser(null);
     localStorage.removeItem('user');

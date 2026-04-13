@@ -53,7 +53,7 @@ export default function LoginPage() {
   useEffect(() => {
     // Define window.fbAsyncInit BEFORE loading the script
     window.fbAsyncInit = function () {
-      FB.init({
+      window.FB.init({
         appId: import.meta.env.VITE_FACEBOOK_APP_ID || '900343549537260',
         xfbml: false,
         version: 'v18.0'
@@ -185,14 +185,14 @@ export default function LoginPage() {
       return;
     }
 
-    if (typeof FB === 'undefined') {
+    if (!window.FB) {
       alert("Facebook SDK chưa sẵn sàng. Vui lòng tải lại trang.");
       return;
     }
 
     setOauthLoading(true);
     
-    FB.login(function(response) {
+    window.FB.login(function(response) {
       if (response.authResponse) {
         console.log('Facebook login response:', response);
         const accessToken = response.authResponse.accessToken;
