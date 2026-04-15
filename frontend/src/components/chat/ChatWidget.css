@@ -280,6 +280,12 @@
   box-shadow: 0 2px 8px rgba(102, 126, 234, 0.15);
 }
 
+.chat-venue-card.is-suggested {
+  border-color: #34c759;
+  background: linear-gradient(90deg, #f6fff6 0%, #ffffff 100%);
+  box-shadow: 0 2px 8px rgba(52, 199, 89, 0.12);
+}
+
 .chat-venue-card-header {
   display: flex;
   justify-content: space-between;
