@@ -1254,7 +1254,10 @@ function extractVenueImageUrls(venue, externalImages = []) {
 }
 
 function resolveNumericCoordinate(value) {
-    const numeric = Number(value);
+    const normalizedValue = typeof value === 'string'
+        ? value.trim().replace(',', '.')
+        : value;
+    const numeric = Number(normalizedValue);
     return Number.isFinite(numeric) ? numeric : null;
 }
 
@@ -3377,6 +3380,9 @@ async function generateWardIdFromName(name) {
             [/\bks\b/g, 'khach san'],
             [/\bhotel\b/g, 'khach san'],
             [/\brestaurant\b/g, 'nha hang'],
+            [/\brestaurants\b/g, 'nha hang'],
+            [/\bpubs\b/g, 'pub'],
+            [/\bbars\b/g, 'bar'],
             [/\bpet\s+friendly\b/g, 'pet friendly'],
             [/\bwi\s*fi\b/g, 'wifi']
         ];
@@ -3461,21 +3467,40 @@ async function generateWardIdFromName(name) {
             return null;
         }
 
+        function convertDistanceToKm(amountText, unitText = '') {
+            const amount = Number(String(amountText || '').replace(',', '.'));
+            if (!Number.isFinite(amount) || amount <= 0) {
+                return null;
+            }
+
+            const unit = String(unitText || '').trim().toLowerCase();
+
+            if (['m', 'meter', 'meters', 'metre', 'metres'].includes(unit)) {
+                return amount / 1000;
+            }
+
+            if (['mi', 'mile', 'miles'].includes(unit)) {
+                return amount * 1.60934;
+            }
+
+            return amount;
+        }
+
         function parseDistanceCapKmFromRefineQuery(normalizedQuery) {
             const distanceMatch = normalizedQuery.match(
-                /(?:duoi|toi da|max|within|under|gan|near|around)\s*(\d+(?:[.,]\d+)?)\s*(km|kilometer|kilomet)/
-            ) || normalizedQuery.match(/(\d+(?:[.,]\d+)?)\s*(km|kilometer|kilomet)\b/);
+                /(?:duoi|toi da|max|within|under|gan|near|around|ban kinh|radius)\s*(\d+(?:[.,]\d+)?)\s*(km|kilometer|kilometers|kilometre|kilometres|m|meter|meters|metre|metres|mi|mile|miles)\b/
+            ) || normalizedQuery.match(/(\d+(?:[.,]\d+)?)\s*(km|kilometer|kilometers|kilometre|kilometres|m|meter|meters|metre|metres|mi|mile|miles)\b/);
 
             if (!distanceMatch) {
                 return null;
             }
 
-            const parsed = Number(String(distanceMatch[1] || '').replace(',', '.'));
-            if (!Number.isFinite(parsed) || parsed <= 0) {
+            const parsedKm = convertDistanceToKm(distanceMatch[1], distanceMatch[2]);
+            if (!Number.isFinite(parsedKm) || parsedKm <= 0) {
                 return null;
             }
 
-            return Number(parsed.toFixed(2));
+            return Number(parsedKm.toFixed(2));
         }
 
         const REFINE_IMPLICIT_NEARBY_DEFAULT_DISTANCE_KM = 6;
@@ -3517,6 +3542,7 @@ async function generateWardIdFromName(name) {
             ['bbq', ['nuong', 'bbq', 'grill']],
             ['seafood', ['hai san', 'seafood']],
             ['coffee', ['ca phe', 'cafe', 'coffee']],
+            ['pub bar', ['quan nhau', 'nhau', 'bar', 'pub', 'beer', 'bia', 'cocktail', 'lounge', 'brewery', 'taproom']],
             ['banh mi', ['banh mi', 'sandwich']],
             ['street food', ['an vat', 'street food', 'snack', 'quan coc', 'tra chanh', 'xien', 'banh trang', 'tokbokki']],
             ['milk tea', ['tra sua', 'milk tea', 'tea milk', 'tra sua tran chau', 'topping']],
@@ -3543,11 +3569,11 @@ async function generateWardIdFromName(name) {
             'nearby', 'nearest', 'close', 'closer', 'aroundme', 'around_me'
         ]);
 
-        const REFINE_FOOD_INTENT_PATTERN = /(?:\bquan an\b|\bnha hang\b|\bam thuc\b|\bdo an\b|\ban uong\b|\ban toi\b|\ban trua\b|\ban sang\b|\ban\s+vat\b|\bsnack\b|\btra\s+sua\b|\bmilk\s+tea\b|\btra\s+chanh\b|\beat(?:ing)?\b|\bfood\b|\brestaurants?\b|\beatery\b|\bdining\b|\bmeals?\b|\blunch\b|\bdinner\b|\bbreakfast\b)/;
+        const REFINE_FOOD_INTENT_PATTERN = /(?:\bquan an\b|\bnha hang\b|\bam thuc\b|\bdo an\b|\ban uong\b|\bquan nhau\b|\bnhau\b|\ban toi\b|\ban trua\b|\ban sang\b|\ban\s+vat\b|\bsnack\b|\btra\s+sua\b|\bmilk\s+tea\b|\btra\s+chanh\b|\beat(?:ing)?\b|\bfood\b|\brestaurants?\b|\beatery\b|\bdining\b|\bmeals?\b|\blunch\b|\bdinner\b|\bbreakfast\b|\bpubs?\b|\bbars?\b|\bbeer\b|\bcocktail\b|\blounge\b|\bbrewery\b)/;
 
         const REFINE_FOOD_KEYWORDS = [
             'food', 'restaurant', 'dining', 'eatery', 'cuisine',
-            'quan an', 'nha hang', 'am thuc', 'do an', 'an uong', 'quan nhau',
+            'quan an', 'nha hang', 'am thuc', 'do an', 'an uong', 'quan nhau', 'nhau', 'pub', 'bar', 'beer', 'cocktail', 'lounge', 'brewery',
             'lau', 'nuong', 'hai san', 'bun', 'pho', 'com', 'mi quang', 'cao lau', 'banh mi',
             'ca phe', 'cafe', 'coffee', 'tra sua', 'milk tea', 'dessert', 'an vat', 'snack',
             'tra chanh', 'xien', 'banh trang', 'tokbokki', 'lap xuong', 'lap xuong nuong da'
@@ -12799,6 +12825,14 @@ async function generateWardIdFromName(name) {
                 const useBaseScope = baseVenueIdsFilter.values.length > 0
                     && ['base', 'base_scope', 'narrow', 'seed'].includes(requestedRefineScope);
                 let refineScope = useBaseScope ? 'base_scope' : 'global_scope';
+                const prioritizeDistanceSort = Number.isFinite(refineConstraints.maxDistanceKm);
+                const prioritizeBudgetSort = Number.isFinite(refineConstraints.maxBudgetVnd)
+                    || Number.isFinite(refineConstraints.minBudgetVnd);
+                const sortBudgetDescending = Boolean(
+                    refineConstraints.strictBudgetFloor
+                    && Number.isFinite(refineConstraints.minBudgetVnd)
+                    && !Number.isFinite(refineConstraints.maxBudgetVnd)
+                );
 
                 if (useBaseScope) {
                     venueResult = await pool.query(
@@ -12818,6 +12852,50 @@ async function generateWardIdFromName(name) {
                 }
 
                 const sortScoredRefineVenues = (first, second) => {
+                    if (prioritizeDistanceSort) {
+                        const firstDistance = Number(first.distanceKm);
+                        const secondDistance = Number(second.distanceKm);
+                        const firstDistanceComparable = Number.isFinite(firstDistance) && firstDistance >= 0
+                            ? firstDistance
+                            : Number.POSITIVE_INFINITY;
+                        const secondDistanceComparable = Number.isFinite(secondDistance) && secondDistance >= 0
+                            ? secondDistance
+                            : Number.POSITIVE_INFINITY;
+
+                        if (firstDistanceComparable !== secondDistanceComparable) {
+                            return firstDistanceComparable - secondDistanceComparable;
+                        }
+                    }
+
+                    if (prioritizeBudgetSort) {
+                        const firstBudget = resolveVenueBudgetRange(first);
+                        const secondBudget = resolveVenueBudgetRange(second);
+
+                        const resolveComparableBudget = (budgetRange) => {
+                            const minPrice = Number(budgetRange?.minPrice);
+                            const maxPrice = Number(budgetRange?.maxPrice);
+
+                            if (Number.isFinite(minPrice) && minPrice > 0) {
+                                return minPrice;
+                            }
+
+                            if (Number.isFinite(maxPrice) && maxPrice > 0) {
+                                return maxPrice;
+                            }
+
+                            return Number.POSITIVE_INFINITY;
+                        };
+
+                        const firstBudgetComparable = resolveComparableBudget(firstBudget);
+                        const secondBudgetComparable = resolveComparableBudget(secondBudget);
+
+                        if (firstBudgetComparable !== secondBudgetComparable) {
+                            return sortBudgetDescending
+                                ? secondBudgetComparable - firstBudgetComparable
+                                : firstBudgetComparable - secondBudgetComparable;
+                        }
+                    }
+
                     if (second.finalScore !== first.finalScore) {
                         return second.finalScore - first.finalScore;
                     }
@@ -12936,7 +13014,16 @@ async function generateWardIdFromName(name) {
                     : requiredRefineDimensionsFromConstraints;
                 const requiresConcurrentDimensionMatch = requiredRefineDimensions.length >= 2;
                 const semanticScoreThreshold = requiresConcurrentDimensionMatch ? 0.62 : 0.48;
-                const hasDistanceConstraint = Number.isFinite(refineConstraints.maxDistanceKm);
+                const requireHeuristicPassForSemantic = Boolean(
+                    Number.isFinite(refineConstraints.maxDistanceKm)
+                    || refineConstraints.requireKeywordMatch
+                    || refineConstraints.requireFoodVenue
+                    || refineConstraints.requireNameMatch
+                    || refineConstraints.requireLocationMatch
+                    || refineConstraints.requireActivityMatch
+                    || refineConstraints.requireServiceMatch
+                    || (Array.isArray(refineConstraints.cuisineKeywords) && refineConstraints.cuisineKeywords.length > 0)
+                );
 
                 if (!semanticRefine.understood) {
                     refinedVenues = [...heuristicRefinedVenues];
@@ -12953,7 +13040,7 @@ async function generateWardIdFromName(name) {
                                 return false;
                             }
 
-                            if (hasDistanceConstraint && !venue.passesRefine) {
+                            if (requireHeuristicPassForSemantic && !venue.passesRefine) {
                                 return false;
                             }
 
