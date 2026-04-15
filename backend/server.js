@@ -783,8 +783,7 @@ const USER_PREFERENCE_AGE_RANGES = [
 const USER_PREFERENCE_GENDERS = [
     { key: 'male', label: 'Male' },
     { key: 'female', label: 'Female' },
-    { key: 'non_binary', label: 'Non-binary' },
-    { key: 'prefer_not_to_say', label: 'Prefer not to say' }
+    { key: 'other', label: 'Other' }
 ];
 
 const USER_PREFERENCE_TIME_WINDOWS = [
@@ -3222,7 +3221,11 @@ async function generateWardIdFromName(name) {
                 ageReason = 'Age fit: family and comfort';
             }
 
-            if (preference.preferredGender === 'female' || preference.preferredGender === 'non_binary') {
+            if (
+                preference.preferredGender === 'female'
+                || preference.preferredGender === 'other'
+                || preference.preferredGender === 'non_binary'
+            ) {
                 const comfortHits = countKeywordHits(text, [
                     'family', 'cafe', 'park', 'museum', 'wellness', 'community',
                     'cong vien', 'thu vien', 'bao tang', 'yen tinh'
@@ -3429,7 +3432,9 @@ async function generateWardIdFromName(name) {
             ['seafood', ['hai san', 'seafood']],
             ['coffee', ['ca phe', 'cafe', 'coffee']],
             ['banh mi', ['banh mi', 'sandwich']],
-            ['street food', ['an vat', 'street food', 'snack']],
+            ['street food', ['an vat', 'street food', 'snack', 'quan coc', 'tra chanh', 'xien', 'banh trang', 'tokbokki']],
+            ['milk tea', ['tra sua', 'milk tea', 'tea milk', 'tra sua tran chau', 'topping']],
+            ['grilled snack', ['lap xuong', 'lap xuong nuong da', 'nuong da', 'xien nuong']],
             ['vegetarian', ['chay', 'vegetarian', 'vegan']],
             ['japanese', ['nhat', 'japanese', 'sushi', 'ramen']],
             ['korean', ['han quoc', 'korean']],
@@ -3442,6 +3447,7 @@ async function generateWardIdFromName(name) {
             'duoi', 'toi da', 'max', 'under', 'below', 'less', 'than', 'within', 'gan', 'near', 'around', 'tren', 'hon', 'from', 'least', 'minimum', 'min',
             'open', 'now', 'dang', 'mo', 'con', 'cua', 'place', 'places', 'restaurant', 'restaurants',
             'food', 'do', 'an', 'gia', 'budget', 'price', 'duoc', 'khong', 'the', 'co', 'o', 'tai',
+            'choi', 'play', 'sports', 'sport', 'activity',
             'mon', 'may', 'ten', 'named', 'called', 'name', 'dia', 'diem',
             'want', 'find', 'show', 'please', 'help', 'me', 'you', 'for', 'and', 'the', 'with', 'friendly',
             'eat', 'eating', 'meal', 'meals', 'dining', 'eatery',
@@ -3451,13 +3457,14 @@ async function generateWardIdFromName(name) {
             'nearby', 'nearest', 'close', 'closer', 'aroundme', 'around_me'
         ]);
 
-        const REFINE_FOOD_INTENT_PATTERN = /(?:\bquan an\b|\bnha hang\b|\bam thuc\b|\bdo an\b|\ban uong\b|\ban toi\b|\ban trua\b|\ban sang\b|\beat(?:ing)?\b|\bfood\b|\brestaurants?\b|\beatery\b|\bdining\b|\bmeals?\b|\blunch\b|\bdinner\b|\bbreakfast\b)/;
+        const REFINE_FOOD_INTENT_PATTERN = /(?:\bquan an\b|\bnha hang\b|\bam thuc\b|\bdo an\b|\ban uong\b|\ban toi\b|\ban trua\b|\ban sang\b|\ban\s+vat\b|\bsnack\b|\btra\s+sua\b|\bmilk\s+tea\b|\btra\s+chanh\b|\beat(?:ing)?\b|\bfood\b|\brestaurants?\b|\beatery\b|\bdining\b|\bmeals?\b|\blunch\b|\bdinner\b|\bbreakfast\b)/;
 
         const REFINE_FOOD_KEYWORDS = [
             'food', 'restaurant', 'dining', 'eatery', 'cuisine',
             'quan an', 'nha hang', 'am thuc', 'do an', 'an uong', 'quan nhau',
             'lau', 'nuong', 'hai san', 'bun', 'pho', 'com', 'mi quang', 'cao lau', 'banh mi',
-            'ca phe', 'cafe', 'coffee', 'tra sua', 'milk tea', 'dessert', 'an vat', 'snack'
+            'ca phe', 'cafe', 'coffee', 'tra sua', 'milk tea', 'dessert', 'an vat', 'snack',
+            'tra chanh', 'xien', 'banh trang', 'tokbokki', 'lap xuong', 'lap xuong nuong da'
         ];
 
         const REFINE_FOOD_CATEGORY_KEYWORDS = [
@@ -3466,8 +3473,11 @@ async function generateWardIdFromName(name) {
         ];
 
         const REFINE_ACTIVITY_HINTS = [
+            ['sports', ['the thao', 'choi the thao', 'sport', 'sports', 'football', 'soccer', 'da bong', 'san da bong', 'futsal', 'cau long', 'badminton', 'tennis', 'pickleball', 'gym', 'fitness', 'yoga', 'bida', 'billiard', 'pool']],
             ['swimming', ['boi', 'di boi', 'cho boi', 'be boi', 'ho boi', 'swim', 'swimming', 'cong vien nuoc', 'water park', 'suoi']],
             ['amusement', ['khu vui choi', 'vui choi', 'giai tri', 'entertainment', 'theme park', 'arcade', 'game center', 'playground']],
+            ['shopping', ['mua sam', 'shopping', 'shop', 'cua hang', 'quan ao', 'thoi trang', 'giay', 'my pham', 'do gia dung', 'nha sach', 'bookstore', 'minimart', 'sieu thi']],
+            ['repair', ['sua chua', 'repair', 'sua dien thoai', 'thay man hinh', 'ep kinh', 'phone repair', 'laptop repair', 'bao hanh']],
             ['nature', ['ngoai troi', 'outdoor', 'hiking', 'trekking', 'camping', 'beach', 'bien', 'river', 'cong vien']]
         ];
 
@@ -3478,7 +3488,11 @@ async function generateWardIdFromName(name) {
             ['private room', ['phong rieng', 'private room', 'vip room']],
             ['pet friendly', ['pet friendly', 'cho thu cung', 'mang pet', 'pet']],
             ['family', ['tre em', 'kid friendly', 'gia dinh', 'family friendly', 'baby chair']],
-            ['booking', ['dat ban', 'booking', 'reservation', 'reserve']]
+            ['booking', ['dat ban', 'booking', 'reservation', 'reserve']],
+            ['sports facility', ['dat san', 'thue san', 'huan luyen', 'cho thue dung cu', 'giai dau', 've theo gio']],
+            ['repair', ['sua chua', 'bao hanh', 'thay man hinh', 'ep kinh', 'phone repair', 'repair']],
+            ['retail support', ['doi tra', 'thu do', 'tu van size', 'order online', 'giao hang noi thanh']],
+            ['drink menu', ['tra sua', 'milk tea', 'topping', 'combo nuoc', 'do uong']]
         ];
 
         const REFINE_DISH_STYLE_HINTS = [
@@ -12195,6 +12209,7 @@ async function generateWardIdFromName(name) {
             const weatherMain = String(req.body?.weatherMain || '').trim();
             const currentTimeIsoInput = String(req.body?.currentTimeIso || '').trim();
             const baseVenueIdsFilter = parsePositiveIntegerList(req.body?.baseVenueIds);
+            const requestedRefineScope = String(req.body?.scope || '').trim().toLowerCase();
 
             if (!userId) {
                 return res.status(401).json({ message: 'Unauthorized' });
@@ -12305,8 +12320,11 @@ async function generateWardIdFromName(name) {
                 `;
 
                 let venueResult;
-                let refineScope = baseVenueIdsFilter.values.length ? 'base_scope' : 'global_scope';
-                if (baseVenueIdsFilter.values.length) {
+                const useBaseScope = baseVenueIdsFilter.values.length > 0
+                    && ['base', 'base_scope', 'narrow', 'seed'].includes(requestedRefineScope);
+                let refineScope = useBaseScope ? 'base_scope' : 'global_scope';
+
+                if (useBaseScope) {
                     venueResult = await pool.query(
                         `${venueSelectSql}
                          AND venues.id = ANY($1::bigint[])
@@ -12318,7 +12336,7 @@ async function generateWardIdFromName(name) {
                     venueResult = await pool.query(
                         `${venueSelectSql}
                          ORDER BY COALESCE(venues.approved_at, venues.created_at) DESC, venues.id DESC
-                         LIMIT 320
+                         LIMIT 1200
                         `
                     );
                 }
@@ -12382,7 +12400,13 @@ async function generateWardIdFromName(name) {
                                 recommendationReasons: mergedReasons
                             };
                         })
-                        .filter((venue) => venue.recommendationScore > 0.05);
+                        .filter((venue) => {
+                            if (hasStructuredRefineSignals(refineConstraints)) {
+                                return true;
+                            }
+
+                            return venue.recommendationScore > 0.05;
+                        });
                 };
 
                 let scoredVenueCandidates = computeScoredRefineVenuesFromRows(venueResult.rows);
@@ -12391,11 +12415,11 @@ async function generateWardIdFromName(name) {
                     .sort(sortScoredRefineVenues);
 
                 // If base-scope refinement yields no result, expand to broader candidate pool.
-                if (!refinedVenues.length && baseVenueIdsFilter.values.length) {
+                if (!refinedVenues.length && useBaseScope) {
                     const expandedVenueResult = await pool.query(
                         `${venueSelectSql}
                          ORDER BY COALESCE(venues.approved_at, venues.created_at) DESC, venues.id DESC
-                         LIMIT 320
+                         LIMIT 1200
                         `
                     );
 
@@ -12409,9 +12433,11 @@ async function generateWardIdFromName(name) {
                     }
                 }
 
+                const heuristicRefinedVenues = [...refinedVenues];
+
                 const semanticRefine = await runSemanticVenueRefine({
                     queryText: refineQuery,
-                    candidateVenues: [...scoredVenueCandidates].sort(sortScoredRefineVenues).slice(0, 120),
+                    candidateVenues: [...scoredVenueCandidates].sort(sortScoredRefineVenues).slice(0, 260),
                     currentTime
                 });
 
@@ -12436,7 +12462,7 @@ async function generateWardIdFromName(name) {
                 const semanticScoreThreshold = requiresConcurrentDimensionMatch ? 0.62 : 0.48;
 
                 if (!semanticRefine.understood) {
-                    refinedVenues = [];
+                    refinedVenues = [...heuristicRefinedVenues];
                 } else if (semanticMatchMap.size > 0) {
                     refinedVenues = scoredVenueCandidates
                         .filter((venue) => {
@@ -12496,7 +12522,7 @@ async function generateWardIdFromName(name) {
                         })
                         .sort(sortScoredRefineVenues);
                 } else {
-                    refinedVenues = [];
+                    refinedVenues = [...heuristicRefinedVenues];
                 }
 
                 const fallbackConstraintSummary = buildRefineConstraintsSummary(refineConstraints);
@@ -12505,7 +12531,9 @@ async function generateWardIdFromName(name) {
                 const refineSummary = semanticSummary
                     || (semanticRefine.understood
                         ? (hasConstraintSignals ? fallbackConstraintSummary : 'Semantic intent understood. Strict sentence-level filtering applied.')
-                        : 'Unable to confidently understand this refine sentence. Please rewrite with clearer details.');
+                        : (heuristicRefinedVenues.length
+                            ? 'Semantic parser uncertain. Returned broader heuristic refine results from approved venues.'
+                            : 'Unable to confidently understand this refine sentence. Please rewrite with clearer details.'));
 
                 const recommendations = refinedVenues.slice(0, limit).map((venue) => ({
                     id: venue.id,
@@ -12554,6 +12582,7 @@ async function generateWardIdFromName(name) {
                         understood: Boolean(semanticRefine.understood),
                         confidence: Number(semanticRefine.confidence || 0),
                         requiredDimensions: requiredRefineDimensions,
+                        requestedScope: requestedRefineScope || 'global',
                         scope: refineScope,
                         summary: refineSummary,
                         constraints: refineConstraints

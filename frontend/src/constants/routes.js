@@ -14,6 +14,7 @@ export const APP_ROUTES = {
   ADMIN_BOUNDARIES: '/admin/boundaries',
   ADMIN_USERS: '/admin/users',
   ADMIN_REPORTS: '/admin/reports',
+  ADMIN_PACKAGES: '/admin/packages',
   ADMIN_APPROVALS: '/admin/approvals',
   ADMIN_FEEDBACK: '/admin/feedback',
   MERCHANT_DASHBOARD: '/merchant',

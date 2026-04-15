@@ -1007,6 +1007,7 @@
 
 .overview-category-sections {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 28px;
   width: 100%;
   min-width: 0;
@@ -1014,6 +1015,8 @@
 }
 
 .overview-category-block {
+  width: 100%;
+  min-width: 0;
   position: relative;
   border-radius: 18px;
   border: 0;
