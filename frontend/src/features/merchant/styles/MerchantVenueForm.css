@@ -44,6 +44,36 @@
   margin: 0 auto;
 }
 
+.merchant-edit-variant-switch {
+  max-width: 800px;
+  margin: 0 auto 18px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.merchant-edit-variant-btn {
+  border: 1px solid rgba(21, 94, 99, 0.22);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.82);
+  color: #1c4b55;
+  padding: 11px 14px;
+  font-size: 0.92rem;
+  font-weight: 700;
+  transition: border-color 200ms ease, transform 200ms ease, box-shadow 200ms ease;
+}
+
+.merchant-edit-variant-btn:hover {
+  transform: translateY(-1px);
+  border-color: rgba(242, 95, 41, 0.46);
+}
+
+.merchant-edit-variant-btn.is-active {
+  border-color: rgba(242, 95, 41, 0.62);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(255, 234, 220, 0.9));
+  box-shadow: 0 8px 16px rgba(242, 95, 41, 0.16);
+}
+
 .status-message {
   padding: 16px 20px;
   border-radius: 12px;
@@ -584,6 +614,34 @@
   color: #69828a;
 }
 
+.merchant-cover-preference {
+  margin-top: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.merchant-cover-preference-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.merchant-cover-preference-btn {
+  border: 1px solid rgba(21, 94, 99, 0.22);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #1f4d57;
+  padding: 7px 12px;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.merchant-cover-preference-btn.is-active {
+  border-color: rgba(242, 95, 41, 0.58);
+  background: rgba(242, 95, 41, 0.12);
+  color: #b95325;
+}
+
 /* Animations */
 @keyframes fadeIn {
   from {
@@ -669,6 +727,10 @@
 
   .form-actions {
     flex-direction: column;
+  }
+
+  .merchant-edit-variant-switch {
+    grid-template-columns: 1fr;
   }
 
   .submit-status-inline {
