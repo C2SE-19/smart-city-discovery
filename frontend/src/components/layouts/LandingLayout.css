@@ -8,9 +8,9 @@
 }
 
 .landing-page {
-  width: min(1160px, calc(100% - 48px));
+  width: min(1160px, 100%);
   margin: 0 auto;
-  padding: 24px 0 72px;
+  padding: 24px 24px 72px;
 }
 
 .landing-header,
@@ -679,6 +679,8 @@
 
 .landing-main {
   display: grid;
+  width: 100%;
+  min-width: 0;
 }
 
 .landing-info-section {
@@ -751,8 +753,9 @@
 }
 
 .landing-footer-inner {
-  width: min(1160px, calc(100% - 48px));
+  width: min(1160px, 100%);
   margin: 0 auto;
+  padding: 0 24px;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 28px;
@@ -820,9 +823,9 @@
 }
 
 .landing-footer-note {
-  width: min(1160px, calc(100% - 48px));
+  width: min(1160px, 100%);
   margin: 24px auto 0;
-  padding-top: 16px;
+  padding: 16px 24px 0;
   text-align: center;
   font-size: 0.8rem;
   border-top: 1px solid rgba(110, 86, 37, 0.12);
@@ -840,14 +843,20 @@
 }
 
 @media (max-width: 720px) {
-  .landing-page,
-  .landing-footer-inner,
-  .landing-footer-note {
-    width: min(100%, calc(100% - 28px));
-  }
-
   .landing-page {
     padding-top: 18px;
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .landing-footer-inner {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .landing-footer-note {
+    padding-left: 14px;
+    padding-right: 14px;
   }
 
   .landing-header {
@@ -867,7 +876,18 @@
 
 @media (max-width: 560px) {
   .landing-page {
-    width: min(100%, calc(100% - 20px));
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+  .landing-footer-inner {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+  .landing-footer-note {
+    padding-left: 10px;
+    padding-right: 10px;
   }
 
   .landing-logo-mark {

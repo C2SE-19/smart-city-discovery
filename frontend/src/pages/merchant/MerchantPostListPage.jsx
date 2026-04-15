@@ -5,7 +5,12 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import translations from '../../constants/translations';
 import { APP_ROUTES } from '../../constants/routes';
-import { deleteMerchantVenuePost, fetchMyVenueSubmissions, fetchMyVenueUpdateRequests } from '../../services/api/venuesApi';
+import {
+  deleteMerchantVenuePost,
+  fetchMyVenueSubmissions,
+  fetchMyVenueUpdateRequests,
+  toggleMerchantVenuePauseStatus,
+} from '../../services/api/venuesApi';
 import './MerchantPostList.css';
 
 const MenuItems = [
@@ -18,7 +23,8 @@ const MenuItems = [
 const POST_STATUSES = {
   approved: 'approved',
   pending: 'pending',
-  rejected: 'rejected'
+  rejected: 'rejected',
+  hidden: 'hidden',
 };
 
 const FALLBACK_POST_IMAGE = 'https://via.placeholder.com/200x150?text=Venue';
@@ -209,6 +215,7 @@ function MerchantPostListPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeMenu, setActiveMenu] = useState('posts');
   const [deletingPostId, setDeletingPostId] = useState(null);
+  const [togglingPausePostId, setTogglingPausePostId] = useState(null);
   const copy = {
     followers: language === 'en' ? 'Followers' : 'Người theo dõi',
     following: language === 'en' ? 'Following' : 'Đang theo dõi',
@@ -223,7 +230,7 @@ function MerchantPostListPage() {
       try {
         const [venueRows, rejectedUpdateRows] = await Promise.all([
           fetchMyVenueSubmissions({
-            status: `${POST_STATUSES.approved},${POST_STATUSES.pending},${POST_STATUSES.rejected}`
+            status: `${POST_STATUSES.approved},${POST_STATUSES.pending},${POST_STATUSES.rejected},${POST_STATUSES.hidden}`
           }),
           fetchMyVenueUpdateRequests({ status: POST_STATUSES.rejected }),
         ]);
@@ -301,6 +308,39 @@ function MerchantPostListPage() {
     }
   };
 
+  const handleTogglePausePost = async (post) => {
+    if (!post?.venueId || post.kind !== 'venue') {
+      return;
+    }
+
+    setTogglingPausePostId(post.id);
+    setLoadError('');
+
+    try {
+      const response = await toggleMerchantVenuePauseStatus(post.venueId);
+      const nextStatus = String(response?.venue?.status || '').toLowerCase();
+
+      if (!nextStatus) {
+        return;
+      }
+
+      setPosts((currentPosts) =>
+        currentPosts.map((item) =>
+          Number(item.venueId) === Number(post.venueId)
+            ? {
+                ...item,
+                status: nextStatus,
+              }
+            : item
+        )
+      );
+    } catch (error) {
+      setLoadError(error.response?.data?.message || 'Could not update venue visibility. Please try again.');
+    } finally {
+      setTogglingPausePostId(null);
+    }
+  };
+
   const statusCounts = useMemo(() => {
     const initialCounts = {
       [POST_STATUSES.approved]: 0,
@@ -309,6 +349,11 @@ function MerchantPostListPage() {
     };
 
     return posts.reduce((counts, post) => {
+      if (post.status === POST_STATUSES.hidden) {
+        counts[POST_STATUSES.approved] += 1;
+        return counts;
+      }
+
       if (Object.prototype.hasOwnProperty.call(counts, post.status)) {
         counts[post.status] += 1;
       }
@@ -320,8 +365,13 @@ function MerchantPostListPage() {
   const filteredPosts = useMemo(
     () =>
       posts.filter(
-        (post) =>
-          post.status === activeStatus && post.name.toLowerCase().includes(searchTerm.trim().toLowerCase())
+        (post) => {
+          const matchesStatus = activeStatus === POST_STATUSES.approved
+            ? [POST_STATUSES.approved, POST_STATUSES.hidden].includes(post.status)
+            : post.status === activeStatus;
+
+          return matchesStatus && post.name.toLowerCase().includes(searchTerm.trim().toLowerCase());
+        }
       ),
     [posts, activeStatus, searchTerm]
   );
@@ -488,6 +538,19 @@ function MerchantPostListPage() {
                       onClick={() => handleEditPost(post)}
                     >
                       {t.merchant.edit}
+                    </button>
+                  ) : null}
+                  {post.kind === 'venue' && [POST_STATUSES.approved, POST_STATUSES.hidden].includes(post.status) ? (
+                    <button
+                      className={`merchant-post-pause-btn ${post.status === POST_STATUSES.hidden ? 'is-paused' : ''}`.trim()}
+                      disabled={togglingPausePostId === post.id}
+                      onClick={() => handleTogglePausePost(post)}
+                    >
+                      {togglingPausePostId === post.id
+                        ? 'Updating...'
+                        : post.status === POST_STATUSES.hidden
+                          ? 'Resume Shop'
+                          : 'Pause Shop'}
                     </button>
                   ) : null}
                   <button 
