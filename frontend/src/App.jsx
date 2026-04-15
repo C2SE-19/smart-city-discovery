@@ -19,6 +19,7 @@ import AdminBoundaryPage from './pages/admin/AdminBoundaryPage';
 import AdminUserManagementPage from './pages/admin/AdminUserManagementPage';
 import AdminReportsPage from './pages/admin/AdminReportsPage';
 import AdminVenueApprovalPage from './pages/admin/AdminVenueApprovalPage';
+import AdminAdPackagesPage from './pages/admin/AdminAdPackagesPage';
 import AdminFeedbackManagementPage from './pages/admin/AdminFeedbackManagementPage';
 import MerchantWorkbenchPage from './pages/merchant/MerchantWorkbenchPage';
 import MerchantWorkbenchEditPage from './pages/merchant/MerchantWorkbenchEditPage';
@@ -146,6 +147,7 @@ function App() {
           <Route path="boundaries" element={<AdminBoundaryPage />} />
           <Route path="users" element={<AdminUserManagementPage />} />
           <Route path="reports" element={<AdminReportsPage />} />
+          <Route path="packages" element={<AdminAdPackagesPage />} />
           <Route path="approvals" element={<AdminVenueApprovalPage />} />
           <Route path="feedback" element={<AdminFeedbackManagementPage />} />
         </Route>

@@ -649,6 +649,14 @@ function VenueDetailPage() {
 		const numericValue = Number(location.state?.chatThreadId || 0);
 		return Number.isFinite(numericValue) && numericValue > 0 ? numericValue : null;
 	}, [location.state]);
+	const hasOverviewReturnSnapshot = useMemo(
+		() => Boolean(
+			location.state?.fromOverview
+			&& location.state?.overviewReturnSnapshot
+			&& typeof location.state.overviewReturnSnapshot === 'object'
+		),
+		[location.state]
+	);
 	const syncedChatThreadId = useMemo(() => {
 		const numericValue = Number(syncedChatThread?.threadId || 0);
 		return Number.isFinite(numericValue) && numericValue > 0 ? numericValue : null;
@@ -754,6 +762,19 @@ function VenueDetailPage() {
 		}
 
 		navigate(`${APP_ROUTES.CITY_MAP}?${params.toString()}`);
+	};
+
+	const handleBackNavigation = () => {
+		if (hasOverviewReturnSnapshot) {
+			navigate(APP_ROUTES.HOME, {
+				state: {
+					restoreOverviewSnapshot: location.state.overviewReturnSnapshot
+				}
+			});
+			return;
+		}
+
+		navigate(-1);
 	};
 
 	const openVenueReportModal = () => {
@@ -1818,7 +1839,7 @@ function VenueDetailPage() {
 			<section className={`venue-detail-page theme-${theme}`}>
 				<div className="venue-detail-error-box">
 					<p>{error || 'Venue not found.'}</p>
-					<button type="button" onClick={() => navigate(-1)}>Back</button>
+					<button type="button" onClick={handleBackNavigation}>Back</button>
 				</div>
 			</section>
 		);
@@ -1835,7 +1856,7 @@ function VenueDetailPage() {
 	return (
 		<section className={`venue-detail-page theme-${theme}`}>
 			<div className="venue-detail-topbar">
-				<button type="button" className="venue-detail-back-btn" onClick={() => navigate(-1)}>
+				<button type="button" className="venue-detail-back-btn" onClick={handleBackNavigation}>
 					← Back
 				</button>
 			</div>
