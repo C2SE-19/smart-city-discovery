@@ -33,6 +33,90 @@ import TermsPage from './pages/terms/TermsPage';
 import { APP_ROUTES } from './constants/routes';
 import { ROLES } from './constants/roles';
 import ChatWidget from './components/chat/ChatWidget';
+import translations from './constants/translations';
+import { useLanguage } from './contexts/LanguageContext';
+
+function AppRoutes() {
+  const { language } = useLanguage();
+  const t = translations[language] || translations.vi;
+  const appCopy = t.app || translations.vi.app;
+
+  return (
+    <Routes>
+      <Route element={<LandingLayout />}>
+        <Route path={APP_ROUTES.HOME} element={<OverviewPage />} />
+        <Route
+          path={APP_ROUTES.ABOUT}
+          element={
+            <LandingInfoPage
+              title={appCopy.about.title}
+              description={appCopy.about.description}
+              cards={appCopy.about.cards}
+            />
+          }
+        />
+        <Route
+          path={APP_ROUTES.ALL_CITY}
+          element={
+            <LandingInfoPage
+              title={appCopy.allCity.title}
+              description={appCopy.allCity.description}
+              cards={appCopy.allCity.cards}
+            />
+          }
+        />
+        <Route
+          path={APP_ROUTES.SERVICE}
+          element={
+            <LandingInfoPage
+              title={appCopy.service.title}
+              description={appCopy.service.description}
+              cards={appCopy.service.cards}
+            />
+          }
+        />
+        <Route path={APP_ROUTES.TERMS} element={<TermsPage />} />
+        <Route path={APP_ROUTES.FEEDBACK} element={<FeedbackSupportPage />} />
+        <Route path={APP_ROUTES.VENUE_DETAIL} element={<VenueDetailPage />} />
+        <Route path="/profile" element={<ProfilePage />} />
+      </Route>
+
+      <Route path={APP_ROUTES.LOGIN} element={<LoginPage />} />
+      <Route path={APP_ROUTES.REGISTER} element={<RegisterPage />} />
+      <Route path={APP_ROUTES.CITY_MAP} element={<CityMapPage />} />
+
+      <Route element={<WorkspaceLayout />}>
+        <Route path={APP_ROUTES.DISCOVERY} element={<DiscoveryPage />} />
+      </Route>
+
+      <Route element={<MerchantLayout />}>
+        <Route path={APP_ROUTES.MERCHANT_DASHBOARD} element={<MerchantDashboardPage />} />
+        <Route path={APP_ROUTES.MERCHANT_POSTS} element={<MerchantPostListPage />} />
+        <Route path={APP_ROUTES.MERCHANT_WORKBENCH} element={<MerchantWorkbenchPage />} />
+        <Route path={APP_ROUTES.MERCHANT_WORKBENCH_EDIT} element={<MerchantWorkbenchEditPage />} />
+      </Route>
+
+      <Route
+        path="/admin"
+        element={
+          <RoleGuard allowedRoles={[ROLES.ADMIN]}>
+            <AdminLayout />
+          </RoleGuard>
+        }
+      >
+        <Route index element={<AdminDashboardPage />} />
+        <Route path="boundaries" element={<AdminBoundaryPage />} />
+        <Route path="users" element={<AdminUserManagementPage />} />
+        <Route path="reports" element={<AdminReportsPage />} />
+        <Route path="packages" element={<AdminAdPackagesPage />} />
+        <Route path="approvals" element={<AdminVenueApprovalPage />} />
+        <Route path="feedback" element={<AdminFeedbackManagementPage />} />
+      </Route>
+
+      <Route path="*" element={<Navigate replace to={APP_ROUTES.HOME} />} />
+    </Routes>
+  );
+}
 
 function App() {
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
@@ -42,118 +126,7 @@ function App() {
         <ThemeProvider>
           <LanguageProvider>
             <BrowserRouter>
-            <Routes>
-          <Route element={<LandingLayout />}>
-          <Route path={APP_ROUTES.HOME} element={<OverviewPage />} />
-          <Route
-            path={APP_ROUTES.ABOUT}
-            element={
-              <LandingInfoPage
-                title="About Smart City Discovery"
-                description="Trang nay la khung noi dung mau de ban thay route thay doi nhung header, search, food va footer van giu nguyen."
-                cards={[
-                  {
-                    title: 'Local-first discovery',
-                    copy: 'Tap trung vao dia diem, mon an va trai nghiem noi bat de nguoi dung tim nhanh theo khu vuc.'
-                  },
-                  {
-                    title: 'Merchant support',
-                    copy: 'Cho merchant de dang dua hinh anh, menu, uu dai va noi dung quang ba vao he thong.'
-                  },
-                  {
-                    title: 'GIS mindset',
-                    copy: 'Ban do va khu vuc hanh chinh duoc xem nhu lop du lieu chinh de mo rong sau nay.'
-                  }
-                ]}
-              />
-            }
-          />
-          <Route
-            path={APP_ROUTES.ALL_CITY}
-            element={
-              <LandingInfoPage
-                title="All City Highlights"
-                description="Day la page mau cho danh muc tong hop. Khi chuyen route, LandingLayout khong bi remount nen phan dung chung van giu nguyen."
-                cards={[
-                  {
-                    title: 'Food districts',
-                    copy: 'Nhom khu vuc an uong theo bai bien, trung tam thanh pho va khu du lich.'
-                  },
-                  {
-                    title: 'Popular landmarks',
-                    copy: 'Tong hop cac diem check-in, cau noi tieng, bao tang va chua lon trong thanh pho.'
-                  },
-                  {
-                    title: 'Suggested routes',
-                    copy: 'Goi y hanh trinh di chuyen gon trong 1 ngay hoac cuoi tuan cho khach du lich.'
-                  }
-                ]}
-              />
-            }
-          />
-          <Route
-            path={APP_ROUTES.SERVICE}
-            element={
-              <LandingInfoPage
-                title="Service"
-                description="Page nay co the dung cho giao do, dat ban, affiliate ads hoac cac service page khac ma van dung lai khung trang chung."
-                cards={[
-                  {
-                    title: 'Delivery support',
-                    copy: 'Ket noi dia chi giao hang, merchant va danh sach mon an trong cung mot flow.'
-                  },
-                  {
-                    title: 'Promotion slots',
-                    copy: 'Cho phep merchant mua vi tri noi bat tren landing page ma khong pha vo bo cuc tong.'
-                  },
-                  {
-                    title: 'Content modules',
-                    copy: 'Moi route con co the them section rieng ma khong can copy lai header, food va footer.'
-                  }
-                ]}
-              />
-            }
-          />
-          <Route path={APP_ROUTES.TERMS} element={<TermsPage />} />
-          <Route path={APP_ROUTES.FEEDBACK} element={<FeedbackSupportPage />} />
-          <Route path={APP_ROUTES.VENUE_DETAIL} element={<VenueDetailPage />} />
-          <Route path="/profile" element={<ProfilePage />} />
-        </Route>
-
-        <Route path={APP_ROUTES.LOGIN} element={<LoginPage />} />
-        <Route path={APP_ROUTES.REGISTER} element={<RegisterPage />} />
-        <Route path={APP_ROUTES.CITY_MAP} element={<CityMapPage />} />
-
-        <Route element={<WorkspaceLayout />}>
-          <Route path={APP_ROUTES.DISCOVERY} element={<DiscoveryPage />} />
-        </Route>
-
-        <Route element={<MerchantLayout />}>
-          <Route path={APP_ROUTES.MERCHANT_DASHBOARD} element={<MerchantDashboardPage />} />
-          <Route path={APP_ROUTES.MERCHANT_POSTS} element={<MerchantPostListPage />} />
-          <Route path={APP_ROUTES.MERCHANT_WORKBENCH} element={<MerchantWorkbenchPage />} />
-          <Route path={APP_ROUTES.MERCHANT_WORKBENCH_EDIT} element={<MerchantWorkbenchEditPage />} />
-        </Route>
-
-        <Route
-          path="/admin"
-          element={
-            <RoleGuard allowedRoles={[ROLES.ADMIN]}>
-              <AdminLayout />
-            </RoleGuard>
-          }
-        >
-          <Route index element={<AdminDashboardPage />} />
-          <Route path="boundaries" element={<AdminBoundaryPage />} />
-          <Route path="users" element={<AdminUserManagementPage />} />
-          <Route path="reports" element={<AdminReportsPage />} />
-          <Route path="packages" element={<AdminAdPackagesPage />} />
-          <Route path="approvals" element={<AdminVenueApprovalPage />} />
-          <Route path="feedback" element={<AdminFeedbackManagementPage />} />
-        </Route>
-
-        <Route path="*" element={<Navigate replace to={APP_ROUTES.HOME} />} />
-      </Routes>
+              <AppRoutes />
             <ChatWidget />
           </BrowserRouter>
         </LanguageProvider>
