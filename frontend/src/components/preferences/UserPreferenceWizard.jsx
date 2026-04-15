@@ -17,8 +17,7 @@ const FALLBACK_OPTIONS = {
   genders: [
     { key: 'male', label: 'Male' },
     { key: 'female', label: 'Female' },
-    { key: 'non_binary', label: 'Non-binary' },
-    { key: 'prefer_not_to_say', label: 'Prefer not to say' }
+    { key: 'other', label: 'Other' }
   ],
   visitTimes: [
     { key: 'morning', label: 'Morning' },

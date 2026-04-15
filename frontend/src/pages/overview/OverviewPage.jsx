@@ -601,7 +601,6 @@ function OverviewPage() {
     selectedWardIds.length +
     selectedServiceIds.length +
     (searchInput.trim() ? 1 : 0);
-  const isSearchMode = searchTriggered;
   const appliedFilterCount =
     appliedCategoryIds.length +
     appliedWardIds.length +
@@ -916,6 +915,44 @@ function OverviewPage() {
   }, [submittedSearch]);
 
   useEffect(() => {
+    const snapshot = location.state?.restoreOverviewSnapshot;
+    if (!snapshot || typeof snapshot !== 'object') {
+      return;
+    }
+
+    const restoredSuggestedVenues = Array.isArray(snapshot.aiSuggestedVenues)
+      ? snapshot.aiSuggestedVenues
+      : [];
+    const restoredBaseVenues = Array.isArray(snapshot.aiBaseVenues)
+      ? snapshot.aiBaseVenues
+      : restoredSuggestedVenues;
+    const restoredVisibleCount = Number(snapshot.aiVisibleCount);
+
+    setAiSuggestMode(Boolean(snapshot.aiSuggestMode));
+    setAiSuggestedVenues(restoredSuggestedVenues);
+    setAiBaseVenues(restoredBaseVenues);
+    setAiVisibleCount(
+      Number.isFinite(restoredVisibleCount) && restoredVisibleCount > 0
+        ? Math.min(restoredVisibleCount, 40)
+        : 8
+    );
+    setAiContext(snapshot.aiContext && typeof snapshot.aiContext === 'object' ? snapshot.aiContext : null);
+    setAiRefineInput(String(snapshot.aiRefineInput || '').trim());
+    setAiRefineMeta(snapshot.aiRefineMeta && typeof snapshot.aiRefineMeta === 'object' ? snapshot.aiRefineMeta : null);
+    setAiRefineError('');
+    setAiSuggestError('');
+    setSearchTriggered(false);
+    setShowFilterPanel(false);
+
+    const nextState = { ...(location.state || {}) };
+    delete nextState.restoreOverviewSnapshot;
+    navigate(location.pathname, {
+      replace: true,
+      state: Object.keys(nextState).length ? nextState : null
+    });
+  }, [location.pathname, location.state, navigate]);
+
+  useEffect(() => {
     if (!location.state?.resetOverview) {
       return;
     }
@@ -1128,21 +1165,13 @@ function OverviewPage() {
       return;
     }
 
-    const baseSource = aiBaseVenues.length ? aiBaseVenues : aiSuggestedVenues;
-    if (!baseSource.length) {
-      setAiRefineError('No AI suggestions available to refine. Please run AI Suggest first.');
-      return;
-    }
-
     setAiRefineLoading(true);
     setAiRefineError('');
 
     try {
       const payload = {
         query: refineText,
-        baseVenueIds: baseSource
-          .map((venue) => Number(venue?.id))
-          .filter((venueId) => Number.isFinite(venueId)),
+        scope: 'global',
         limit: 24,
         currentTimeIso: new Date().toISOString()
       };
@@ -1319,7 +1348,22 @@ function OverviewPage() {
       return;
     }
 
-    navigate(`/venues/${venue.id}`);
+    const overviewReturnSnapshot = {
+      aiSuggestMode,
+      aiSuggestedVenues: aiSuggestMode ? aiSuggestedVenues : [],
+      aiBaseVenues: aiSuggestMode ? aiBaseVenues : [],
+      aiVisibleCount: aiSuggestMode ? aiVisibleCount : 8,
+      aiContext: aiSuggestMode ? aiContext : null,
+      aiRefineInput: aiSuggestMode ? aiRefineInput : '',
+      aiRefineMeta: aiSuggestMode ? aiRefineMeta : null
+    };
+
+    navigate(`/venues/${venue.id}`, {
+      state: {
+        fromOverview: true,
+        overviewReturnSnapshot
+      }
+    });
   };
 
   const handlePreferenceSaved = (savedPreference) => {
@@ -1814,7 +1858,7 @@ function OverviewPage() {
                 type="button"
                 className="overview-ai-refine-run"
                 onClick={handleRunAiRefine}
-                disabled={aiRefineLoading || aiSuggestLoading || !(aiBaseVenues.length || aiSuggestedVenues.length)}
+                disabled={aiRefineLoading || aiSuggestLoading}
               >
                 {aiRefineLoading ? (
                   <span className="overview-ai-refine-btn-loading" aria-live="polite">

@@ -112,7 +112,7 @@ function AdminLayout() {
     { label: t.users, path: APP_ROUTES.ADMIN_USERS, icon: 'users' },
     { label: t.map, path: APP_ROUTES.ADMIN_BOUNDARIES, icon: 'map' },
     { label: t.reports, path: APP_ROUTES.ADMIN_REPORTS, icon: 'payments' },
-    { label: t.packages, path: APP_ROUTES.ADMIN_APPROVALS, icon: 'packages' },
+    { label: t.packages, path: APP_ROUTES.ADMIN_PACKAGES, icon: 'packages' },
     { label: t.feedback, path: APP_ROUTES.ADMIN_FEEDBACK, icon: 'feedback' },
   ];
   const displayName = user?.fullName || user?.fullname || 'Administrator';
