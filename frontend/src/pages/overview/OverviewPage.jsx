@@ -601,7 +601,6 @@ function OverviewPage() {
     selectedWardIds.length +
     selectedServiceIds.length +
     (searchInput.trim() ? 1 : 0);
-  const isSearchMode = searchTriggered;
   const appliedFilterCount =
     appliedCategoryIds.length +
     appliedWardIds.length +

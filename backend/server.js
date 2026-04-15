@@ -20,6 +20,14 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
+// Mount LLM-backed chat route (v2) from src so frontend can call /api/chat-v2
+try {
+    const chatV2 = require('./src/routes/chat.route');
+    app.use('/api/chat-v2', chatV2);
+} catch (e) {
+    console.warn('Could not mount /api/chat-v2:', e.message);
+}
+
 // Initialize Google OAuth2 Client
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
@@ -13141,7 +13149,20 @@ async function generateWardIdFromName(name) {
                 if (weatherQuery && intent !== 'entertainment') {
                     venueResults = await findVenueMatches(weatherQuery.searchText, 5, weatherQuery.category || 'food');
                     if (venueResults.length) {
-                        reply = `Thời tiết ${weatherQuery.label} thì bạn có thể thử ${weatherQuery.suggestion}. Dưới đây là một số gợi ý quán phù hợp:`;
+                        // Build a short, varied reply instead of a fixed template
+                        const openers = ['ừ', 'nè', 'ok', 'hmm', 'ừm'];
+                        const emojis = ['😄', '🙂', '😉', '👍'];
+                        const opener = openers[Math.floor(Math.random() * openers.length)];
+                        const emo = emojis[Math.floor(Math.random() * emojis.length)];
+                        const topNames = venueResults.slice(0, 2).map(v => v.name).join(' hoặc ');
+
+                        const replyVariants = [
+                            `${opener} ${weatherQuery.suggestion}, thử ${topNames} ${emo}`,
+                            `${opener} ${topNames} hợp lắm ${emo}`,
+                            `${opener} trời ${weatherQuery.label} thì ${weatherQuery.suggestion} hợp đó, ví dụ: ${topNames}`
+                        ];
+
+                        reply = replyVariants[Math.floor(Math.random() * replyVariants.length)];
                         return res.json({ reply, venueResults });
                     }
                 }
