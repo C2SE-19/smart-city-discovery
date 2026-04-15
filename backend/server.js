@@ -13223,6 +13223,295 @@ async function generateWardIdFromName(name) {
             }
         ];
 
+        const CANONICAL_PLACE_RULES = [
+            {
+                canonical: 'cầu thuận phước',
+                variants: ['cầu thuận phước', 'cau thuan phuoc', 'thuan phuoc bridge', 'thuận phước bridge'],
+                pattern: /\bcau\s*thuan\s*phuoc\b/
+            },
+            {
+                canonical: 'cầu rồng',
+                variants: ['cầu rồng', 'cau rong', 'dragon bridge'],
+                pattern: /\bcau\s*rong\b/
+            },
+            {
+                canonical: 'cầu sông hàn',
+                variants: ['cầu sông hàn', 'cau song han', 'song han bridge'],
+                pattern: /\bcau\s*song\s*han\b/
+            },
+            {
+                canonical: 'cầu trần thị lý',
+                variants: ['cầu trần thị lý', 'cau tran thi ly', 'tran thi ly bridge'],
+                pattern: /\bcau\s*tran\s*thi\s*ly\b/
+            },
+            {
+                canonical: 'cầu nguyễn văn trỗi',
+                variants: ['cầu nguyễn văn trỗi', 'cau nguyen van troi', 'nguyen van troi bridge'],
+                pattern: /\bcau\s*nguyen\s*van\s*troi\b/
+            },
+            {
+                canonical: 'cầu tiên sơn',
+                variants: ['cầu tiên sơn', 'cau tien son', 'cầu tuyên sơn', 'cau tuyen son', 'tien son bridge', 'tuyen son bridge'],
+                pattern: /\bcau\s*(tien\s*son|tuyen\s*son)\b/
+            },
+            {
+                canonical: 'cầu cẩm lệ',
+                variants: ['cầu cẩm lệ', 'cau cam le', 'cam le bridge'],
+                pattern: /\bcau\s*cam\s*le\b/
+            },
+            {
+                canonical: 'cầu nguyễn tri phương',
+                variants: ['cầu nguyễn tri phương', 'cau nguyen tri phuong', 'nguyen tri phuong bridge'],
+                pattern: /\bcau\s*nguyen\s*tri\s*phuong\b/
+            },
+            {
+                canonical: 'cầu hòa xuân',
+                variants: ['cầu hòa xuân', 'cau hoa xuan', 'hoa xuan bridge'],
+                pattern: /\bcau\s*hoa\s*xuan\b/
+            },
+            {
+                canonical: 'cầu đỏ',
+                variants: ['cầu đỏ', 'cau do', 'do bridge'],
+                pattern: /\bcau\s*do\b/
+            },
+            {
+                canonical: 'cầu nam ô',
+                variants: ['cầu nam ô', 'cau nam o', 'nam o bridge'],
+                pattern: /\bcau\s*nam\s*o\b/
+            },
+            {
+                canonical: 'cầu phò nam',
+                variants: ['cầu phò nam', 'cau pho nam', 'pho nam bridge'],
+                pattern: /\bcau\s*pho\s*nam\b/
+            },
+            {
+                canonical: 'cầu vàng',
+                variants: ['cầu vàng', 'cau vang', 'golden bridge', 'cầu bàn tay', 'cau ban tay'],
+                pattern: /\b(cau\s*vang|golden\s*bridge|cau\s*ban\s*tay)\b/
+            },
+            {
+                canonical: 'cầu tình yêu',
+                variants: ['cầu tình yêu', 'cau tinh yeu', 'love bridge'],
+                pattern: /\b(cau\s*tinh\s*yeu|love\s*bridge)\b/
+            },
+            {
+                canonical: 'cầu đi bộ nguyễn tất thành',
+                variants: ['cầu đi bộ nguyễn tất thành', 'cau di bo nguyen tat thanh', 'nguyen tat thanh walking bridge'],
+                pattern: /\b(cau\s*di\s*bo\s*nguyen\s*tat\s*thanh|nguyen\s*tat\s*thanh\s*walking\s*bridge)\b/
+            },
+            {
+                canonical: 'bà nà hills',
+                variants: ['bà nà hills', 'ba na hills', 'banahills'],
+                pattern: /\bba\s*na\s*hills\b/
+            },
+            {
+                canonical: 'ngũ hành sơn',
+                variants: ['ngũ hành sơn', 'ngu hanh son', 'marble mountains'],
+                pattern: /\bngu\s*hanh\s*son\b/
+            },
+            {
+                canonical: 'chùa linh ứng',
+                variants: ['chùa linh ứng', 'chua linh ung', 'linh ung pagoda'],
+                pattern: /\blinh\s*ung\b/
+            },
+            {
+                canonical: 'asia park',
+                variants: ['asia park', 'sun world asia park'],
+                pattern: /\b(asia\s*park|sun\s*world\s*asia\s*park)\b/
+            }
+        ];
+
+        function resolveCanonicalPlaceFromVision(values = []) {
+            const haystack = normalizeVisionNoAccent(values.join(' '));
+
+            if (!haystack) {
+                return null;
+            }
+
+            const matched = CANONICAL_PLACE_RULES.find((rule) => rule.pattern.test(haystack));
+            return matched || null;
+        }
+
+        const DANANG_BRIDGE_CATALOG = [
+            {
+                canonical: 'cầu thuận phước',
+                notes: 'cầu treo dây võng dài, gần cửa biển'
+            },
+            {
+                canonical: 'cầu sông hàn',
+                notes: 'cầu quay, biểu tượng trung tâm sông hàn'
+            },
+            {
+                canonical: 'cầu rồng',
+                notes: 'hình rồng, có phun lửa hoặc nước cuối tuần'
+            },
+            {
+                canonical: 'cầu nguyễn văn trỗi',
+                notes: 'cầu lâu đời, hiện nổi bật như cầu đi bộ'
+            },
+            {
+                canonical: 'cầu trần thị lý',
+                notes: 'trụ nghiêng và dây văng kiểu cánh buồm'
+            },
+            {
+                canonical: 'cầu tiên sơn',
+                notes: 'còn gọi tuyên sơn, thiên về giao thông vận tải'
+            },
+            {
+                canonical: 'cầu cẩm lệ',
+                notes: 'kết nối khu trung tâm với quận cẩm lệ'
+            },
+            {
+                canonical: 'cầu nguyễn tri phương',
+                notes: 'kết nối khu hòa xuân và trung tâm'
+            },
+            {
+                canonical: 'cầu hòa xuân',
+                notes: 'phục vụ khu đô thị sinh thái hòa xuân'
+            },
+            {
+                canonical: 'cầu đỏ',
+                notes: 'cây cầu lịch sử gần quốc lộ 1a'
+            },
+            {
+                canonical: 'cầu nam ô',
+                notes: 'bắc qua sông cu đê, dáng vòm'
+            },
+            {
+                canonical: 'cầu phò nam',
+                notes: 'cầu treo khu thượng nguồn sông cu đê'
+            },
+            {
+                canonical: 'cầu vàng',
+                notes: 'golden bridge ở bà nà hills, hình bàn tay'
+            },
+            {
+                canonical: 'cầu tình yêu',
+                notes: 'điểm check-in khóa tình yêu ven sông hàn'
+            },
+            {
+                canonical: 'cầu đi bộ nguyễn tất thành',
+                notes: 'cầu đi bộ vươn ra biển khu nguyễn tất thành'
+            }
+        ];
+
+        function hasBridgeSignal(values = []) {
+            const normalized = normalizeVisionNoAccent(values.join(' '));
+            if (!normalized) {
+                return false;
+            }
+
+            return /(\bcau\b|\bbridge\b|song han|han river|day vang|landmark)/.test(normalized);
+        }
+
+        async function verifyDanangBridgeFromImage(imageDataUrl, visionPayload = {}) {
+            const openAiApiKey = String(process.env.OPENAI_API_KEY || '').trim();
+
+            if (!openAiApiKey) {
+                return null;
+            }
+
+            const hintValues = [
+                visionPayload?.label,
+                ...(visionPayload?.alternativeLabels || []),
+                ...(visionPayload?.keywords || []),
+                ...(visionPayload?.visualClues || [])
+            ].filter(Boolean);
+
+            if (!hasBridgeSignal(hintValues)) {
+                return null;
+            }
+
+            const model =
+                String(process.env.OPENAI_VISION_MODEL || '').trim()
+                || String(process.env.OPENAI_CHAT_MODEL || '').trim()
+                || 'gpt-4o';
+
+            const catalogText = DANANG_BRIDGE_CATALOG
+                .map((item) => `- ${item.canonical}: ${item.notes}`)
+                .join('\n');
+
+            const systemPrompt = [
+                'Bạn là AI xác minh cầu tại Đà Nẵng từ ảnh.',
+                'Nhiệm vụ: chọn ĐÚNG 1 cầu trong catalog nếu đủ bằng chứng.',
+                'Nếu không chắc chắn thì trả về unknown, không được đoán bừa sang cầu nổi tiếng.',
+                'Chỉ trả JSON object hợp lệ.',
+                'Schema JSON:',
+                '{"selectedCanonical":"string","confidence":0,"reason":"string","alternatives":["string"]}',
+                'selectedCanonical chỉ được là một trong catalog hoặc unknown.',
+                'reason phải ngắn gọn dựa trên đặc trưng nhìn thấy.',
+                'Catalog cầu Đà Nẵng:',
+                catalogText
+            ].join(' ');
+
+            const response = await axios.post(
+                'https://api.openai.com/v1/chat/completions',
+                {
+                    model,
+                    temperature: 0,
+                    max_tokens: 220,
+                    response_format: { type: 'json_object' },
+                    messages: [
+                        { role: 'system', content: systemPrompt },
+                        {
+                            role: 'user',
+                            content: [
+                                {
+                                    type: 'text',
+                                    text: `Hint từ lần nhận diện đầu: ${hintValues.join(', ') || 'không có'}. Hãy xác minh đây là cầu nào.`
+                                },
+                                {
+                                    type: 'image_url',
+                                    image_url: {
+                                        url: imageDataUrl,
+                                        detail: 'high'
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    headers: {
+                        Authorization: `Bearer ${openAiApiKey}`,
+                        'Content-Type': 'application/json'
+                    },
+                    timeout: 30000
+                }
+            );
+
+            const rawContent = response?.data?.choices?.[0]?.message?.content || '{}';
+            const parsed = safeParseJsonObject(rawContent);
+            const selectedCanonical = normalizeVisionText(parsed.selectedCanonical || 'unknown');
+            const confidence = Number(parsed.confidence || 0);
+            const reason = String(parsed.reason || '').trim();
+            const alternatives = Array.isArray(parsed.alternatives)
+                ? parsed.alternatives.map((item) => String(item || '').trim()).filter(Boolean)
+                : [];
+
+            if (!selectedCanonical || selectedCanonical === 'unknown') {
+                return {
+                    selectedCanonical: 'unknown',
+                    confidence: Number.isFinite(confidence) ? confidence : 0,
+                    reason,
+                    alternatives,
+                    canonicalRule: null
+                };
+            }
+
+            const selectedRule = CANONICAL_PLACE_RULES.find(
+                (rule) => normalizeVisionNoAccent(rule.canonical) === normalizeVisionNoAccent(selectedCanonical)
+            ) || null;
+
+            return {
+                selectedCanonical,
+                confidence: Number.isFinite(confidence) ? confidence : 0,
+                reason,
+                alternatives,
+                canonicalRule: selectedRule
+            };
+        }
+
         function resolveCanonicalFoodFromVision(values = []) {
             const haystack = normalizeVisionNoAccent(values.join(' '));
 
@@ -13285,8 +13574,11 @@ async function generateWardIdFromName(name) {
                 }
             }
 
-            score += Math.min(5, Number(venue?.average_rating || 0)) * 1.2;
-            score += Math.log10(Number(venue?.total_reviews || 0) + 1) * 1.1;
+            const isGenericPlaceLabel = normalizedTarget === 'place' && isGenericVisionLabel(primaryLabel);
+            const popularityWeight = isGenericPlaceLabel ? 0.3 : 1;
+
+            score += Math.min(5, Number(venue?.average_rating || 0)) * 1.2 * popularityWeight;
+            score += Math.log10(Number(venue?.total_reviews || 0) + 1) * 1.1 * popularityWeight;
 
             return Number(score.toFixed(4));
         }
@@ -13319,7 +13611,8 @@ async function generateWardIdFromName(name) {
                         LOWER(COALESCE(place_categories.name, '')) LIKE ANY(ARRAY[
                             '%entertainment%', '%giải trí%', '%giai tri%', '%du lịch%', '%du lich%',
                             '%tham quan%', '%công viên%', '%cong vien%', '%khu vui chơi%', '%karaoke%',
-                            '%bar%', '%club%', '%landscape%'
+                            '%bar%', '%club%', '%landscape%', '%bridge%', '%cầu%', '%cau%', '%landmark%',
+                            '%sightseeing%', '%tourist attraction%'
                         ])
                         OR EXISTS (
                             SELECT 1
@@ -13327,7 +13620,8 @@ async function generateWardIdFromName(name) {
                             WHERE LOWER(service_name.value) LIKE ANY(ARRAY[
                                 '%entertainment%', '%giải trí%', '%giai tri%', '%du lịch%', '%du lich%',
                                 '%tham quan%', '%công viên%', '%cong vien%', '%khu vui chơi%', '%karaoke%',
-                                '%bar%', '%club%', '%landscape%'
+                                '%bar%', '%club%', '%landscape%', '%bridge%', '%cầu%', '%cau%', '%landmark%',
+                                '%sightseeing%', '%tourist attraction%'
                             ])
                         )
                     )
@@ -13435,7 +13729,7 @@ async function generateWardIdFromName(name) {
             const model =
                 String(process.env.OPENAI_VISION_MODEL || '').trim()
                 || String(process.env.OPENAI_CHAT_MODEL || '').trim()
-                || 'gpt-4o-mini';
+                || 'gpt-4o';
 
             const normalizedTarget = normalizeVisionText(target);
             const preferredKind = normalizedTarget === 'food' ? 'food' : normalizedTarget === 'place' ? 'place' : 'unknown';
@@ -13444,19 +13738,26 @@ async function generateWardIdFromName(name) {
                 'Bạn là AI nhận diện ảnh cho ứng dụng khám phá địa điểm.',
                 'Chỉ trả về JSON object hợp lệ, không thêm markdown.',
                 'Schema JSON:',
-                '{"label":"string","keywords":["string"],"kind":"food|place|unknown","confidence":0}',
-                'label là tên CỤ THỂ của món ăn hoặc địa điểm nếu nhận diện được (ví dụ: bun dau mam tom, mi quang, cau rong).',
+                '{"label":"string","alternativeLabels":["string"],"keywords":["string"],"visualClues":["string"],"kind":"food|place|unknown","confidence":0}',
+                'label là tên CỤ THỂ nhất bạn có thể suy ra trực tiếp từ ảnh.',
+                'alternativeLabels là 1 đến 3 tên thay thế gần nhất nếu label chưa chắc chắn.',
                 'keywords là tối đa 5 từ khóa tìm kiếm hữu ích để truy vấn database.',
+                'visualClues là các dấu hiệu nhìn thấy rõ trong ảnh, ngắn gọn và không suy diễn quá mức.',
                 'Tránh trả nhãn chung chung như "món ăn Việt Nam" hoặc "địa điểm du lịch".',
+                'Không được đổi sang món/địa điểm phổ biến hơn nếu ảnh không có đặc trưng rõ ràng của nó.',
+                'Nếu ảnh là món nướng, món cuốn, món bún, món phở, hãy ưu tiên đúng kiểu món đó thay vì suy đoán sang món khác.',
                 'Nếu không chắc thì kind=unknown và confidence thấp.',
-                `Ưu tiên kind=${preferredKind} nếu ảnh phù hợp.`
+                `Ưu tiên kind=${preferredKind} nếu ảnh phù hợp.`,
+                'Nếu kind=place và ảnh là cầu hoặc địa danh ở Đà Nẵng, hãy cố gắng trả về tên đúng trong catalog thay vì mặc định Cầu Rồng.',
+                'Catalog địa danh ưu tiên: Cầu Thuận Phước, Cầu Rồng, Cầu Sông Hàn, Cầu Trần Thị Lý, Cầu Nguyễn Văn Trỗi, Bà Nà Hills, Ngũ Hành Sơn, Chùa Linh Ứng, Asia Park.',
+                'Chỉ dùng Cầu Rồng khi có đặc trưng cầu rồng rõ ràng; nếu không chắc, hãy trả kind=unknown hoặc một tên địa danh khác phù hợp hơn.'
             ].join(' ');
 
             const response = await axios.post(
                 'https://api.openai.com/v1/chat/completions',
                 {
                     model,
-                    temperature: 0.1,
+                    temperature: 0,
                     max_tokens: 260,
                     response_format: { type: 'json_object' },
                     messages: [
@@ -13491,8 +13792,14 @@ async function generateWardIdFromName(name) {
             const rawContent = response?.data?.choices?.[0]?.message?.content || '{}';
             const parsed = safeParseJsonObject(rawContent);
             const label = String(parsed.label || '').trim();
+            const alternativeLabels = Array.isArray(parsed.alternativeLabels)
+                ? parsed.alternativeLabels.map((item) => String(item || '').trim()).filter(Boolean)
+                : [];
             const keywords = Array.isArray(parsed.keywords)
                 ? parsed.keywords.map((item) => String(item || '').trim()).filter(Boolean)
+                : [];
+            const visualClues = Array.isArray(parsed.visualClues)
+                ? parsed.visualClues.map((item) => String(item || '').trim()).filter(Boolean)
                 : [];
             const kindRaw = normalizeVisionText(parsed.kind);
             const kind = ['food', 'place', 'unknown'].includes(kindRaw) ? kindRaw : 'unknown';
@@ -13501,7 +13808,9 @@ async function generateWardIdFromName(name) {
             return {
                 model,
                 label,
+                alternativeLabels,
                 keywords,
+                visualClues,
                 kind,
                 confidence: Number.isFinite(confidence) ? confidence : 0
             };
@@ -13521,32 +13830,69 @@ async function generateWardIdFromName(name) {
                 }
 
                 const vision = await detectImageSearchPayload(imageDataUrl, target);
-                const terms = buildVisionSearchTerms(vision.label, vision.keywords);
+                const visionHints = [
+                    vision.label,
+                    ...(vision.alternativeLabels || []),
+                    ...(vision.keywords || []),
+                    ...(vision.visualClues || [])
+                ];
+                const terms = buildVisionSearchTerms(vision.label, visionHints);
 
                 const canonicalFoodRule =
                     target === 'food'
-                        ? resolveCanonicalFoodFromVision([vision.label, ...(vision.keywords || []), ...terms])
+                        ? resolveCanonicalFoodFromVision([vision.label, ...(vision.alternativeLabels || []), ...(vision.keywords || []), ...(vision.visualClues || []), ...terms])
                         : null;
 
-                const effectiveTerms = canonicalFoodRule
-                    ? uniqueVisionValues(canonicalFoodRule.variants)
+                let canonicalPlaceRule =
+                    target === 'place'
+                        ? resolveCanonicalPlaceFromVision([vision.label, ...(vision.alternativeLabels || []), ...(vision.keywords || []), ...(vision.visualClues || []), ...terms])
+                        : null;
+
+                const bridgeVerification =
+                    target === 'place'
+                        ? await verifyDanangBridgeFromImage(imageDataUrl, vision)
+                        : null;
+
+                if (bridgeVerification?.canonicalRule && Number(bridgeVerification.confidence || 0) >= 0.55) {
+                    canonicalPlaceRule = bridgeVerification.canonicalRule;
+                }
+
+                const canonicalRule = canonicalFoodRule || canonicalPlaceRule;
+
+                const effectiveTerms = canonicalRule
+                    ? uniqueVisionValues(canonicalRule.variants)
                     : terms;
 
                 const venueResults = await queryVisionVenueMatches(effectiveTerms, target, 24, vision.label);
 
-                const bestMatchName = String(venueResults?.[0]?.name || '').trim();
                 const hasGenericLabel = isGenericVisionLabel(vision.label);
+                const bestGuessLabel = uniqueVisionValues([
+                    vision.label,
+                    ...(vision.alternativeLabels || [])
+                ]).find((item) => !isGenericVisionLabel(item)) || String(vision.label || '').trim();
                 const specificLabel = hasGenericLabel ? '' : String(vision.label || '').trim();
-                const canonicalFoodText = canonicalFoodRule?.canonical || '';
-                const searchText = canonicalFoodText || specificLabel || bestMatchName || effectiveTerms[0] || '';
+                const canonicalText = canonicalRule?.canonical || '';
+                const searchText = canonicalText || specificLabel || bestGuessLabel || effectiveTerms[0] || '';
 
                 return res.json({
                     success: true,
                     target,
                     detectedLabel: vision.label,
+                    bestGuessLabel,
+                    alternativeLabels: vision.alternativeLabels || [],
+                    visualClues: vision.visualClues || [],
                     detectedKind: vision.kind,
                     confidence: vision.confidence,
-                    canonicalFood: canonicalFoodText,
+                    canonicalFood: canonicalFoodRule?.canonical || '',
+                    canonicalPlace: canonicalPlaceRule?.canonical || '',
+                    bridgeVerification: bridgeVerification
+                        ? {
+                            selectedCanonical: bridgeVerification.selectedCanonical,
+                            confidence: bridgeVerification.confidence,
+                            reason: bridgeVerification.reason,
+                            alternatives: bridgeVerification.alternatives
+                        }
+                        : null,
                     searchTerms: effectiveTerms,
                     searchText,
                     venueResults
