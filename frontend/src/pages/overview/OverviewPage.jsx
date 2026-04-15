@@ -8,6 +8,7 @@ import { fetchPlaceCategories } from '../../services/api/placeCategoriesApi';
 import { fetchMerchantServices } from '../../services/api/merchantServicesApi';
 import { fetchWards } from '../../services/api/wardsApi';
 import { fetchVenues } from '../../services/api/venuesApi';
+import { searchVenuesByImage } from '../../services/api/imageSearchApi';
 import {
   fetchForYouRecommendations,
   refineForYouRecommendations,
@@ -81,6 +82,15 @@ function normalizeVietnameseToneInsensitive(value) {
     .replace(/[\u0300\u0301\u0303\u0309\u0323]/g, '')
     .toLowerCase()
     .trim();
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('Failed to read selected image.'));
+    reader.readAsDataURL(file);
+  });
 }
 
 function getVenueImage(venue) {
@@ -423,9 +433,11 @@ function OverviewPage() {
   const [weatherError, setWeatherError] = useState('');
   const [locationClock, setLocationClock] = useState('');
   const [showImageSearch, setShowImageSearch] = useState(false);
+  const [imageSearchTarget, setImageSearchTarget] = useState('');
   const [selectedImage, setSelectedImage] = useState(null);
   const [previewUrl, setPreviewUrl] = useState('');
   const [imageError, setImageError] = useState('');
+  const [imageSearchLoading, setImageSearchLoading] = useState(false);
   const [searchPage, setSearchPage] = useState(1);
   const [searchTriggered, setSearchTriggered] = useState(false);
   const [userPreference, setUserPreference] = useState(null);
@@ -449,16 +461,28 @@ function OverviewPage() {
   const [sliderPager, setSliderPager] = useState({});
   const sliderRefs = useRef(new Map());
   const sliderCleanupRefs = useRef(new Map());
+  const searchInputRef = useRef(null);
   const libraryInputRef = useRef(null);
   const cameraInputRef = useRef(null);
 
   const closeImageModal = () => {
     setShowImageSearch(false);
+    setImageSearchTarget('');
     setSelectedImage(null);
     setPreviewUrl('');
     setImageError('');
+    setImageSearchLoading(false);
     if (libraryInputRef.current) libraryInputRef.current.value = '';
     if (cameraInputRef.current) cameraInputRef.current.value = '';
+  };
+
+  const openImageModal = () => {
+    setShowImageSearch(true);
+    setImageSearchTarget('');
+    setSelectedImage(null);
+    setPreviewUrl('');
+    setImageError('');
+    setImageSearchLoading(false);
   };
 
   const apiUrl = useMemo(
@@ -1074,6 +1098,24 @@ function OverviewPage() {
     setSearchTriggered(true);
   };
 
+  const resetSearchToStart = () => {
+    setAiSuggestMode(false);
+    setAiSuggestError('');
+    setAiSuggestedVenues([]);
+    setAiBaseVenues([]);
+    setAiVisibleCount(8);
+    setAiRefineInput('');
+    setAiRefineError('');
+    setAiRefineMeta(null);
+    setSubmittedSearch('');
+    setSearchTriggered(false);
+    setSearchPage(1);
+    setShowFilterPanel(false);
+    window.requestAnimationFrame(() => {
+      searchInputRef.current?.focus();
+    });
+  };
+
   const handleAiSuggest = async () => {
     if (!token) {
       navigate('/login');
@@ -1313,25 +1355,88 @@ function OverviewPage() {
 
   const handlePickImage = (source) => {
     setImageError('');
-    if (source === 'library') {
-      libraryInputRef.current?.click();
-    } else {
+
+    if (source === 'camera') {
       cameraInputRef.current?.click();
+      return;
+    }
+
+    libraryInputRef.current?.click();
+  };
+
+  const runVisionSearchWithFile = async (file, target) => {
+    setImageSearchLoading(true);
+    setImageError('');
+
+    try {
+      const imageDataUrl = await readFileAsDataUrl(file);
+      const response = await searchVenuesByImage({
+        imageDataUrl,
+        target
+      });
+
+      const nextSearchText = String(response?.searchText || response?.detectedLabel || '').trim();
+
+      if (!nextSearchText) {
+        setImageError(language === 'en'
+          ? 'AI could not detect a reliable dish or place from this image.'
+          : 'AI chưa nhận diện được món ăn hoặc địa điểm phù hợp từ ảnh này.');
+        return;
+      }
+
+      setAiSuggestMode(false);
+      setAiSuggestError('');
+      setAiSuggestedVenues([]);
+      setAiBaseVenues([]);
+      setAiRefineInput('');
+      setAiRefineError('');
+      setAiRefineMeta(null);
+
+      setSelectedCategoryIds([]);
+      setSelectedWardIds([]);
+      setSelectedServiceIds([]);
+      setAppliedCategoryIds([]);
+      setAppliedWardIds([]);
+      setAppliedServiceIds([]);
+
+      setSearchInput(nextSearchText);
+      setSubmittedSearch(nextSearchText);
+      setSearchTriggered(true);
+      setSearchPage(1);
+      setShowFilterPanel(false);
+
+      closeImageModal();
+    } catch (error) {
+      setImageError(error?.response?.data?.message || (language === 'en'
+        ? 'Unable to analyze this image right now.'
+        : 'Không thể phân tích ảnh lúc này.'));
+    } finally {
+      setImageSearchLoading(false);
     }
   };
 
-  const handleImageSelected = (event) => {
-    const file = event.target.files?.[0];
+  const handleImageSelected = async (event) => {
+    const inputElement = event.target;
+    const file = inputElement.files?.[0];
     if (!file) return;
+
+    inputElement.value = '';
+
     if (!file.type.startsWith('image/')) {
       setImageError(language === 'en' ? 'Please choose an image file.' : 'Vui lòng chọn tệp hình ảnh.');
-      event.target.value = '';
       return;
     }
+
+    if (!imageSearchTarget) {
+      setImageError(language === 'en' ? 'Please select search mode first.' : 'Vui lòng chọn kiểu tìm kiếm trước.');
+      return;
+    }
+
     setSelectedImage(file);
     const url = URL.createObjectURL(file);
     setPreviewUrl(url);
-    setShowImageSearch(true);
+
+    await runVisionSearchWithFile(file, imageSearchTarget);
   };
 
   const clearSelectedImage = () => {
@@ -1541,7 +1646,7 @@ function OverviewPage() {
               <button 
                 type="button" 
                 className="overview-hero-button overview-hero-button-primary"
-                onClick={() => setShowImageSearch(true)}
+                onClick={openImageModal}
               >
                 {t.hero.findByPictures}
               </button>
@@ -1569,22 +1674,63 @@ function OverviewPage() {
               ×
             </button>
             <div className="overview-image-search-panel">
-              <div className="overview-image-search-actions">
-                <button
-                  type="button"
-                  className="overview-image-button library"
-                  onClick={() => handlePickImage('library')}
-                >
-                  {t.hero.chooseFromLibrary}
-                </button>
-                <button
-                  type="button"
-                  className="overview-image-button camera"
-                  onClick={() => handlePickImage('camera')}
-                >
-                  {t.hero.takeNewPhoto}
-                </button>
-              </div>
+              {!imageSearchTarget ? (
+                <div className="overview-image-step-root">
+                  <div className="overview-image-search-actions">
+                    <button
+                      type="button"
+                      className="overview-image-button food"
+                      onClick={() => setImageSearchTarget('food')}
+                      disabled={imageSearchLoading}
+                    >
+                      {t.hero.searchFood}
+                    </button>
+                    <button
+                      type="button"
+                      className="overview-image-button place"
+                      onClick={() => setImageSearchTarget('place')}
+                      disabled={imageSearchLoading}
+                    >
+                      {t.hero.searchPlace}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="overview-image-step-root">
+                  <div className="overview-image-step-head">
+                    <button
+                      type="button"
+                      className="overview-image-back"
+                      onClick={() => {
+                        setImageSearchTarget('');
+                        clearSelectedImage();
+                      }}
+                      disabled={imageSearchLoading}
+                    >
+                      {t.hero.backToSearchMode}
+                    </button>
+                  </div>
+
+                  <div className="overview-image-search-actions overview-image-source-actions">
+                    <button
+                      type="button"
+                      className="overview-image-button camera"
+                      onClick={() => handlePickImage('camera')}
+                      disabled={imageSearchLoading}
+                    >
+                      {imageSearchLoading ? t.hero.analyzingImage : t.hero.takeNewPhoto}
+                    </button>
+                    <button
+                      type="button"
+                      className="overview-image-button library"
+                      onClick={() => handlePickImage('library')}
+                      disabled={imageSearchLoading}
+                    >
+                      {imageSearchLoading ? t.hero.analyzingImage : t.hero.chooseFromLibrary}
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <input
                 ref={libraryInputRef}
@@ -1610,14 +1756,6 @@ function OverviewPage() {
                       −
                     </button>
                   </div>
-                  <button
-                    type="button"
-                    className="overview-image-find"
-                    disabled={!selectedImage}
-                    onClick={() => {/* hook up real search later */}}
-                  >
-                    {t.hero.findAction}
-                  </button>
                 </div>
               )}
 
@@ -1654,6 +1792,7 @@ function OverviewPage() {
           <label className="overview-address-field">
             <span className="overview-address-icon" aria-hidden="true" />
             <input
+              ref={searchInputRef}
               type="text"
               placeholder="Search venue name, address, ward, or service"
               value={searchInput}
@@ -1949,7 +2088,34 @@ function OverviewPage() {
             </p>
           </div>
 
+          {pagedSearchVenues.length > 0 ? (
+            <div className="overview-results-toolbar">
+              <button type="button" className="overview-empty-action secondary" onClick={resetSearchToStart}>
+                {t.search.back}
+              </button>
+              <button type="button" className="overview-empty-action primary" onClick={openImageModal}>
+                {t.search.searchByImage}
+              </button>
+            </div>
+          ) : null}
+
           {venueError ? <p className="overview-inline-error">{venueError}</p> : null}
+
+          {!venueError && !loadingVenues && !pagedSearchVenues.length ? (
+            <div className="overview-results-empty-state">
+              <p className="overview-empty-copy">
+                {t.search.noResultHint}
+              </p>
+              <div className="overview-results-empty-actions">
+                <button type="button" className="overview-empty-action secondary" onClick={resetSearchToStart}>
+                  {t.search.back}
+                </button>
+                <button type="button" className="overview-empty-action primary" onClick={openImageModal}>
+                  {t.search.searchByImage}
+                </button>
+              </div>
+            </div>
+          ) : null}
 
           <div className="overview-search-results">
             <div className="overview-dynamic-grid overview-search-grid">

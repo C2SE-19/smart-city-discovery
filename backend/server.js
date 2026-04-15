@@ -13007,6 +13007,560 @@ async function generateWardIdFromName(name) {
             }
         });
 
+        function normalizeVisionText(value) {
+            return String(value || '').trim().toLowerCase();
+        }
+
+        function safeParseJsonObject(rawValue) {
+            try {
+                const parsed = JSON.parse(rawValue);
+                return parsed && typeof parsed === 'object' ? parsed : {};
+            } catch {
+                return {};
+            }
+        }
+
+        function buildVisionSearchTerms(label, keywords = []) {
+            const seen = new Set();
+            const merged = [label, ...keywords]
+                .map((item) => normalizeVisionText(item))
+                .flatMap((item) => item.split(/[,;|]+/))
+                .map((item) => item.trim())
+                .filter((item) => item.length >= 2);
+
+            const results = [];
+            for (const item of merged) {
+                const compact = item.replace(/\s+/g, ' ');
+                if (!compact || seen.has(compact)) {
+                    continue;
+                }
+                seen.add(compact);
+                results.push(compact);
+                if (results.length >= 8) {
+                    break;
+                }
+            }
+
+            return results;
+        }
+
+        function normalizeVisionNoAccent(value) {
+            return normalizeVisionText(value)
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .replace(/đ/g, 'd');
+        }
+
+        function isGenericVisionLabel(value) {
+            const normalized = normalizeVisionNoAccent(value);
+
+            if (!normalized) {
+                return true;
+            }
+
+            const genericPhrases = [
+                'mon an viet nam',
+                'am thuc viet nam',
+                'mon viet',
+                'do an',
+                'do uong',
+                'thuc an',
+                'dia diem giai tri',
+                'dia diem du lich',
+                'landmark',
+                'vietnamese food',
+                'food',
+                'restaurant',
+                'place',
+                'outdoor place'
+            ];
+
+            return genericPhrases.some((phrase) => normalized === phrase || normalized.includes(`${phrase} `));
+        }
+
+        function uniqueVisionValues(values = []) {
+            const seen = new Set();
+            const result = [];
+
+            values.forEach((value) => {
+                const normalized = String(value || '').trim();
+                if (!normalized) {
+                    return;
+                }
+
+                const key = normalizeVisionNoAccent(normalized);
+                if (!key || seen.has(key)) {
+                    return;
+                }
+
+                seen.add(key);
+                result.push(normalized);
+            });
+
+            return result;
+        }
+
+        const CANONICAL_FOOD_RULES = [
+            {
+                canonical: 'mì cay',
+                variants: ['mì cay', 'mi cay', 'my cay', 'mỳ cay'],
+                pattern: /\bm[iy]\s*cay\b/
+            },
+            {
+                canonical: 'bún đậu mắm tôm',
+                variants: [
+                    'bún đậu mắm tôm',
+                    'bun dau mam tom',
+                    'bún đậu',
+                    'bun dau'
+                ],
+                pattern: /\bbun\s*dau(\s*mam\s*tom)?\b/
+            },
+            {
+                canonical: 'bún bò huế',
+                variants: ['bún bò huế', 'bun bo hue', 'bun bo', 'bún bò'],
+                pattern: /\bbun\s*bo(\s*hue)?\b/
+            },
+            {
+                canonical: 'mỳ quảng',
+                variants: ['mỳ quảng', 'my quang', 'mi quang'],
+                pattern: /\b(m[iy]\s*quang)\b/
+            },
+            {
+                canonical: 'cao lầu',
+                variants: ['cao lầu', 'cao lau'],
+                pattern: /\bcao\s*lau\b/
+            },
+            {
+                canonical: 'phở',
+                variants: ['phở', 'pho', 'pho bo', 'pho ga'],
+                pattern: /\bpho\b/
+            },
+            {
+                canonical: 'bún chả',
+                variants: ['bún chả', 'bun cha'],
+                pattern: /\bbun\s*cha\b/
+            },
+            {
+                canonical: 'bún riêu',
+                variants: ['bún riêu', 'bun rieu', 'bun rieu cua'],
+                pattern: /\bbun\s*rieu(\s*cua)?\b/
+            },
+            {
+                canonical: 'cơm tấm',
+                variants: ['cơm tấm', 'com tam'],
+                pattern: /\bcom\s*tam\b/
+            },
+            {
+                canonical: 'bánh mì',
+                variants: ['bánh mì', 'banh mi'],
+                pattern: /\bbanh\s*mi\b/
+            },
+            {
+                canonical: 'hủ tiếu',
+                variants: ['hủ tiếu', 'hu tieu'],
+                pattern: /\bhu\s*tieu\b/
+            },
+            {
+                canonical: 'bánh canh',
+                variants: ['bánh canh', 'banh canh', 'banh canh cua', 'banh canh ghe'],
+                pattern: /\bbanh\s*canh(\s*(cua|ghe))?\b/
+            },
+            {
+                canonical: 'bánh xèo',
+                variants: ['bánh xèo', 'banh xeo'],
+                pattern: /\bbanh\s*xeo\b/
+            },
+            {
+                canonical: 'bánh tráng trộn',
+                variants: ['bánh tráng trộn', 'banh trang tron'],
+                pattern: /\bbanh\s*trang\s*tron\b/
+            },
+            {
+                canonical: 'gỏi cuốn',
+                variants: ['gỏi cuốn', 'goi cuon'],
+                pattern: /\bgoi\s*cuon\b/
+            },
+            {
+                canonical: 'nem lụi',
+                variants: ['nem lụi', 'nem lui'],
+                pattern: /\bnem\s*lui\b/
+            },
+            {
+                canonical: 'cơm gà',
+                variants: ['cơm gà', 'com ga'],
+                pattern: /\bcom\s*ga\b/
+            },
+            {
+                canonical: 'xôi gà',
+                variants: ['xôi gà', 'xoi ga'],
+                pattern: /\bxoi\s*ga\b/
+            },
+            {
+                canonical: 'mì xào',
+                variants: ['mì xào', 'mi xao', 'my xao'],
+                pattern: /\bm[iy]\s*xao\b/
+            },
+            {
+                canonical: 'lẩu',
+                variants: ['lẩu', 'lau', 'lau thai', 'lau hai san'],
+                pattern: /\blau(\s*(thai|hai\s*san))?\b/
+            },
+            {
+                canonical: 'cháo',
+                variants: ['cháo', 'chao', 'chao long', 'chao ga'],
+                pattern: /\bchao(\s*(long|ga))?\b/
+            },
+            {
+                canonical: 'ốc',
+                variants: ['ốc', 'oc', 'oc hut'],
+                pattern: /\boc(\s*hut)?\b/
+            },
+            {
+                canonical: 'chè',
+                variants: ['chè', 'che'],
+                pattern: /\bche\b/
+            }
+        ];
+
+        function resolveCanonicalFoodFromVision(values = []) {
+            const haystack = normalizeVisionNoAccent(values.join(' '));
+
+            if (!haystack) {
+                return null;
+            }
+
+            const matched = CANONICAL_FOOD_RULES.find((rule) => rule.pattern.test(haystack));
+            return matched || null;
+        }
+
+        function scoreVisionVenueCandidate(venue, terms = [], primaryLabel = '', target = 'any') {
+            const normalizedLabel = normalizeVisionNoAccent(primaryLabel);
+            const normalizedTerms = Array.isArray(terms)
+                ? terms.map((item) => normalizeVisionNoAccent(item)).filter(Boolean)
+                : [];
+
+            const nameText = normalizeVisionNoAccent(venue?.name || venue?.title || '');
+            const searchable = normalizeVisionNoAccent([
+                venue?.name,
+                venue?.title,
+                venue?.address,
+                venue?.description,
+                venue?.ward_name,
+                venue?.category_name
+            ].filter(Boolean).join(' '));
+
+            let score = 0;
+
+            if (normalizedLabel) {
+                if (nameText === normalizedLabel) {
+                    score += 52;
+                } else if (nameText.includes(normalizedLabel)) {
+                    score += 40;
+                } else if (searchable.includes(normalizedLabel)) {
+                    score += 20;
+                }
+            }
+
+            normalizedTerms.forEach((term) => {
+                if (nameText.includes(term)) {
+                    score += 16;
+                } else if (searchable.includes(term)) {
+                    score += 8;
+                }
+            });
+
+            const normalizedTarget = normalizeVisionText(target);
+            const normalizedCategory = normalizeVisionNoAccent(venue?.category_name || '');
+
+            if (normalizedTarget === 'food') {
+                if (/(am thuc|food|restaurant|quan|nha hang|cafe|coffee|an uong)/.test(normalizedCategory)) {
+                    score += 8;
+                }
+            }
+
+            if (normalizedTarget === 'place') {
+                if (/(giai tri|entertainment|du lich|tham quan|cong vien|khu vui choi|bar|club|karaoke)/.test(normalizedCategory)) {
+                    score += 8;
+                }
+            }
+
+            score += Math.min(5, Number(venue?.average_rating || 0)) * 1.2;
+            score += Math.log10(Number(venue?.total_reviews || 0) + 1) * 1.1;
+
+            return Number(score.toFixed(4));
+        }
+
+        function buildVisionCategoryFilter(target) {
+            const normalizedTarget = normalizeVisionText(target);
+
+            if (normalizedTarget === 'food') {
+                return `
+                    (
+                        LOWER(COALESCE(place_categories.name, '')) LIKE ANY(ARRAY[
+                            '%food%', '%ẩm thực%', '%am thuc%', '%nhà hàng%', '%nha hang%',
+                            '%quán ăn%', '%quan an%', '%cafe%', '%coffee%', '%trà sữa%', '%tra sua%'
+                        ])
+                        OR EXISTS (
+                            SELECT 1
+                            FROM jsonb_array_elements_text(COALESCE(venues.metadata->'selectedServiceNames', '[]'::jsonb)) AS service_name(value)
+                            WHERE LOWER(service_name.value) LIKE ANY(ARRAY[
+                                '%food%', '%ẩm thực%', '%am thuc%', '%nhà hàng%', '%nha hang%',
+                                '%quán ăn%', '%quan an%', '%cafe%', '%coffee%', '%trà sữa%', '%tra sua%'
+                            ])
+                        )
+                    )
+                `;
+            }
+
+            if (normalizedTarget === 'place') {
+                return `
+                    (
+                        LOWER(COALESCE(place_categories.name, '')) LIKE ANY(ARRAY[
+                            '%entertainment%', '%giải trí%', '%giai tri%', '%du lịch%', '%du lich%',
+                            '%tham quan%', '%công viên%', '%cong vien%', '%khu vui chơi%', '%karaoke%',
+                            '%bar%', '%club%', '%landscape%'
+                        ])
+                        OR EXISTS (
+                            SELECT 1
+                            FROM jsonb_array_elements_text(COALESCE(venues.metadata->'selectedServiceNames', '[]'::jsonb)) AS service_name(value)
+                            WHERE LOWER(service_name.value) LIKE ANY(ARRAY[
+                                '%entertainment%', '%giải trí%', '%giai tri%', '%du lịch%', '%du lich%',
+                                '%tham quan%', '%công viên%', '%cong vien%', '%khu vui chơi%', '%karaoke%',
+                                '%bar%', '%club%', '%landscape%'
+                            ])
+                        )
+                    )
+                `;
+            }
+
+            return 'TRUE';
+        }
+
+        async function queryVisionVenueMatches(terms = [], target = 'any', limit = 24, primaryLabel = '') {
+            const normalizedTerms = Array.isArray(terms)
+                ? terms.map((item) => normalizeVisionText(item)).filter((item) => item.length >= 2)
+                : [];
+
+            if (!normalizedTerms.length) {
+                return [];
+            }
+
+            const values = [];
+            const whereConditions = [
+                "venues.status = 'approved'",
+                buildVisionCategoryFilter(target)
+            ];
+
+            const termClauses = [];
+
+            normalizedTerms.forEach((term) => {
+                values.push(`%${term}%`);
+                const termIndex = values.length;
+                termClauses.push(`
+                    (
+                        LOWER(COALESCE(venues.name, '')) LIKE $${termIndex}
+                        OR LOWER(COALESCE(venues.title, '')) LIKE $${termIndex}
+                        OR LOWER(COALESCE(venues.address, '')) LIKE $${termIndex}
+                        OR LOWER(COALESCE(venues.description, '')) LIKE $${termIndex}
+                        OR LOWER(COALESCE(wards.name, '')) LIKE $${termIndex}
+                        OR LOWER(COALESCE(place_categories.name, '')) LIKE $${termIndex}
+                        OR EXISTS (
+                            SELECT 1
+                            FROM jsonb_array_elements_text(COALESCE(venues.metadata->'selectedServiceNames', '[]'::jsonb)) AS service_name(value)
+                            WHERE LOWER(service_name.value) LIKE $${termIndex}
+                        )
+                    )
+                `);
+            });
+
+            if (!termClauses.length) {
+                return [];
+            }
+
+            whereConditions.push(`(${termClauses.join(' OR ')})`);
+
+            values.push(Math.max(1, Math.min(Number(limit) || 24, 30)));
+            const limitIndex = values.length;
+
+            const query = `
+                SELECT
+                    venues.id,
+                    COALESCE(NULLIF(venues.name, ''), venues.title) AS name,
+                    venues.title,
+                    venues.address,
+                    venues.description,
+                    venues.latitude,
+                    venues.longitude,
+                    venues.ward_id,
+                    wards.name AS ward_name,
+                    venues.category_id,
+                    place_categories.name AS category_name,
+                    venues.cover_image_url,
+                    venues.average_rating,
+                    venues.total_reviews,
+                    venues.metadata
+                FROM venues
+                LEFT JOIN wards ON wards.ward_id = venues.ward_id
+                LEFT JOIN place_categories ON place_categories.id = venues.category_id
+                WHERE ${whereConditions.join(' AND ')}
+                ORDER BY venues.average_rating DESC NULLS LAST, venues.total_reviews DESC NULLS LAST, venues.id DESC
+                LIMIT $${limitIndex}
+            `;
+
+            const result = await pool.query(query, values);
+            const mapped = result.rows.map((row) => ({
+                ...row,
+                cover_image_url: sanitizeLargeInlineAssetUrl(row.cover_image_url),
+                average_rating: Number(row.average_rating || 0),
+                total_reviews: Number(row.total_reviews || 0)
+            }));
+
+            return mapped
+                .map((row) => ({
+                    ...row,
+                    _visionScore: scoreVisionVenueCandidate(row, normalizedTerms, primaryLabel, target)
+                }))
+                .sort((a, b) => b._visionScore - a._visionScore)
+                .map(({ _visionScore, ...row }) => row);
+        }
+
+        async function detectImageSearchPayload(imageDataUrl, target) {
+            const openAiApiKey = String(process.env.OPENAI_API_KEY || '').trim();
+
+            if (!openAiApiKey) {
+                throw new Error('OPENAI_API_KEY is missing on server');
+            }
+
+            const model =
+                String(process.env.OPENAI_VISION_MODEL || '').trim()
+                || String(process.env.OPENAI_CHAT_MODEL || '').trim()
+                || 'gpt-4o-mini';
+
+            const normalizedTarget = normalizeVisionText(target);
+            const preferredKind = normalizedTarget === 'food' ? 'food' : normalizedTarget === 'place' ? 'place' : 'unknown';
+
+            const systemPrompt = [
+                'Bạn là AI nhận diện ảnh cho ứng dụng khám phá địa điểm.',
+                'Chỉ trả về JSON object hợp lệ, không thêm markdown.',
+                'Schema JSON:',
+                '{"label":"string","keywords":["string"],"kind":"food|place|unknown","confidence":0}',
+                'label là tên CỤ THỂ của món ăn hoặc địa điểm nếu nhận diện được (ví dụ: bun dau mam tom, mi quang, cau rong).',
+                'keywords là tối đa 5 từ khóa tìm kiếm hữu ích để truy vấn database.',
+                'Tránh trả nhãn chung chung như "món ăn Việt Nam" hoặc "địa điểm du lịch".',
+                'Nếu không chắc thì kind=unknown và confidence thấp.',
+                `Ưu tiên kind=${preferredKind} nếu ảnh phù hợp.`
+            ].join(' ');
+
+            const response = await axios.post(
+                'https://api.openai.com/v1/chat/completions',
+                {
+                    model,
+                    temperature: 0.1,
+                    max_tokens: 260,
+                    response_format: { type: 'json_object' },
+                    messages: [
+                        { role: 'system', content: systemPrompt },
+                        {
+                            role: 'user',
+                            content: [
+                                {
+                                    type: 'text',
+                                    text: 'Phân tích ảnh này để tìm từ khóa giúp tìm địa điểm trong cơ sở dữ liệu.'
+                                },
+                                {
+                                    type: 'image_url',
+                                    image_url: {
+                                        url: imageDataUrl,
+                                        detail: 'low'
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    headers: {
+                        Authorization: `Bearer ${openAiApiKey}`,
+                        'Content-Type': 'application/json'
+                    },
+                    timeout: 30000
+                }
+            );
+
+            const rawContent = response?.data?.choices?.[0]?.message?.content || '{}';
+            const parsed = safeParseJsonObject(rawContent);
+            const label = String(parsed.label || '').trim();
+            const keywords = Array.isArray(parsed.keywords)
+                ? parsed.keywords.map((item) => String(item || '').trim()).filter(Boolean)
+                : [];
+            const kindRaw = normalizeVisionText(parsed.kind);
+            const kind = ['food', 'place', 'unknown'].includes(kindRaw) ? kindRaw : 'unknown';
+            const confidence = Number(parsed.confidence || 0);
+
+            return {
+                model,
+                label,
+                keywords,
+                kind,
+                confidence: Number.isFinite(confidence) ? confidence : 0
+            };
+        }
+
+        const searchVenuesByImageVisionHandler = async (req, res) => {
+            try {
+                const target = normalizeVisionText(req.body?.target || 'any');
+                const imageDataUrl = String(req.body?.imageDataUrl || '').trim();
+
+                if (!/^data:image\//i.test(imageDataUrl)) {
+                    return res.status(400).json({ message: 'imageDataUrl must be a valid data:image/* base64 string.' });
+                }
+
+                if (imageDataUrl.length > 8_000_000) {
+                    return res.status(413).json({ message: 'Image is too large. Please choose a smaller image.' });
+                }
+
+                const vision = await detectImageSearchPayload(imageDataUrl, target);
+                const terms = buildVisionSearchTerms(vision.label, vision.keywords);
+
+                const canonicalFoodRule =
+                    target === 'food'
+                        ? resolveCanonicalFoodFromVision([vision.label, ...(vision.keywords || []), ...terms])
+                        : null;
+
+                const effectiveTerms = canonicalFoodRule
+                    ? uniqueVisionValues(canonicalFoodRule.variants)
+                    : terms;
+
+                const venueResults = await queryVisionVenueMatches(effectiveTerms, target, 24, vision.label);
+
+                const bestMatchName = String(venueResults?.[0]?.name || '').trim();
+                const hasGenericLabel = isGenericVisionLabel(vision.label);
+                const specificLabel = hasGenericLabel ? '' : String(vision.label || '').trim();
+                const canonicalFoodText = canonicalFoodRule?.canonical || '';
+                const searchText = canonicalFoodText || specificLabel || bestMatchName || effectiveTerms[0] || '';
+
+                return res.json({
+                    success: true,
+                    target,
+                    detectedLabel: vision.label,
+                    detectedKind: vision.kind,
+                    confidence: vision.confidence,
+                    canonicalFood: canonicalFoodText,
+                    searchTerms: effectiveTerms,
+                    searchText,
+                    venueResults
+                });
+            } catch (error) {
+                console.error('Vision image search error:', error?.response?.data || error?.message || error);
+                return res.status(500).json({
+                    message: 'Unable to analyze this image right now. Please try again.'
+                });
+            }
+        };
+
+        registerVersionedRoute('post', '/vision/image-search', searchVenuesByImageVisionHandler);
+
         // Chat API route
         app.post('/api/chat', async (req, res) => {
             function normalizeText(text) {
