@@ -1,10 +1,5 @@
 const translations = {
   en: {
-    brand: {
-      name: 'Smart City',
-      tagline: 'Discovery',
-      homepageAria: 'Smart City home page'
-    },
     header: {
       home: 'Home',
       about: 'About',
@@ -129,107 +124,9 @@ const translations = {
       backToHome: 'Back to Home',
       title: 'City Map Explorer',
       subtitle: 'Explore wards and approved places with live filtering.'
-    },
-    app: {
-      about: {
-        title: 'About Smart City Discovery',
-        description: 'This sample page shows that route content can change while the shared header, search, food, and footer stay intact.',
-        cards: [
-          {
-            title: 'Local-first discovery',
-            copy: 'Focus on venues, food, and highlights so users can search quickly by area.'
-          },
-          {
-            title: 'Merchant support',
-            copy: 'Give merchants a simple way to publish photos, menus, offers, and promotional content.'
-          },
-          {
-            title: 'GIS mindset',
-            copy: 'Treat maps and administrative wards as core data layers that can expand later.'
-          }
-        ]
-      },
-      allCity: {
-        title: 'All City Highlights',
-        description: 'This is a sample page for a combined city category. Switching routes keeps the shared shell mounted and stable.',
-        cards: [
-          {
-            title: 'Food districts',
-            copy: 'Group dining areas by beach zones, central districts, and tourist streets.'
-          },
-          {
-            title: 'Popular landmarks',
-            copy: 'Collect check-in spots, famous bridges, museums, and major temples across the city.'
-          },
-          {
-            title: 'Suggested routes',
-            copy: 'Suggest compact one-day or weekend routes for travelers.'
-          }
-        ]
-      },
-      service: {
-        title: 'Service',
-        description: 'Use this page for delivery, booking, affiliate ads, or any other service page while reusing the shared shell.',
-        cards: [
-          {
-            title: 'Delivery support',
-            copy: 'Connect delivery addresses, merchants, and venue menus in one flow.'
-          },
-          {
-            title: 'Promotion slots',
-            copy: 'Let merchants buy featured positions on the landing page without breaking the overall layout.'
-          },
-          {
-            title: 'Content modules',
-            copy: 'Each child route can add its own sections without copying the header, food, or footer.'
-          }
-        ]
-      }
-    },
-    layout: {
-      workspace: {
-        groupTitle: 'Workspace',
-        overview: 'Overview',
-        overviewDesc: 'Project command center',
-        discovery: 'Discovery',
-        discoveryDesc: 'Explore venues',
-        adminBoundaries: 'Admin Boundaries',
-        adminBoundariesDesc: 'Manage GIS wards',
-        merchantWorkbench: 'Merchant Workbench',
-        merchantWorkbenchDesc: 'Merchant venue tools',
-        brandCopy: 'Role and feature-based workspace so teams can deliver in parallel with clear flow.',
-        backendBaseUrl: 'Backend base URL',
-        workspaceCurrent: 'Current workspace',
-        workspaceFallback: 'Overview',
-        workspaceFallbackDesc: 'Project command center and delivery split.',
-        scaffoldChip: 'GIS-first scaffold',
-        language: 'Language',
-        themeDark: 'Dark',
-        themeLight: 'Light'
-      },
-      admin: {
-        title: 'Admin',
-        dashboard: 'Dashboard',
-        users: 'User Management',
-        map: 'Map Management',
-        reports: 'Reports & Revenue',
-        packages: 'Ad Packages',
-        feedback: 'Feedback & Support',
-        logout: 'Log out',
-        role: 'Administrator',
-        language: 'Language',
-        dark: 'Dark',
-        light: 'Light',
-        notifications: 'Notifications'
-      }
     }
   },
   vi: {
-    brand: {
-      name: 'Smart City',
-      tagline: 'Discovery',
-      homepageAria: 'Trang chủ Smart City'
-    },
     header: {
       home: 'Trang chủ',
       about: 'Giới thiệu',
@@ -354,99 +251,6 @@ const translations = {
       backToHome: 'Về trang chủ',
       title: 'Bản đồ thành phố',
       subtitle: 'Khám phá phường và địa điểm đã duyệt với bộ lọc thời gian thực.'
-    },
-    app: {
-      about: {
-        title: 'Giới thiệu Smart City Discovery',
-        description: 'Trang mẫu này cho thấy nội dung route có thể thay đổi trong khi header, tìm kiếm, món ăn và footer dùng chung vẫn giữ nguyên.',
-        cards: [
-          {
-            title: 'Khám phá theo địa phương',
-            copy: 'Tập trung vào địa điểm, món ăn và điểm nổi bật để người dùng tìm nhanh theo khu vực.'
-          },
-          {
-            title: 'Hỗ trợ merchant',
-            copy: 'Cho merchant cách đơn giản để đăng ảnh, menu, ưu đãi và nội dung quảng bá.'
-          },
-          {
-            title: 'Tư duy GIS',
-            copy: 'Xem bản đồ và ranh giới hành chính như lớp dữ liệu cốt lõi để mở rộng sau này.'
-          }
-        ]
-      },
-      allCity: {
-        title: 'Điểm nổi bật toàn thành phố',
-        description: 'Đây là trang mẫu cho danh mục tổng hợp. Khi chuyển route, shell dùng chung vẫn được giữ nguyên.',
-        cards: [
-          {
-            title: 'Khu ẩm thực',
-            copy: 'Nhóm các khu ăn uống theo khu biển, trung tâm thành phố và tuyến du lịch.'
-          },
-          {
-            title: 'Địa danh phổ biến',
-            copy: 'Tổng hợp các điểm check-in, cây cầu nổi tiếng, bảo tàng và chùa lớn trong thành phố.'
-          },
-          {
-            title: 'Lộ trình gợi ý',
-            copy: 'Gợi ý lịch trình gọn trong 1 ngày hoặc cuối tuần cho khách du lịch.'
-          }
-        ]
-      },
-      service: {
-        title: 'Dịch vụ',
-        description: 'Trang này có thể dùng cho giao đồ, đặt bàn, quảng cáo affiliate hoặc các page dịch vụ khác mà vẫn dùng lại khung trang chung.',
-        cards: [
-          {
-            title: 'Hỗ trợ giao hàng',
-            copy: 'Kết nối địa chỉ giao hàng, merchant và danh sách món ăn trong cùng một flow.'
-          },
-          {
-            title: 'Vị trí quảng bá',
-            copy: 'Cho phép merchant mua vị trí nổi bật trên landing page mà không phá vỡ bố cục tổng.'
-          },
-          {
-            title: 'Mô-đun nội dung',
-            copy: 'Mỗi route con có thể thêm section riêng mà không cần copy lại header, food và footer.'
-          }
-        ]
-      }
-    },
-    layout: {
-      workspace: {
-        groupTitle: 'Không gian làm việc',
-        overview: 'Tổng quan',
-        overviewDesc: 'Trung tâm điều phối dự án',
-        discovery: 'Khám phá',
-        discoveryDesc: 'Khám phá địa điểm',
-        adminBoundaries: 'Ranh giới quản trị',
-        adminBoundariesDesc: 'Quản lý bản đồ phường',
-        merchantWorkbench: 'Bảng điều khiển Merchant',
-        merchantWorkbenchDesc: 'Công cụ quản lý địa điểm',
-        brandCopy: 'Khung làm việc theo vai trò và tính năng để team triển khai song song đúng luồng.',
-        backendBaseUrl: 'Đường dẫn backend',
-        workspaceCurrent: 'Không gian hiện tại',
-        workspaceFallback: 'Tổng quan',
-        workspaceFallbackDesc: 'Trung tâm điều phối dự án.',
-        scaffoldChip: 'Khung GIS ưu tiên',
-        language: 'Ngôn ngữ',
-        themeDark: 'Tối',
-        themeLight: 'Sáng'
-      },
-      admin: {
-        title: 'Admin',
-        dashboard: 'Bảng điều khiển',
-        users: 'Quản lý người dùng',
-        map: 'Quản lý bản đồ',
-        reports: 'Báo cáo & doanh thu',
-        packages: 'Gói quảng cáo',
-        feedback: 'Phản hồi & hỗ trợ',
-        logout: 'Đăng xuất',
-        role: 'Quản trị viên',
-        language: 'Ngôn ngữ',
-        dark: 'Tối',
-        light: 'Sáng',
-        notifications: 'Thông báo'
-      }
     }
   }
 };
