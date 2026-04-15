@@ -1,9 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import ImageUploader from './ImageUploader';
 import ServiceSelector from './ServiceSelector';
 import BusinessLicenseUploader from './BusinessLicenseUploader';
 import LocationPickerModal from '../../../shared/components/modals/LocationPickerModal';
-import { createVenueRequest, fetchVenueEditDraft, submitVenueUpdateRequest } from '../../../services/api/venuesApi';
+import {
+  createVenueRequest,
+  fetchVenueEditDraft,
+  submitVenueUpdateRequest,
+  updateVenueSimpleInfo,
+} from '../../../services/api/venuesApi';
 import { fetchPlaceCategories } from '../../../services/api/placeCategoriesApi';
 import { fetchMerchantServices } from '../../../services/api/merchantServicesApi';
 import { fetchWards } from '../../../services/api/wardsApi';
@@ -17,6 +22,38 @@ const WEEK_DAYS = [
   { key: 'friday', label: 'Fri' },
   { key: 'saturday', label: 'Sat' },
   { key: 'sunday', label: 'Sun' }
+];
+
+const EDIT_VARIANTS = {
+  SIMPLE: 'simple',
+  REVIEW: 'review'
+};
+
+const COVER_PREFERENCES = {
+  EXISTING: 'existing',
+  UPLOADED: 'uploaded'
+};
+
+const REVIEW_METADATA_KEYS = [
+  'category',
+  'categoryName',
+  'categoryId',
+  'wardId',
+  'wardName',
+  'imagesCount',
+  'galleryImages'
+];
+
+const SIMPLE_METADATA_KEYS = [
+  'minPrice',
+  'maxPrice',
+  'startTime',
+  'endTime',
+  'weeklyOpenHours',
+  'weeklySchedule',
+  'selectedServices',
+  'selectedServiceNames',
+  'contactEmail'
 ];
 
 function buildDefaultWeeklyOpenHours() {
@@ -94,6 +131,181 @@ function normalizeServiceSelections(selectedServices) {
   return [...new Set(selectedServices
     .map((serviceId) => Number(serviceId))
     .filter((serviceId) => Number.isInteger(serviceId) && serviceId > 0))];
+}
+
+function pickVenueMetadataFields(metadata, allowedKeys) {
+  const source = normalizeVenueMetadata(metadata);
+
+  return allowedKeys.reduce((result, key) => {
+    if (Object.prototype.hasOwnProperty.call(source, key)) {
+      result[key] = source[key];
+    }
+
+    return result;
+  }, {});
+}
+
+function buildReviewAwareMergedMetadata(venueMetadata, snapshotMetadata) {
+  return {
+    ...normalizeVenueMetadata(venueMetadata),
+    ...pickVenueMetadataFields(snapshotMetadata, REVIEW_METADATA_KEYS)
+  };
+}
+
+function canonicalizeComparableValue(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => canonicalizeComparableValue(item));
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.keys(value)
+      .sort()
+      .reduce((result, key) => {
+        result[key] = canonicalizeComparableValue(value[key]);
+        return result;
+      }, {});
+  }
+
+  return value;
+}
+
+function areComparableValuesEqual(firstValue, secondValue) {
+  return JSON.stringify(canonicalizeComparableValue(firstValue)) === JSON.stringify(canonicalizeComparableValue(secondValue));
+}
+
+function normalizeComparableCoordinate(value) {
+  const coordinate = Number(value);
+
+  if (!Number.isFinite(coordinate)) {
+    return null;
+  }
+
+  return Number(coordinate.toFixed(6));
+}
+
+function normalizeComparableWeeklyHours(weeklyOpenHours) {
+  return WEEK_DAYS.reduce((result, day) => {
+    const schedule = weeklyOpenHours?.[day.key] || {};
+    const isClosed = Boolean(schedule.isClosed);
+    const openTime = isClosed ? '' : String(schedule.openTime || '').trim();
+    const closeTime = isClosed ? '' : String(schedule.closeTime || '').trim();
+
+    result[day.key] = {
+      isClosed,
+      openTime,
+      closeTime
+    };
+
+    return result;
+  }, {});
+}
+
+function buildFileFingerprint(file) {
+  if (!file || typeof file !== 'object') {
+    return '';
+  }
+
+  const fileName = String(file.name || '').trim();
+  const fileSize = Number(file.size || 0);
+  const fileLastModified = Number(file.lastModified || 0);
+  return `${fileName}:${fileSize}:${fileLastModified}`;
+}
+
+function normalizeComparableImageUrls(imageUrls) {
+  if (!Array.isArray(imageUrls)) {
+    return [];
+  }
+
+  return imageUrls
+    .map((imageUrl) => String(imageUrl || '').trim())
+    .filter(Boolean);
+}
+
+function buildSimpleComparableState(formData) {
+  return {
+    phone: String(formData.phone || '').trim(),
+    description: String(formData.description || '').trim(),
+    metadata: pickVenueMetadataFields(
+      {
+        minPrice: formData.minPrice === '' ? null : Number(formData.minPrice),
+        maxPrice: formData.maxPrice === '' ? null : Number(formData.maxPrice),
+        startTime: String(formData.startTime || '').trim() || null,
+        endTime: String(formData.endTime || '').trim() || null,
+        weeklyOpenHours: normalizeComparableWeeklyHours(formData.weeklyOpenHours),
+        selectedServices: normalizeServiceSelections(formData.selectedServices)
+      },
+      SIMPLE_METADATA_KEYS
+    )
+  };
+}
+
+function deriveWeeklyOverrideMapFromHours(weeklyOpenHours) {
+  return WEEK_DAYS.reduce((result, day) => {
+    const daySchedule = weeklyOpenHours?.[day.key] || {};
+    result[day.key] = Boolean(daySchedule.isClosed || daySchedule.openTime || daySchedule.closeTime);
+    return result;
+  }, buildDefaultWeeklyOverrideMap());
+}
+
+function normalizeWeeklyOpenHoursFromComparableState(rawWeeklyOpenHours) {
+  return WEEK_DAYS.reduce((result, day) => {
+    const source = rawWeeklyOpenHours?.[day.key] || {};
+    const isClosed = Boolean(source.isClosed);
+    const openTime = isClosed ? '' : String(source.openTime || '').trim();
+    const closeTime = isClosed ? '' : String(source.closeTime || '').trim();
+
+    result[day.key] = {
+      isClosed,
+      openTime,
+      closeTime
+    };
+
+    return result;
+  }, buildDefaultWeeklyOpenHours());
+}
+
+function applySimpleBaselineToFormData(currentFormData, simpleBaseline) {
+  if (!simpleBaseline || typeof simpleBaseline !== 'object') {
+    return currentFormData;
+  }
+
+  const simpleMetadata = simpleBaseline.metadata && typeof simpleBaseline.metadata === 'object'
+    ? simpleBaseline.metadata
+    : {};
+  const normalizedWeeklyOpenHours = normalizeWeeklyOpenHoursFromComparableState(simpleMetadata.weeklyOpenHours);
+
+  return {
+    ...currentFormData,
+    phone: String(simpleBaseline.phone || '').trim(),
+    description: String(simpleBaseline.description || '').trim(),
+    minPrice: simpleMetadata.minPrice !== undefined && simpleMetadata.minPrice !== null ? String(simpleMetadata.minPrice) : '',
+    maxPrice: simpleMetadata.maxPrice !== undefined && simpleMetadata.maxPrice !== null ? String(simpleMetadata.maxPrice) : '',
+    startTime: String(simpleMetadata.startTime || '').trim(),
+    endTime: String(simpleMetadata.endTime || '').trim(),
+    weeklyOpenHours: normalizedWeeklyOpenHours,
+    selectedServices: normalizeServiceSelections(simpleMetadata.selectedServices)
+  };
+}
+
+function buildReviewComparableState(formData, coverPreference = COVER_PREFERENCES.EXISTING) {
+  const normalizedImages = Array.isArray(formData.images)
+    ? formData.images.map((file) => buildFileFingerprint(file)).filter(Boolean)
+    : [];
+
+  return {
+    venueName: String(formData.venueName || '').trim(),
+    category: String(formData.category || '').trim(),
+    address: String(formData.address || '').trim(),
+    wardId: String(formData.wardId || '').trim(),
+    latitude: normalizeComparableCoordinate(formData.latitude),
+    longitude: normalizeComparableCoordinate(formData.longitude),
+    existingCoverImageUrl: String(formData.existingCoverImageUrl || '').trim(),
+    existingGalleryImageUrls: normalizeComparableImageUrls(formData.existingGalleryImageUrls),
+    existingBusinessLicenseUrl: String(formData.existingBusinessLicenseUrl || '').trim(),
+    uploadedImageFingerprints: normalizedImages,
+    uploadedBusinessLicenseFingerprint: buildFileFingerprint(formData.businessLicense),
+    coverPreference: normalizedImages.length ? coverPreference : COVER_PREFERENCES.EXISTING
+  };
 }
 
 function normalizeWeeklyDaySchedule(rawDaySchedule, fallbackStart, fallbackEnd) {
@@ -242,7 +454,9 @@ function normalizeWeeklyOpenHoursForPayload(weeklyOpenHours, fallbackStart, fall
 
 function MerchantVenueEditForm({ editVenueId = null }) {
   const isEditMode = Number.isFinite(Number(editVenueId));
+  const [activeEditVariant, setActiveEditVariant] = useState(EDIT_VARIANTS.REVIEW);
   const [activeWeekDay, setActiveWeekDay] = useState(WEEK_DAYS[0].key);
+  const [coverPreference, setCoverPreference] = useState(COVER_PREFERENCES.EXISTING);
   const [formData, setFormData] = useState({
     venueName: '',
     category: '',
@@ -283,8 +497,29 @@ function MerchantVenueEditForm({ editVenueId = null }) {
   const [loadingDraft, setLoadingDraft] = useState(false);
   const [draftLoadError, setDraftLoadError] = useState('');
   const [pendingUpdateRequest, setPendingUpdateRequest] = useState(null);
+  const [initialComparableState, setInitialComparableState] = useState(null);
   const existingImageCount = Math.min(Array.isArray(formData.existingGalleryImageUrls) ? formData.existingGalleryImageUrls.length : 0, 6);
   const remainingUploadSlots = Math.max(0, 6 - existingImageCount);
+
+  const simpleComparableState = useMemo(() => buildSimpleComparableState(formData), [formData]);
+  const reviewComparableState = useMemo(
+    () => buildReviewComparableState(formData, coverPreference),
+    [formData, coverPreference]
+  );
+  const hasSimpleChanges = useMemo(() => {
+    if (!isEditMode || !initialComparableState?.simple) {
+      return true;
+    }
+
+    return !areComparableValuesEqual(initialComparableState.simple, simpleComparableState);
+  }, [initialComparableState, isEditMode, simpleComparableState]);
+  const hasReviewChanges = useMemo(() => {
+    if (!isEditMode || !initialComparableState?.review) {
+      return true;
+    }
+
+    return !areComparableValuesEqual(initialComparableState.review, reviewComparableState);
+  }, [initialComparableState, isEditMode, reviewComparableState]);
 
   const handleWeeklyHoursChange = (dayKey, field, value) => {
     unlockResubmitIfNeeded();
@@ -449,6 +684,8 @@ function MerchantVenueEditForm({ editVenueId = null }) {
       setLoadingDraft(false);
       setDraftLoadError('');
       setPendingUpdateRequest(null);
+      setInitialComparableState(null);
+      setCoverPreference(COVER_PREFERENCES.EXISTING);
       return;
     }
 
@@ -473,10 +710,7 @@ function MerchantVenueEditForm({ editVenueId = null }) {
 
         const venueMetadata = normalizeVenueMetadata(venue.metadata);
         const snapshotMetadata = normalizeVenueMetadata(pendingSnapshot?.metadata);
-        const mergedMetadata = {
-          ...venueMetadata,
-          ...snapshotMetadata
-        };
+        const mergedMetadata = buildReviewAwareMergedMetadata(venueMetadata, snapshotMetadata);
         const snapshotLatitude = Number(pendingSnapshot?.latitude);
         const snapshotLongitude = Number(pendingSnapshot?.longitude);
         const venueLatitude = Number(venue.latitude);
@@ -492,10 +726,10 @@ function MerchantVenueEditForm({ editVenueId = null }) {
             ? venueLongitude
             : null;
         const resolvedCoverImageUrl = String(
-          pendingSnapshot?.coverImageUrl || venue.cover_image_url || ''
+          pendingSnapshot?.coverImageUrl || pendingSnapshot?.cover_image_url || venue.cover_image_url || ''
         ).trim();
         const resolvedBusinessLicenseImageUrl = String(
-          pendingSnapshot?.businessLicenseImageUrl || venue.business_license_image_url || ''
+          pendingSnapshot?.businessLicenseImageUrl || pendingSnapshot?.business_license_image_url || venue.business_license_image_url || ''
         ).trim();
         const resolvedGalleryImageUrls = resolveExistingGalleryImageUrls(
           {
@@ -510,28 +744,24 @@ function MerchantVenueEditForm({ editVenueId = null }) {
           }
         );
         const resolvedWeeklyOpenHours = normalizeWeeklyOpenHours(mergedMetadata);
-        const resolvedWeeklyOverrides = WEEK_DAYS.reduce((accumulator, day) => {
-          const daySchedule = resolvedWeeklyOpenHours[day.key];
-          accumulator[day.key] = Boolean(daySchedule?.isClosed || daySchedule?.openTime || daySchedule?.closeTime);
-          return accumulator;
-        }, {});
+        const resolvedWeeklyOverrides = deriveWeeklyOverrideMapFromHours(resolvedWeeklyOpenHours);
 
         const nextFormData = {
           venueName: String(pendingSnapshot?.name || pendingSnapshot?.title || venue.name || venue.title || '').trim(),
           category: String(
-            pendingSnapshot?.categoryId ?? venue.category_id ?? mergedMetadata.categoryId ?? ''
+            pendingSnapshot?.categoryId ?? pendingSnapshot?.category_id ?? venue.category_id ?? mergedMetadata.categoryId ?? ''
           ).trim(),
           address: String(pendingSnapshot?.address || venue.address || '').trim(),
-          wardId: String(pendingSnapshot?.wardId || venue.ward_id || mergedMetadata.wardId || '').trim(),
+          wardId: String(pendingSnapshot?.wardId || pendingSnapshot?.ward_id || venue.ward_id || mergedMetadata.wardId || '').trim(),
           latitude: resolvedLatitude,
           longitude: resolvedLongitude,
-          phone: String(pendingSnapshot?.phone || venue.phone || '').trim(),
+          phone: String(venue.phone || '').trim(),
           minPrice: mergedMetadata.minPrice !== undefined && mergedMetadata.minPrice !== null ? String(mergedMetadata.minPrice) : '',
           maxPrice: mergedMetadata.maxPrice !== undefined && mergedMetadata.maxPrice !== null ? String(mergedMetadata.maxPrice) : '',
           startTime: String(mergedMetadata.startTime || '').trim(),
           endTime: String(mergedMetadata.endTime || '').trim(),
           weeklyOpenHours: resolvedWeeklyOpenHours,
-          description: String(pendingSnapshot?.description || venue.description || '').trim(),
+          description: String(venue.description || '').trim(),
           selectedServices: normalizeServiceSelections(mergedMetadata.selectedServices),
           images: [],
           businessLicense: null,
@@ -546,6 +776,12 @@ function MerchantVenueEditForm({ editVenueId = null }) {
 
         setFormData(nextFormData);
         setWeeklyManualOverrides(resolvedWeeklyOverrides);
+        setActiveEditVariant(EDIT_VARIANTS.REVIEW);
+        setCoverPreference(COVER_PREFERENCES.EXISTING);
+        setInitialComparableState({
+          simple: buildSimpleComparableState(nextFormData),
+          review: buildReviewComparableState(nextFormData, COVER_PREFERENCES.EXISTING)
+        });
         setFormErrors({});
         setSubmitStatus(
           pendingRequest?.status === 'pending'
@@ -592,6 +828,9 @@ function MerchantVenueEditForm({ editVenueId = null }) {
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
+    const normalizedValue = name === 'phone'
+      ? String(value || '').replace(/\D/g, '').slice(0, 11)
+      : value;
 
     unlockResubmitIfNeeded();
 
@@ -599,7 +838,7 @@ function MerchantVenueEditForm({ editVenueId = null }) {
       const isWardChanged = name === 'wardId' && String(prev.wardId || '') !== String(value || '');
       const nextFormData = {
         ...prev,
-        [name]: value
+        [name]: normalizedValue
       };
 
       if (isWardChanged) {
@@ -657,10 +896,9 @@ function MerchantVenueEditForm({ editVenueId = null }) {
     }
   };
 
-  const validateForm = () => {
+  const validateReviewForm = () => {
     const errors = {};
 
-    // Required fields
     if (!formData.venueName.trim()) errors.venueName = 'Venue name is required';
     if (!formData.category) errors.category = 'Category is required';
     if (formData.category && !placeCategories.some((category) => String(category.id) === String(formData.category))) {
@@ -674,32 +912,39 @@ function MerchantVenueEditForm({ editVenueId = null }) {
     if (formData.wardId && !wards.some((ward) => String(ward.ward_id) === String(formData.wardId))) {
       errors.wardId = 'Selected ward is not available';
     }
-    if (!formData.phone.trim()) errors.phone = 'Phone number is required';
     const hasBusinessLicense = Boolean(formData.businessLicense || formData.existingBusinessLicenseUrl);
     if (!hasBusinessLicense) errors.businessLicense = 'Business license is required';
-    
-    // Location picking is mandatory
+
     if (formData.latitude === null || formData.longitude === null) {
       errors.location = 'You must pick location on map to continue';
     }
 
-    // Price range validation
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const validateSimpleForm = () => {
+    const errors = {};
+
+    if (!formData.phone.trim()) errors.phone = 'Phone number is required';
+    if (formData.phone.trim() && !/^\d{10,11}$/.test(formData.phone.trim())) {
+      errors.phone = 'Phone number must contain 10-11 digits';
+    }
+
     if (!formData.minPrice) errors.minPrice = 'Min price is required';
     if (!formData.maxPrice) errors.maxPrice = 'Max price is required';
     if (formData.minPrice || formData.maxPrice) {
-      // Check if values are numeric
       const minVal = parseFloat(formData.minPrice);
       const maxVal = parseFloat(formData.maxPrice);
-      
+
       if (isNaN(minVal)) errors.minPrice = 'Min price must be a valid number';
       if (isNaN(maxVal)) errors.maxPrice = 'Max price must be a valid number';
-      
+
       if (!isNaN(minVal) && !isNaN(maxVal) && minVal >= maxVal) {
         errors.maxPrice = 'Max price must be higher than min price';
       }
     }
 
-    // Weekly open hours validation
     WEEK_DAYS.forEach((day) => {
       const daySchedule = formData.weeklyOpenHours?.[day.key] || {};
 
@@ -736,6 +981,28 @@ function MerchantVenueEditForm({ editVenueId = null }) {
       images
     }));
 
+    if (!Array.isArray(images) || !images.length) {
+      setCoverPreference(COVER_PREFERENCES.EXISTING);
+    }
+
+    if (submitStatus?.type === 'success') {
+      setSubmitStatus(null);
+    }
+  };
+
+  const handleCoverPreferenceChange = (nextPreference) => {
+    const normalizedPreference =
+      nextPreference === COVER_PREFERENCES.UPLOADED
+        ? COVER_PREFERENCES.UPLOADED
+        : COVER_PREFERENCES.EXISTING;
+
+    if (normalizedPreference === COVER_PREFERENCES.UPLOADED && !formData.images.length) {
+      return;
+    }
+
+    unlockResubmitIfNeeded();
+    setCoverPreference(normalizedPreference);
+
     if (submitStatus?.type === 'success') {
       setSubmitStatus(null);
     }
@@ -748,6 +1015,7 @@ function MerchantVenueEditForm({ editVenueId = null }) {
     }
 
     unlockResubmitIfNeeded();
+    setCoverPreference(COVER_PREFERENCES.EXISTING);
     setFormData((prev) => {
       const currentGallery = Array.isArray(prev.existingGalleryImageUrls)
         ? prev.existingGalleryImageUrls
@@ -887,7 +1155,33 @@ function MerchantVenueEditForm({ editVenueId = null }) {
     setIsLocationPickerOpen(true);
   };
 
-  const handleSubmit = async (e) => {
+  const handleEditVariantChange = (nextVariant) => {
+    const normalizedVariant = nextVariant === EDIT_VARIANTS.SIMPLE ? EDIT_VARIANTS.SIMPLE : EDIT_VARIANTS.REVIEW;
+    setActiveEditVariant(normalizedVariant);
+
+    if (submitStatus?.type === 'success') {
+      setSubmitStatus(null);
+    }
+  };
+
+  const buildOpeningHoursMetadata = () => {
+    const derivedTimeRange = derivePrimaryTimeRangeFromWeeklyHours(formData.weeklyOpenHours);
+    const metadataStartTime = derivedTimeRange.startTime || String(formData.startTime || '').trim();
+    const metadataEndTime = derivedTimeRange.endTime || String(formData.endTime || '').trim();
+    const normalizedWeeklyOpenHoursPayload = normalizeWeeklyOpenHoursForPayload(
+      formData.weeklyOpenHours,
+      metadataStartTime,
+      metadataEndTime
+    );
+
+    return {
+      metadataStartTime,
+      metadataEndTime,
+      normalizedWeeklyOpenHoursPayload
+    };
+  };
+
+  const handleReviewSubmit = async (e) => {
     e.preventDefault();
 
     if (!isEditMode && isResubmitLocked) {
@@ -898,7 +1192,19 @@ function MerchantVenueEditForm({ editVenueId = null }) {
       return;
     }
 
-    if (!validateForm()) {
+    if (isEditMode && !hasReviewChanges) {
+      setSubmitStatus({
+        type: 'error',
+        message: 'No review changes detected. Update at least one review field before submitting.'
+      });
+      return;
+    }
+
+    const isFormValid = isEditMode
+      ? validateReviewForm()
+      : validateReviewForm() && validateSimpleForm();
+
+    if (!isFormValid) {
       setSubmitStatus({
         type: 'error',
         message: 'Please fix the errors before submitting'
@@ -934,15 +1240,22 @@ function MerchantVenueEditForm({ editVenueId = null }) {
         const combinedGallery = [...new Set([...galleryImageUrls, ...normalizedUploadedGallery])];
         galleryImageUrls = combinedGallery.length > 6 ? combinedGallery.slice(combinedGallery.length - 6) : combinedGallery;
 
-        const normalizedPreferredCover = String(coverImageUrl || '').trim();
-        if (normalizedPreferredCover && galleryImageUrls.includes(normalizedPreferredCover)) {
-          coverImageUrl = normalizedPreferredCover;
-        } else if (normalizedUploadedGallery.length) {
-          coverImageUrl = galleryImageUrls.includes(normalizedUploadedGallery[0])
-            ? normalizedUploadedGallery[0]
+        const shouldUseUploadedCover =
+          coverPreference === COVER_PREFERENCES.UPLOADED &&
+          normalizedUploadedGallery.length > 0;
+
+        if (shouldUseUploadedCover) {
+          const uploadedCover = String(normalizedUploadedGallery[0] || '').trim();
+          coverImageUrl = galleryImageUrls.includes(uploadedCover)
+            ? uploadedCover
             : (galleryImageUrls[0] || '');
         } else {
-          coverImageUrl = galleryImageUrls[0] || '';
+          const normalizedPreferredCover = String(coverImageUrl || '').trim();
+          if (normalizedPreferredCover && galleryImageUrls.includes(normalizedPreferredCover)) {
+            coverImageUrl = normalizedPreferredCover;
+          } else if (!normalizedPreferredCover && galleryImageUrls.length) {
+            coverImageUrl = galleryImageUrls[0];
+          }
         }
       }
 
@@ -954,14 +1267,24 @@ function MerchantVenueEditForm({ editVenueId = null }) {
         placeCategories.find((category) => String(category.id) === String(formData.category)) || null;
       const selectedWard =
         wards.find((ward) => String(ward.ward_id) === String(formData.wardId)) || null;
-      const derivedTimeRange = derivePrimaryTimeRangeFromWeeklyHours(formData.weeklyOpenHours);
-      const metadataStartTime = derivedTimeRange.startTime || String(formData.startTime || '').trim();
-      const metadataEndTime = derivedTimeRange.endTime || String(formData.endTime || '').trim();
-      const normalizedWeeklyOpenHoursPayload = normalizeWeeklyOpenHoursForPayload(
-        formData.weeklyOpenHours,
-        metadataStartTime,
-        metadataEndTime
-      );
+      const savedSimpleBaseline = isEditMode ? initialComparableState?.simple || null : null;
+      const reviewPhone = isEditMode
+        ? String(savedSimpleBaseline?.phone ?? formData.phone ?? '').trim()
+        : String(formData.phone || '').trim();
+      const reviewDescription = isEditMode
+        ? String(savedSimpleBaseline?.description ?? formData.description ?? '').trim()
+        : String(formData.description || '').trim();
+      const { metadataStartTime, metadataEndTime, normalizedWeeklyOpenHoursPayload } = buildOpeningHoursMetadata();
+
+      const reviewMetadata = {
+        category: selectedCategory?.slug || '',
+        categoryName: selectedCategory?.name || '',
+        categoryId: selectedCategory?.id || null,
+        wardId: selectedWard?.ward_id || null,
+        wardName: selectedWard?.name || null,
+        imagesCount: galleryImageUrls.length,
+        galleryImages: galleryImageUrls
+      };
 
       const payload = {
         name: formData.venueName,
@@ -972,42 +1295,50 @@ function MerchantVenueEditForm({ editVenueId = null }) {
         category: selectedCategory?.name || '',
         latitude: formData.latitude,
         longitude: formData.longitude,
-        description: formData.description,
-        phone: formData.phone,
+        description: reviewDescription,
+        phone: reviewPhone,
         coverImageUrl,
         businessLicenseImageUrl,
-        metadata: {
-          category: selectedCategory?.slug || '',
-          categoryName: selectedCategory?.name || '',
-          wardId: selectedWard?.ward_id || null,
-          wardName: selectedWard?.name || null,
-          minPrice: formData.minPrice ? Number(formData.minPrice) : null,
-          maxPrice: formData.maxPrice ? Number(formData.maxPrice) : null,
-          startTime: metadataStartTime || null,
-          endTime: metadataEndTime || null,
-          weeklyOpenHours: normalizedWeeklyOpenHoursPayload,
-          selectedServices: formData.selectedServices,
-          imagesCount: galleryImageUrls.length,
-          galleryImages: galleryImageUrls
-        }
+        metadata: isEditMode
+          ? reviewMetadata
+          : {
+              ...reviewMetadata,
+              minPrice: formData.minPrice ? Number(formData.minPrice) : null,
+              maxPrice: formData.maxPrice ? Number(formData.maxPrice) : null,
+              startTime: metadataStartTime || null,
+              endTime: metadataEndTime || null,
+              weeklyOpenHours: normalizedWeeklyOpenHoursPayload,
+              selectedServices: formData.selectedServices
+            }
       };
 
       if (isEditMode) {
         const response = await submitVenueUpdateRequest(editVenueId, payload);
+
+        const draftNextFormData = {
+          ...formData,
+          images: [],
+          businessLicense: null,
+          existingGalleryImageUrls: galleryImageUrls,
+          existingCoverImageUrl: coverImageUrl,
+          existingBusinessLicenseUrl: businessLicenseImageUrl
+        };
+        const nextFormData = applySimpleBaselineToFormData(draftNextFormData, savedSimpleBaseline);
+        const nextWeeklyOverrides = deriveWeeklyOverrideMapFromHours(nextFormData.weeklyOpenHours);
+        const nextSimpleComparableState = savedSimpleBaseline || buildSimpleComparableState(nextFormData);
 
         setSubmitStatus({
           type: 'success',
           message: response.message || 'Venue update request submitted successfully. Awaiting admin review.'
         });
         setPendingUpdateRequest(response.updateRequest || pendingUpdateRequest || null);
-        setFormData((prev) => ({
-          ...prev,
-          images: [],
-          businessLicense: null,
-          existingGalleryImageUrls: galleryImageUrls,
-          existingCoverImageUrl: coverImageUrl,
-          existingBusinessLicenseUrl: businessLicenseImageUrl
-        }));
+        setCoverPreference(COVER_PREFERENCES.EXISTING);
+        setFormData(nextFormData);
+        setWeeklyManualOverrides(nextWeeklyOverrides);
+        setInitialComparableState({
+          simple: nextSimpleComparableState,
+          review: buildReviewComparableState(nextFormData, COVER_PREFERENCES.EXISTING)
+        });
         return;
       }
 
@@ -1043,6 +1374,8 @@ function MerchantVenueEditForm({ editVenueId = null }) {
           existingBusinessLicenseUrl: ''
         });
         setWeeklyManualOverrides(buildDefaultWeeklyOverrideMap());
+        setCoverPreference(COVER_PREFERENCES.EXISTING);
+        setInitialComparableState(null);
         setFormErrors({});
         setSubmitStatus(null);
       }, 3500);
@@ -1055,6 +1388,80 @@ function MerchantVenueEditForm({ editVenueId = null }) {
       setIsSubmitting(false);
     }
   };
+
+  const handleSimpleSubmit = async (e) => {
+    e.preventDefault();
+
+    if (!isEditMode) {
+      return;
+    }
+
+    if (!hasSimpleChanges) {
+      setSubmitStatus({
+        type: 'error',
+        message: 'No simple changes detected. Update at least one simple field before saving.'
+      });
+      return;
+    }
+
+    if (!validateSimpleForm()) {
+      setSubmitStatus({
+        type: 'error',
+        message: 'Please fix the errors before saving simple information.'
+      });
+      return;
+    }
+
+    setIsSubmitting(true);
+    setSubmitStatus(null);
+
+    try {
+      const { metadataStartTime, metadataEndTime, normalizedWeeklyOpenHoursPayload } = buildOpeningHoursMetadata();
+
+      const payload = {
+        phone: formData.phone,
+        description: formData.description,
+        metadata: {
+          minPrice: formData.minPrice ? Number(formData.minPrice) : null,
+          maxPrice: formData.maxPrice ? Number(formData.maxPrice) : null,
+          startTime: metadataStartTime || null,
+          endTime: metadataEndTime || null,
+          weeklyOpenHours: normalizedWeeklyOpenHoursPayload,
+          selectedServices: normalizeServiceSelections(formData.selectedServices)
+        }
+      };
+
+      const response = await updateVenueSimpleInfo(editVenueId, payload);
+
+      setSubmitStatus({
+        type: 'success',
+        message: response.message || 'Simple information updated successfully.'
+      });
+      setInitialComparableState((previousState) => ({
+        simple: simpleComparableState,
+        review: previousState?.review || reviewComparableState
+      }));
+    } catch (error) {
+      setSubmitStatus({
+        type: 'error',
+        message: error.response?.data?.message || 'Failed to save simple information. Please try again.'
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleSubmit = isEditMode && activeEditVariant === EDIT_VARIANTS.SIMPLE
+    ? handleSimpleSubmit
+    : handleReviewSubmit;
+  const isSimpleVariantActive = isEditMode && activeEditVariant === EDIT_VARIANTS.SIMPLE;
+  const isReviewVariantActive = !isEditMode || activeEditVariant === EDIT_VARIANTS.REVIEW;
+  const isSubmitDisabled =
+    isSubmitting ||
+    loadingDraft ||
+    (!isEditMode && isResubmitLocked) ||
+    (isEditMode && activeEditVariant === EDIT_VARIANTS.SIMPLE && !hasSimpleChanges) ||
+    (isEditMode && activeEditVariant === EDIT_VARIANTS.REVIEW && !hasReviewChanges);
 
   return (
     <div className="merchant-venue-form-container">
@@ -1073,9 +1480,29 @@ function MerchantVenueEditForm({ editVenueId = null }) {
         <p className="form-note">A location update for this venue is currently pending. Submitting now will replace that pending request.</p>
       ) : null}
 
-      <form className="merchant-venue-form" onSubmit={handleSubmit}>
+      {isEditMode ? (
+        <div className="merchant-edit-variant-switch" role="tablist" aria-label="Edit types">
+          <button
+            type="button"
+            className={`merchant-edit-variant-btn ${activeEditVariant === EDIT_VARIANTS.SIMPLE ? 'is-active' : ''}`}
+            onClick={() => handleEditVariantChange(EDIT_VARIANTS.SIMPLE)}
+          >
+            Simple Information Edit
+          </button>
+          <button
+            type="button"
+            className={`merchant-edit-variant-btn ${activeEditVariant === EDIT_VARIANTS.REVIEW ? 'is-active' : ''}`}
+            onClick={() => handleEditVariantChange(EDIT_VARIANTS.REVIEW)}
+          >
+            Admin Review Edit
+          </button>
+        </div>
+      ) : null}
+
+      <form className={`merchant-venue-form ${isEditMode ? `is-${activeEditVariant}` : ''}`.trim()} onSubmit={handleSubmit}>
         {/* Section 1: Images */}
-        <div className="form-section">
+        {isReviewVariantActive ? (
+          <div className="form-section">
           <div className="section-header">
             <h2>1. Photos</h2>
             <p className="section-hint">Upload up to 6 photos of your venue</p>
@@ -1124,331 +1551,392 @@ function MerchantVenueEditForm({ editVenueId = null }) {
           ) : null}
 
           {remainingUploadSlots > 0 ? (
-            <ImageUploader maxImages={remainingUploadSlots} onImagesChange={handleImagesChange} />
+            <ImageUploader
+              maxImages={remainingUploadSlots}
+              onImagesChange={handleImagesChange}
+              allowSetCover={coverPreference === COVER_PREFERENCES.UPLOADED}
+            />
           ) : (
             <p className="form-note">You already have 6 images. Remove at least one existing image above to upload a new one.</p>
           )}
-        </div>
+
+          {formData.images.length ? (
+            <div className="merchant-cover-preference">
+              <p className="form-note">Choose which cover should be used when you submit this review update.</p>
+              <div className="merchant-cover-preference-actions" role="group" aria-label="Cover preference">
+                <button
+                  type="button"
+                  className={`merchant-cover-preference-btn ${coverPreference === COVER_PREFERENCES.EXISTING ? 'is-active' : ''}`.trim()}
+                  onClick={() => handleCoverPreferenceChange(COVER_PREFERENCES.EXISTING)}
+                >
+                  Keep Existing Cover
+                </button>
+                <button
+                  type="button"
+                  className={`merchant-cover-preference-btn ${coverPreference === COVER_PREFERENCES.UPLOADED ? 'is-active' : ''}`.trim()}
+                  onClick={() => handleCoverPreferenceChange(COVER_PREFERENCES.UPLOADED)}
+                >
+                  Use Uploaded Cover
+                </button>
+              </div>
+              <p className="form-note">
+                {coverPreference === COVER_PREFERENCES.UPLOADED
+                  ? 'Tip: in Uploaded Images, use Set Cover to choose which new image becomes the uploaded cover.'
+                  : 'Uploaded Images cover controls are locked while Keep Existing Cover is active.'}
+              </p>
+            </div>
+          ) : null}
+          </div>
+        ) : null}
 
         {/* Section 2: Basic Info */}
         <div className="form-section">
           <div className="section-header">
-            <h2>2. Basic Information</h2>
+            <h2>{isSimpleVariantActive ? '2. Simple Information' : '2. Basic Information'}</h2>
           </div>
 
-          <div className="form-row">
-            <div className="form-group">
-              <label htmlFor="venueName">
-                Venue Name <span className="required">*</span>
-                {formErrors.venueName && <span className="error-text"> - {formErrors.venueName}</span>}
-              </label>
-              <input
-                type="text"
-                id="venueName"
-                name="venueName"
-                value={formData.venueName}
-                onChange={handleInputChange}
-                placeholder="Enter venue name"
-                required
-                className={`form-input ${formErrors.venueName ? 'input-error' : ''}`}
-              />
-            </div>
+          {isReviewVariantActive ? (
+            <div className="form-row">
+              <div className="form-group">
+                <label htmlFor="venueName">
+                  Venue Name <span className="required">*</span>
+                  {formErrors.venueName && <span className="error-text"> - {formErrors.venueName}</span>}
+                </label>
+                <input
+                  type="text"
+                  id="venueName"
+                  name="venueName"
+                  value={formData.venueName}
+                  onChange={handleInputChange}
+                  placeholder="Enter venue name"
+                  required
+                  className={`form-input ${formErrors.venueName ? 'input-error' : ''}`}
+                />
+              </div>
 
-            <div className="form-group">
-              <label htmlFor="category">
-                Category <span className="required">*</span>
-                {formErrors.category && <span className="error-text"> - {formErrors.category}</span>}
-              </label>
-              <select
-                id="category"
-                name="category"
-                value={formData.category}
-                onChange={handleInputChange}
-                required
-                disabled={categoriesLoading}
-                className={`form-input ${formErrors.category ? 'input-error' : ''}`}
-              >
-                <option value="">
-                  {categoriesLoading ? 'Loading categories...' : 'Select a category'}
-                </option>
-                {placeCategories.map((category) => (
-                  <option key={category.id} value={String(category.id)}>
-                    {category.name}
+              <div className="form-group">
+                <label htmlFor="category">
+                  Category <span className="required">*</span>
+                  {formErrors.category && <span className="error-text"> - {formErrors.category}</span>}
+                </label>
+                <select
+                  id="category"
+                  name="category"
+                  value={formData.category}
+                  onChange={handleInputChange}
+                  required
+                  disabled={categoriesLoading}
+                  className={`form-input ${formErrors.category ? 'input-error' : ''}`}
+                >
+                  <option value="">
+                    {categoriesLoading ? 'Loading categories...' : 'Select a category'}
                   </option>
-                ))}
-              </select>
+                  {placeCategories.map((category) => (
+                    <option key={category.id} value={String(category.id)}>
+                      {category.name}
+                    </option>
+                  ))}
+                </select>
 
-              {categoryLoadError ? <p className="error-text">{categoryLoadError}</p> : null}
+                {categoryLoadError ? <p className="error-text">{categoryLoadError}</p> : null}
+              </div>
             </div>
-          </div>
+          ) : null}
 
-          <div className="form-group">
-            <label htmlFor="phone">
-              Phone Number <span className="required">*</span>
-              {formErrors.phone && <span className="error-text"> - {formErrors.phone}</span>}
-            </label>
-            <input
-              type="tel"
-              id="phone"
-              name="phone"
-              value={formData.phone}
-              onChange={handleInputChange}
-              placeholder="e.g., +84 123 456 789"
-              required
-              className={`form-input ${formErrors.phone ? 'input-error' : ''}`}
-            />
-          </div>
+          {!isEditMode || activeEditVariant === EDIT_VARIANTS.SIMPLE ? (
+            <>
+              <div className="form-group">
+                <label htmlFor="phone">
+                  Phone Number <span className="required">*</span>
+                  {formErrors.phone && <span className="error-text"> - {formErrors.phone}</span>}
+                </label>
+                <input
+                  type="tel"
+                  id="phone"
+                  name="phone"
+                  value={formData.phone}
+                  onChange={handleInputChange}
+                  placeholder="e.g., +84 123 456 789"
+                  inputMode="numeric"
+                  maxLength={11}
+                  pattern="[0-9]{10,11}"
+                  required
+                  className={`form-input ${formErrors.phone ? 'input-error' : ''}`}
+                />
+              </div>
 
-          <div className="form-group">
-            <label htmlFor="description">Description</label>
-            <textarea
-              id="description"
-              name="description"
-              value={formData.description}
-              onChange={handleInputChange}
-              placeholder="Tell us about your venue, atmosphere, specialties..."
-              rows="5"
-              className="form-textarea"
-            />
-          </div>
+              <div className="form-group">
+                <label htmlFor="description">Description</label>
+                <textarea
+                  id="description"
+                  name="description"
+                  value={formData.description}
+                  onChange={handleInputChange}
+                  placeholder="Tell us about your venue, atmosphere, specialties..."
+                  rows="5"
+                  className="form-textarea"
+                />
+              </div>
+            </>
+          ) : null}
         </div>
 
         {/* Section 3: Location & Hours */}
         <div className="form-section">
           <div className="section-header">
-            <h2>3. Location & Hours</h2>
+            <h2>{isSimpleVariantActive ? '3. Operations & Pricing' : '3. Location & Hours'}</h2>
           </div>
 
-          <div className="form-group">
-            <label>
-              Address <span className="required">*</span>
-              {formErrors.address && <span className="error-text"> - {formErrors.address}</span>}
-            </label>
-            <div className="address-input-group">
-              <input
-                type="text"
-                name="address"
-                value={formData.address}
-                onChange={handleInputChange}
-                placeholder="Enter detailed address"
-                required
-                className={`form-input ${formErrors.address ? 'input-error' : ''}`}
-              />
+          {isReviewVariantActive ? (
+            <div className="form-group">
+              <label>
+                Address <span className="required">*</span>
+                {formErrors.address && <span className="error-text"> - {formErrors.address}</span>}
+              </label>
+              <div className="address-input-group">
+                <input
+                  type="text"
+                  name="address"
+                  value={formData.address}
+                  onChange={handleInputChange}
+                  placeholder="Enter detailed address"
+                  required
+                  className={`form-input ${formErrors.address ? 'input-error' : ''}`}
+                />
 
-              <select
-                id="wardId"
-                name="wardId"
-                value={formData.wardId}
-                onChange={handleInputChange}
-                disabled={wardsLoading}
-                className={`form-input ward-select ${formErrors.wardId ? 'input-error' : ''}`}
-              >
-                <option value="">{wardsLoading ? 'Loading wards...' : 'Select ward'}</option>
-                {wards.map((ward) => (
-                  <option key={ward.ward_id} value={String(ward.ward_id)}>
-                    {ward.name}
-                  </option>
-                ))}
-              </select>
-
-              <button type="button" className={`btn-map-picker ${formErrors.location ? 'btn-error' : ''}`} onClick={openLocationPicker}>
-                📍 Pick on Map
-              </button>
-            </div>
-            {formErrors.wardId && <span className="error-text">🔴 {formErrors.wardId}</span>}
-            {wardLoadError ? <p className="error-text">{wardLoadError}</p> : null}
-            {formErrors.location && <span className="error-text">🔴 {formErrors.location}</span>}
-            {formData.latitude && formData.longitude && (
-              <p className="location-display">
-                ✓ Selected: ({formData.latitude.toFixed(4)}, {formData.longitude.toFixed(4)})
-              </p>
-            )}
-          </div>
-
-          <div className="weekly-open-hours-card">
-            <div className="weekly-open-hours-header">
-              <h4>Weekly Opening Hours</h4>
-              <p>Set opening and closing time for each day. Select Off to mark a closed day.</p>
-              {formErrors.weeklyOpenHours ? <p className="error-text">{formErrors.weeklyOpenHours}</p> : null}
-            </div>
-
-            <div className="weekly-open-hours-tabs">
-              {WEEK_DAYS.map((day) => {
-                const daySchedule = formData.weeklyOpenHours?.[day.key] || {
-                  isClosed: false,
-                  openTime: '',
-                  closeTime: ''
-                };
-                const isActive = day.key === activeWeekDay;
-
-                return (
-                  <button
-                    key={day.key}
-                    type="button"
-                    className={`weekly-open-hours-tab ${isActive ? 'active' : ''}`}
-                    onClick={() => setActiveWeekDay(day.key)}
-                  >
-                    <span className="tab-day-label">{day.label}</span>
-                    <span className={`tab-day-status ${daySchedule.isClosed ? 'closed' : 'open'}`}>
-                      {daySchedule.isClosed ? 'Off' : 'Open'}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="weekly-open-hours-editor">
-              <div className="weekly-open-hours-editor-header">
-                <h5>{activeWeekDayConfig.label === 'Mon' ? 'Monday' : activeWeekDayConfig.label === 'Tue' ? 'Tuesday' : activeWeekDayConfig.label === 'Wed' ? 'Wednesday' : activeWeekDayConfig.label === 'Thu' ? 'Thursday' : activeWeekDayConfig.label === 'Fri' ? 'Friday' : activeWeekDayConfig.label === 'Sat' ? 'Saturday' : 'Sunday'}</h5>
-                <button
-                  type="button"
-                  className={`day-open-toggle ${activeDaySchedule.isClosed ? 'closed' : 'open'}`}
-                  onClick={() => handleWeeklyHoursChange(activeWeekDayConfig.key, 'isClosed', !activeDaySchedule.isClosed)}
+                <select
+                  id="wardId"
+                  name="wardId"
+                  value={formData.wardId}
+                  onChange={handleInputChange}
+                  disabled={wardsLoading}
+                  className={`form-input ward-select ${formErrors.wardId ? 'input-error' : ''}`}
                 >
-                  {activeDaySchedule.isClosed ? 'Off' : 'Open'}
+                  <option value="">{wardsLoading ? 'Loading wards...' : 'Select ward'}</option>
+                  {wards.map((ward) => (
+                    <option key={ward.ward_id} value={String(ward.ward_id)}>
+                      {ward.name}
+                    </option>
+                  ))}
+                </select>
+
+                <button type="button" className={`btn-map-picker ${formErrors.location ? 'btn-error' : ''}`} onClick={openLocationPicker}>
+                  📍 Pick on Map
                 </button>
               </div>
-
-              <div className="weekly-open-hours-editor-grid">
-                <div className="form-group">
-                  <label htmlFor={`open-${activeWeekDayConfig.key}`}>Start</label>
-                  <input
-                    id={`open-${activeWeekDayConfig.key}`}
-                    type="time"
-                    value={activeDaySchedule.openTime}
-                    disabled={activeDaySchedule.isClosed}
-                    onChange={(event) => handleWeeklyHoursChange(activeWeekDayConfig.key, 'openTime', event.target.value)}
-                    className="form-input"
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label htmlFor={`close-${activeWeekDayConfig.key}`}>End</label>
-                  <input
-                    id={`close-${activeWeekDayConfig.key}`}
-                    type="time"
-                    value={activeDaySchedule.closeTime}
-                    disabled={activeDaySchedule.isClosed}
-                    onChange={(event) => handleWeeklyHoursChange(activeWeekDayConfig.key, 'closeTime', event.target.value)}
-                    className="form-input"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="form-row">
-            <div className="form-group">
-              <label htmlFor="minPrice">
-                Minimum Price (VNĐ) <span className="required">*</span>
-                {formErrors.minPrice && <span className="error-text"> - {formErrors.minPrice}</span>}
-              </label>
-              <input
-                type="number"
-                id="minPrice"
-                name="minPrice"
-                value={formData.minPrice}
-                onChange={handleInputChange}
-                placeholder="e.g., 50000"
-                min="0"
-                step="1000"
-                required
-                className={`form-input ${formErrors.minPrice ? 'input-error' : ''}`}
-              />
-              {formData.minPrice && !formErrors.minPrice && (
-                <p className="price-display">{parseInt(formData.minPrice).toLocaleString('vi-VN')} VNĐ</p>
+              {formErrors.wardId && <span className="error-text">🔴 {formErrors.wardId}</span>}
+              {wardLoadError ? <p className="error-text">{wardLoadError}</p> : null}
+              {formErrors.location && <span className="error-text">🔴 {formErrors.location}</span>}
+              {formData.latitude && formData.longitude && (
+                <p className="location-display">
+                  ✓ Selected: ({formData.latitude.toFixed(4)}, {formData.longitude.toFixed(4)})
+                </p>
               )}
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="maxPrice">
-                Maximum Price (VNĐ) <span className="required">*</span>
-                {formErrors.maxPrice && <span className="error-text"> - {formErrors.maxPrice}</span>}
-              </label>
-              <input
-                type="number"
-                id="maxPrice"
-                name="maxPrice"
-                value={formData.maxPrice}
-                onChange={handleInputChange}
-                placeholder="e.g., 500000"
-                min="0"
-                step="1000"
-                required
-                className={`form-input ${formErrors.maxPrice ? 'input-error' : ''}`}
-              />
-              {formData.maxPrice && !formErrors.maxPrice && (
-                <p className="price-display">{parseInt(formData.maxPrice).toLocaleString('vi-VN')} VNĐ</p>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Section 4: Services */}
-        <div className="form-section">
-          <div className="section-header">
-            <h2>4. Services Offered</h2>
-            <p className="section-hint">
-              {servicesLoading ? 'Loading services...' : 'Select all applicable services'}
-            </p>
-          </div>
-          <ServiceSelector
-            availableServices={merchantServices}
-            selectedServices={formData.selectedServices}
-            onServicesChange={handleServicesChange}
-            disabled={servicesLoading}
-          />
-          {serviceLoadError ? <p className="error-text">{serviceLoadError}</p> : null}
-        </div>
-
-        {/* Section 5: Business License */}
-        <div className="form-section">
-          <div className="section-header">
-            <h2>5. Verification</h2>
-          </div>
-
-          {isEditMode && formData.existingBusinessLicenseUrl ? (
-            <div className="merchant-existing-license">
-              <img
-                src={resolveAssetUrl(formData.existingBusinessLicenseUrl)}
-                alt="Existing business license"
-                className="merchant-existing-license-image"
-              />
-              <button
-                type="button"
-                className="merchant-existing-action-btn danger"
-                onClick={handleRemoveExistingBusinessLicense}
-              >
-                Remove Current License
-              </button>
-              <p className="form-note">Current business license on file. Upload a new file only if you need to replace it.</p>
             </div>
           ) : null}
 
-          <BusinessLicenseUploader onLicenseChange={handleBusinessLicenseChange} />
+          {!isEditMode || activeEditVariant === EDIT_VARIANTS.SIMPLE ? (
+            <>
+              <div className="weekly-open-hours-card">
+                <div className="weekly-open-hours-header">
+                  <h4>Weekly Opening Hours</h4>
+                  <p>Set opening and closing time for each day. Select Off to mark a closed day.</p>
+                  {formErrors.weeklyOpenHours ? <p className="error-text">{formErrors.weeklyOpenHours}</p> : null}
+                </div>
+
+                <div className="weekly-open-hours-tabs">
+                  {WEEK_DAYS.map((day) => {
+                    const daySchedule = formData.weeklyOpenHours?.[day.key] || {
+                      isClosed: false,
+                      openTime: '',
+                      closeTime: ''
+                    };
+                    const isActive = day.key === activeWeekDay;
+
+                    return (
+                      <button
+                        key={day.key}
+                        type="button"
+                        className={`weekly-open-hours-tab ${isActive ? 'active' : ''}`}
+                        onClick={() => setActiveWeekDay(day.key)}
+                      >
+                        <span className="tab-day-label">{day.label}</span>
+                        <span className={`tab-day-status ${daySchedule.isClosed ? 'closed' : 'open'}`}>
+                          {daySchedule.isClosed ? 'Off' : 'Open'}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="weekly-open-hours-editor">
+                  <div className="weekly-open-hours-editor-header">
+                    <h5>{activeWeekDayConfig.label === 'Mon' ? 'Monday' : activeWeekDayConfig.label === 'Tue' ? 'Tuesday' : activeWeekDayConfig.label === 'Wed' ? 'Wednesday' : activeWeekDayConfig.label === 'Thu' ? 'Thursday' : activeWeekDayConfig.label === 'Fri' ? 'Friday' : activeWeekDayConfig.label === 'Sat' ? 'Saturday' : 'Sunday'}</h5>
+                    <button
+                      type="button"
+                      className={`day-open-toggle ${activeDaySchedule.isClosed ? 'closed' : 'open'}`}
+                      onClick={() => handleWeeklyHoursChange(activeWeekDayConfig.key, 'isClosed', !activeDaySchedule.isClosed)}
+                    >
+                      {activeDaySchedule.isClosed ? 'Off' : 'Open'}
+                    </button>
+                  </div>
+
+                  <div className="weekly-open-hours-editor-grid">
+                    <div className="form-group">
+                      <label htmlFor={`open-${activeWeekDayConfig.key}`}>Start</label>
+                      <input
+                        id={`open-${activeWeekDayConfig.key}`}
+                        type="time"
+                        value={activeDaySchedule.openTime}
+                        disabled={activeDaySchedule.isClosed}
+                        onChange={(event) => handleWeeklyHoursChange(activeWeekDayConfig.key, 'openTime', event.target.value)}
+                        className="form-input"
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label htmlFor={`close-${activeWeekDayConfig.key}`}>End</label>
+                      <input
+                        id={`close-${activeWeekDayConfig.key}`}
+                        type="time"
+                        value={activeDaySchedule.closeTime}
+                        disabled={activeDaySchedule.isClosed}
+                        onChange={(event) => handleWeeklyHoursChange(activeWeekDayConfig.key, 'closeTime', event.target.value)}
+                        className="form-input"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="form-row">
+                <div className="form-group">
+                  <label htmlFor="minPrice">
+                    Minimum Price (VNĐ) <span className="required">*</span>
+                    {formErrors.minPrice && <span className="error-text"> - {formErrors.minPrice}</span>}
+                  </label>
+                  <input
+                    type="number"
+                    id="minPrice"
+                    name="minPrice"
+                    value={formData.minPrice}
+                    onChange={handleInputChange}
+                    placeholder="e.g., 50000"
+                    min="0"
+                    step="1000"
+                    required
+                    className={`form-input ${formErrors.minPrice ? 'input-error' : ''}`}
+                  />
+                  {formData.minPrice && !formErrors.minPrice && (
+                    <p className="price-display">{parseInt(formData.minPrice, 10).toLocaleString('vi-VN')} VNĐ</p>
+                  )}
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="maxPrice">
+                    Maximum Price (VNĐ) <span className="required">*</span>
+                    {formErrors.maxPrice && <span className="error-text"> - {formErrors.maxPrice}</span>}
+                  </label>
+                  <input
+                    type="number"
+                    id="maxPrice"
+                    name="maxPrice"
+                    value={formData.maxPrice}
+                    onChange={handleInputChange}
+                    placeholder="e.g., 500000"
+                    min="0"
+                    step="1000"
+                    required
+                    className={`form-input ${formErrors.maxPrice ? 'input-error' : ''}`}
+                  />
+                  {formData.maxPrice && !formErrors.maxPrice && (
+                    <p className="price-display">{parseInt(formData.maxPrice, 10).toLocaleString('vi-VN')} VNĐ</p>
+                  )}
+                </div>
+              </div>
+            </>
+          ) : null}
         </div>
+
+        {/* Section 4: Services */}
+        {!isEditMode || activeEditVariant === EDIT_VARIANTS.SIMPLE ? (
+          <div className="form-section">
+            <div className="section-header">
+              <h2>4. Services Offered</h2>
+              <p className="section-hint">
+                {servicesLoading ? 'Loading services...' : 'Select all applicable services'}
+              </p>
+            </div>
+            <ServiceSelector
+              availableServices={merchantServices}
+              selectedServices={formData.selectedServices}
+              onServicesChange={handleServicesChange}
+              disabled={servicesLoading}
+            />
+            {serviceLoadError ? <p className="error-text">{serviceLoadError}</p> : null}
+          </div>
+        ) : null}
+
+        {/* Section 5: Business License */}
+        {isReviewVariantActive ? (
+          <div className="form-section">
+            <div className="section-header">
+              <h2>5. Verification</h2>
+            </div>
+
+            {isEditMode && formData.existingBusinessLicenseUrl ? (
+              <div className="merchant-existing-license">
+                <img
+                  src={resolveAssetUrl(formData.existingBusinessLicenseUrl)}
+                  alt="Existing business license"
+                  className="merchant-existing-license-image"
+                />
+                <button
+                  type="button"
+                  className="merchant-existing-action-btn danger"
+                  onClick={handleRemoveExistingBusinessLicense}
+                >
+                  Remove Current License
+                </button>
+                <p className="form-note">Current business license on file. Upload a new file only if you need to replace it.</p>
+              </div>
+            ) : null}
+
+            <BusinessLicenseUploader onLicenseChange={handleBusinessLicenseChange} />
+          </div>
+        ) : null}
 
         {/* Submit Button */}
         <div className="form-actions">
           <div className="form-submit-block">
             <button
               type="submit"
-              disabled={isSubmitting || loadingDraft || (!isEditMode && isResubmitLocked)}
+              disabled={isSubmitDisabled}
               className="btn-submit"
             >
               {isSubmitting
-                ? isEditMode
-                  ? 'Submitting update...'
+                ? isEditMode && activeEditVariant === EDIT_VARIANTS.SIMPLE
+                  ? 'Saving simple update...'
+                  : isEditMode
+                    ? 'Submitting review update...'
                   : 'Submitting...'
                 : !isEditMode && isResubmitLocked
                   ? 'Submitted'
-                  : isEditMode
+                  : isEditMode && activeEditVariant === EDIT_VARIANTS.SIMPLE
+                    ? 'Save Simple Changes'
+                    : isEditMode
                     ? 'Submit Location Update for Review'
                     : 'Submit Venue for Review'}
             </button>
             <p className="form-note">
               {isEditMode
-                ? 'Your edited location and details will be reviewed by admin before applying to the live venue.'
+                ? activeEditVariant === EDIT_VARIANTS.SIMPLE
+                  ? hasSimpleChanges
+                    ? 'Simple updates are saved immediately without admin review.'
+                    : 'Change at least one simple field to enable save.'
+                  : hasReviewChanges
+                    ? 'Review updates are sent to admin in Location Updates for moderation.'
+                    : 'Change at least one review field to enable submission.'
                 : 'Your venue will be reviewed by our admin team before going live.'}
             </p>
           </div>

@@ -143,7 +143,7 @@ const venueOwnerColumnState = {
     checkedAt: 0
 };
 
-const MAX_INLINE_IMAGE_URL_LENGTH = 200000;
+const MAX_INLINE_IMAGE_URL_LENGTH = 2000000;
 const MAX_METADATA_JSON_LENGTH = 300000;
 
 function sanitizeLargeInlineAssetUrl(value) {
@@ -693,6 +693,50 @@ function normalizeVenueUpdateSnapshot(value) {
             value.businessLicenseImageUrl ?? value.business_license_image_url
         ),
         metadata: normalizeVenueMetadataObject(value.metadata)
+    };
+}
+
+const VENUE_REVIEW_METADATA_KEYS = [
+    'category',
+    'categoryName',
+    'categoryId',
+    'wardId',
+    'wardName',
+    'imagesCount',
+    'galleryImages'
+];
+
+const VENUE_SIMPLE_METADATA_KEYS = [
+    'minPrice',
+    'maxPrice',
+    'startTime',
+    'endTime',
+    'weeklyOpenHours',
+    'weeklySchedule',
+    'selectedServices',
+    'selectedServiceNames',
+    'contactEmail'
+];
+
+function pickVenueMetadataFields(metadata, allowedKeys) {
+    const source = normalizeVenueMetadataObject(metadata);
+
+    return allowedKeys.reduce((result, key) => {
+        if (Object.prototype.hasOwnProperty.call(source, key)) {
+            result[key] = source[key];
+        }
+
+        return result;
+    }, {});
+}
+
+function mergeVenueReviewMetadata(currentMetadata, proposedMetadata) {
+    const baseMetadata = normalizeVenueMetadataObject(currentMetadata);
+    const reviewMetadata = pickVenueMetadataFields(proposedMetadata, VENUE_REVIEW_METADATA_KEYS);
+
+    return {
+        ...baseMetadata,
+        ...reviewMetadata
     };
 }
 
@@ -3426,6 +3470,40 @@ async function generateWardIdFromName(name) {
             return Number(parsed.toFixed(2));
         }
 
+        const REFINE_IMPLICIT_NEARBY_DEFAULT_DISTANCE_KM = 6;
+        const REFINE_IMPLICIT_NEARBY_INTENT_PATTERNS = [
+            /\bnearby\b/,
+            /\bnearest\b/,
+            /\bnear\s+me\b/,
+            /\bclose\s+to\s+me\b/,
+            /\baround\s+me\b/,
+            /\baround\s+my\s+location\b/,
+            /\bgan\s+toi\b/,
+            /\bgan\s+minh\b/,
+            /\bgan\s+day\b/,
+            /\bgan\s+nhat\b/,
+            /\bxung\s+quanh\s+(?:toi|minh|day)\b/,
+            /\bquanh\s+(?:toi|minh|day)\b/,
+            /\bvi\s+tri\s+hien\s+tai\b/,
+            /\bkhu\s+vuc\s+(?:toi|minh)\b/,
+            /\bcurrent\s+location\b/,
+            /\bmy\s+location\b/,
+            /\baroundme\b/,
+            /\baround_me\b/
+        ];
+
+        function detectImplicitNearbyIntent(normalizedQuery, locationPhrases = []) {
+            if (!normalizedQuery) {
+                return false;
+            }
+
+            if (Array.isArray(locationPhrases) && locationPhrases.length > 0) {
+                return false;
+            }
+
+            return REFINE_IMPLICIT_NEARBY_INTENT_PATTERNS.some((pattern) => pattern.test(normalizedQuery));
+        }
+
         const REFINE_CUISINE_HINTS = [
             ['hotpot', ['lau', 'hotpot', 'shabu']],
             ['bbq', ['nuong', 'bbq', 'grill']],
@@ -3829,6 +3907,10 @@ async function generateWardIdFromName(name) {
             const preferredTimeWindows = detectTimeWindowsFromQuery(normalizedQuery);
             const locationPhrases = extractLocationPhrasesFromRefineQuery(normalizedQuery);
             const locationKeywords = extractLocationKeywordsFromPhrases(locationPhrases);
+            const implicitNearbyIntent = detectImplicitNearbyIntent(normalizedQuery, locationPhrases);
+            const effectiveDistanceCapKm = Number.isFinite(distanceCapKm)
+                ? distanceCapKm
+                : (implicitNearbyIntent ? REFINE_IMPLICIT_NEARBY_DEFAULT_DISTANCE_KM : null);
             const requireLocationMatch = locationPhrases.length > 0;
             const requireActivityMatch = activityKeywords.length > 0;
             const requireServiceMatch = serviceKeywords.length > 0;
@@ -3858,7 +3940,7 @@ async function generateWardIdFromName(name) {
             const hasStructuredConstraints =
                 Number.isFinite(budgetCapVnd)
                 || Number.isFinite(budgetFloorVnd)
-                || Number.isFinite(distanceCapKm)
+                || Number.isFinite(effectiveDistanceCapKm)
                 || requireOpenNow
                 || locationPhrases.length > 0
                 || activityKeywords.length > 0
@@ -3871,7 +3953,7 @@ async function generateWardIdFromName(name) {
             return {
                 maxBudgetVnd: Number.isFinite(budgetCapVnd) ? budgetCapVnd : null,
                 minBudgetVnd: Number.isFinite(budgetFloorVnd) ? budgetFloorVnd : null,
-                maxDistanceKm: Number.isFinite(distanceCapKm) ? distanceCapKm : null,
+                maxDistanceKm: Number.isFinite(effectiveDistanceCapKm) ? effectiveDistanceCapKm : null,
                 strictBudgetCap,
                 strictBudgetFloor,
                 requireOpenNow,
@@ -4083,10 +4165,17 @@ async function generateWardIdFromName(name) {
             const includeKeywords = normalizeRefineKeywordList(normalized.includeKeywords)
                 .filter((token) => !blockedIncludeTokens.has(token));
 
+            const implicitNearbyIntent = detectImplicitNearbyIntent(normalizedQuery, locationPhrases);
+            let maxDistanceKm = Number.isFinite(normalized.maxDistanceKm) ? normalized.maxDistanceKm : null;
+
+            if (!Number.isFinite(maxDistanceKm) && implicitNearbyIntent) {
+                maxDistanceKm = REFINE_IMPLICIT_NEARBY_DEFAULT_DISTANCE_KM;
+            }
+
             const hasStructuredConstraints =
                 Number.isFinite(normalized.maxBudgetVnd)
                 || Number.isFinite(normalized.minBudgetVnd)
-                || Number.isFinite(normalized.maxDistanceKm)
+                || Number.isFinite(maxDistanceKm)
                 || Boolean(normalized.requireOpenNow)
                 || locationPhrases.length > 0
                 || activityKeywords.length > 0
@@ -4123,7 +4212,7 @@ async function generateWardIdFromName(name) {
             return {
                 maxBudgetVnd,
                 minBudgetVnd,
-                maxDistanceKm: Number.isFinite(normalized.maxDistanceKm) ? normalized.maxDistanceKm : null,
+                maxDistanceKm,
                 strictBudgetCap,
                 strictBudgetFloor,
                 requireOpenNow: Boolean(normalized.requireOpenNow),
@@ -4273,6 +4362,8 @@ async function generateWardIdFromName(name) {
                             'You parse user refine requests for venue recommendation constraints.',
                             'You are pass 1 of 2.',
                             'Understand Vietnamese, teencode abbreviations, and English, including mixed phrases.',
+                            'Do not require full details. Infer intent from short refine requests.',
+                            'If query implies nearby intent (gan toi, xung quanh, near me, nearby, nearest) without explicit km, set maxDistanceKm to 6.',
                             'Extract only constraints implied by user intent.',
                             schemaPrompt
                         ].join(' '),
@@ -4307,6 +4398,7 @@ async function generateWardIdFromName(name) {
                             '6) If minBudgetVnd is present and query says tren/hon/from/at least/minimum, strictBudgetFloor must be true.',
                             '7) Do not force requireKeywordMatch when structured constraints exist.',
                             '8) Remove duplicate overlap between location/activity/dish/service/name/cuisine/include keywords.',
+                            '9) If query implies nearby intent (gan toi, xung quanh, near me, nearby, nearest) and maxDistanceKm is missing, set maxDistanceKm to 6.',
                             schemaPrompt
                         ].join(' '),
                         userPrompt: JSON.stringify({
@@ -4632,6 +4724,7 @@ async function generateWardIdFromName(name) {
                                         'Read the full sentence intent, not isolated tokens.',
                                         'Only return venues that satisfy explicit user requirements from the whole sentence.',
                                         'Extract requiredDimensions from the user sentence and keep them strict.',
+                                        'If query implies nearby intent (gan toi, xung quanh, near me, nearby, nearest), distance must be required and far venues must not match.',
                                         'If intent is unclear, vague, or contradictory, set understood=false and return empty matches.',
                                         'Do not guess or broaden by assumptions.',
                                         'Return strict JSON with keys:',
@@ -7757,6 +7850,241 @@ async function generateWardIdFromName(name) {
             }
         }
 
+        async function updateMerchantVenueSimpleInfo(req, res) {
+            const venueId = Number(req.params.venueId);
+
+            if (!Number.isFinite(venueId)) {
+                return res.status(400).json({ message: 'Invalid venue id' });
+            }
+
+            try {
+                const currentUserId = await getAuthenticatedChatUserId(req);
+                const isAdmin = normalizeRole(req.authUser?.role) === 'admin';
+
+                if (!currentUserId && !isAdmin) {
+                    return res.status(401).json({ message: 'Missing authentication token' });
+                }
+
+                const venueHasOwnerUserColumn = await hasVenueOwnerUserColumn();
+                const resolvedOwnerUserSql = buildResolvedVenueOwnerUserSql('venues');
+                const ownerSelect = venueHasOwnerUserColumn
+                    ? `${resolvedOwnerUserSql} AS owner_user_id,`
+                    : `NULL::uuid AS owner_user_id,`;
+
+                const venueResult = await pool.query(
+                    `
+                        SELECT
+                            venues.id,
+                            venues.name,
+                            venues.title,
+                            ${ownerSelect}
+                            venues.submitted_by_user_id,
+                            venues.description,
+                            venues.phone,
+                            venues.metadata,
+                            venues.status::text AS status
+                        FROM venues
+                        WHERE venues.id = $1
+                        LIMIT 1
+                    `,
+                    [venueId]
+                );
+
+                if (!venueResult.rows.length) {
+                    return res.status(404).json({ message: 'Venue not found' });
+                }
+
+                const venue = venueResult.rows[0];
+                const ownerCandidateIds = extractVenueOwnerCandidateIds(venue);
+                const isOwner = Boolean(currentUserId && ownerCandidateIds.includes(String(currentUserId || '').trim()));
+
+                if (!isAdmin && !isOwner) {
+                    return res.status(403).json({ message: 'You do not have permission to edit this venue' });
+                }
+
+                if (String(venue.status || '').toLowerCase() !== 'approved') {
+                    return res.status(400).json({ message: 'Only approved venues can be updated directly' });
+                }
+
+                const body = req.body || {};
+                const existingMetadata = normalizeVenueMetadataObject(venue.metadata);
+                const incomingMetadata = body.metadata && typeof body.metadata === 'object' && !Array.isArray(body.metadata)
+                    ? body.metadata
+                    : {};
+                const allowedSimpleMetadata = pickVenueMetadataFields(incomingMetadata, VENUE_SIMPLE_METADATA_KEYS);
+                const normalizedMetadata = {
+                    ...existingMetadata,
+                    ...allowedSimpleMetadata
+                };
+
+                const hasPhoneField = Object.prototype.hasOwnProperty.call(body, 'phone');
+                const hasDescriptionField = Object.prototype.hasOwnProperty.call(body, 'description');
+                const normalizedPhone = hasPhoneField
+                    ? normalizeNullableText(body.phone)
+                    : normalizeNullableText(venue.phone);
+                const normalizedDescription = hasDescriptionField
+                    ? normalizeNullableText(body.description)
+                    : normalizeNullableText(venue.description);
+
+                if (!normalizedPhone) {
+                    return res.status(400).json({ message: 'Phone number is required' });
+                }
+
+                if (!/^\d{10,11}$/.test(normalizedPhone)) {
+                    return res.status(400).json({ message: 'Phone number must contain 10-11 digits' });
+                }
+
+                const normalizedMinPrice =
+                    normalizedMetadata.minPrice === undefined || normalizedMetadata.minPrice === null || normalizedMetadata.minPrice === ''
+                        ? null
+                        : Number(normalizedMetadata.minPrice);
+                const normalizedMaxPrice =
+                    normalizedMetadata.maxPrice === undefined || normalizedMetadata.maxPrice === null || normalizedMetadata.maxPrice === ''
+                        ? null
+                        : Number(normalizedMetadata.maxPrice);
+
+                if (normalizedMinPrice !== null && (!Number.isFinite(normalizedMinPrice) || normalizedMinPrice < 0)) {
+                    return res.status(400).json({ message: 'minPrice must be a non-negative number' });
+                }
+
+                if (normalizedMaxPrice !== null && (!Number.isFinite(normalizedMaxPrice) || normalizedMaxPrice < 0)) {
+                    return res.status(400).json({ message: 'maxPrice must be a non-negative number' });
+                }
+
+                if (normalizedMinPrice !== null || normalizedMaxPrice !== null) {
+                    if (normalizedMinPrice === null || normalizedMaxPrice === null) {
+                        return res.status(400).json({ message: 'Both minPrice and maxPrice are required when setting a price range' });
+                    }
+
+                    if (normalizedMinPrice >= normalizedMaxPrice) {
+                        return res.status(400).json({ message: 'maxPrice must be greater than minPrice' });
+                    }
+                }
+
+                normalizedMetadata.minPrice = normalizedMinPrice;
+                normalizedMetadata.maxPrice = normalizedMaxPrice;
+
+                const metadataStartTime = String(normalizedMetadata.startTime || '').trim();
+                const metadataEndTime = String(normalizedMetadata.endTime || '').trim();
+                const hasCanonicalWeeklySchedule =
+                    normalizedMetadata.weeklySchedule &&
+                    typeof normalizedMetadata.weeklySchedule === 'object' &&
+                    !Array.isArray(normalizedMetadata.weeklySchedule);
+                const hasLegacyWeeklyOpenHours =
+                    normalizedMetadata.weeklyOpenHours &&
+                    typeof normalizedMetadata.weeklyOpenHours === 'object' &&
+                    !Array.isArray(normalizedMetadata.weeklyOpenHours);
+                const hasGlobalTimeRange =
+                    /^\d{2}:\d{2}$/.test(metadataStartTime) &&
+                    /^\d{2}:\d{2}$/.test(metadataEndTime) &&
+                    metadataStartTime < metadataEndTime;
+
+                if (hasCanonicalWeeklySchedule || hasLegacyWeeklyOpenHours || hasGlobalTimeRange) {
+                    const weeklyScheduleCandidate = resolveWeeklyScheduleSource(normalizedMetadata, allowedSimpleMetadata);
+                    const normalizedScheduleResult = normalizeWeeklyScheduleInput(weeklyScheduleCandidate, {
+                        fallbackStart: metadataStartTime,
+                        fallbackEnd: metadataEndTime
+                    });
+
+                    if (normalizedScheduleResult.error) {
+                        return res.status(400).json({ message: normalizedScheduleResult.error });
+                    }
+
+                    normalizedMetadata.weeklySchedule = normalizedScheduleResult.value;
+                }
+
+                const requestedServiceIds = normalizeServiceIds(normalizedMetadata.selectedServices);
+                if (requestedServiceIds.length) {
+                    const servicesResult = await pool.query(
+                        `
+                            SELECT id, name
+                            FROM merchant_services
+                            WHERE id = ANY($1::int[])
+                              AND is_active = true
+                        `,
+                        [requestedServiceIds]
+                    );
+
+                    if (servicesResult.rows.length !== requestedServiceIds.length) {
+                        return res.status(400).json({ message: 'Selected services are invalid or inactive' });
+                    }
+
+                    const serviceNameMap = new Map(
+                        servicesResult.rows.map((service) => [Number(service.id), service.name])
+                    );
+
+                    normalizedMetadata.selectedServices = requestedServiceIds;
+                    normalizedMetadata.selectedServiceNames = requestedServiceIds
+                        .map((serviceId) => serviceNameMap.get(serviceId))
+                        .filter(Boolean);
+                } else {
+                    normalizedMetadata.selectedServices = [];
+                    normalizedMetadata.selectedServiceNames = [];
+                }
+
+                const normalizedContactEmail = normalizeNullableText(
+                    normalizedMetadata.contactEmail ?? req.authUser?.email
+                );
+
+                if (normalizedContactEmail && !isValidEmail(normalizedContactEmail)) {
+                    return res.status(400).json({ message: 'contactEmail is invalid' });
+                }
+
+                if (normalizedContactEmail) {
+                    normalizedMetadata.contactEmail = normalizedContactEmail;
+                } else {
+                    delete normalizedMetadata.contactEmail;
+                }
+
+                const previousSnapshot = {
+                    phone: normalizeNullableText(venue.phone),
+                    description: normalizeNullableText(venue.description),
+                    metadata: pickVenueMetadataFields(existingMetadata, VENUE_SIMPLE_METADATA_KEYS)
+                };
+                const nextSnapshot = {
+                    phone: normalizedPhone,
+                    description: normalizedDescription,
+                    metadata: pickVenueMetadataFields(normalizedMetadata, VENUE_SIMPLE_METADATA_KEYS)
+                };
+
+                if (areJsonValuesEqual(previousSnapshot, nextSnapshot)) {
+                    return res.status(400).json({ message: 'No changes detected. Please update at least one simple field.' });
+                }
+
+                const updateResult = await pool.query(
+                    `
+                        UPDATE venues
+                        SET
+                            description = $2,
+                            phone = $3,
+                            metadata = $4::jsonb,
+                            updated_at = now()
+                        WHERE id = $1
+                        RETURNING id, description, phone, metadata, updated_at
+                    `,
+                    [venueId, normalizedDescription, normalizedPhone, normalizedMetadata]
+                );
+
+                if (!updateResult.rows.length) {
+                    return res.status(404).json({ message: 'Venue not found' });
+                }
+
+                invalidateVenueCommunityBundleCacheByVenueId(venueId);
+                publicCompactApprovedVenuesCache = { timestamp: 0, data: null };
+                publicVenueDetailCache.delete(`public:${venueId}`);
+                publicVenueDetailCache.delete(`admin:${venueId}`);
+                publicVenueForDetailCache.delete(`public:${venueId}`);
+                publicVenueForDetailCache.delete(`admin:${venueId}`);
+
+                return res.json({
+                    message: 'Simple venue information updated successfully.',
+                    venue: updateResult.rows[0]
+                });
+            } catch (error) {
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
         async function deleteMerchantVenue(req, res) {
             const venueId = Number(req.params.venueId);
 
@@ -7861,6 +8189,99 @@ async function generateWardIdFromName(name) {
                 return res.json({
                     message: 'Venue deleted successfully',
                     deletedVenueId: venueId
+                });
+            } catch (error) {
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
+        async function toggleMerchantVenuePauseStatus(req, res) {
+            const venueId = Number(req.params.venueId);
+
+            if (!Number.isFinite(venueId)) {
+                return res.status(400).json({ message: 'Invalid venue id' });
+            }
+
+            try {
+                const currentUserId = await getAuthenticatedChatUserId(req);
+                const isAdmin = normalizeRole(req.authUser?.role) === 'admin';
+
+                if (!currentUserId && !isAdmin) {
+                    return res.status(401).json({ message: 'Missing authentication token' });
+                }
+
+                const venueHasOwnerUserColumn = await hasVenueOwnerUserColumn();
+                const resolvedOwnerUserSql = buildResolvedVenueOwnerUserSql('venues');
+                const ownerSelect = venueHasOwnerUserColumn
+                    ? `${resolvedOwnerUserSql} AS owner_user_id,`
+                    : `NULL::uuid AS owner_user_id,`;
+
+                const venueResult = await pool.query(
+                    `
+                        SELECT
+                            venues.id,
+                            venues.name,
+                            venues.title,
+                            ${ownerSelect}
+                            venues.submitted_by_user_id,
+                            venues.status::text AS status
+                        FROM venues
+                        WHERE venues.id = $1
+                        LIMIT 1
+                    `,
+                    [venueId]
+                );
+
+                if (!venueResult.rows.length) {
+                    return res.status(404).json({ message: 'Venue not found' });
+                }
+
+                const venue = venueResult.rows[0];
+                const ownerCandidateIds = extractVenueOwnerCandidateIds(venue);
+                const isOwner = Boolean(currentUserId && ownerCandidateIds.includes(String(currentUserId || '').trim()));
+
+                if (!isAdmin && !isOwner) {
+                    return res.status(403).json({ message: 'You do not have permission to update this venue' });
+                }
+
+                const currentStatus = String(venue.status || '').toLowerCase();
+                if (!['approved', 'hidden'].includes(currentStatus)) {
+                    return res.status(400).json({ message: 'Only approved or paused venues can be toggled' });
+                }
+
+                const nextStatus = currentStatus === 'hidden' ? 'approved' : 'hidden';
+
+                const updateResult = await pool.query(
+                    `
+                        UPDATE venues
+                        SET
+                            status = $2,
+                            updated_at = now()
+                        WHERE id = $1
+                        RETURNING id, status
+                    `,
+                    [venueId, nextStatus]
+                );
+
+                if (!updateResult.rows.length) {
+                    return res.status(404).json({ message: 'Venue not found' });
+                }
+
+                invalidateVenueCommunityBundleCacheByVenueId(venueId);
+                publicCompactApprovedVenuesCache = { timestamp: 0, data: null };
+                publicVenueDetailCache.delete(`public:${venueId}`);
+                publicVenueDetailCache.delete(`admin:${venueId}`);
+                publicVenueForDetailCache.delete(`public:${venueId}`);
+                publicVenueForDetailCache.delete(`admin:${venueId}`);
+
+                const isPaused = nextStatus === 'hidden';
+
+                return res.json({
+                    message: isPaused
+                        ? 'Venue has been paused and hidden from public pages.'
+                        : 'Venue is active again and visible on public pages.',
+                    venue: updateResult.rows[0],
+                    isPaused,
                 });
             } catch (error) {
                 return res.status(500).json({ message: error.message });
@@ -8075,6 +8496,26 @@ async function generateWardIdFromName(name) {
                     });
                 }
 
+                const currentVenueResult = await client.query(
+                    `
+                        SELECT metadata
+                        FROM venues
+                        WHERE id = $1
+                        LIMIT 1
+                    `,
+                    [targetVenueId]
+                );
+
+                if (!currentVenueResult.rows.length) {
+                    await client.query('ROLLBACK');
+                    return res.status(404).json({ message: 'Venue not found for this update request' });
+                }
+
+                const mergedReviewMetadata = mergeVenueReviewMetadata(
+                    currentVenueResult.rows[0].metadata,
+                    proposedSnapshot.metadata
+                );
+
                 const venueUpdateResult = await client.query(
                     `
                         UPDATE venues
@@ -8082,15 +8523,13 @@ async function generateWardIdFromName(name) {
                             name = $2,
                             title = $3,
                             address = $4,
-                            description = $5,
-                            phone = $6,
-                            latitude = $7,
-                            longitude = $8,
-                            ward_id = $9,
-                            category_id = $10,
-                            cover_image_url = $11,
-                            business_license_image_url = $12,
-                            metadata = $13::jsonb,
+                            latitude = $5,
+                            longitude = $6,
+                            ward_id = $7,
+                            category_id = $8,
+                            cover_image_url = $9,
+                            business_license_image_url = $10,
+                            metadata = $11::jsonb,
                             status = 'approved',
                             approved_at = now(),
                             rejected_at = NULL,
@@ -8104,15 +8543,13 @@ async function generateWardIdFromName(name) {
                         proposedSnapshot.name,
                         proposedSnapshot.title || proposedSnapshot.name,
                         proposedSnapshot.address,
-                        proposedSnapshot.description,
-                        proposedSnapshot.phone,
                         proposedSnapshot.latitude,
                         proposedSnapshot.longitude,
                         proposedSnapshot.wardId,
                         Number.isNaN(proposedSnapshot.categoryId) ? null : proposedSnapshot.categoryId,
                         proposedSnapshot.coverImageUrl,
                         proposedSnapshot.businessLicenseImageUrl,
-                        proposedSnapshot.metadata,
+                        mergedReviewMetadata,
                     ]
                 );
 
@@ -11467,6 +11904,8 @@ async function generateWardIdFromName(name) {
         registerVersionedRoute('delete', '/venues/:venueId/reviews/:reviewId/replies/:replyId', authenticateOptional, requireAuth, deleteVenueReviewReply);
         registerVersionedRoute('delete', '/venues/:venueId/reviews/:reviewId', authenticateOptional, requireAuth, deleteVenueReview);
         registerVersionedRoute('get', '/venues/:venueId/edit-draft', authenticateRequest, checkUserStatus, getMerchantVenueEditDraft);
+        registerVersionedRoute('patch', '/venues/:venueId/simple-update', authenticateRequest, checkUserStatus, updateMerchantVenueSimpleInfo);
+        registerVersionedRoute('patch', '/venues/:venueId/pause-toggle', authenticateRequest, checkUserStatus, toggleMerchantVenuePauseStatus);
         registerVersionedRoute('post', '/venues/:venueId/update-request', authenticateRequest, checkUserStatus, submitMerchantVenueUpdateRequest);
         registerVersionedRoute('delete', '/venues/:venueId', authenticateRequest, checkUserStatus, deleteMerchantVenue);
         registerVersionedRoute('post', '/venues', authenticateOptionalLenient, createVenueSubmission);
@@ -12460,6 +12899,7 @@ async function generateWardIdFromName(name) {
                     : requiredRefineDimensionsFromConstraints;
                 const requiresConcurrentDimensionMatch = requiredRefineDimensions.length >= 2;
                 const semanticScoreThreshold = requiresConcurrentDimensionMatch ? 0.62 : 0.48;
+                const hasDistanceConstraint = Number.isFinite(refineConstraints.maxDistanceKm);
 
                 if (!semanticRefine.understood) {
                     refinedVenues = [...heuristicRefinedVenues];
@@ -12473,6 +12913,10 @@ async function generateWardIdFromName(name) {
 
                             const semanticScore = Number(semanticMatch.score || 0);
                             if (semanticScore < semanticScoreThreshold) {
+                                return false;
+                            }
+
+                            if (hasDistanceConstraint && !venue.passesRefine) {
                                 return false;
                             }
 
@@ -12527,10 +12971,10 @@ async function generateWardIdFromName(name) {
 
                 const fallbackConstraintSummary = buildRefineConstraintsSummary(refineConstraints);
                 const hasConstraintSignals = hasStructuredRefineSignals(refineConstraints);
-                const semanticSummary = String(semanticRefine.summary || '').trim();
-                const refineSummary = semanticSummary
-                    || (semanticRefine.understood
-                        ? (hasConstraintSignals ? fallbackConstraintSummary : 'Semantic intent understood. Strict sentence-level filtering applied.')
+                const refineSummary = hasConstraintSignals
+                    ? fallbackConstraintSummary
+                    : (semanticRefine.understood
+                        ? 'Semantic intent understood. Applied sentence-level matching without hard numeric constraints.'
                         : (heuristicRefinedVenues.length
                             ? 'Semantic parser uncertain. Returned broader heuristic refine results from approved venues.'
                             : 'Unable to confidently understand this refine sentence. Please rewrite with clearer details.'));

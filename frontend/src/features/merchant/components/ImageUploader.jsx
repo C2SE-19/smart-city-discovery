@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import '../styles/ImageUploader.css';
 
-function ImageUploader({ maxImages = 6, onImagesChange }) {
+function ImageUploader({ maxImages = 6, onImagesChange, allowSetCover = true }) {
   const [images, setImages] = useState([]);
   const [previews, setPreviews] = useState([]);
 
@@ -129,6 +129,8 @@ function ImageUploader({ maxImages = 6, onImagesChange }) {
                 <div className="preview-actions">
                   {index === 0 ? (
                     <span className="preview-cover-label">Cover image</span>
+                  ) : !allowSetCover ? (
+                    <span className="preview-cover-label preview-cover-label-locked">Cover locked</span>
                   ) : (
                     <button
                       type="button"
