@@ -1,6 +1,7 @@
 ﻿import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { sendAiChatMessage } from '../../services/api/chatBotApi';
 import './ChatWidget.css';
 
 const CHAT_HISTORY_KEY = 'smartcity_chat_history';
@@ -111,6 +112,7 @@ const ChatWidget = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState([createDefaultGreeting()]);
   const [venueResults, setVenueResults] = useState([]);
+  const [aiSuggestedNames, setAiSuggestedNames] = useState([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [position, setPosition] = useState(getDefaultPosition);
@@ -273,28 +275,20 @@ const ChatWidget = () => {
       timestamp: new Date(),
     };
 
+    const chatHistory = messages
+      .slice(-6)
+      .map((item) => ({
+        role: item.sender === 'user' ? 'user' : 'assistant',
+        content: item.text
+      }));
+
     setMessages((prev) => [...prev, userMessage]);
     setVenueResults([]);
     setInputValue('');
     setIsLoading(true);
 
     try {
-      const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
-      const response = await fetch(`${apiBaseUrl.replace(/\/+$/, '')}/chat`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          message: trimmedInput,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to get response');
-      }
+      const data = await sendAiChatMessage(trimmedInput, chatHistory);
 
       const botMessage = {
         id: messages.length + 2,
@@ -305,6 +299,7 @@ const ChatWidget = () => {
 
       setMessages((prev) => [...prev, botMessage]);
       setVenueResults(Array.isArray(data.venueResults) ? data.venueResults : []);
+      setAiSuggestedNames(Array.isArray(data.aiSuggestedNames) ? data.aiSuggestedNames : []);
     } catch (error) {
       console.error('Chat error:', error);
 
@@ -400,25 +395,31 @@ const ChatWidget = () => {
             <div className="chat-venue-results fade-in">
               <div className="chat-venue-results-title">Gợi ý quán liên quan</div>
 
-              {venueResults.map((venue) => (
-                <button
-                  key={venue.id}
-                  className="chat-venue-card"
-                  type="button"
-                  onClick={() => {
-                    setIsOpen(false);
-                    navigate(`/venues/${venue.id}`);
-                  }}
-                >
-                  <div className="chat-venue-card-header">
-                    <strong>{venue.name}</strong>
-                    <span>{venue.categoryName}</span>
-                  </div>
-                  <div className="chat-venue-card-body">
-                    <p>{venue.address}</p>
-                  </div>
-                </button>
-              ))}
+              {venueResults.map((venue) => {
+                const isSuggested = aiSuggestedNames && aiSuggestedNames.length
+                  ? aiSuggestedNames.some((n) => n && n.toLowerCase().trim() === (venue.name || '').toLowerCase().trim())
+                  : false;
+
+                return (
+                  <button
+                    key={venue.id}
+                    className={`chat-venue-card ${isSuggested ? 'is-suggested' : ''}`}
+                    type="button"
+                    onClick={() => {
+                      setIsOpen(false);
+                      navigate(`/venues/${venue.id}`);
+                    }}
+                  >
+                    <div className="chat-venue-card-header">
+                      <strong>{venue.name}</strong>
+                      <span>{venue.categoryName}</span>
+                    </div>
+                    <div className="chat-venue-card-body">
+                      <p>{venue.address}</p>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           )}
 
