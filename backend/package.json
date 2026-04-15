@@ -8,7 +8,8 @@
     "dev": "nodemon server.js",
     "backup:wards": "node scripts/backup-wards.js",
     "restore:wards": "node scripts/restore-wards.js",
-    "restore:wards:latest": "node scripts/restore-wards.js --latest --mode merge"
+    "restore:wards:latest": "node scripts/restore-wards.js --latest --mode merge",
+    "seed:venues:random": "node scripts/seed-random-venues.js"
   },
   "keywords": [],
   "author": "Smart City Team",
