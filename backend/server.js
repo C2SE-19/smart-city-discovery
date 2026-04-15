@@ -5236,6 +5236,34 @@ async function generateWardIdFromName(name) {
             }
         }
 
+        async function listCitiesWithStats(req, res) {
+            try {
+                // Lấy danh sách phường/thành phố kèm số lượng địa điểm
+                const result = await pool.query(`
+                    SELECT 
+                        w.ward_id,
+                        w.name as ward_name,
+                        COUNT(v.id) as venue_count
+                    FROM wards w
+                    LEFT JOIN venues v ON w.ward_id = v.ward_id AND v.status = 'approved'
+                    GROUP BY w.ward_id, w.name
+                    ORDER BY w.name ASC
+                `);
+
+                // Format dữ liệu
+                const cities = result.rows.map(row => ({
+                    id: row.ward_id,
+                    name: row.ward_name,
+                    count: Number(row.venue_count) || 0
+                }));
+
+                return res.json(cities);
+            } catch (err) {
+                console.error('listCitiesWithStats error:', err);
+                return res.status(500).json({ error: err.message });
+            }
+        }
+
         async function detectPublicWard(req, res) {
             const latitude = Number(req.body?.latitude);
             const longitude = Number(req.body?.longitude);
@@ -11446,6 +11474,7 @@ async function generateWardIdFromName(name) {
         registerVersionedRoute('delete', '/chat/threads/:threadId', authenticateRequest, checkUserStatus, deleteChatThread);
 
         registerVersionedRoute('get', '/wards', listPublicWards);
+        registerVersionedRoute('get', '/cities/stats', listCitiesWithStats);
         registerVersionedRoute('post', '/gis/detect-ward', detectPublicWard);
         registerVersionedRoute('get', '/place-categories', listPublicPlaceCategories);
         registerVersionedRoute('get', '/merchant-services', listPublicMerchantServices);
