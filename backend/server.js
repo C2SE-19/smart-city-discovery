@@ -13020,7 +13020,14 @@ async function generateWardIdFromName(name) {
             }
         }
 
-        function buildVisionSearchTerms(label, keywords = []) {
+        function buildVisionSearchTerms(label, keywords = [], target = 'any') {
+            const normalizedTarget = normalizeVisionText(target);
+            const genericTerms = new Set([
+                'mon', 'an', 'am', 'thuc', 'food', 'restaurant', 'quan', 'nha', 'hang',
+                'place', 'dia', 'diem', 'du', 'lich', 'landmark', 'sightseeing', 'tourist',
+                'cau', 'bridge'
+            ]);
+            const preserveBridgeTerms = normalizedTarget === 'place';
             const seen = new Set();
             const merged = [label, ...keywords]
                 .map((item) => normalizeVisionText(item))
@@ -13034,8 +13041,29 @@ async function generateWardIdFromName(name) {
                 if (!compact || seen.has(compact)) {
                     continue;
                 }
+
+                const compactNoAccent = normalizeVisionNoAccent(compact);
+                const compactTokens = compactNoAccent.split(/[^a-z0-9]+/).filter(Boolean);
+                const isGenericOnly = compactTokens.length > 0 && compactTokens.every((token) => {
+                    if (preserveBridgeTerms && (token === 'cau' || token === 'bridge')) {
+                        return false;
+                    }
+
+                    return genericTerms.has(token);
+                });
+
+                if (isGenericOnly) {
+                    continue;
+                }
+
                 seen.add(compact);
                 results.push(compact);
+
+                if (compactNoAccent && compactNoAccent !== compact && !seen.has(compactNoAccent)) {
+                    seen.add(compactNoAccent);
+                    results.push(compactNoAccent);
+                }
+
                 if (results.length >= 8) {
                     break;
                 }
@@ -13098,6 +13126,19 @@ async function generateWardIdFromName(name) {
             });
 
             return result;
+        }
+
+        function tokenizeVisionValue(value) {
+            const stopwords = new Set([
+                'la', 'va', 'the', 'a', 'an', 'of', 'for', 'and',
+                'quan', 'nha', 'hang', 'restaurant', 'food', 'place', 'dia', 'diem',
+                'landmark', 'bridge', 'cau', 'du', 'lich', 'tourist'
+            ]);
+
+            return normalizeVisionNoAccent(value)
+                .split(/[^a-z0-9]+/)
+                .map((token) => token.trim())
+                .filter((token) => token.length >= 2 && !stopwords.has(token));
         }
 
         const CANONICAL_FOOD_RULES = [
@@ -13404,6 +13445,33 @@ async function generateWardIdFromName(name) {
             return /(\bcau\b|\bbridge\b|song han|han river|day vang|landmark)/.test(normalized);
         }
 
+        function hasBridgeEvidenceForRule(rule, values = []) {
+            if (!rule || !Array.isArray(values) || !values.length) {
+                return false;
+            }
+
+            const normalizedHaystack = normalizeVisionNoAccent(values.join(' '));
+            if (!normalizedHaystack) {
+                return false;
+            }
+
+            if (rule.pattern?.test(normalizedHaystack)) {
+                return true;
+            }
+
+            const stopTokens = new Set(['cau', 'bridge', 'walking', 'golden', 'love']);
+            const canonicalTokens = normalizeVisionNoAccent(rule.canonical || '')
+                .split(/\s+/)
+                .map((token) => token.trim())
+                .filter((token) => token.length >= 3 && !stopTokens.has(token));
+
+            if (!canonicalTokens.length) {
+                return false;
+            }
+
+            return canonicalTokens.some((token) => normalizedHaystack.includes(token));
+        }
+
         async function verifyDanangBridgeFromImage(imageDataUrl, visionPayload = {}) {
             const openAiApiKey = String(process.env.OPENAI_API_KEY || '').trim();
 
@@ -13543,21 +13611,40 @@ async function generateWardIdFromName(name) {
 
             if (normalizedLabel) {
                 if (nameText === normalizedLabel) {
-                    score += 52;
+                    score += 78;
                 } else if (nameText.includes(normalizedLabel)) {
-                    score += 40;
+                    score += 55;
                 } else if (searchable.includes(normalizedLabel)) {
-                    score += 20;
+                    score += 24;
                 }
             }
 
             normalizedTerms.forEach((term) => {
                 if (nameText.includes(term)) {
-                    score += 16;
+                    score += 20;
                 } else if (searchable.includes(term)) {
-                    score += 8;
+                    score += 12;
                 }
             });
+
+            const queryTokens = uniqueVisionValues([primaryLabel, ...terms])
+                .flatMap((value) => tokenizeVisionValue(value));
+            const venueTokens = new Set(tokenizeVisionValue(searchable));
+            const overlapCount = queryTokens.reduce((total, token) => total + (venueTokens.has(token) ? 1 : 0), 0);
+            const overlapRatio = queryTokens.length
+                ? overlapCount / Math.max(1, queryTokens.length)
+                : 0;
+
+            if (overlapCount > 0) {
+                score += overlapCount * 10;
+                score += overlapRatio * 22;
+            }
+
+            const hasSpecificPrimaryLabel = primaryLabel && !isGenericVisionLabel(primaryLabel);
+            if (hasSpecificPrimaryLabel && overlapCount === 0) {
+                // Penalize popularity-only matches when the image label is specific.
+                score -= 26;
+            }
 
             const normalizedTarget = normalizeVisionText(target);
             const normalizedCategory = normalizeVisionNoAccent(venue?.category_name || '');
@@ -13674,7 +13761,7 @@ async function generateWardIdFromName(name) {
 
             whereConditions.push(`(${termClauses.join(' OR ')})`);
 
-            values.push(Math.max(1, Math.min(Number(limit) || 24, 30)));
+            values.push(Math.max(1, Math.min(Number(limit) || 24, 50)));
             const limitIndex = values.length;
 
             const query = `
@@ -13717,6 +13804,136 @@ async function generateWardIdFromName(name) {
                 }))
                 .sort((a, b) => b._visionScore - a._visionScore)
                 .map(({ _visionScore, ...row }) => row);
+        }
+
+        async function rerankVisionVenueMatchesWithAI(vision, terms = [], target = 'any', candidates = []) {
+            const openAiApiKey = String(process.env.OPENAI_API_KEY || '').trim();
+
+            if (!openAiApiKey || !Array.isArray(candidates) || !candidates.length) {
+                return null;
+            }
+
+            const model =
+                String(process.env.OPENAI_RERANK_MODEL || '').trim()
+                || String(process.env.OPENAI_CHAT_MODEL || '').trim()
+                || 'gpt-4o-mini';
+
+            const shortlist = candidates.slice(0, 20).map((venue) => ({
+                id: String(venue.id),
+                name: String(venue.name || venue.title || '').trim(),
+                category: String(venue.category_name || '').trim(),
+                ward: String(venue.ward_name || '').trim(),
+                address: String(venue.address || '').trim(),
+                description: String(venue.description || '').slice(0, 220).trim(),
+                averageRating: Number(venue.average_rating || 0),
+                totalReviews: Number(venue.total_reviews || 0)
+            }));
+
+            const systemPrompt = [
+                'Bạn là AI rerank kết quả tìm kiếm địa điểm từ ảnh.',
+                'Nhiệm vụ: xếp hạng các venue theo độ khớp với ảnh và hint.',
+                'Ưu tiên độ liên quan ngữ nghĩa + từ khóa cụ thể hơn độ nổi tiếng.',
+                'Không đoán bừa: nếu venue không đủ liên quan thì score thấp.',
+                'Chỉ trả JSON object hợp lệ.',
+                'Schema JSON:',
+                '{"ranked":[{"id":"string","score":0,"reason":"string"}]}'
+            ].join(' ');
+
+            try {
+                const response = await axios.post(
+                    'https://api.openai.com/v1/chat/completions',
+                    {
+                        model,
+                        temperature: 0,
+                        max_tokens: 550,
+                        response_format: { type: 'json_object' },
+                        messages: [
+                            { role: 'system', content: systemPrompt },
+                            {
+                                role: 'user',
+                                content: JSON.stringify({
+                                    target: normalizeVisionText(target),
+                                    detectedLabel: String(vision?.label || '').trim(),
+                                    alternativeLabels: Array.isArray(vision?.alternativeLabels) ? vision.alternativeLabels : [],
+                                    keywords: Array.isArray(vision?.keywords) ? vision.keywords : [],
+                                    visualClues: Array.isArray(vision?.visualClues) ? vision.visualClues : [],
+                                    searchTerms: Array.isArray(terms) ? terms : [],
+                                    candidates: shortlist
+                                })
+                            }
+                        ]
+                    },
+                    {
+                        headers: {
+                            Authorization: `Bearer ${openAiApiKey}`,
+                            'Content-Type': 'application/json'
+                        },
+                        timeout: 30000
+                    }
+                );
+
+                const rawContent = response?.data?.choices?.[0]?.message?.content || '{}';
+                const parsed = safeParseJsonObject(rawContent);
+                const ranked = Array.isArray(parsed.ranked) ? parsed.ranked : [];
+                if (!ranked.length) {
+                    return null;
+                }
+
+                const allowedIds = new Set(shortlist.map((item) => String(item.id)));
+                const rankMap = new Map();
+
+                ranked.forEach((item) => {
+                    const id = String(item?.id || '').trim();
+                    if (!id || !allowedIds.has(id) || rankMap.has(id)) {
+                        return;
+                    }
+
+                    const score = Number(item?.score || 0);
+                    rankMap.set(id, Number.isFinite(score) ? score : 0);
+                });
+
+                if (!rankMap.size) {
+                    return null;
+                }
+
+                const fallbackOrder = new Map(candidates.map((item, index) => [String(item.id), index]));
+                const reranked = [...candidates].sort((a, b) => {
+                    const idA = String(a.id);
+                    const idB = String(b.id);
+                    const aiScoreA = rankMap.get(idA);
+                    const aiScoreB = rankMap.get(idB);
+                    const hasA = Number.isFinite(aiScoreA);
+                    const hasB = Number.isFinite(aiScoreB);
+
+                    if (hasA && hasB) {
+                        if (aiScoreB !== aiScoreA) {
+                            return aiScoreB - aiScoreA;
+                        }
+
+                        return (fallbackOrder.get(idA) || 0) - (fallbackOrder.get(idB) || 0);
+                    }
+
+                    if (hasA && !hasB) {
+                        return -1;
+                    }
+
+                    if (!hasA && hasB) {
+                        return 1;
+                    }
+
+                    return (fallbackOrder.get(idA) || 0) - (fallbackOrder.get(idB) || 0);
+                });
+
+                return {
+                    applied: true,
+                    model,
+                    rankMap,
+                    results: reranked
+                };
+            } catch (error) {
+                console.error('Vision rerank error:', error?.response?.data || error?.message || error);
+                return null;
+            }
         }
 
         async function detectImageSearchPayload(imageDataUrl, target) {
@@ -13836,7 +14053,7 @@ async function generateWardIdFromName(name) {
                     ...(vision.keywords || []),
                     ...(vision.visualClues || [])
                 ];
-                const terms = buildVisionSearchTerms(vision.label, visionHints);
+                const terms = buildVisionSearchTerms(vision.label, visionHints, target);
 
                 const canonicalFoodRule =
                     target === 'food'
@@ -13853,7 +14070,30 @@ async function generateWardIdFromName(name) {
                         ? await verifyDanangBridgeFromImage(imageDataUrl, vision)
                         : null;
 
-                if (bridgeVerification?.canonicalRule && Number(bridgeVerification.confidence || 0) >= 0.55) {
+                const bridgeVerificationEvidenceValues = [
+                    vision.label,
+                    ...(vision.alternativeLabels || []),
+                    ...(vision.keywords || []),
+                    ...(vision.visualClues || []),
+                    bridgeVerification?.reason,
+                    ...(bridgeVerification?.alternatives || [])
+                ].filter(Boolean);
+
+                const bridgeVerificationConfidence = Number(bridgeVerification?.confidence || 0);
+                const bridgeVerificationHasEvidence = bridgeVerification?.canonicalRule
+                    ? hasBridgeEvidenceForRule(bridgeVerification.canonicalRule, bridgeVerificationEvidenceValues)
+                    : false;
+
+                const shouldApplyBridgeVerification =
+                    !!bridgeVerification?.canonicalRule
+                    && bridgeVerificationConfidence >= 0.72
+                    && bridgeVerificationHasEvidence
+                    && (
+                        !canonicalPlaceRule
+                        || canonicalPlaceRule.canonical === bridgeVerification.canonicalRule.canonical
+                    );
+
+                if (shouldApplyBridgeVerification) {
                     canonicalPlaceRule = bridgeVerification.canonicalRule;
                 }
 
@@ -13863,7 +14103,14 @@ async function generateWardIdFromName(name) {
                     ? uniqueVisionValues(canonicalRule.variants)
                     : terms;
 
-                const venueResults = await queryVisionVenueMatches(effectiveTerms, target, 24, vision.label);
+                const lexicalVenueResults = await queryVisionVenueMatches(effectiveTerms, target, 40, vision.label);
+                const rerankResult = await rerankVisionVenueMatchesWithAI(
+                    vision,
+                    effectiveTerms,
+                    target,
+                    lexicalVenueResults
+                );
+                const venueResults = (rerankResult?.results || lexicalVenueResults).slice(0, 24);
 
                 const hasGenericLabel = isGenericVisionLabel(vision.label);
                 const bestGuessLabel = uniqueVisionValues([
@@ -13891,6 +14138,12 @@ async function generateWardIdFromName(name) {
                             confidence: bridgeVerification.confidence,
                             reason: bridgeVerification.reason,
                             alternatives: bridgeVerification.alternatives
+                        }
+                        : null,
+                    aiRerank: rerankResult
+                        ? {
+                            applied: true,
+                            model: rerankResult.model
                         }
                         : null,
                     searchTerms: effectiveTerms,

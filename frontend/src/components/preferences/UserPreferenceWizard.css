@@ -2,8 +2,8 @@
   position: fixed;
   inset: 0;
   z-index: 2500;
-  background: rgba(21, 17, 9, 0.48);
-  backdrop-filter: blur(3px);
+  background: transparent;
+  backdrop-filter: none;
   display: flex;
   align-items: center;
   justify-content: center;
