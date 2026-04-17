@@ -1,0 +1,397 @@
+.app-onboarding-tooltip {
+  position: relative;
+  border: 1px solid rgba(220, 177, 110, 0.28);
+  border-radius: 24px !important;
+  background:
+    radial-gradient(circle at top right, rgba(255, 193, 122, 0.18), transparent 35%),
+    linear-gradient(180deg, #fffaf3 0%, #fff4e8 100%);
+  box-shadow: 0 28px 60px rgba(87, 57, 20, 0.18);
+  animation: appOnboardingTooltipIn 280ms ease;
+  overflow: hidden;
+  min-width: 300px;
+  max-width: 380px;
+  padding-bottom: 26px;
+}
+
+.app-onboarding-tooltip--compact {
+  min-width: 260px;
+  max-width: 320px;
+}
+
+.app-onboarding-tooltip--map-overlay {
+  min-width: min(360px, calc(100vw - 32px));
+  max-width: min(420px, calc(100vw - 32px));
+}
+
+.app-onboarding-tooltip .introjs-tooltiptext {
+  position: relative;
+  z-index: 1;
+}
+
+.app-onboarding-tooltip .introjs-tooltip-header {
+  position: relative !important;
+  padding-right: 74px;
+  padding-top: 10px;
+  z-index: 2;
+}
+
+.app-onboarding-tooltip .introjs-tooltip-title {
+  margin: 0;
+  color: #2c2115;
+  font-family: var(--font-display, inherit);
+  font-size: 1.35rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.app-onboarding-tooltip .introjs-tooltiptext {
+  padding-top: 18px;
+  color: #5e4a36;
+  font-size: 0.95rem;
+  line-height: 1.65;
+}
+
+.app-onboarding-tooltip .introjs-tooltipbuttons {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  border-top: 1px solid rgba(220, 177, 110, 0.25);
+  padding: 16px 18px 18px;
+  flex-wrap: nowrap;
+}
+
+.app-onboarding-tooltip .introjs-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 108px;
+  height: 46px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border-width: 1px;
+  border-style: solid;
+  text-shadow: none;
+  font-weight: 700;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    background-color 180ms ease,
+    color 180ms ease,
+    border-color 180ms ease;
+}
+
+.app-onboarding-tooltip .introjs-tooltipbuttons .introjs-skipbutton,
+.app-onboarding-tooltip .introjs-tooltipbuttons .introjs-nextbutton,
+.app-onboarding-tooltip .introjs-tooltipbuttons .introjs-donebutton {
+  position: static !important;
+  float: none !important;
+  margin: 0 !important;
+  text-decoration: none !important;
+  top: auto !important;
+  right: auto !important;
+  left: auto !important;
+}
+
+.app-onboarding-tooltip .introjs-nextbutton,
+.app-onboarding-tooltip .introjs-donebutton {
+  border: 1px solid #ef8738;
+  background: linear-gradient(135deg, #f8a14d 0%, #ee7d31 100%);
+  color: #fff;
+  box-shadow: 0 14px 28px rgba(238, 125, 49, 0.28);
+}
+
+.app-onboarding-tooltip .introjs-nextbutton:hover,
+.app-onboarding-tooltip .introjs-donebutton:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 18px 32px rgba(238, 125, 49, 0.34);
+}
+
+.app-onboarding-tooltip .introjs-skipbutton {
+  border: 1px solid rgba(205, 150, 84, 0.35);
+  background: #fff;
+  color: #8b6338;
+  box-shadow: none;
+  min-width: 108px;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  text-align: center !important;
+  flex: 0 0 auto;
+  line-height: 1;
+}
+
+.app-onboarding-tooltip .introjs-nextbutton,
+.app-onboarding-tooltip .introjs-donebutton {
+  min-width: 108px;
+  line-height: 1;
+}
+
+.app-onboarding-tooltip .introjs-skipbutton:hover {
+  background: #fff4e6;
+  color: #6e4d29;
+  transform: translateY(-1px);
+}
+
+.app-onboarding-tooltip .introjs-prevbutton {
+  display: inline-flex !important;
+  position: absolute !important;
+  top: 10px !important;
+  right: 18px !important;
+  min-width: 42px;
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  border: 1px solid rgba(205, 150, 84, 0.35);
+  background: #fff;
+  color: #8b6338;
+  box-shadow: none;
+  border-radius: 999px;
+  font-size: 1.05rem;
+  font-weight: 800;
+  flex: 0 0 46px;
+  z-index: 3;
+}
+
+.app-onboarding-tooltip .introjs-prevbutton:hover {
+  background: #fff4e6;
+  color: #6e4d29;
+  transform: translateY(-1px);
+}
+
+.app-onboarding-highlight {
+  border-radius: 20px !important;
+  background: rgba(255, 251, 245, 0.16) !important;
+  box-shadow:
+    0 0 0 4px rgba(255, 206, 141, 0.96),
+    0 0 0 10px rgba(255, 237, 213, 0.84),
+    0 0 40px rgba(255, 196, 118, 0.32) !important;
+  animation: appOnboardingPulse 1.8s ease-in-out infinite;
+}
+
+.introjs-helperLayer {
+  border-radius: 20px !important;
+  transition: all 220ms ease !important;
+  background: rgba(255, 250, 241, 0.14) !important;
+  box-shadow:
+    0 0 0 4px rgba(255, 206, 141, 0.96),
+    0 0 0 10px rgba(255, 237, 213, 0.82),
+    0 0 0 9999px rgba(26, 18, 10, 0.56) !important;
+}
+
+.introjs-overlay {
+  backdrop-filter: blur(5px) saturate(0.8);
+  background: rgba(23, 16, 10, 0.28) !important;
+}
+
+.introjs-tooltipReferenceLayer {
+  transition: all 220ms ease !important;
+}
+
+body.app-onboarding-confirm-open .introjs-tooltipReferenceLayer {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  visibility: hidden !important;
+}
+
+body.app-onboarding-confirm-open .introjs-helperLayer {
+  opacity: 0.3 !important;
+}
+
+.app-onboarding-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100000000 !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background:
+    radial-gradient(circle at top, rgba(255, 197, 126, 0.18), transparent 35%),
+    rgba(39, 27, 16, 0.44);
+  backdrop-filter: blur(8px);
+  animation: appOnboardingBackdropIn 220ms ease;
+  pointer-events: auto;
+}
+
+.app-onboarding-modal {
+  width: min(460px, 100%);
+  padding: 28px 28px 24px;
+  border: 1px solid rgba(223, 182, 122, 0.28);
+  border-radius: 28px;
+  background:
+    radial-gradient(circle at top right, rgba(255, 196, 118, 0.18), transparent 38%),
+    linear-gradient(180deg, #fffaf4 0%, #fff5eb 100%);
+  box-shadow: 0 32px 70px rgba(50, 32, 12, 0.24);
+  animation: appOnboardingModalIn 260ms cubic-bezier(0.22, 1, 0.36, 1);
+  pointer-events: auto;
+}
+
+.app-onboarding-modal-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: rgba(245, 159, 70, 0.14);
+  color: #9a6124;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.app-onboarding-modal h3 {
+  margin: 0 0 10px;
+  color: #2b2015;
+  font-size: 1.6rem;
+  line-height: 1.2;
+}
+
+.app-onboarding-modal p {
+  margin: 0;
+  color: #695440;
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
+.app-onboarding-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 26px;
+}
+
+.app-onboarding-modal-button {
+  min-width: 120px;
+  padding: 12px 18px;
+  border: 0;
+  border-radius: 999px;
+  font-size: 0.96rem;
+  font-weight: 700;
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    background-color 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease;
+}
+
+.app-onboarding-modal-button.is-secondary {
+  border: 1px solid rgba(205, 150, 84, 0.32);
+  background: #fff;
+  color: #73512d;
+}
+
+.app-onboarding-modal-button.is-secondary:hover {
+  background: #fff3e2;
+  transform: translateY(-1px);
+}
+
+.app-onboarding-modal-button.is-primary {
+  border: 1px solid #ef8738;
+  background: linear-gradient(135deg, #f8a14d 0%, #ee7d31 100%);
+  color: #fff;
+  box-shadow: 0 14px 28px rgba(238, 125, 49, 0.28);
+}
+
+.app-onboarding-modal-button.is-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 18px 34px rgba(238, 125, 49, 0.34);
+}
+
+.app-onboarding-modal-button:disabled,
+.app-onboarding-tooltip .introjs-button:disabled {
+  opacity: 0.62;
+  cursor: wait;
+  transform: none;
+  box-shadow: none;
+}
+
+@keyframes appOnboardingTooltipIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes appOnboardingPulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 4px rgba(255, 206, 141, 0.96),
+      0 0 0 10px rgba(255, 237, 213, 0.84),
+      0 0 40px rgba(255, 196, 118, 0.32) !important;
+  }
+  50% {
+    box-shadow:
+      0 0 0 6px rgba(255, 206, 141, 1),
+      0 0 0 14px rgba(255, 237, 213, 0.7),
+      0 0 52px rgba(255, 196, 118, 0.4) !important;
+  }
+}
+
+@keyframes appOnboardingBackdropIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes appOnboardingModalIn {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (max-width: 640px) {
+  .app-onboarding-tooltip {
+    min-width: 0;
+    max-width: min(92vw, 360px);
+    padding-bottom: 24px;
+  }
+
+  .app-onboarding-tooltip .introjs-tooltipbuttons {
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: stretch;
+  }
+
+  .app-onboarding-tooltip .introjs-button,
+  .app-onboarding-modal-button {
+    width: 100%;
+    text-align: center;
+  }
+
+  .app-onboarding-tooltip .introjs-skipbutton {
+    position: static !important;
+    margin: 0 !important;
+  }
+
+  .app-onboarding-modal {
+    padding: 22px 20px 20px;
+    border-radius: 24px;
+  }
+
+  .app-onboarding-modal-actions {
+    flex-direction: column-reverse;
+  }
+
+  .app-onboarding-modal h3 {
+    font-size: 1.35rem;
+  }
+}

@@ -1896,7 +1896,7 @@ function CityMapPage() {
 
   return (
     <div className="city-map-fullscreen-page">
-      <div className="city-map-fullscreen-canvas">
+      <div className="city-map-fullscreen-canvas" data-onboarding="city-map-canvas">
         <MapContainer center={safeMapCenter} zoom={mapZoom} preferCanvas style={{ height: '100%', width: '100%' }}>
           <MapViewportController center={safeMapCenter} zoom={mapZoom} />
 
@@ -2032,7 +2032,7 @@ function CityMapPage() {
 
         </MapContainer>
 
-        <header className="city-map-top-bar">
+        <header className="city-map-top-bar" data-onboarding="city-map-header">
           <button type="button" className="city-map-back-btn" onClick={() => navigate(APP_ROUTES.HOME)}>
             {t.mapPage?.backToHome || 'Về trang chủ'}
           </button>
@@ -2063,6 +2063,7 @@ function CityMapPage() {
             className={`city-map-filter-panel ${selectedVenue ? 'has-detail-sheet' : ''}`.trim()}
             role="region"
             aria-label="Map filters"
+            data-onboarding="city-map-filters"
           >
             <header>
               <h2>Map filters</h2>
@@ -2160,7 +2161,7 @@ function CityMapPage() {
           </section>
         ) : null}
 
-        <div className="city-map-floating-stats">
+        <div className="city-map-floating-stats" data-onboarding="city-map-stats">
           <span>{wards.length} wards</span>
           <span>{displayedVenues.length} places</span>
           <span>{currentPosition ? 'Current location on map' : 'Location unavailable'}</span>
