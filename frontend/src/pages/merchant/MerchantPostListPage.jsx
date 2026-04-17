@@ -390,7 +390,7 @@ function MerchantPostListPage() {
   return (
   <div className={`merchant-posts-wrapper theme-${theme}`}>
       {/* Sidebar */}
-      <aside className="merchant-sidebar">
+      <aside className="merchant-sidebar" data-onboarding="merchant-sidebar">
         <div className="merchant-sidebar-header">
           <div className="merchant-user-info">
             <div className="merchant-user-avatar">{getUserInitial()}</div>
@@ -405,12 +405,13 @@ function MerchantPostListPage() {
         <button 
           className="merchant-publish-btn"
           onClick={handlePublishClick}
+          data-onboarding="merchant-publish-button"
         >
           {t.merchant.publish}
         </button>
 
         {/* Menu Items */}
-        <nav className="merchant-menu">
+        <nav className="merchant-menu" data-onboarding="merchant-menu">
           {MenuItems.map(item => (
             <button
               key={item.id}
@@ -462,7 +463,7 @@ function MerchantPostListPage() {
         </div>
 
         {/* Tabs */}
-        <div className="merchant-post-tabs">
+        <div className="merchant-post-tabs" data-onboarding="merchant-post-tabs">
           <button
             className={`merchant-tab ${activeStatus === POST_STATUSES.approved ? 'active' : ''}`}
             onClick={() => setActiveStatus(POST_STATUSES.approved)}
@@ -494,7 +495,7 @@ function MerchantPostListPage() {
         </div>
 
         {/* Posts List */}
-        <div className="merchant-post-list">
+        <div className="merchant-post-list" data-onboarding="merchant-post-list">
           {loadingPosts ? (
             <div className="merchant-post-empty">
               <p>{language === 'en' ? 'Loading posts...' : 'Đang tải bài đăng...'}</p>
