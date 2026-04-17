@@ -438,6 +438,7 @@ function OverviewPage() {
   const [previewUrl, setPreviewUrl] = useState('');
   const [imageError, setImageError] = useState('');
   const [imageSearchLoading, setImageSearchLoading] = useState(false);
+  const [imageSearchVenues, setImageSearchVenues] = useState([]);
   const [searchPage, setSearchPage] = useState(1);
   const [searchTriggered, setSearchTriggered] = useState(false);
   const [userPreference, setUserPreference] = useState(null);
@@ -526,6 +527,10 @@ function OverviewPage() {
   );
 
   const displayedVenues = useMemo(() => {
+    if (searchTriggered && imageSearchVenues.length > 0) {
+      return imageSearchVenues;
+    }
+
     if (!normalizedSubmittedSearch) {
       return venues;
     }
@@ -550,6 +555,8 @@ function OverviewPage() {
       );
     });
   }, [
+    searchTriggered,
+    imageSearchVenues,
     venues,
     normalizedSubmittedSearch,
     submittedSearchHasTone,
@@ -998,6 +1005,7 @@ function OverviewPage() {
     setAiRefineInput('');
     setAiRefineError('');
     setAiRefineMeta(null);
+    setImageSearchVenues([]);
     setShowFilterPanel(false);
     setSearchPage(1);
   }, [location.state?.resetOverview]);
@@ -1072,6 +1080,7 @@ function OverviewPage() {
     setAiRefineInput('');
     setAiRefineError('');
     setAiRefineMeta(null);
+    setImageSearchVenues([]);
     setSubmittedSearch(searchInput.trim());
     setAppliedCategoryIds(selectedCategoryIds);
     setAppliedWardIds(selectedWardIds);
@@ -1087,6 +1096,7 @@ function OverviewPage() {
     setAiRefineInput('');
     setAiRefineError('');
     setAiRefineMeta(null);
+    setImageSearchVenues([]);
     setSelectedCategoryIds([]);
     setSelectedWardIds([]);
     setSelectedServiceIds([]);
@@ -1107,6 +1117,7 @@ function OverviewPage() {
     setAiRefineInput('');
     setAiRefineError('');
     setAiRefineMeta(null);
+    setImageSearchVenues([]);
     setSubmittedSearch('');
     setSearchTriggered(false);
     setSearchPage(1);
@@ -1372,12 +1383,29 @@ function OverviewPage() {
       const imageDataUrl = await readFileAsDataUrl(file);
       const response = await searchVenuesByImage({
         imageDataUrl,
-        target
+        target,
+        language
       });
 
+      const directVenueResults = Array.isArray(response?.venueResults)
+        ? response.venueResults
+        : [];
       const nextSearchText = String(response?.searchText || response?.detectedLabel || '').trim();
+      const isUnknownLabel = nextSearchText.toLowerCase() === 'unknown';
+      const readableHint = [
+        response?.bestGuessLabel,
+        ...(Array.isArray(response?.searchTerms) ? response.searchTerms : [])
+      ]
+        .map((item) => String(item || '').trim())
+        .find((item) => item && item.toLowerCase() !== 'unknown' && item.toLowerCase() !== 'place' && item.toLowerCase() !== 'food');
+      const fallbackSearchText = target === 'food'
+        ? (language === 'en' ? 'Detected food from image' : 'Món ăn nhận diện từ ảnh')
+        : (language === 'en' ? 'Detected place from image' : 'Địa điểm nhận diện từ ảnh');
+      const resolvedSearchText = (!nextSearchText || isUnknownLabel)
+        ? (readableHint || fallbackSearchText)
+        : nextSearchText;
 
-      if (!nextSearchText) {
+      if (!directVenueResults.length && (!nextSearchText || isUnknownLabel)) {
         setImageError(language === 'en'
           ? 'AI could not detect a reliable dish or place from this image.'
           : 'AI chưa nhận diện được món ăn hoặc địa điểm phù hợp từ ảnh này.');
@@ -1399,8 +1427,10 @@ function OverviewPage() {
       setAppliedWardIds([]);
       setAppliedServiceIds([]);
 
-      setSearchInput(nextSearchText);
-      setSubmittedSearch(nextSearchText);
+      setImageSearchVenues(directVenueResults);
+
+      setSearchInput(resolvedSearchText);
+      setSubmittedSearch(resolvedSearchText);
       setSearchTriggered(true);
       setSearchPage(1);
       setShowFilterPanel(false);

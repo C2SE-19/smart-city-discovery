@@ -13463,6 +13463,26 @@ async function generateWardIdFromName(name) {
             return String(value || '').trim().toLowerCase();
         }
 
+        function normalizeVisionLanguage(value) {
+            const normalized = normalizeVisionText(value);
+            return normalized === 'vi' ? 'vi' : 'en';
+        }
+
+        const VISION_TAXONOMY_PATH = path.join(__dirname, 'data', 'vision-taxonomy.json');
+        const VISION_TAXONOMY_CACHE_TTL_MS = 60_000;
+        const VISION_TAXONOMY_MIN_CONFIDENCE = Math.max(
+            0,
+            Math.min(1, Number(process.env.VISION_TAXONOMY_MIN_CONFIDENCE || 0.55))
+        );
+        const VISION_TAXONOMY_LOG_ENABLED = String(process.env.VISION_TAXONOMY_LOG_ENABLED || 'true').trim().toLowerCase() !== 'false';
+        const VISION_TAXONOMY_LOG_PATH = String(process.env.VISION_TAXONOMY_LOG_PATH || '').trim()
+            || path.join(__dirname, 'logs', 'vision-taxonomy-eval.log');
+        const visionTaxonomyState = {
+            loadedAt: 0,
+            taxonomy: null,
+            aliasIndex: new Map()
+        };
+
         function safeParseJsonObject(rawValue) {
             try {
                 const parsed = JSON.parse(rawValue);
@@ -13529,6 +13549,361 @@ async function generateWardIdFromName(name) {
                 .normalize('NFD')
                 .replace(/[\u0300-\u036f]/g, '')
                 .replace(/đ/g, 'd');
+        }
+
+        function loadVisionTaxonomyFromDisk() {
+            try {
+                const raw = fs.readFileSync(VISION_TAXONOMY_PATH, 'utf8');
+                const parsed = safeParseJsonObject(raw);
+                const labels = parsed?.labels && typeof parsed.labels === 'object' ? parsed.labels : {};
+
+                return {
+                    version: String(parsed?.version || 'unknown'),
+                    labels
+                };
+            } catch (error) {
+                console.error('Vision taxonomy load error:', error?.message || error);
+                return {
+                    version: 'missing',
+                    labels: {}
+                };
+            }
+        }
+
+        function buildVisionTaxonomyAliasIndex(taxonomy) {
+            const aliasIndex = new Map();
+            const labels = taxonomy?.labels && typeof taxonomy.labels === 'object' ? taxonomy.labels : {};
+
+            Object.entries(labels).forEach(([labelId, meta]) => {
+                const kind = normalizeVisionText(meta?.kind);
+                const aliases = Array.isArray(meta?.aliases) ? meta.aliases : [];
+                const mustHaveCues = Array.isArray(meta?.must_have_cues) ? meta.must_have_cues : [];
+
+                const normalizedAliases = [
+                    labelId,
+                    ...aliases
+                ]
+                    .map((value) => normalizeVisionNoAccent(value))
+                    .filter(Boolean);
+
+                normalizedAliases.forEach((alias) => {
+                    if (!aliasIndex.has(alias)) {
+                        aliasIndex.set(alias, []);
+                    }
+
+                    aliasIndex.get(alias).push({
+                        labelId,
+                        kind: kind || 'unknown',
+                        aliases,
+                        mustHaveCues,
+                        allowUnknown: meta?.allow_unknown !== false
+                    });
+                });
+            });
+
+            return aliasIndex;
+        }
+
+        function getVisionTaxonomy() {
+            const now = Date.now();
+            if (
+                visionTaxonomyState.taxonomy
+                && now - visionTaxonomyState.loadedAt < VISION_TAXONOMY_CACHE_TTL_MS
+            ) {
+                return visionTaxonomyState;
+            }
+
+            const taxonomy = loadVisionTaxonomyFromDisk();
+            visionTaxonomyState.taxonomy = taxonomy;
+            visionTaxonomyState.aliasIndex = buildVisionTaxonomyAliasIndex(taxonomy);
+            visionTaxonomyState.loadedAt = now;
+
+            return visionTaxonomyState;
+        }
+
+        function clampVisionConfidence(value) {
+            const n = Number(value);
+            if (!Number.isFinite(n)) {
+                return 0;
+            }
+
+            return Math.max(0, Math.min(1, n));
+        }
+
+        function writeVisionTaxonomyEvalLog(payload = {}) {
+            if (!VISION_TAXONOMY_LOG_ENABLED) {
+                return;
+            }
+
+            try {
+                fs.mkdirSync(path.dirname(VISION_TAXONOMY_LOG_PATH), { recursive: true });
+                const line = JSON.stringify({
+                    timestamp: new Date().toISOString(),
+                    ...payload
+                });
+
+                fs.appendFile(VISION_TAXONOMY_LOG_PATH, `${line}\n`, (error) => {
+                    if (error) {
+                        console.error('Vision taxonomy log append error:', error?.message || error);
+                    }
+                });
+            } catch (error) {
+                console.error('Vision taxonomy log write error:', error?.message || error);
+            }
+        }
+
+        function scoreTaxonomyCandidateFromEvidence(candidate, evidenceText) {
+            if (!candidate || !evidenceText) {
+                return 0;
+            }
+
+            const aliasValues = [candidate.labelId, ...(candidate.aliases || [])]
+                .map((value) => normalizeVisionNoAccent(value))
+                .filter(Boolean);
+
+            const cueValues = Array.isArray(candidate.mustHaveCues)
+                ? candidate.mustHaveCues.map((value) => normalizeVisionNoAccent(value)).filter(Boolean)
+                : [];
+
+            let score = 0;
+
+            aliasValues.forEach((alias) => {
+                if (evidenceText === alias) {
+                    score += 8;
+                } else if (evidenceText.includes(alias)) {
+                    score += alias.includes(' ') ? 5 : 2;
+                }
+            });
+
+            cueValues.forEach((cue) => {
+                if (evidenceText.includes(cue)) {
+                    score += cue.includes(' ') ? 4 : 2;
+                }
+            });
+
+            return score;
+        }
+
+        function resolveTaxonomyDisplayLabel(meta = {}, labelId = '', language = 'en') {
+            const normalizedLanguage = normalizeVisionLanguage(language);
+            const displayNames = meta?.display_names && typeof meta.display_names === 'object'
+                ? meta.display_names
+                : {};
+
+            const preferredDisplay = String(displayNames[normalizedLanguage] || '').trim();
+            if (preferredDisplay) {
+                return preferredDisplay;
+            }
+
+            const aliases = Array.isArray(meta?.aliases) ? meta.aliases : [];
+            const accentRegex = /[^\x00-\x7F]/;
+            const asciiAlias = aliases.find((alias) => {
+                const text = String(alias || '').trim();
+                return text && !accentRegex.test(text);
+            });
+            const accentedAlias = aliases.find((alias) => {
+                const text = String(alias || '').trim();
+                return text && accentRegex.test(text);
+            });
+
+            if (normalizedLanguage === 'vi' && accentedAlias) {
+                return accentedAlias;
+            }
+
+            if (normalizedLanguage === 'en' && asciiAlias) {
+                return asciiAlias;
+            }
+
+            if (aliases.length) {
+                return String(aliases[0] || '').trim();
+            }
+
+            return String(labelId || '').replace(/_/g, ' ').trim();
+        }
+
+        function resolveCanonicalRuleDisplay(rule, language = 'en') {
+            if (!rule || typeof rule !== 'object') {
+                return '';
+            }
+
+            const normalizedLanguage = normalizeVisionLanguage(language);
+            const variants = Array.isArray(rule.variants) ? rule.variants : [];
+            if (!variants.length) {
+                return String(rule.canonical || '').trim();
+            }
+
+            const accentRegex = /[^\x00-\x7F]/;
+            if (normalizedLanguage === 'vi') {
+                const viVariant = variants.find((item) => {
+                    const text = String(item || '').trim();
+                    return text && accentRegex.test(text);
+                });
+                if (viVariant) {
+                    return String(viVariant).trim();
+                }
+            }
+
+            if (normalizedLanguage === 'en') {
+                const enVariant = variants.find((item) => {
+                    const text = String(item || '').trim();
+                    return text && !accentRegex.test(text);
+                });
+                if (enVariant) {
+                    return String(enVariant).trim();
+                }
+            }
+
+            return String(rule.canonical || variants[0] || '').trim();
+        }
+
+        function normalizeVisionPayloadWithTaxonomy(visionPayload = {}, target = 'any', language = 'en') {
+            const { taxonomy, aliasIndex } = getVisionTaxonomy();
+            const labels = taxonomy?.labels && typeof taxonomy.labels === 'object' ? taxonomy.labels : {};
+
+            if (!Object.keys(labels).length || !aliasIndex?.size) {
+                return {
+                    applied: false,
+                    reason: 'taxonomy_unavailable'
+                };
+            }
+
+            const normalizedTarget = normalizeVisionText(target);
+            const isStrictTargetMode = normalizedTarget === 'food' || normalizedTarget === 'place';
+            const evidenceValues = uniqueVisionValues([
+                visionPayload?.label,
+                ...(visionPayload?.alternativeLabels || []),
+                ...(visionPayload?.keywords || []),
+                ...(visionPayload?.visualClues || [])
+            ]);
+
+            const normalizedEvidence = evidenceValues
+                .map((value) => normalizeVisionNoAccent(value))
+                .filter(Boolean);
+
+            if (!normalizedEvidence.length) {
+                return {
+                    applied: true,
+                    matched: false,
+                    label: 'unknown',
+                    kind: 'unknown',
+                    confidence: 0
+                };
+            }
+
+            const scoreByLabel = new Map();
+
+            normalizedEvidence.forEach((evidenceText) => {
+                aliasIndex.forEach((candidateList, aliasKey) => {
+                    if (evidenceText !== aliasKey && !evidenceText.includes(aliasKey) && !aliasKey.includes(evidenceText)) {
+                        return;
+                    }
+
+                    candidateList.forEach((candidate) => {
+                        if (isStrictTargetMode && candidate?.kind !== normalizedTarget) {
+                            return;
+                        }
+
+                        const labelId = candidate.labelId;
+                        const current = scoreByLabel.get(labelId) || 0;
+                        const delta = scoreTaxonomyCandidateFromEvidence(candidate, evidenceText);
+                        scoreByLabel.set(labelId, current + delta);
+                    });
+                });
+            });
+
+            if (!scoreByLabel.size) {
+                return {
+                    applied: true,
+                    matched: false,
+                    label: 'unknown',
+                    kind: 'unknown',
+                    confidence: 0
+                };
+            }
+
+            const ranked = [...scoreByLabel.entries()]
+                .map(([labelId, score]) => {
+                    const meta = labels[labelId] || {};
+                    const kind = normalizeVisionText(meta.kind || 'unknown');
+                    const mustHaveCues = Array.isArray(meta.must_have_cues) ? meta.must_have_cues : [];
+                    const cueMatchedCount = mustHaveCues
+                        .map((cue) => normalizeVisionNoAccent(cue))
+                        .filter((cue) => cue && normalizedEvidence.some((evidence) => evidence.includes(cue))).length;
+
+                    const hasMustHaveEvidence = mustHaveCues.length ? cueMatchedCount > 0 : score >= 6;
+                    const preferredAlias = resolveTaxonomyDisplayLabel(meta, labelId, language);
+
+                    return {
+                        labelId,
+                        score,
+                        kind: ['food', 'place'].includes(kind) ? kind : 'unknown',
+                        hasMustHaveEvidence,
+                        cueMatchedCount,
+                        preferredAlias,
+                        aliases: Array.isArray(meta.aliases) ? meta.aliases.filter(Boolean) : []
+                    };
+                })
+                .filter((item) => {
+                    if (!isStrictTargetMode) {
+                        return true;
+                    }
+
+                    return item.kind === normalizedTarget;
+                })
+                .sort((a, b) => b.score - a.score);
+
+            if (!ranked.length) {
+                return {
+                    applied: true,
+                    matched: false,
+                    label: 'unknown',
+                    kind: 'unknown',
+                    confidence: 0,
+                    topCandidates: []
+                };
+            }
+
+            const best = ranked[0];
+            const second = ranked[1];
+            const modelConfidence = clampVisionConfidence(visionPayload?.confidence);
+            const evidenceConfidence = Math.max(0, Math.min(1, best.score / 20));
+            let blendedConfidence = (evidenceConfidence * 0.65) + (modelConfidence * 0.35);
+
+            if (second && best.score <= second.score + 1) {
+                blendedConfidence -= 0.1;
+            }
+
+            blendedConfidence = clampVisionConfidence(blendedConfidence);
+
+            if (!best.hasMustHaveEvidence || blendedConfidence < VISION_TAXONOMY_MIN_CONFIDENCE) {
+                return {
+                    applied: true,
+                    matched: false,
+                    label: 'unknown',
+                    kind: 'unknown',
+                    confidence: blendedConfidence,
+                    topCandidates: ranked.slice(0, 3).map((item) => ({
+                        labelId: item.labelId,
+                        kind: item.kind,
+                        score: item.score
+                    }))
+                };
+            }
+
+            return {
+                applied: true,
+                matched: true,
+                labelId: best.labelId,
+                label: best.preferredAlias,
+                kind: best.kind,
+                confidence: blendedConfidence,
+                aliases: best.aliases,
+                topCandidates: ranked.slice(0, 3).map((item) => ({
+                    labelId: item.labelId,
+                    kind: item.kind,
+                    score: item.score
+                }))
+            };
         }
 
         function isGenericVisionLabel(value) {
@@ -13793,6 +14168,21 @@ async function generateWardIdFromName(name) {
                 pattern: /\b(cau\s*di\s*bo\s*nguyen\s*tat\s*thanh|nguyen\s*tat\s*thanh\s*walking\s*bridge)\b/
             },
             {
+                canonical: 'cầu liên chiểu',
+                variants: ['cầu liên chiểu', 'cau lien chieu', 'lien chieu bridge'],
+                pattern: /\bcau\s*lien\s*chieu\b/
+            },
+            {
+                canonical: 'cầu cổ cò',
+                variants: ['cầu cổ cò', 'cau co co', 'co co bridge'],
+                pattern: /\bcau\s*co\s*co\b/
+            },
+            {
+                canonical: 'cầu bãi dài',
+                variants: ['cầu bãi dài', 'cau bai dai', 'bai dai bridge'],
+                pattern: /\bcau\s*bai\s*dai\b/
+            },
+            {
                 canonical: 'bà nà hills',
                 variants: ['bà nà hills', 'ba na hills', 'banahills'],
                 pattern: /\bba\s*na\s*hills\b/
@@ -13821,26 +14211,35 @@ async function generateWardIdFromName(name) {
                 return null;
             }
 
-            const matched = CANONICAL_PLACE_RULES.find((rule) => rule.pattern.test(haystack));
+            const matched = CANONICAL_PLACE_RULES.find((rule) => {
+                if (rule.pattern.test(haystack)) {
+                    return true;
+                }
+
+                return (rule.variants || []).some((variant) => {
+                    const normalizedVariant = normalizeVisionNoAccent(variant);
+                    return normalizedVariant && normalizedVariant.length >= 5 && haystack.includes(normalizedVariant);
+                });
+            });
             return matched || null;
         }
 
         const DANANG_BRIDGE_CATALOG = [
             {
                 canonical: 'cầu thuận phước',
-                notes: 'cầu treo dây võng dài, gần cửa biển'
+                notes: 'cầu treo dây võng rất dài, nằm ở cửa biển nơi sông Hàn đổ ra vịnh Đà Nẵng'
             },
             {
                 canonical: 'cầu sông hàn',
-                notes: 'cầu quay, biểu tượng trung tâm sông hàn'
+                notes: 'cầu quay đầu tiên do kỹ sư Việt Nam thiết kế, phần giữa cầu có thể xoay 90 độ'
             },
             {
                 canonical: 'cầu rồng',
-                notes: 'hình rồng, có phun lửa hoặc nước cuối tuần'
+                notes: 'hình dáng rồng vươn ra biển, có phun lửa và phun nước vào 21:00 tối thứ 7 và chủ nhật'
             },
             {
                 canonical: 'cầu nguyễn văn trỗi',
-                notes: 'cầu lâu đời, hiện nổi bật như cầu đi bộ'
+                notes: 'cầu có tuổi đời lâu, hiện giữ lại làm cầu đi bộ chụp ảnh và tham quan'
             },
             {
                 canonical: 'cầu trần thị lý',
@@ -13848,19 +14247,19 @@ async function generateWardIdFromName(name) {
             },
             {
                 canonical: 'cầu tiên sơn',
-                notes: 'còn gọi tuyên sơn, thiên về giao thông vận tải'
+                notes: 'còn gọi cầu tuyên sơn, nối Hải Châu và Ngũ Hành Sơn, trục giao thông quan trọng'
             },
             {
                 canonical: 'cầu cẩm lệ',
-                notes: 'kết nối khu trung tâm với quận cẩm lệ'
+                notes: 'bắc qua sông Cẩm Lệ, kết nối trục vào phía nam thành phố'
             },
             {
                 canonical: 'cầu nguyễn tri phương',
-                notes: 'kết nối khu hòa xuân và trung tâm'
+                notes: 'bắc qua sông Cẩm Lệ, kết nối các khu đô thị mới về trung tâm'
             },
             {
                 canonical: 'cầu hòa xuân',
-                notes: 'phục vụ khu đô thị sinh thái hòa xuân'
+                notes: 'bắc qua sông Cẩm Lệ, phục vụ khu đô thị Hòa Xuân'
             },
             {
                 canonical: 'cầu đỏ',
@@ -13868,11 +14267,23 @@ async function generateWardIdFromName(name) {
             },
             {
                 canonical: 'cầu nam ô',
-                notes: 'bắc qua sông cu đê, dáng vòm'
+                notes: 'bắc qua sông Cu Đê, kết nối quốc lộ 1 và đường sắt khu Nam Ô'
             },
             {
                 canonical: 'cầu phò nam',
                 notes: 'cầu treo khu thượng nguồn sông cu đê'
+            },
+            {
+                canonical: 'cầu liên chiểu',
+                notes: 'bắc qua khu vực sông Cu Đê, kết nối hướng Liên Chiểu'
+            },
+            {
+                canonical: 'cầu cổ cò',
+                notes: 'bắc qua sông Cổ Cò, tuyến kết nối du lịch ven biển'
+            },
+            {
+                canonical: 'cầu bãi dài',
+                notes: 'khu vực sông Cổ Cò, phục vụ kết nối ven biển và du lịch'
             },
             {
                 canonical: 'cầu vàng',
@@ -13887,6 +14298,125 @@ async function generateWardIdFromName(name) {
                 notes: 'cầu đi bộ vươn ra biển khu nguyễn tất thành'
             }
         ];
+
+        const BRIDGE_VISUAL_CUE_RULES = [
+            {
+                canonical: 'cầu rồng',
+                cues: [
+                    'cau rong',
+                    'dragon bridge',
+                    'rong',
+                    'dau rong',
+                    'phun lua',
+                    'phun nuoc',
+                    'fire breathing bridge'
+                ]
+            },
+            {
+                canonical: 'cầu thuận phước',
+                cues: [
+                    'cau thuan phuoc',
+                    'thuan phuoc bridge',
+                    'cau treo',
+                    'day vong',
+                    'cua bien'
+                ]
+            },
+            {
+                canonical: 'cầu sông hàn',
+                cues: ['cau song han', 'song han bridge', 'cau quay', 'han river bridge', 'xoay 90 do']
+            },
+            {
+                canonical: 'cầu trần thị lý',
+                cues: ['cau tran thi ly', 'tran thi ly bridge', 'day vang', 'tru nghieng', 'canh buom']
+            },
+            {
+                canonical: 'cầu nguyễn văn trỗi',
+                cues: ['cau nguyen van troi', 'nguyen van troi bridge', 'cau di bo cu', 'cau cu']
+            },
+            {
+                canonical: 'cầu tiên sơn',
+                cues: ['cau tien son', 'cau tuyen son', 'tien son bridge', 'tuyen son bridge']
+            },
+            {
+                canonical: 'cầu cẩm lệ',
+                cues: ['cau cam le', 'cam le bridge']
+            },
+            {
+                canonical: 'cầu nguyễn tri phương',
+                cues: ['cau nguyen tri phuong', 'nguyen tri phuong bridge']
+            },
+            {
+                canonical: 'cầu hòa xuân',
+                cues: ['cau hoa xuan', 'hoa xuan bridge']
+            },
+            {
+                canonical: 'cầu nam ô',
+                cues: ['cau nam o', 'nam o bridge', 'song cu de']
+            },
+            {
+                canonical: 'cầu liên chiểu',
+                cues: ['cau lien chieu', 'lien chieu bridge']
+            },
+            {
+                canonical: 'cầu cổ cò',
+                cues: ['cau co co', 'co co bridge', 'song co co']
+            },
+            {
+                canonical: 'cầu bãi dài',
+                cues: ['cau bai dai', 'bai dai bridge']
+            },
+            {
+                canonical: 'cầu vàng',
+                cues: ['cau vang', 'golden bridge', 'ban tay', 'giant hands bridge']
+            },
+            {
+                canonical: 'cầu tình yêu',
+                cues: ['cau tinh yeu', 'love bridge', 'moc khoa tinh yeu', 'lock bridge']
+            },
+            {
+                canonical: 'cầu đi bộ nguyễn tất thành',
+                cues: ['cau di bo nguyen tat thanh', 'nguyen tat thanh walking bridge', 'cau di bo moi']
+            }
+        ];
+
+        function resolveBridgeVisualCueRule(values = []) {
+            const normalizedHaystack = normalizeVisionNoAccent(values.join(' '));
+
+            if (!normalizedHaystack || !hasBridgeSignal(values)) {
+                return null;
+            }
+
+            const ranked = BRIDGE_VISUAL_CUE_RULES
+                .map((rule) => {
+                    const score = (rule.cues || []).reduce((total, cue) => {
+                        const normalizedCue = normalizeVisionNoAccent(cue);
+                        if (!normalizedCue || !normalizedHaystack.includes(normalizedCue)) {
+                            return total;
+                        }
+
+                        return total + (normalizedCue.includes(' ') ? 3 : 1);
+                    }, 0);
+
+                    return { canonical: rule.canonical, score };
+                })
+                .sort((a, b) => b.score - a.score);
+
+            const best = ranked[0];
+            const second = ranked[1];
+
+            if (!best || best.score < 3) {
+                return null;
+            }
+
+            if (second && best.score <= second.score) {
+                return null;
+            }
+
+            return CANONICAL_PLACE_RULES.find(
+                (rule) => normalizeVisionNoAccent(rule.canonical) === normalizeVisionNoAccent(best.canonical)
+            ) || null;
+        }
 
         function hasBridgeSignal(values = []) {
             const normalized = normalizeVisionNoAccent(values.join(' '));
@@ -13952,9 +14482,15 @@ async function generateWardIdFromName(name) {
                 .join('\n');
 
             const systemPrompt = [
-                'Bạn là AI xác minh cầu tại Đà Nẵng từ ảnh.',
+                'Bạn là mô-đun PHỤ chuyên gia xác minh CẦU trong pipeline AI xác minh món ăn/địa điểm từ ảnh.',
+                'Chỉ chạy suy luận trong ngữ cảnh cầu khi đã có tín hiệu cầu từ bước phân tích tổng quát.',
                 'Nhiệm vụ: chọn ĐÚNG 1 cầu trong catalog nếu đủ bằng chứng.',
-                'Nếu không chắc chắn thì trả về unknown, không được đoán bừa sang cầu nổi tiếng.',
+                'Nếu không chắc chắn thì trả về unknown, không được đoán bừa.',
+                'Không được mặc định Cầu Thuận Phước khi ảnh có dấu hiệu Cầu Rồng (hình rồng, đầu rồng, phun lửa/phun nước).',
+                'Nếu thấy dấu hiệu rồng rõ thì phải ưu tiên Cầu Rồng.',
+                'Nhóm cầu biểu tượng bắc qua sông Hàn: Cầu Rồng, Cầu Sông Hàn, Cầu Thuận Phước, Cầu Trần Thị Lý, Cầu Nguyễn Văn Trỗi, Cầu Tiên Sơn.',
+                'Nhóm cầu du lịch/đi bộ đặc biệt: Cầu Vàng, Cầu Tình Yêu, Cầu đi bộ Nguyễn Tất Thành.',
+                'Nhóm cầu khác nội thành: Cầu Cẩm Lệ, Cầu Nguyễn Tri Phương, Cầu Hòa Xuân, Cầu Nam Ô, Cầu Liên Chiểu, Cầu Cổ Cò, Cầu Bãi Dài, Cầu Đỏ.',
                 'Chỉ trả JSON object hợp lệ.',
                 'Schema JSON:',
                 '{"selectedCanonical":"string","confidence":0,"reason":"string","alternatives":["string"]}',
@@ -14043,11 +14579,29 @@ async function generateWardIdFromName(name) {
             return matched || null;
         }
 
+        function extractVisionServiceNames(metadata) {
+            if (!metadata || typeof metadata !== 'object') {
+                return [];
+            }
+
+            const selectedServiceNames = Array.isArray(metadata.selectedServiceNames)
+                ? metadata.selectedServiceNames
+                : [];
+
+            return selectedServiceNames
+                .map((item) => String(item || '').trim())
+                .filter(Boolean);
+        }
+
         function scoreVisionVenueCandidate(venue, terms = [], primaryLabel = '', target = 'any') {
             const normalizedLabel = normalizeVisionNoAccent(primaryLabel);
             const normalizedTerms = Array.isArray(terms)
                 ? terms.map((item) => normalizeVisionNoAccent(item)).filter(Boolean)
                 : [];
+
+            const descriptionText = normalizeVisionNoAccent(venue?.description || '');
+            const serviceNames = extractVisionServiceNames(venue?.metadata);
+            const serviceText = normalizeVisionNoAccent(serviceNames.join(' '));
 
             const nameText = normalizeVisionNoAccent(venue?.name || venue?.title || '');
             const searchable = normalizeVisionNoAccent([
@@ -14055,6 +14609,7 @@ async function generateWardIdFromName(name) {
                 venue?.title,
                 venue?.address,
                 venue?.description,
+                ...serviceNames,
                 venue?.ward_name,
                 venue?.category_name
             ].filter(Boolean).join(' '));
@@ -14074,6 +14629,11 @@ async function generateWardIdFromName(name) {
             normalizedTerms.forEach((term) => {
                 if (nameText.includes(term)) {
                     score += 20;
+                } else if (descriptionText.includes(term)) {
+                    // Description often contains detailed activity/food signals not present in title.
+                    score += 15;
+                } else if (serviceText.includes(term)) {
+                    score += 14;
                 } else if (searchable.includes(term)) {
                     score += 12;
                 }
@@ -14096,6 +14656,17 @@ async function generateWardIdFromName(name) {
             if (hasSpecificPrimaryLabel && overlapCount === 0) {
                 // Penalize popularity-only matches when the image label is specific.
                 score -= 26;
+            }
+
+            if (descriptionText && normalizedTerms.length) {
+                const descriptionTokenSet = new Set(tokenizeVisionValue(descriptionText));
+                const descriptionOverlap = normalizedTerms
+                    .flatMap((value) => tokenizeVisionValue(value))
+                    .reduce((total, token) => total + (descriptionTokenSet.has(token) ? 1 : 0), 0);
+
+                if (descriptionOverlap > 0) {
+                    score += Math.min(20, descriptionOverlap * 4.5);
+                }
             }
 
             const normalizedTarget = normalizeVisionText(target);
@@ -14276,7 +14847,8 @@ async function generateWardIdFromName(name) {
                 category: String(venue.category_name || '').trim(),
                 ward: String(venue.ward_name || '').trim(),
                 address: String(venue.address || '').trim(),
-                description: String(venue.description || '').slice(0, 220).trim(),
+                description: String(venue.description || '').slice(0, 360).trim(),
+                serviceNames: extractVisionServiceNames(venue.metadata),
                 averageRating: Number(venue.average_rating || 0),
                 totalReviews: Number(venue.total_reviews || 0)
             }));
@@ -14285,6 +14857,8 @@ async function generateWardIdFromName(name) {
                 'Bạn là AI rerank kết quả tìm kiếm địa điểm từ ảnh.',
                 'Nhiệm vụ: xếp hạng các venue theo độ khớp với ảnh và hint.',
                 'Ưu tiên độ liên quan ngữ nghĩa + từ khóa cụ thể hơn độ nổi tiếng.',
+                'Bắt buộc đọc kỹ description và serviceNames của từng venue để so khớp nội dung ảnh.',
+                'Nếu mô tả venue thể hiện đúng hoạt động/món ăn trong ảnh thì phải ưu tiên venue đó.',
                 'Không đoán bừa: nếu venue không đủ liên quan thì score thấp.',
                 'Chỉ trả JSON object hợp lệ.',
                 'Schema JSON:',
@@ -14404,7 +14978,9 @@ async function generateWardIdFromName(name) {
             const preferredKind = normalizedTarget === 'food' ? 'food' : normalizedTarget === 'place' ? 'place' : 'unknown';
 
             const systemPrompt = [
-                'Bạn là AI nhận diện ảnh cho ứng dụng khám phá địa điểm.',
+                'Bạn là AI CHÍNH chuyên gia xác minh món ăn/địa điểm từ hình ảnh người dùng gửi lên.',
+                'Mô-đun này là phân tích tổng quát; chuyên gia cầu chỉ là bước phụ khi có tín hiệu cầu.',
+                'Mục tiêu là trả nhãn đúng nhất theo nội dung thật của ảnh người dùng gửi lên.',
                 'Chỉ trả về JSON object hợp lệ, không thêm markdown.',
                 'Schema JSON:',
                 '{"label":"string","alternativeLabels":["string"],"keywords":["string"],"visualClues":["string"],"kind":"food|place|unknown","confidence":0}',
@@ -14417,9 +14993,12 @@ async function generateWardIdFromName(name) {
                 'Nếu ảnh là món nướng, món cuốn, món bún, món phở, hãy ưu tiên đúng kiểu món đó thay vì suy đoán sang món khác.',
                 'Nếu không chắc thì kind=unknown và confidence thấp.',
                 `Ưu tiên kind=${preferredKind} nếu ảnh phù hợp.`,
-                'Nếu kind=place và ảnh là cầu hoặc địa danh ở Đà Nẵng, hãy cố gắng trả về tên đúng trong catalog thay vì mặc định Cầu Rồng.',
-                'Catalog địa danh ưu tiên: Cầu Thuận Phước, Cầu Rồng, Cầu Sông Hàn, Cầu Trần Thị Lý, Cầu Nguyễn Văn Trỗi, Bà Nà Hills, Ngũ Hành Sơn, Chùa Linh Ứng, Asia Park.',
-                'Chỉ dùng Cầu Rồng khi có đặc trưng cầu rồng rõ ràng; nếu không chắc, hãy trả kind=unknown hoặc một tên địa danh khác phù hợp hơn.'
+                'Ràng buộc bắt buộc theo target tìm kiếm:',
+                'Nếu target=place thì không được trả label là món ăn; chỉ trả place hoặc unknown.',
+                'Nếu target=food thì không được trả label là địa điểm; chỉ trả food hoặc unknown.',
+                'Nếu kind=place và ảnh là cầu ở Đà Nẵng, hãy nêu đúng tên cầu nếu có đặc trưng rõ; nếu chưa rõ thì giữ ở mức trung lập và để bước xác minh cầu xử lý tiếp.',
+                'Không mặc định về bất kỳ cây cầu nổi tiếng nào khi chưa đủ bằng chứng.',
+                'Ví dụ địa danh thường gặp để tham chiếu ngữ cảnh: Cầu Rồng, Cầu Sông Hàn, Cầu Thuận Phước, Cầu Trần Thị Lý, Cầu Nguyễn Văn Trỗi, Bà Nà Hills, Ngũ Hành Sơn, Chùa Linh Ứng, Asia Park.'
             ].join(' ');
 
             const response = await axios.post(
@@ -14488,6 +15067,7 @@ async function generateWardIdFromName(name) {
         const searchVenuesByImageVisionHandler = async (req, res) => {
             try {
                 const target = normalizeVisionText(req.body?.target || 'any');
+                const requestLanguage = normalizeVisionLanguage(req.body?.language || 'en');
                 const imageDataUrl = String(req.body?.imageDataUrl || '').trim();
 
                 if (!/^data:image\//i.test(imageDataUrl)) {
@@ -14498,7 +15078,26 @@ async function generateWardIdFromName(name) {
                     return res.status(413).json({ message: 'Image is too large. Please choose a smaller image.' });
                 }
 
-                const vision = await detectImageSearchPayload(imageDataUrl, target);
+                let vision = await detectImageSearchPayload(imageDataUrl, target);
+                const taxonomyNormalized = normalizeVisionPayloadWithTaxonomy(vision, target, requestLanguage);
+
+                if (taxonomyNormalized?.applied) {
+                    const normalizedLabel = String(taxonomyNormalized.label || 'unknown').trim();
+                    const normalizedAliases = Array.isArray(taxonomyNormalized.aliases)
+                        ? taxonomyNormalized.aliases
+                        : [];
+
+                    vision = {
+                        ...vision,
+                        label: normalizedLabel,
+                        kind: taxonomyNormalized.kind || 'unknown',
+                        confidence: clampVisionConfidence(taxonomyNormalized.confidence),
+                        alternativeLabels: taxonomyNormalized.matched
+                            ? uniqueVisionValues([...normalizedAliases, ...(vision.alternativeLabels || [])]).slice(0, 4)
+                            : uniqueVisionValues(vision.alternativeLabels || []).slice(0, 4)
+                    };
+                }
+
                 const visionHints = [
                     vision.label,
                     ...(vision.alternativeLabels || []),
@@ -14521,6 +15120,21 @@ async function generateWardIdFromName(name) {
                     target === 'place'
                         ? await verifyDanangBridgeFromImage(imageDataUrl, vision)
                         : null;
+
+                const bridgeVisualCueRule =
+                    target === 'place'
+                        ? resolveBridgeVisualCueRule([
+                            vision.label,
+                            ...(vision.alternativeLabels || []),
+                            ...(vision.keywords || []),
+                            ...(vision.visualClues || []),
+                            ...terms
+                        ])
+                        : null;
+
+                if (bridgeVisualCueRule) {
+                    canonicalPlaceRule = bridgeVisualCueRule;
+                }
 
                 const bridgeVerificationEvidenceValues = [
                     vision.label,
@@ -14570,8 +15184,51 @@ async function generateWardIdFromName(name) {
                     ...(vision.alternativeLabels || [])
                 ]).find((item) => !isGenericVisionLabel(item)) || String(vision.label || '').trim();
                 const specificLabel = hasGenericLabel ? '' : String(vision.label || '').trim();
-                const canonicalText = canonicalRule?.canonical || '';
-                const searchText = canonicalText || specificLabel || bestGuessLabel || effectiveTerms[0] || '';
+                const canonicalText = resolveCanonicalRuleDisplay(canonicalRule, requestLanguage);
+                const rawSearchText = canonicalText || specificLabel || bestGuessLabel || effectiveTerms[0] || '';
+                const fallbackReadableTerm = uniqueVisionValues(effectiveTerms || [])
+                    .find((term) => {
+                        const normalized = normalizeVisionNoAccent(term);
+                        if (!normalized || normalized === 'unknown') {
+                            return false;
+                        }
+
+                        if (isGenericVisionLabel(term)) {
+                            return false;
+                        }
+
+                        return !['place', 'food', 'dia diem', 'mon an', 'landmark'].includes(normalized);
+                    }) || '';
+                const searchText = normalizeVisionNoAccent(rawSearchText) === 'unknown'
+                    ? (
+                        fallbackReadableTerm
+                        || (target === 'food'
+                            ? (requestLanguage === 'en' ? 'food from image' : 'món ăn từ ảnh')
+                            : (requestLanguage === 'en' ? 'place from image' : 'địa điểm từ ảnh'))
+                    )
+                    : rawSearchText;
+
+                writeVisionTaxonomyEvalLog({
+                    target,
+                    taxonomyApplied: Boolean(taxonomyNormalized?.applied),
+                    taxonomyMatched: Boolean(taxonomyNormalized?.matched),
+                    taxonomyLabelId: taxonomyNormalized?.labelId || null,
+                    taxonomyConfidence: clampVisionConfidence(taxonomyNormalized?.confidence),
+                    modelDetectedLabel: String(vision.label || '').trim(),
+                    modelDetectedKind: String(vision.kind || '').trim(),
+                    modelConfidence: clampVisionConfidence(vision.confidence),
+                    canonicalFood: canonicalFoodRule?.canonical || null,
+                    canonicalPlace: canonicalPlaceRule?.canonical || null,
+                    searchTerms: Array.isArray(effectiveTerms) ? effectiveTerms.slice(0, 10) : [],
+                    topTaxonomyCandidates: Array.isArray(taxonomyNormalized?.topCandidates)
+                        ? taxonomyNormalized.topCandidates.slice(0, 3)
+                        : [],
+                    venueResultCount: Array.isArray(venueResults) ? venueResults.length : 0,
+                    firstVenueId: venueResults?.[0]?.id || null,
+                    firstVenueName: venueResults?.[0]?.name || venueResults?.[0]?.title || null,
+                    aiRerankApplied: Boolean(rerankResult?.applied),
+                    aiRerankModel: rerankResult?.model || null
+                });
 
                 return res.json({
                     success: true,
@@ -14582,6 +15239,16 @@ async function generateWardIdFromName(name) {
                     visualClues: vision.visualClues || [],
                     detectedKind: vision.kind,
                     confidence: vision.confidence,
+                    taxonomyNormalization: taxonomyNormalized?.applied
+                        ? {
+                            matched: Boolean(taxonomyNormalized.matched),
+                            labelId: taxonomyNormalized.labelId || '',
+                            confidence: clampVisionConfidence(taxonomyNormalized.confidence),
+                            topCandidates: Array.isArray(taxonomyNormalized.topCandidates)
+                                ? taxonomyNormalized.topCandidates
+                                : []
+                        }
+                        : null,
                     canonicalFood: canonicalFoodRule?.canonical || '',
                     canonicalPlace: canonicalPlaceRule?.canonical || '',
                     bridgeVerification: bridgeVerification
