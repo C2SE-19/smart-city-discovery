@@ -2087,8 +2087,20 @@
 }
 
 .overview-map-section {
+  position: relative;
   display: grid;
   justify-items: center;
+}
+
+.overview-map-guide-anchor {
+  position: absolute;
+  top: 50%;
+  right: 18px;
+  width: 12px;
+  height: 12px;
+  transform: translateY(-50%);
+  pointer-events: none;
+  opacity: 0;
 }
 
 .overview-map-frame {

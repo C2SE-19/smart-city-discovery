@@ -36,6 +36,7 @@ import TermsPage from './pages/terms/TermsPage';
 import { APP_ROUTES } from './constants/routes';
 import { ROLES } from './constants/roles';
 import ChatWidget from './components/chat/ChatWidget';
+import AppOnboarding from './components/onboarding/AppOnboarding';
 import translations from './constants/translations';
 import { useLanguage } from './contexts/LanguageContext';
 
@@ -204,6 +205,7 @@ function App() {
             <BrowserRouter>
               <AppRoutes />
               <ChatWidget />
+              <AppOnboarding />
             </BrowserRouter>
           </LanguageProvider>
         </ThemeProvider>

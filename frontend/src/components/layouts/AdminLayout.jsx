@@ -139,7 +139,7 @@ function AdminLayout() {
             </div>
           </div>
 
-          <nav className="admin-nav">
+          <nav className="admin-nav" data-onboarding="admin-nav">
             {adminNavigation.map((item) => (
               <NavLink
                 key={item.path}
@@ -166,7 +166,7 @@ function AdminLayout() {
       </aside>
 
       <main className="admin-main">
-        <header className="admin-topbar">
+        <header className="admin-topbar" data-onboarding="admin-topbar">
           <div className="admin-topbar-actions">
             <label className="admin-lang-wrap">
               <span>{t.language}</span>
