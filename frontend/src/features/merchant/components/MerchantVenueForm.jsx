@@ -1058,7 +1058,7 @@ function MerchantVenueForm({ editVenueId = null }) {
 
   return (
     <div className="merchant-venue-form-container">
-      <div className="form-header">
+      <div className="form-header" data-onboarding="merchant-form-header">
         <h1>{isEditMode ? 'Edit Venue Submission' : 'Register Your Venue'}</h1>
         <p>
           {isEditMode
@@ -1131,7 +1131,7 @@ function MerchantVenueForm({ editVenueId = null }) {
         </div>
 
         {/* Section 2: Basic Info */}
-        <div className="form-section">
+        <div className="form-section" data-onboarding="merchant-form-basic">
           <div className="section-header">
             <h2>2. Basic Information</h2>
           </div>
@@ -1214,7 +1214,7 @@ function MerchantVenueForm({ editVenueId = null }) {
         </div>
 
         {/* Section 3: Location & Hours */}
-        <div className="form-section">
+        <div className="form-section" data-onboarding="merchant-form-location">
           <div className="section-header">
             <h2>3. Location & Hours</h2>
           </div>
@@ -1385,7 +1385,7 @@ function MerchantVenueForm({ editVenueId = null }) {
         </div>
 
         {/* Section 4: Services */}
-        <div className="form-section">
+        <div className="form-section" data-onboarding="merchant-form-services">
           <div className="section-header">
             <h2>4. Services Offered</h2>
             <p className="section-hint">
@@ -1429,7 +1429,7 @@ function MerchantVenueForm({ editVenueId = null }) {
         </div>
 
         {/* Submit Button */}
-        <div className="form-actions">
+        <div className="form-actions" data-onboarding="merchant-form-submit">
           <div className="form-submit-block">
             <button
               type="submit"

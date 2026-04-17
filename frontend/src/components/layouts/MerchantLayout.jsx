@@ -97,6 +97,16 @@ function MerchantLayout() {
               <option value="en">English</option>
               <option value="vi">Vietnamese</option>
             </select>
+            <button
+              type="button"
+              className="landing-onboarding-trigger"
+              aria-label="Open onboarding guide"
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent('smart-city-onboarding-restart'));
+              }}
+            >
+              ?
+            </button>
             <button type="button" className="landing-icon-button" aria-label={t.header.search} />
             
             {/* User Profile Dropdown */}

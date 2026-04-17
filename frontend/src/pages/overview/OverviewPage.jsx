@@ -1642,7 +1642,7 @@ function OverviewPage() {
               {t.hero.description}
             </p>
 
-            <div className="overview-hero-actions">
+            <div className="overview-hero-actions" data-onboarding="overview-hero-actions">
               <button 
                 type="button" 
                 className="overview-hero-button overview-hero-button-primary"
@@ -1765,7 +1765,10 @@ function OverviewPage() {
         </div>
       )}
 
-      <section className={`overview-search ${isCondensedMode ? 'is-searching' : ''}`.trim()}>
+      <section
+        className={`overview-search ${isCondensedMode ? 'is-searching' : ''}`.trim()}
+        data-onboarding="overview-search"
+      >
         <div className="overview-search-top">
           <div className="overview-search-headline">
             <h2>Explore with live filters</h2>
@@ -1814,6 +1817,7 @@ function OverviewPage() {
             type="button"
             className={`overview-search-filter ${showFilterPanel ? 'is-active' : ''}`}
             onClick={() => setShowFilterPanel((current) => !current)}
+            data-onboarding="overview-filter-button"
           >
             Filter
           </button>
@@ -1825,6 +1829,7 @@ function OverviewPage() {
             aria-label={t.search.aiSuggest}
             onClick={handleAiSuggest}
             disabled={aiSuggestLoading || preferencesLoading}
+            data-onboarding="overview-ai-button"
           >
             {aiSuggestLoading ? 'Thinking...' : t.search.aiSuggest}
           </button>
@@ -2270,7 +2275,8 @@ function OverviewPage() {
       )}
 
       {!isCondensedMode && (
-        <section className="overview-section overview-map-section">
+        <section className="overview-section overview-map-section" data-onboarding="overview-map">
+          <div className="overview-map-guide-anchor" data-onboarding="overview-map-anchor" aria-hidden="true" />
           <div className="overview-section-heading">
             <h2>City map</h2>
             <span />

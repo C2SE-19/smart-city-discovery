@@ -7,6 +7,8 @@ import translations from "../../constants/translations";
 import authService from "../../services/authService";
 import { validatePassword } from "../../utils/validators/validators";
 
+const NEW_ACCOUNT_ONBOARDING_KEY = "smart-city-onboarding:new-account";
+
 export default function RegisterPage() {
 
   const navigate = useNavigate();
@@ -116,6 +118,15 @@ export default function RegisterPage() {
         email: email.trim(),
         password
       });
+
+      window.localStorage.setItem(
+        NEW_ACCOUNT_ONBOARDING_KEY,
+        JSON.stringify({
+          email: email.trim().toLowerCase(),
+          username: username.trim().toLowerCase(),
+          registeredAt: new Date().toISOString()
+        })
+      );
 
       alert(res.message || t.auth.registerSuccess);
 

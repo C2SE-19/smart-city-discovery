@@ -44,7 +44,7 @@ function DiscoveryPage() {
         title="Discovery workspace"
         description="Explore wards, filter by place categories, and browse approved venues on the map."
       >
-        <div className="filter-bar">
+        <div className="filter-bar" data-onboarding="discovery-filters">
           <input
             className="search-input"
             type="text"
@@ -88,13 +88,15 @@ function DiscoveryPage() {
           </div>
         </div>
 
-        <InteractiveWardMap
-          wards={wards}
-          venues={visibleVenues}
-          loading={loading}
-          selectedWardName={selectedWardName}
-          emptyLabel="Wards and approved venues will appear here once map data is available."
-        />
+        <div data-onboarding="discovery-map">
+          <InteractiveWardMap
+            wards={wards}
+            venues={visibleVenues}
+            loading={loading}
+            selectedWardName={selectedWardName}
+            emptyLabel="Wards and approved venues will appear here once map data is available."
+          />
+        </div>
       </SectionCard>
 
       <div className="two-column-grid">
@@ -116,7 +118,7 @@ function DiscoveryPage() {
           title={`${visibleVenues.length} venues in the current view`}
           description={error || 'This list is filtered by ward, category, and search keyword.'}
         >
-          <div className="venue-list">
+          <div className="venue-list" data-onboarding="discovery-list">
             {visibleVenues.slice(0, 8).map((venue) => (
               <article key={venue.id || `${venue.name}-${venue.latitude}`} className="venue-row">
                 <div>
