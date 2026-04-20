@@ -31,8 +31,10 @@ const STATUS_LABELS = {
 };
 
 function resolveApiOrigin(baseUrl) {
-  if (/^https?:\/\//i.test(baseUrl)) {
-    return baseUrl.replace(/\/api\/v1\/?$/, '').replace(/\/api\/?$/, '');
+  const normalizedBaseUrl = String(baseUrl || '').trim();
+
+  if (/^https?:\/\//i.test(normalizedBaseUrl)) {
+    return normalizedBaseUrl.replace(/\/api\/v1\/?$/, '').replace(/\/api\/?$/, '');
   }
 
   const uploadsBaseUrl = String(import.meta.env.VITE_UPLOADS_BASE_URL || '').trim();
@@ -41,14 +43,14 @@ function resolveApiOrigin(baseUrl) {
   }
 
   if (typeof window !== 'undefined') {
-    const backendPort = String(import.meta.env.VITE_BACKEND_PORT || '5000').trim() || '5000';
-    return `${window.location.protocol}//${window.location.hostname}:${backendPort}`;
+    return window.location.origin;
   }
 
   return 'http://localhost:5000';
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api/v1';
+const DEFAULT_API_BASE_URL = import.meta.env.DEV ? 'http://localhost:5000/api/v1' : '/api';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL;
 const API_ORIGIN = resolveApiOrigin(API_BASE_URL);
 
 function toUploadedFileUrl(rawUrl) {

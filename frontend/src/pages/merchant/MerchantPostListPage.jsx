@@ -30,7 +30,17 @@ const POST_STATUSES = {
 const FALLBACK_POST_IMAGE = 'https://via.placeholder.com/200x150?text=Venue';
 
 function resolveApiOrigin() {
-  const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api/v1';
+  const configuredBaseUrl =
+    import.meta.env.VITE_API_BASE_URL
+    || (import.meta.env.DEV ? 'http://localhost:5000/api/v1' : '/api');
+
+  if (typeof window !== 'undefined') {
+    try {
+      return new URL(configuredBaseUrl, window.location.origin).origin;
+    } catch {
+      return window.location.origin;
+    }
+  }
 
   try {
     return new URL(configuredBaseUrl).origin;
@@ -242,7 +252,7 @@ function MerchantPostListPage() {
 
         setPosts([...normalizedVenuePosts, ...normalizedRejectedUpdatePosts]);
       } catch (error) {
-        setLoadError(error.response?.data?.message || 'Không thể tải danh sách bài đăng của bạn.');
+        setLoadError(error.response?.data?.message || 'Could not load your posts. Please refresh and try again.');
       } finally {
         setLoadingPosts(false);
       }
@@ -339,6 +349,18 @@ function MerchantPostListPage() {
     } finally {
       setTogglingPausePostId(null);
     }
+  };
+
+  const handleAdvertisePost = (post) => {
+    if (!post?.venueId || post.kind !== 'venue') {
+      return;
+    }
+
+    navigate(APP_ROUTES.MERCHANT_POST_ADVERTISE.replace(':venueId', String(post.venueId)), {
+      state: {
+        venueName: post.name,
+      },
+    });
   };
 
   const statusCounts = useMemo(() => {
@@ -551,6 +573,14 @@ function MerchantPostListPage() {
                         : post.status === POST_STATUSES.hidden
                           ? 'Resume Shop'
                           : 'Pause Shop'}
+                    </button>
+                  ) : null}
+                  {post.kind === 'venue' && [POST_STATUSES.approved, POST_STATUSES.hidden].includes(post.status) ? (
+                    <button
+                      className="merchant-post-advertise-btn"
+                      onClick={() => handleAdvertisePost(post)}
+                    >
+                      Advertise
                     </button>
                   ) : null}
                   <button 

@@ -548,7 +548,12 @@ function VenueDetailPage() {
 	const navigate = useNavigate();
 	const { token, user } = useAuth();
 	const { theme } = useTheme();
-	const apiUrl = useMemo(() => import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api', []);
+	const apiUrl = useMemo(
+		() =>
+			import.meta.env.VITE_API_BASE_URL
+			|| (import.meta.env.DEV ? 'http://localhost:5000/api' : '/api'),
+		[]
+	);
 	const apiBase = useMemo(() => apiUrl.replace(/\/api\/v1$|\/api$/i, ''), [apiUrl]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState('');
