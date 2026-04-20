@@ -24,6 +24,8 @@ import AdminReportsPage from './pages/admin/AdminReportsPage';
 import AdminVenueApprovalPage from './pages/admin/AdminVenueApprovalPage';
 import AdminAdPackagesPage from './pages/admin/AdminAdPackagesPage';
 import AdminFeedbackManagementPage from './pages/admin/AdminFeedbackManagementPage';
+import AdminForumManagementPage from './pages/admin/AdminForumManagementPage';
+import AdminForumOverviewPage from './pages/admin/AdminForumOverviewPage';
 import MerchantWorkbenchPage from './pages/merchant/MerchantWorkbenchPage';
 import MerchantWorkbenchEditPage from './pages/merchant/MerchantWorkbenchEditPage';
 import MerchantDashboardPage from './pages/merchant/MerchantDashboardPage';
@@ -33,6 +35,7 @@ import RegisterPage from './pages/auth/RegisterPage';
 import ProfilePage from './pages/profile/ProfilePage';
 import FeedbackSupportPage from './pages/feedback/FeedbackSupportPage';
 import TermsPage from './pages/terms/TermsPage';
+import ForumPage from './pages/forum/ForumPage';
 import { APP_ROUTES } from './constants/routes';
 import { ROLES } from './constants/roles';
 import ChatWidget from './components/chat/ChatWidget';
@@ -149,6 +152,7 @@ function AppRoutes() {
           }
         />
         <Route path={APP_ROUTES.TERMS} element={<TermsPage />} />
+        <Route path={APP_ROUTES.FORUM} element={<ForumPage />} />
         <Route path={APP_ROUTES.FEEDBACK} element={<FeedbackSupportPage />} />
         <Route path={APP_ROUTES.LANDING_DETAIL} element={<LandingDetailPage />} />
         <Route path={APP_ROUTES.PLACE_LIST} element={<PlaceListPage />} />
@@ -182,6 +186,9 @@ function AppRoutes() {
       >
         <Route index element={<AdminDashboardPage />} />
         <Route path="boundaries" element={<AdminBoundaryPage />} />
+        <Route path="forum" element={<Navigate replace to={APP_ROUTES.ADMIN_FORUM_REPORTS} />} />
+        <Route path="forum/reports" element={<AdminForumManagementPage />} />
+        <Route path="forum/view" element={<AdminForumOverviewPage />} />
         <Route path="users" element={<AdminUserManagementPage />} />
         <Route path="reports" element={<AdminReportsPage />} />
         <Route path="packages" element={<AdminAdPackagesPage />} />

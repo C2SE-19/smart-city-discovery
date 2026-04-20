@@ -85,6 +85,12 @@ function MerchantLayout() {
             >
               {t.header.service}
             </NavLink>
+            <NavLink
+              to={APP_ROUTES.FORUM}
+              className={({ isActive }) => `landing-nav-link${isActive ? ' is-active' : ''}`}
+            >
+              {t.header.forum}
+            </NavLink>
           </nav>
 
           <div className="landing-header-actions">

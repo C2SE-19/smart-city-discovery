@@ -11918,6 +11918,1035 @@ async function generateWardIdFromName(name) {
         registerVersionedRoute('post', '/chat/threads/:threadId/read', authenticateRequest, checkUserStatus, markChatThreadRead);
         registerVersionedRoute('delete', '/chat/threads/:threadId', authenticateRequest, checkUserStatus, deleteChatThread);
 
+        const FORUM_PROFANITY_PATTERNS = [
+            'dit me', 'ditme', 'dit bo', 'ditba', 'dit', 'dm ', 'vcl', 'vl', 'cc', 'cmm', 'dmm',
+            'địt', 'đụ', 'đéo', 'deo', 'lon', 'cac', 'cặc', 'lồn', 'ngu', 'oc cho', 'occho',
+            'do ngu', 'mat day', 'hon lao', 'vo hoc', 'cho chet', 'chó chết'
+        ];
+
+        function normalizeForumText(value) {
+            return String(value || '')
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .toLowerCase()
+                .replace(/[^a-z0-9\s]/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+        }
+
+        function forumContainsProfanity(text) {
+            const normalized = normalizeForumText(text);
+            return FORUM_PROFANITY_PATTERNS.some((pattern) => normalized.includes(pattern));
+        }
+
+        function sanitizeForumImageList(input, maxImages = 3) {
+            if (!Array.isArray(input)) {
+                return [];
+            }
+
+            const images = input
+                .map((item) => String(item || '').trim())
+                .filter(Boolean)
+                .filter((item) => /^data:image\//i.test(item) || /^https?:\/\//i.test(item));
+
+            const uniqueImages = [...new Set(images)];
+            return uniqueImages.slice(0, maxImages);
+        }
+
+        function normalizeActorKey(value) {
+            return String(value || '')
+                .trim()
+                .replace(/[^a-zA-Z0-9_-]/g, '')
+                .slice(0, 80);
+        }
+
+        function isGenericForumAuthorName(value) {
+            const normalized = normalizeForumText(value);
+            return normalized === 'nguoi dung' || normalized === 'user';
+        }
+
+        async function resolveForumAuthorName(req, requestedAuthorName) {
+            const trimmedRequestedName = String(requestedAuthorName || '').trim();
+            if (trimmedRequestedName && !isGenericForumAuthorName(trimmedRequestedName)) {
+                return trimmedRequestedName;
+            }
+
+            const authUserId = String(req.authUser?.id || '').trim();
+            if (authUserId) {
+                try {
+                    const userResult = await pool.query(
+                        'SELECT fullname, username, email FROM users WHERE id = $1 LIMIT 1',
+                        [authUserId]
+                    );
+
+                    if (userResult.rows.length) {
+                        const userRow = userResult.rows[0];
+                        const candidates = [
+                            String(userRow.fullname || '').trim(),
+                            String(userRow.username || '').trim(),
+                            String(userRow.email || '').trim()
+                        ];
+
+                        for (const candidate of candidates) {
+                            if (!candidate) {
+                                continue;
+                            }
+
+                            const derived = candidate.includes('@')
+                                ? String(candidate).split('@')[0].trim()
+                                : candidate;
+
+                            if (derived && !isGenericForumAuthorName(derived)) {
+                                return derived;
+                            }
+                        }
+                    }
+                } catch (error) {
+                    console.warn('resolveForumAuthorName lookup error:', error.message);
+                }
+            }
+
+            const authEmail = String(req.authUser?.email || '').trim();
+            if (authEmail) {
+                const emailName = authEmail.split('@')[0].trim();
+                if (emailName && !isGenericForumAuthorName(emailName)) {
+                    return emailName;
+                }
+            }
+
+            return 'Người dùng';
+        }
+
+        function mapForumComment(row) {
+            const isAnonymous = Boolean(row.is_anonymous);
+            const alias = String(row.anonymous_alias || '').trim();
+            const author = isAnonymous
+                ? alias || 'Người dùng ẩn danh'
+                : String(row.author_name || '').trim() || 'Người dùng';
+            const rawParentId = row.parent_comment_id;
+            const parentCommentId = rawParentId === null || rawParentId === undefined
+                ? null
+                : Number(rawParentId) || null;
+            const creatorUserId = row.creator_user_id ? String(row.creator_user_id) : null;
+            const authorActorKey = row.author_actor_key ? String(row.author_actor_key) : null;
+            const reportCount = Number(row.report_count || row.comment_report_count || 0);
+            const lastReportedAt = row.last_reported_at || null;
+            const reportReasons = Array.isArray(row.comment_report_reasons)
+                ? row.comment_report_reasons
+                : (Array.isArray(row.report_reasons) ? row.report_reasons : []);
+
+            return {
+                id: row.id,
+                postId: row.post_id,
+                parentCommentId,
+                content: row.content,
+                author,
+                isAnonymous,
+                anonymousAlias: alias || null,
+                images: Array.isArray(row.comment_images) ? row.comment_images : [],
+                creatorUserId,
+                authorActorKey,
+                reportCount,
+                isReported: reportCount > 0,
+                lastReportedAt,
+                reportReasons,
+                createdAt: row.created_at,
+                time: row.created_at
+            };
+        }
+
+        function mapForumPost(row) {
+            const isAnonymous = Boolean(row.is_anonymous);
+            const alias = String(row.anonymous_alias || '').trim();
+            const author = isAnonymous
+                ? alias || 'Người dùng ẩn danh'
+                : String(row.author_name || '').trim() || 'Người dùng';
+            const creatorUserId = row.creator_user_id ? String(row.creator_user_id) : null;
+            const authorActorKey = row.author_actor_key ? String(row.author_actor_key) : null;
+            const reportCount = Number(row.post_report_count || row.report_count || 0);
+            const commentReportCount = Number(row.comment_report_count || 0);
+            const hasReportedContent = Boolean(reportCount > 0 || commentReportCount > 0);
+            const postReportReasons = Array.isArray(row.post_report_reasons) ? row.post_report_reasons : [];
+
+            return {
+                id: row.id,
+                title: row.title,
+                category: row.category,
+                content: row.content,
+                excerpt: row.content,
+                author,
+                comments: Number(row.comments_count || 0),
+                likesCount: Number(row.likes_count || 0),
+                images: Array.isArray(row.post_images) ? row.post_images : [],
+                createdAt: row.created_at,
+                time: row.created_at,
+                isAnonymous,
+                anonymousAlias: alias || null,
+                creatorUserId,
+                authorActorKey,
+                reportCount,
+                commentReportCount,
+                hasReportedContent,
+                lastReportedAt: row.last_reported_at || null,
+                postReportReasons,
+                commentsList: Array.isArray(row.comments_list) ? row.comments_list.map(mapForumComment) : []
+            };
+        }
+
+        async function listAdminForumPosts(req, res) {
+            try {
+                const search = String(req.query?.search || '').trim();
+                const queryParams = [];
+                let whereClause = '';
+
+                if (search) {
+                    queryParams.push(`%${search}%`);
+                    whereClause = `
+                        WHERE (
+                            p.title ILIKE $${queryParams.length}
+                            OR p.content ILIKE $${queryParams.length}
+                            OR p.category ILIKE $${queryParams.length}
+                            OR COALESCE(p.author_name, '') ILIKE $${queryParams.length}
+                            OR EXISTS (
+                                SELECT 1
+                                FROM forum_comments fc_search
+                                WHERE fc_search.post_id = p.id
+                                  AND (
+                                      fc_search.content ILIKE $${queryParams.length}
+                                      OR COALESCE(fc_search.author_name, '') ILIKE $${queryParams.length}
+                                      OR COALESCE(fc_search.anonymous_alias, '') ILIKE $${queryParams.length}
+                                  )
+                            )
+                        )
+                    `;
+                }
+
+                const result = await pool.query(
+                    `
+                        SELECT
+                            p.id,
+                            p.title,
+                            p.category,
+                            p.content,
+                            p.author_name,
+                            p.creator_user_id,
+                            p.author_actor_key,
+                            p.is_anonymous,
+                            p.anonymous_alias,
+                            p.comments_count,
+                            p.likes_count,
+                            p.post_images,
+                            p.created_at,
+                            COALESCE(post_reports.report_count, 0) AS post_report_count,
+                            COALESCE(comment_reports.report_count, 0) AS comment_report_count,
+                            COALESCE(
+                                (
+                                    SELECT json_agg(report_item ORDER BY report_item.created_at DESC)
+                                    FROM (
+                                        SELECT
+                                            fpr.id,
+                                            fpr.actor_key,
+                                            fpr.reason,
+                                            fpr.created_at
+                                        FROM forum_post_reports fpr
+                                        WHERE fpr.post_id = p.id
+                                        ORDER BY fpr.created_at DESC
+                                        LIMIT 20
+                                    ) report_item
+                                ),
+                                '[]'::json
+                            ) AS post_report_reasons,
+                            GREATEST(
+                                COALESCE(post_reports.last_reported_at, 'epoch'::timestamptz),
+                                COALESCE(comment_reports.last_reported_at, 'epoch'::timestamptz)
+                            ) AS last_reported_at,
+                            COALESCE(
+                                (
+                                    SELECT json_agg(c ORDER BY c.is_reported DESC, c.last_reported_at DESC NULLS LAST, c.created_at DESC)
+                                    FROM (
+                                        SELECT
+                                            fc.id,
+                                            fc.post_id,
+                                            fc.parent_comment_id,
+                                            fc.content,
+                                            fc.author_name,
+                                            fc.creator_user_id,
+                                            fc.author_actor_key,
+                                            fc.is_anonymous,
+                                            fc.anonymous_alias,
+                                            fc.comment_images,
+                                            fc.created_at,
+                                            COALESCE(fcr.report_count, 0) AS report_count,
+                                            COALESCE(
+                                                (
+                                                    SELECT json_agg(comment_report_item ORDER BY comment_report_item.created_at DESC)
+                                                    FROM (
+                                                        SELECT
+                                                            report.id,
+                                                            report.actor_key,
+                                                            report.reason,
+                                                            report.created_at
+                                                        FROM forum_comment_reports report
+                                                        WHERE report.comment_id = fc.id
+                                                        ORDER BY report.created_at DESC
+                                                        LIMIT 20
+                                                    ) comment_report_item
+                                                ),
+                                                '[]'::json
+                                            ) AS comment_report_reasons,
+                                            fcr.last_reported_at,
+                                            (COALESCE(fcr.report_count, 0) > 0) AS is_reported
+                                        FROM forum_comments fc
+                                        LEFT JOIN (
+                                            SELECT
+                                                comment_id,
+                                                COUNT(*)::int AS report_count,
+                                                MAX(created_at) AS last_reported_at
+                                            FROM forum_comment_reports
+                                            GROUP BY comment_id
+                                        ) fcr ON fcr.comment_id = fc.id
+                                        WHERE fc.post_id = p.id
+                                        ORDER BY fc.created_at DESC
+                                        LIMIT 200
+                                    ) c
+                                ),
+                                '[]'::json
+                            ) AS comments_list
+                        FROM forum_posts p
+                        LEFT JOIN (
+                            SELECT
+                                post_id,
+                                COUNT(*)::int AS report_count,
+                                MAX(created_at) AS last_reported_at
+                            FROM forum_post_reports
+                            GROUP BY post_id
+                        ) post_reports ON post_reports.post_id = p.id
+                        LEFT JOIN (
+                            SELECT
+                                fc.post_id,
+                                COUNT(*)::int AS report_count,
+                                MAX(fcr.created_at) AS last_reported_at
+                            FROM forum_comment_reports fcr
+                            INNER JOIN forum_comments fc ON fc.id = fcr.comment_id
+                            GROUP BY fc.post_id
+                        ) comment_reports ON comment_reports.post_id = p.id
+                        ${whereClause}
+                        ORDER BY
+                            (COALESCE(post_reports.report_count, 0) > 0 OR COALESCE(comment_reports.report_count, 0) > 0) DESC,
+                            GREATEST(
+                                COALESCE(post_reports.last_reported_at, 'epoch'::timestamptz),
+                                COALESCE(comment_reports.last_reported_at, 'epoch'::timestamptz)
+                            ) DESC,
+                            p.created_at DESC
+                        LIMIT 200
+                    `,
+                    queryParams
+                );
+
+                return res.json({ data: result.rows.map(mapForumPost) });
+            } catch (error) {
+                console.error('listAdminForumPosts error:', error);
+                return res.status(500).json({ message: 'Không thể tải dữ liệu diễn đàn cho quản trị viên.' });
+            }
+        }
+
+        async function listForumPosts(req, res) {
+            try {
+                const result = await pool.query(
+                    `
+                        SELECT
+                            p.id,
+                            p.title,
+                            p.category,
+                            p.content,
+                            p.author_name,
+                            p.creator_user_id,
+                            p.author_actor_key,
+                            p.is_anonymous,
+                            p.anonymous_alias,
+                            p.comments_count,
+                            p.likes_count,
+                            p.post_images,
+                            p.created_at,
+                            COALESCE(
+                                (
+                                    SELECT json_agg(c ORDER BY c.created_at DESC)
+                                    FROM (
+                                        SELECT
+                                            fc.id,
+                                            fc.post_id,
+                                            fc.parent_comment_id,
+                                            fc.content,
+                                            fc.author_name,
+                                            fc.creator_user_id,
+                                            fc.author_actor_key,
+                                            fc.is_anonymous,
+                                            fc.anonymous_alias,
+                                            fc.comment_images,
+                                            fc.created_at
+                                        FROM forum_comments fc
+                                        WHERE fc.post_id = p.id
+                                        ORDER BY fc.created_at DESC
+                                        LIMIT 100
+                                    ) c
+                                ),
+                                '[]'::json
+                            ) AS comments_list
+                        FROM forum_posts p
+                        ORDER BY p.created_at DESC
+                        LIMIT 100
+                    `
+                );
+
+                return res.json({ data: result.rows.map(mapForumPost) });
+            } catch (error) {
+                console.error('listForumPosts error:', error);
+                return res.status(500).json({ message: 'Không thể tải bài viết diễn đàn.' });
+            }
+        }
+
+        async function createForumPost(req, res) {
+            try {
+                const title = String(req.body?.title || '').trim();
+                const category = String(req.body?.category || '').trim();
+                const content = String(req.body?.content || '').trim();
+                const isAnonymous = Boolean(req.body?.isAnonymous);
+                const anonymousAlias = String(req.body?.anonymousAlias || '').trim();
+                const authorName = await resolveForumAuthorName(req, req.body?.authorName);
+                const actorKey = normalizeActorKey(req.body?.actorKey);
+                const creatorUserId = req.authUser?.id || null;
+                const postImages = sanitizeForumImageList(req.body?.images, 3);
+
+                if (!title || !category || !content) {
+                    return res.status(400).json({ message: 'Vui lòng nhập đầy đủ tiêu đề, chủ đề và nội dung.' });
+                }
+
+                if (content.length > 499) {
+                    return res.status(400).json({ message: 'Nội dung dài tối đa 499 ký tự.' });
+                }
+
+                if (isAnonymous && anonymousAlias.length < 2) {
+                    return res.status(400).json({ message: 'Vui lòng nhập biệt danh tối thiểu 2 ký tự khi đăng ẩn danh.' });
+                }
+
+                if (forumContainsProfanity(`${title} ${category} ${content} ${anonymousAlias}`)) {
+                    return res.status(400).json({ message: 'Nội dung chứa từ ngữ không phù hợp. Vui lòng chỉnh sửa trước khi đăng.' });
+                }
+
+                const insertResult = await pool.query(
+                    `
+                        INSERT INTO forum_posts (
+                            title, category, content, author_name, creator_user_id, author_actor_key, is_anonymous, anonymous_alias, post_images
+                        )
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+                        RETURNING id, title, category, content, author_name, creator_user_id, author_actor_key, is_anonymous, anonymous_alias, comments_count, likes_count, post_images, created_at
+                    `,
+                    [
+                        title,
+                        category,
+                        content,
+                        isAnonymous ? null : authorName,
+                        creatorUserId,
+                        actorKey || null,
+                        isAnonymous,
+                        isAnonymous ? anonymousAlias : null,
+                        JSON.stringify(postImages)
+                    ]
+                );
+
+                return res.status(201).json({ data: mapForumPost(insertResult.rows[0]) });
+            } catch (error) {
+                console.error('createForumPost error:', error);
+                return res.status(500).json({ message: 'Không thể đăng bài lúc này. Vui lòng thử lại.' });
+            }
+        }
+
+        async function createForumComment(req, res) {
+            try {
+                const postId = Number(req.params?.postId);
+                const authUserId = String(req.authUser?.id || '').trim();
+                const rawParentCommentId = req.body?.parentCommentId;
+                const parentCommentId =
+                    rawParentCommentId === null || rawParentCommentId === undefined || rawParentCommentId === ''
+                        ? null
+                        : Number(rawParentCommentId);
+                const content = String(req.body?.content || '').trim();
+                const isAnonymous = Boolean(req.body?.isAnonymous);
+                const anonymousAlias = String(req.body?.anonymousAlias || '').trim();
+                const authorName = await resolveForumAuthorName(req, req.body?.authorName);
+                const actorKey = normalizeActorKey(req.body?.actorKey);
+                const creatorUserId = authUserId || null;
+                const commentImages = sanitizeForumImageList(req.body?.images, 3);
+
+                if (!authUserId) {
+                    return res.status(401).json({ message: 'Bạn cần đăng nhập để bình luận.' });
+                }
+
+                if (!Number.isFinite(postId) || postId <= 0) {
+                    return res.status(400).json({ message: 'Bài viết không hợp lệ.' });
+                }
+
+                if (!content) {
+                    return res.status(400).json({ message: 'Vui lòng nhập nội dung bình luận.' });
+                }
+
+                if (parentCommentId !== null && (!Number.isFinite(parentCommentId) || parentCommentId <= 0)) {
+                    return res.status(400).json({ message: 'Phản hồi bình luận không hợp lệ.' });
+                }
+
+                if (content.length > 499) {
+                    return res.status(400).json({ message: 'Nội dung bình luận tối đa 499 ký tự.' });
+                }
+
+                if (isAnonymous && anonymousAlias.length < 2) {
+                    return res.status(400).json({ message: 'Vui lòng nhập biệt danh tối thiểu 2 ký tự khi bình luận ẩn danh.' });
+                }
+
+                if (forumContainsProfanity(`${content} ${anonymousAlias}`)) {
+                    return res.status(400).json({ message: 'Bình luận chứa từ ngữ không phù hợp. Vui lòng chỉnh sửa trước khi đăng.' });
+                }
+
+                const postCheck = await pool.query('SELECT id FROM forum_posts WHERE id = $1 LIMIT 1', [postId]);
+                if (!postCheck.rows.length) {
+                    return res.status(404).json({ message: 'Không tìm thấy bài viết.' });
+                }
+
+                if (parentCommentId !== null) {
+                    const parentCheck = await pool.query(
+                        'SELECT id FROM forum_comments WHERE id = $1 AND post_id = $2 LIMIT 1',
+                        [parentCommentId, postId]
+                    );
+
+                    if (!parentCheck.rows.length) {
+                        return res.status(404).json({ message: 'Không tìm thấy bình luận gốc để phản hồi.' });
+                    }
+                }
+
+                const insertResult = await pool.query(
+                    `
+                        INSERT INTO forum_comments (
+                            post_id, parent_comment_id, content, author_name, creator_user_id, author_actor_key, is_anonymous, anonymous_alias, comment_images
+                        )
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+                        RETURNING id, post_id, parent_comment_id, content, author_name, creator_user_id, author_actor_key, is_anonymous, anonymous_alias, comment_images, created_at
+                    `,
+                    [
+                        postId,
+                        parentCommentId,
+                        content,
+                        isAnonymous ? null : authorName,
+                        creatorUserId,
+                        actorKey || null,
+                        isAnonymous,
+                        isAnonymous ? anonymousAlias : null,
+                        JSON.stringify(commentImages)
+                    ]
+                );
+
+                await pool.query(
+                    'UPDATE forum_posts SET comments_count = comments_count + 1, updated_at = NOW() WHERE id = $1',
+                    [postId]
+                );
+
+                return res.status(201).json({ data: mapForumComment(insertResult.rows[0]) });
+            } catch (error) {
+                console.error('createForumComment error:', error);
+                return res.status(500).json({ message: 'Không thể đăng bình luận lúc này. Vui lòng thử lại.' });
+            }
+        }
+
+        async function toggleForumPostLike(req, res) {
+            try {
+                const postId = Number(req.params?.postId);
+                const actorKey = normalizeActorKey(req.body?.actorKey);
+
+                if (!Number.isFinite(postId) || postId <= 0) {
+                    return res.status(400).json({ message: 'Bài viết không hợp lệ.' });
+                }
+
+                if (!actorKey) {
+                    return res.status(400).json({ message: 'Thiếu thông tin người dùng để thực hiện thao tác thích.' });
+                }
+
+                const postCheck = await pool.query('SELECT id FROM forum_posts WHERE id = $1 LIMIT 1', [postId]);
+                if (!postCheck.rows.length) {
+                    return res.status(404).json({ message: 'Không tìm thấy bài viết.' });
+                }
+
+                const existing = await pool.query(
+                    'SELECT id FROM forum_post_likes WHERE post_id = $1 AND actor_key = $2 LIMIT 1',
+                    [postId, actorKey]
+                );
+
+                let liked = false;
+                if (existing.rows.length) {
+                    await pool.query('DELETE FROM forum_post_likes WHERE post_id = $1 AND actor_key = $2', [postId, actorKey]);
+                    await pool.query(
+                        'UPDATE forum_posts SET likes_count = GREATEST(likes_count - 1, 0), updated_at = NOW() WHERE id = $1',
+                        [postId]
+                    );
+                } else {
+                    await pool.query(
+                        'INSERT INTO forum_post_likes (post_id, actor_key) VALUES ($1, $2) ON CONFLICT (post_id, actor_key) DO NOTHING',
+                        [postId, actorKey]
+                    );
+                    await pool.query(
+                        'UPDATE forum_posts SET likes_count = likes_count + 1, updated_at = NOW() WHERE id = $1',
+                        [postId]
+                    );
+                    liked = true;
+                }
+
+                const likesResult = await pool.query('SELECT likes_count FROM forum_posts WHERE id = $1', [postId]);
+                const likesCount = Number(likesResult.rows?.[0]?.likes_count || 0);
+
+                return res.json({ data: { postId, liked, likesCount } });
+            } catch (error) {
+                console.error('toggleForumPostLike error:', error);
+                return res.status(500).json({ message: 'Không thể cập nhật lượt thích lúc này. Vui lòng thử lại.' });
+            }
+        }
+
+        async function reportForumPost(req, res) {
+            try {
+                const postId = Number(req.params?.postId);
+                const actorKey = normalizeActorKey(req.body?.actorKey);
+                const reason = String(req.body?.reason || '').trim();
+
+                if (!Number.isFinite(postId) || postId <= 0) {
+                    return res.status(400).json({ message: 'Bài viết không hợp lệ.' });
+                }
+
+                if (!actorKey) {
+                    return res.status(400).json({ message: 'Thiếu thông tin người dùng để báo cáo.' });
+                }
+
+                if (reason.length < 3) {
+                    return res.status(400).json({ message: 'Lý do báo cáo cần ít nhất 3 ký tự.' });
+                }
+
+                if (forumContainsProfanity(reason)) {
+                    return res.status(400).json({ message: 'Lý do báo cáo chứa từ ngữ không phù hợp.' });
+                }
+
+                const postCheck = await pool.query('SELECT id FROM forum_posts WHERE id = $1 LIMIT 1', [postId]);
+                if (!postCheck.rows.length) {
+                    return res.status(404).json({ message: 'Không tìm thấy bài viết.' });
+                }
+
+                await pool.query(
+                    `
+                        INSERT INTO forum_post_reports (post_id, actor_key, reason)
+                        VALUES ($1, $2, $3)
+                    `,
+                    [postId, actorKey, reason]
+                );
+
+                return res.status(201).json({ data: { postId, actorKey } });
+            } catch (error) {
+                console.error('reportForumPost error:', error);
+                return res.status(500).json({ message: 'Không thể gửi báo cáo lúc này. Vui lòng thử lại.' });
+            }
+        }
+
+        async function reportForumComment(req, res) {
+            try {
+                const postId = Number(req.params?.postId);
+                const commentId = Number(req.params?.commentId);
+                const actorKey = normalizeActorKey(req.body?.actorKey);
+                const reason = String(req.body?.reason || '').trim();
+
+                if (!Number.isFinite(postId) || postId <= 0) {
+                    return res.status(400).json({ message: 'Bài viết không hợp lệ.' });
+                }
+
+                if (!Number.isFinite(commentId) || commentId <= 0) {
+                    return res.status(400).json({ message: 'Bình luận không hợp lệ.' });
+                }
+
+                if (!actorKey) {
+                    return res.status(400).json({ message: 'Thiếu thông tin người dùng để báo cáo.' });
+                }
+
+                if (reason.length < 3) {
+                    return res.status(400).json({ message: 'Lý do báo cáo cần ít nhất 3 ký tự.' });
+                }
+
+                if (forumContainsProfanity(reason)) {
+                    return res.status(400).json({ message: 'Lý do báo cáo chứa từ ngữ không phù hợp.' });
+                }
+
+                const commentCheck = await pool.query(
+                    'SELECT id FROM forum_comments WHERE id = $1 AND post_id = $2 LIMIT 1',
+                    [commentId, postId]
+                );
+
+                if (!commentCheck.rows.length) {
+                    return res.status(404).json({ message: 'Không tìm thấy bình luận.' });
+                }
+
+                await pool.query(
+                    `
+                        INSERT INTO forum_comment_reports (comment_id, actor_key, reason)
+                        VALUES ($1, $2, $3)
+                    `,
+                    [commentId, actorKey, reason]
+                );
+
+                return res.status(201).json({ data: { postId, commentId, actorKey } });
+            } catch (error) {
+                console.error('reportForumComment error:', error);
+                return res.status(500).json({ message: 'Không thể gửi báo cáo bình luận lúc này. Vui lòng thử lại.' });
+            }
+        }
+
+        async function deleteForumPost(req, res) {
+            try {
+                const postId = Number(req.params?.postId);
+                const actorKey = normalizeActorKey(req.body?.actorKey);
+                const requestAuthorName = String(req.body?.authorName || '').trim();
+                const authUserId = String(req.authUser?.id || '').trim();
+
+                if (!Number.isFinite(postId) || postId <= 0) {
+                    return res.status(400).json({ message: 'Bài viết không hợp lệ.' });
+                }
+
+                const postResult = await pool.query(
+                    `
+                        SELECT id, author_name, creator_user_id, author_actor_key, is_anonymous
+                        FROM forum_posts
+                        WHERE id = $1
+                        LIMIT 1
+                    `,
+                    [postId]
+                );
+
+                if (!postResult.rows.length) {
+                    return res.status(404).json({ message: 'Không tìm thấy bài viết.' });
+                }
+
+                const post = postResult.rows[0];
+                const postCreatorUserId = post.creator_user_id ? String(post.creator_user_id) : '';
+                const postActorKey = post.author_actor_key ? String(post.author_actor_key) : '';
+                const postAuthorName = String(post.author_name || '').trim();
+                const isAnonymous = Boolean(post.is_anonymous);
+
+                const allowByUserId = Boolean(authUserId && postCreatorUserId && authUserId === postCreatorUserId);
+                const allowByActorKey = Boolean(actorKey && postActorKey && actorKey === postActorKey);
+                const allowLegacyByAuthorName = Boolean(
+                    !isAnonymous &&
+                    requestAuthorName &&
+                    postAuthorName &&
+                    requestAuthorName === postAuthorName
+                );
+
+                if (!allowByUserId && !allowByActorKey && !allowLegacyByAuthorName) {
+                    return res.status(403).json({ message: 'Bạn chỉ có thể xóa bài viết do chính bạn đăng.' });
+                }
+
+                await pool.query('DELETE FROM forum_posts WHERE id = $1', [postId]);
+                return res.json({ data: { postId } });
+            } catch (error) {
+                console.error('deleteForumPost error:', error);
+                return res.status(500).json({ message: 'Không thể xóa bài viết lúc này. Vui lòng thử lại.' });
+            }
+        }
+
+        async function deleteForumComment(req, res) {
+            const postId = Number(req.params?.postId);
+            const commentId = Number(req.params?.commentId);
+            const actorKey = normalizeActorKey(req.body?.actorKey);
+            const requestAuthorName = String(req.body?.authorName || '').trim();
+            const authUserId = String(req.authUser?.id || '').trim();
+
+            if (!Number.isFinite(postId) || postId <= 0) {
+                return res.status(400).json({ message: 'Bài viết không hợp lệ.' });
+            }
+
+            if (!Number.isFinite(commentId) || commentId <= 0) {
+                return res.status(400).json({ message: 'Bình luận không hợp lệ.' });
+            }
+
+            let client;
+
+            try {
+                const identityResult = await pool.query(
+                    `
+                        SELECT
+                            p.id AS post_id,
+                            p.author_name AS post_author_name,
+                            p.creator_user_id AS post_creator_user_id,
+                            p.author_actor_key AS post_actor_key,
+                            p.is_anonymous AS post_is_anonymous,
+                            c.id AS comment_id,
+                            c.author_name AS comment_author_name,
+                            c.creator_user_id AS comment_creator_user_id,
+                            c.author_actor_key AS comment_actor_key,
+                            c.is_anonymous AS comment_is_anonymous
+                        FROM forum_posts p
+                        INNER JOIN forum_comments c ON c.post_id = p.id
+                        WHERE p.id = $1 AND c.id = $2
+                        LIMIT 1
+                    `,
+                    [postId, commentId]
+                );
+
+                if (!identityResult.rows.length) {
+                    return res.status(404).json({ message: 'Không tìm thấy bình luận cần xóa.' });
+                }
+
+                const identity = identityResult.rows[0];
+                const postCreatorUserId = identity.post_creator_user_id ? String(identity.post_creator_user_id) : '';
+                const postActorKey = identity.post_actor_key ? String(identity.post_actor_key) : '';
+                const postAuthorName = String(identity.post_author_name || '').trim();
+                const postIsAnonymous = Boolean(identity.post_is_anonymous);
+
+                const commentCreatorUserId = identity.comment_creator_user_id ? String(identity.comment_creator_user_id) : '';
+                const commentActorKey = identity.comment_actor_key ? String(identity.comment_actor_key) : '';
+                const commentAuthorName = String(identity.comment_author_name || '').trim();
+                const commentIsAnonymous = Boolean(identity.comment_is_anonymous);
+
+                const allowByPostOwner = Boolean(
+                    (authUserId && postCreatorUserId && authUserId === postCreatorUserId)
+                    || (actorKey && postActorKey && actorKey === postActorKey)
+                    || (!postIsAnonymous && requestAuthorName && postAuthorName && requestAuthorName === postAuthorName)
+                );
+
+                const allowByCommentOwner = Boolean(
+                    (authUserId && commentCreatorUserId && authUserId === commentCreatorUserId)
+                    || (actorKey && commentActorKey && actorKey === commentActorKey)
+                    || (!commentIsAnonymous && requestAuthorName && commentAuthorName && requestAuthorName === commentAuthorName)
+                );
+
+                if (!allowByPostOwner && !allowByCommentOwner) {
+                    return res.status(403).json({ message: 'Bạn chỉ có thể xóa bình luận của bạn hoặc bình luận trong bài viết của bạn.' });
+                }
+
+                client = await pool.connect();
+                await client.query('BEGIN');
+
+                const treeResult = await client.query(
+                    `
+                        WITH RECURSIVE comment_tree AS (
+                            SELECT id
+                            FROM forum_comments
+                            WHERE id = $1 AND post_id = $2
+                            UNION ALL
+                            SELECT child.id
+                            FROM forum_comments child
+                            INNER JOIN comment_tree parent_tree ON child.parent_comment_id = parent_tree.id
+                            WHERE child.post_id = $2
+                        )
+                        SELECT id
+                        FROM comment_tree
+                    `,
+                    [commentId, postId]
+                );
+
+                if (!treeResult.rows.length) {
+                    await client.query('ROLLBACK');
+                    return res.status(404).json({ message: 'Không tìm thấy bình luận cần xóa.' });
+                }
+
+                const deletedCount = treeResult.rows.length;
+
+                await client.query(
+                    'DELETE FROM forum_comments WHERE id = $1 AND post_id = $2',
+                    [commentId, postId]
+                );
+
+                await client.query(
+                    'UPDATE forum_posts SET comments_count = GREATEST(comments_count - $2, 0), updated_at = NOW() WHERE id = $1',
+                    [postId, deletedCount]
+                );
+
+                await client.query('COMMIT');
+                return res.json({ data: { postId, commentId, deletedCount } });
+            } catch (error) {
+                if (client) {
+                    try {
+                        await client.query('ROLLBACK');
+                    } catch (_rollbackError) {
+                        // ignore rollback error
+                    }
+                }
+
+                console.error('deleteForumComment error:', error);
+                return res.status(500).json({ message: 'Không thể xóa bình luận lúc này. Vui lòng thử lại.' });
+            } finally {
+                if (client) {
+                    client.release();
+                }
+            }
+        }
+
+        async function deleteAdminForumPost(req, res) {
+            try {
+                const postId = Number(req.params?.postId);
+
+                if (!Number.isFinite(postId) || postId <= 0) {
+                    return res.status(400).json({ message: 'Bài viết không hợp lệ.' });
+                }
+
+                const postCheck = await pool.query('SELECT id FROM forum_posts WHERE id = $1 LIMIT 1', [postId]);
+                if (!postCheck.rows.length) {
+                    return res.status(404).json({ message: 'Không tìm thấy bài viết.' });
+                }
+
+                await pool.query('DELETE FROM forum_posts WHERE id = $1', [postId]);
+                return res.json({ data: { postId } });
+            } catch (error) {
+                console.error('deleteAdminForumPost error:', error);
+                return res.status(500).json({ message: 'Không thể xóa bài viết lúc này. Vui lòng thử lại.' });
+            }
+        }
+
+        async function deleteAdminForumComment(req, res) {
+            const postId = Number(req.params?.postId);
+            const commentId = Number(req.params?.commentId);
+            let client;
+
+            if (!Number.isFinite(postId) || postId <= 0) {
+                return res.status(400).json({ message: 'Bài viết không hợp lệ.' });
+            }
+
+            if (!Number.isFinite(commentId) || commentId <= 0) {
+                return res.status(400).json({ message: 'Bình luận không hợp lệ.' });
+            }
+
+            try {
+                const identityResult = await pool.query(
+                    `
+                        SELECT c.id
+                        FROM forum_comments c
+                        WHERE c.post_id = $1 AND c.id = $2
+                        LIMIT 1
+                    `,
+                    [postId, commentId]
+                );
+
+                if (!identityResult.rows.length) {
+                    return res.status(404).json({ message: 'Không tìm thấy bình luận cần xóa.' });
+                }
+
+                client = await pool.connect();
+                await client.query('BEGIN');
+
+                const treeResult = await client.query(
+                    `
+                        WITH RECURSIVE comment_tree AS (
+                            SELECT id
+                            FROM forum_comments
+                            WHERE id = $1 AND post_id = $2
+                            UNION ALL
+                            SELECT child.id
+                            FROM forum_comments child
+                            INNER JOIN comment_tree parent_tree ON child.parent_comment_id = parent_tree.id
+                            WHERE child.post_id = $2
+                        )
+                        SELECT id
+                        FROM comment_tree
+                    `,
+                    [commentId, postId]
+                );
+
+                if (!treeResult.rows.length) {
+                    await client.query('ROLLBACK');
+                    return res.status(404).json({ message: 'Không tìm thấy bình luận cần xóa.' });
+                }
+
+                const deletedCount = treeResult.rows.length;
+
+                await client.query(
+                    'DELETE FROM forum_comments WHERE id = $1 AND post_id = $2',
+                    [commentId, postId]
+                );
+
+                await client.query(
+                    'UPDATE forum_posts SET comments_count = GREATEST(comments_count - $2, 0), updated_at = NOW() WHERE id = $1',
+                    [postId, deletedCount]
+                );
+
+                await client.query('COMMIT');
+                return res.json({ data: { postId, commentId, deletedCount } });
+            } catch (error) {
+                if (client) {
+                    try {
+                        await client.query('ROLLBACK');
+                    } catch (_rollbackError) {
+                        // ignore rollback error
+                    }
+                }
+
+                console.error('deleteAdminForumComment error:', error);
+                return res.status(500).json({ message: 'Không thể xóa bình luận lúc này. Vui lòng thử lại.' });
+            } finally {
+                if (client) {
+                    client.release();
+                }
+            }
+        }
+
+        async function dismissAdminForumPostReports(req, res) {
+            try {
+                const postId = Number(req.params?.postId);
+
+                if (!Number.isFinite(postId) || postId <= 0) {
+                    return res.status(400).json({ message: 'Bài viết không hợp lệ.' });
+                }
+
+                const postCheck = await pool.query('SELECT id FROM forum_posts WHERE id = $1 LIMIT 1', [postId]);
+                if (!postCheck.rows.length) {
+                    return res.status(404).json({ message: 'Không tìm thấy bài viết.' });
+                }
+
+                const deletedResult = await pool.query('DELETE FROM forum_post_reports WHERE post_id = $1', [postId]);
+                return res.json({ data: { postId, dismissedCount: Number(deletedResult.rowCount || 0) } });
+            } catch (error) {
+                console.error('dismissAdminForumPostReports error:', error);
+                return res.status(500).json({ message: 'Không thể hủy báo cáo bài viết lúc này. Vui lòng thử lại.' });
+            }
+        }
+
+        async function dismissAdminForumCommentReports(req, res) {
+            try {
+                const postId = Number(req.params?.postId);
+                const commentId = Number(req.params?.commentId);
+
+                if (!Number.isFinite(postId) || postId <= 0) {
+                    return res.status(400).json({ message: 'Bài viết không hợp lệ.' });
+                }
+
+                if (!Number.isFinite(commentId) || commentId <= 0) {
+                    return res.status(400).json({ message: 'Bình luận không hợp lệ.' });
+                }
+
+                const commentCheck = await pool.query(
+                    'SELECT id FROM forum_comments WHERE id = $1 AND post_id = $2 LIMIT 1',
+                    [commentId, postId]
+                );
+
+                if (!commentCheck.rows.length) {
+                    return res.status(404).json({ message: 'Không tìm thấy bình luận.' });
+                }
+
+                const deletedResult = await pool.query('DELETE FROM forum_comment_reports WHERE comment_id = $1', [commentId]);
+                return res.json({ data: { postId, commentId, dismissedCount: Number(deletedResult.rowCount || 0) } });
+            } catch (error) {
+                console.error('dismissAdminForumCommentReports error:', error);
+                return res.status(500).json({ message: 'Không thể hủy báo cáo bình luận lúc này. Vui lòng thử lại.' });
+            }
+        }
+
+        registerVersionedRoute('get', '/forum/posts', listForumPosts);
+        registerVersionedRoute('post', '/forum/posts', authenticateOptionalLenient, createForumPost);
+        registerVersionedRoute('post', '/forum/posts/:postId/comments', authenticateOptionalLenient, createForumComment);
+        registerVersionedRoute('delete', '/forum/posts/:postId/comments/:commentId', authenticateOptionalLenient, deleteForumComment);
+        registerVersionedRoute('post', '/forum/posts/:postId/likes/toggle', toggleForumPostLike);
+        registerVersionedRoute('post', '/forum/posts/:postId/report', reportForumPost);
+        registerVersionedRoute('post', '/forum/posts/:postId/comments/:commentId/report', reportForumComment);
+        registerVersionedRoute('delete', '/forum/posts/:postId', authenticateOptionalLenient, deleteForumPost);
+
         registerVersionedRoute('get', '/wards', listPublicWards);
         registerVersionedRoute('get', '/cities/stats', listCitiesWithStats);
         registerVersionedRoute('post', '/gis/detect-ward', detectPublicWard);
@@ -11960,6 +12989,11 @@ async function generateWardIdFromName(name) {
         registerVersionedRoute('patch', '/admin/merchant-services/:serviceId', authenticateRequest, requireAdminRole, updateAdminMerchantService);
         registerVersionedRoute('delete', '/admin/merchant-services/:serviceId', authenticateRequest, requireAdminRole, deleteAdminMerchantService);
         registerVersionedRoute('get', '/admin/venues', authenticateRequest, requireAdminRole, listAdminVenues);
+        registerVersionedRoute('get', '/admin/forum/posts', authenticateRequest, requireAdminRole, listAdminForumPosts);
+        registerVersionedRoute('delete', '/admin/forum/posts/:postId', authenticateRequest, requireAdminRole, deleteAdminForumPost);
+        registerVersionedRoute('delete', '/admin/forum/posts/:postId/comments/:commentId', authenticateRequest, requireAdminRole, deleteAdminForumComment);
+        registerVersionedRoute('delete', '/admin/forum/posts/:postId/reports', authenticateRequest, requireAdminRole, dismissAdminForumPostReports);
+        registerVersionedRoute('delete', '/admin/forum/posts/:postId/comments/:commentId/reports', authenticateRequest, requireAdminRole, dismissAdminForumCommentReports);
         registerVersionedRoute('get', '/admin/venues/:venueId/reviews', authenticateRequest, requireAdminRole, listAdminVenueReviews);
         registerVersionedRoute('get', '/admin/venues/update-requests', authenticateRequest, requireAdminRole, listAdminVenueUpdateRequests);
         registerVersionedRoute('patch', '/admin/venues/update-requests/:requestId/moderation', authenticateRequest, requireAdminRole, moderateVenueUpdateRequest);
