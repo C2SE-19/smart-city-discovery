@@ -1,8 +1,79 @@
 const express = require('express');
 const authRoutes = require('../modules/auth/auth.routes');
 const usersRoutes = require('../modules/users/users.routes');
+const { query } = require('../config/database');
 
 const router = express.Router();
+
+const PROFANITY_PATTERNS = [
+  'dit me',
+  'ditme',
+  'dit bo',
+  'ditba',
+  'dit',
+  'dm ',
+  'vcl',
+  'vl',
+  'cc',
+  'cmm',
+  'dmm',
+  'địt',
+  'đụ',
+  'đéo',
+  'deo',
+  'lon',
+  'cac',
+  'cặc',
+  'lồn',
+  'ngu',
+  'oc cho',
+  'occho',
+  'do ngu',
+  'mat day',
+  'hon lao',
+  'vo hoc',
+  'chó chết',
+  'cho chet'
+];
+
+function normalizeText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function containsProfanity(text) {
+  const normalized = normalizeText(text);
+  return PROFANITY_PATTERNS.some((pattern) => normalized.includes(pattern));
+}
+
+function mapForumPostRow(row) {
+  const isAnonymous = Boolean(row.is_anonymous);
+  const alias = String(row.anonymous_alias || '').trim();
+  const authorName = isAnonymous
+    ? alias
+      ? `Ẩn danh (${alias})`
+      : 'Ẩn danh'
+    : String(row.author_name || '').trim() || 'Người dùng';
+
+  return {
+    id: row.id,
+    title: row.title,
+    category: row.category,
+    content: row.content,
+    excerpt: row.content,
+    author: authorName,
+    comments: Number(row.comments_count || 0),
+    createdAt: row.created_at,
+    time: row.created_at,
+    isAnonymous,
+    anonymousAlias: alias || null
+  };
+}
 
 const normalizeCategoryLabel = (category) =>
   String(category || '')
@@ -443,6 +514,67 @@ router.get('/landing/services/:slug', (req, res) => {
   }
 
   res.json({ data: detail });
+});
+
+router.get('/forum/posts', async (req, res) => {
+  try {
+    const { rows } = await query(
+      `SELECT id, title, category, content, author_name, is_anonymous, anonymous_alias, comments_count, created_at
+       FROM public.forum_posts
+       ORDER BY created_at DESC
+       LIMIT 100`
+    );
+
+    res.json({ data: rows.map(mapForumPostRow) });
+  } catch (error) {
+    console.error('Error loading forum posts:', error);
+    res.status(500).json({ message: 'Không thể tải bài viết diễn đàn.' });
+  }
+});
+
+router.post('/forum/posts', async (req, res) => {
+  try {
+    const title = String(req.body?.title || '').trim();
+    const category = String(req.body?.category || '').trim();
+    const content = String(req.body?.content || '').trim();
+    const isAnonymous = Boolean(req.body?.isAnonymous);
+    const anonymousAlias = String(req.body?.anonymousAlias || '').trim();
+    const authorName = String(req.body?.authorName || '').trim() || 'Người dùng';
+
+    if (!title || !category || !content) {
+      res.status(400).json({ message: 'Vui lòng nhập đầy đủ tiêu đề, chủ đề và nội dung.' });
+      return;
+    }
+
+    if (content.length > 499) {
+      res.status(400).json({ message: 'Nội dung dài tối đa 499 ký tự.' });
+      return;
+    }
+
+    if (isAnonymous && anonymousAlias.length < 2) {
+      res.status(400).json({ message: 'Vui lòng nhập biệt danh tối thiểu 2 ký tự khi đăng ẩn danh.' });
+      return;
+    }
+
+    if (containsProfanity(`${title} ${content} ${category} ${anonymousAlias}`)) {
+      res.status(400).json({ message: 'Nội dung chứa từ ngữ không phù hợp. Vui lòng chỉnh sửa trước khi đăng.' });
+      return;
+    }
+
+    const { rows } = await query(
+      `INSERT INTO public.forum_posts (
+        title, category, content, author_name, is_anonymous, anonymous_alias
+      )
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING id, title, category, content, author_name, is_anonymous, anonymous_alias, comments_count, created_at`,
+      [title, category, content, isAnonymous ? null : authorName, isAnonymous, isAnonymous ? anonymousAlias : null]
+    );
+
+    res.status(201).json({ data: mapForumPostRow(rows[0]) });
+  } catch (error) {
+    console.error('Error creating forum post:', error);
+    res.status(500).json({ message: 'Không thể đăng bài lúc này. Vui lòng thử lại.' });
+  }
 });
 
 module.exports = router;
