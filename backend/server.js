@@ -20,6 +20,28 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
+const swaggerUi = require('swagger-ui-express');
+const swaggerJsdoc = require('swagger-jsdoc');
+
+const swaggerApis = [
+    path.join(__dirname, 'src', 'routes', '*.js').replace(/\\/g, '/')
+];
+
+const options = {
+  definition: {
+    openapi: '3.0.0',
+    info: {
+      title: 'Smart City API',
+      version: '1.0.0',
+    },
+  },
+    apis: swaggerApis,
+};
+
+const specs = swaggerJsdoc(options);
+
+app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(specs));
+
 // ===== 1. API routes (đặt trước) =====
 let chatV2;
 
