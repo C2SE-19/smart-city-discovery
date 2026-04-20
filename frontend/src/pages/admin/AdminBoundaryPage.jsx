@@ -493,13 +493,23 @@ function resolveAssetUrl(rawUrl) {
     return normalizedUrl;
   }
 
-  const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api/v1';
+  const configuredBaseUrl =
+    import.meta.env.VITE_API_BASE_URL
+    || (import.meta.env.DEV ? 'http://localhost:5000/api/v1' : '/api');
   let apiOrigin = 'http://localhost:5000';
 
-  try {
-    apiOrigin = new URL(configuredBaseUrl).origin;
-  } catch {
-    apiOrigin = 'http://localhost:5000';
+  if (typeof window !== 'undefined') {
+    try {
+      apiOrigin = new URL(configuredBaseUrl, window.location.origin).origin;
+    } catch {
+      apiOrigin = window.location.origin;
+    }
+  } else {
+    try {
+      apiOrigin = new URL(configuredBaseUrl).origin;
+    } catch {
+      apiOrigin = 'http://localhost:5000';
+    }
   }
 
   if (normalizedUrl.startsWith('/')) {

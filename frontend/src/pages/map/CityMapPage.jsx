@@ -437,7 +437,12 @@ function CityMapPage() {
   const { token, user } = useAuth();
   const { language } = useLanguage();
   const t = translations[language] || translations.vi;
-  const apiUrl = useMemo(() => import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api', []);
+  const apiUrl = useMemo(
+    () =>
+      import.meta.env.VITE_API_BASE_URL
+      || (import.meta.env.DEV ? 'http://localhost:5000/api' : '/api'),
+    []
+  );
   const apiBase = useMemo(() => apiUrl.replace(/\/api\/v1$|\/api$/i, ''), [apiUrl]);
   const [loadingBaseData, setLoadingBaseData] = useState(true);
   const [loadingVenues, setLoadingVenues] = useState(true);

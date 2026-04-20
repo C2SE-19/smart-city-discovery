@@ -22,6 +22,7 @@ export const APP_ROUTES = {
   ADMIN_FEEDBACK: '/admin/feedback',
   MERCHANT_DASHBOARD: '/merchant',
   MERCHANT_POSTS: '/merchant/posts',
+  MERCHANT_POST_ADVERTISE: '/merchant/posts/:venueId/advertise',
   MERCHANT_WORKBENCH: '/merchant/workbench',
   MERCHANT_WORKBENCH_EDIT: '/merchant/workbench/:venueId',
 };

@@ -129,7 +129,7 @@ function WorkspaceLayout() {
 
         <div className="nav-footnote">
           <p className="nav-footnote-title">{t.backendBaseUrl}</p>
-          <p className="nav-footnote-copy">VITE_API_BASE_URL or http://localhost:5000/api/v1</p>
+          <p className="nav-footnote-copy">VITE_API_BASE_URL (optional) · default: /api</p>
         </div>
       </aside>
 
