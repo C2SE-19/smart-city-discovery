@@ -25,10 +25,11 @@ CMD (Windows):
 
 ```bat
 cd backend
-set PORT=3000
-set EXTRA_PORTS=5173,5174
-node server.js
+npm install
+npm run start:lan
 ```
+
+Swagger UI: `http://10.50.1.240:3000/api/docs`
 
 Gợi ý: kiểm tra nhanh bằng `curl http://10.50.1.240:5173/api/v1/venues`.
 
