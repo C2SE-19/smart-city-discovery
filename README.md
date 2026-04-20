@@ -9,6 +9,29 @@ node server.js
 cd frontend
 npm run dev
 
+## Chạy LAN (3000 + 5173 + 5174)
+
+Nếu bạn muốn truy cập giống nhau qua nhiều cổng (ví dụ: `http://10.50.1.240:3000/`, `:5173`, `:5174`) và vẫn dùng chung API + frontend build:
+
+1) Build frontend
+
+```bash
+npm --prefix frontend run build
+```
+
+2) Chạy backend (mở thêm cổng)
+
+CMD (Windows):
+
+```bat
+cd backend
+set PORT=3000
+set EXTRA_PORTS=5173,5174
+node server.js
+```
+
+Gợi ý: kiểm tra nhanh bằng `curl http://10.50.1.240:5173/api/v1/venues`.
+
 
 git checkout VoVanAnhKhoa
 git pull origin VoVanAnhKhoa
