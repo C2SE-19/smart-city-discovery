@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const DEFAULT_API_BASE_URL = 'http://localhost:5000/api';
+const DEFAULT_API_BASE_URL = import.meta.env.DEV ? 'http://localhost:3000/api' : '/api';
 
 function normalizeBaseUrl(value) {
   const trimmed = String(value || '').trim();
