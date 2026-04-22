@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const DEFAULT_API_BASE_URL = import.meta.env.DEV ? 'http://localhost:5000/api' : '/api';
+const DEFAULT_API_BASE_URL = import.meta.env.DEV ? 'http://localhost:3000/api' : '/api';
 const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL;
 const API_URL = configuredBaseUrl.replace(/\/v1\/?$/, '');
 

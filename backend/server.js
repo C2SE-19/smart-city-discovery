@@ -15644,79 +15644,23 @@ async function generateWardIdFromName(name) {
             }
         });
 
-                // ===== 2. Serve frontend =====
-                const frontendDistCandidates = [
-                    path.resolve(__dirname, '../frontend/dist'),
-                    path.resolve(__dirname, './frontend/dist'),
-                    path.resolve(process.cwd(), '../frontend/dist'),
-                    path.resolve(process.cwd(), 'frontend/dist')
-                ];
-                const frontendDistDir =
-                    frontendDistCandidates.find((dirPath) => fs.existsSync(path.join(dirPath, 'index.html'))) ||
-                    frontendDistCandidates[0];
-                const frontendIndexFile = path.join(frontendDistDir, 'index.html');
-                const hasFrontendIndex = fs.existsSync(frontendIndexFile);
+                // ===== 2. Backend UI (Swagger) =====
+                app.get('/', (_req, res) => res.redirect('/api/docs'));
 
-                if (!hasFrontendIndex) {
-                    console.warn('⚠️ Frontend index not found. Checked paths:', frontendDistCandidates);
+            const PORT = Number(process.env.PORT) || 3000;
+
+            const server = app.listen(PORT, '0.0.0.0', () => {
+                console.log(`🚀 Server running on 0.0.0.0:${PORT}`);
+                console.log(`🌐 Local URL: http://localhost:${PORT}`);
+                console.log(`📚 Swagger UI: http://localhost:${PORT}/api/docs`);
+            });
+
+            server.on('error', (error) => {
+                if (error && error.code === 'EADDRINUSE') {
+                    console.error(`❌ Port ${PORT} is already in use.`);
+                } else {
+                    console.error('❌ Failed to start server:', error);
                 }
 
-                app.use(express.static(frontendDistDir));
-
-                // ===== 3. Fallback (LUÔN LUÔN ĐẶT CUỐI) =====
-                app.get('/{*path}', (req, res) => {
-                    if (req.path.startsWith('/api')) {
-                        return res.status(404).json({ error: 'API not found' });
-                    }
-
-                    if (!hasFrontendIndex) {
-                        return res.status(503).send('Frontend build not found. Please build and deploy frontend/dist.');
-                    }
-
-                    return res.sendFile(frontendIndexFile, (error) => {
-                        if (!error) {
-                            return;
-                        }
-
-                        console.error('Failed to serve frontend index:', error.message);
-
-                        if (!res.headersSent) {
-                            res.status(error.statusCode || 500).send('Internal Server Error');
-                        }
-                    });
-                });
-
-            const PRIMARY_PORT = Number(process.env.PORT) || 3000;
-            const extraPortsRaw = String(
-                process.env.EXTRA_PORTS || process.env.ADDITIONAL_PORTS || ''
-            ).trim();
-            const extraPorts = extraPortsRaw
-                ? extraPortsRaw
-                      .split(',')
-                      .map((value) => Number(String(value).trim()))
-                      .filter((value) => Number.isFinite(value) && value > 0)
-                : [];
-
-            const portsToListen = [
-                PRIMARY_PORT,
-                ...extraPorts.filter((port) => port !== PRIMARY_PORT)
-            ];
-
-            portsToListen.forEach((port) => {
-                const server = app.listen(port, '0.0.0.0', () => {
-                    console.log(`🚀 Server running on 0.0.0.0:${port}`);
-                    console.log(`🌐 Local URL: http://localhost:${port}`);
-                });
-
-                server.on('error', (error) => {
-                    if (error && error.code === 'EADDRINUSE') {
-                        console.error(`❌ Port ${port} is already in use.`);
-                    } else {
-                        console.error(`❌ Failed to start server on port ${port}:`, error);
-                    }
-
-                    if (port === PRIMARY_PORT) {
-                        process.exit(1);
-                    }
-                });
+                process.exit(1);
             });

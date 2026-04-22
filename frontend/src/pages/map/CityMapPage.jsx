@@ -440,7 +440,7 @@ function CityMapPage() {
   const apiUrl = useMemo(
     () =>
       import.meta.env.VITE_API_BASE_URL
-      || (import.meta.env.DEV ? 'http://localhost:5000/api' : '/api'),
+      || (import.meta.env.DEV ? 'http://localhost:3000/api' : '/api'),
     []
   );
   const apiBase = useMemo(() => apiUrl.replace(/\/api\/v1$|\/api$/i, ''), [apiUrl]);
