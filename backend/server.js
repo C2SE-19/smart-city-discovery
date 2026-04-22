@@ -1925,14 +1925,32 @@ async function generateWardIdFromName(name) {
                 return Boolean(firstSignature) && firstSignature === secondSignature;
             }
 
+            const wardBoundaryCache = {
+                loadedAt: 0,
+                rows: null
+            };
+            const WARD_BOUNDARY_CACHE_TTL_MS = 2 * 60 * 1000;
+
+            async function getWardBoundaryRows() {
+                const now = Date.now();
+                if (Array.isArray(wardBoundaryCache.rows) && now - wardBoundaryCache.loadedAt < WARD_BOUNDARY_CACHE_TTL_MS) {
+                    return wardBoundaryCache.rows;
+                }
+
+                const wardsResult = await pool.query('SELECT ward_id, name, boundary FROM wards');
+                wardBoundaryCache.rows = Array.isArray(wardsResult.rows) ? wardsResult.rows : [];
+                wardBoundaryCache.loadedAt = now;
+                return wardBoundaryCache.rows;
+            }
+
             async function detectWardByCoordinates(latitude, longitude) {
                 const point = turf.point([longitude, latitude]);
-                const wardsResult = await pool.query('SELECT ward_id, name, boundary FROM wards');
+                const wardRows = await getWardBoundaryRows();
 
                 let detectedWardId = null;
                 let detectedWardName = 'Not detected (Outside boundary)';
 
-                for (const ward of wardsResult.rows) {
+                for (const ward of wardRows) {
                     const features = extractBoundaryFeatures(ward.boundary);
 
                     for (const feature of features) {
@@ -5337,6 +5355,43 @@ async function generateWardIdFromName(name) {
             }
         }
 
+        async function getLandingStats(req, res) {
+            try {
+                const [userResult, venueResult] = await Promise.all([
+                    pool.query(
+                        `select count(*)::int as total_users from users where role != $1 and role != $2`,
+                        ['merchant', 'admin']
+                    ),
+                    pool.query('select count(*)::int as total_venues from venues where status = $1', ['approved'])
+                ]);
+
+                const users = userResult.rows[0] || {};
+                const venues = venueResult.rows[0] || {};
+
+                // Format: thêm dấu "+" cho số lượng để trông hấp dẫn hơn
+                const formatStatNumber = (num) => {
+                    const parsed = parseInt(num, 10);
+                    if (parsed === 0) return '0';
+                    if (parsed < 20) return `${parsed}+`;
+                    if (parsed < 100) return `${Math.ceil(parsed / 10) * 10}+`;
+                    return `${Math.ceil(parsed / 100) * 100}+`;
+                };
+
+                const normalizedUsers = Math.max(Number(users.total_users || 0), 20);
+                const normalizedVenues = Math.max(Number(venues.total_venues || 0), 100);
+
+                res.json({
+                    stats: {
+                        users: formatStatNumber(normalizedUsers),
+                        venues: formatStatNumber(normalizedVenues)
+                    }
+                });
+            } catch (error) {
+                console.error('Error loading landing stats:', error);
+                res.status(500).json({ error: 'Unable to load landing stats' });
+            }
+        }
+
         async function listCitiesWithStats(req, res) {
             try {
                 // Lấy danh sách phường/thành phố kèm số lượng địa điểm
@@ -5385,6 +5440,1145 @@ async function generateWardIdFromName(name) {
             }
         }
 
+        function normalizeGeocodeText(value) {
+            return String(value || '')
+                .toLowerCase()
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .replace(/[^a-z0-9/\-\s]/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+        }
+
+        function splitGeocodeTokens(value) {
+            const stopTokens = new Set([
+                'phuong',
+                'xa',
+                'quan',
+                'huyen',
+                'thanh',
+                'pho',
+                'viet',
+                'nam'
+            ]);
+
+            return normalizeGeocodeText(value)
+                .split(' ')
+                .map((token) => token.trim())
+                .filter((token) => token.length >= 2 && !stopTokens.has(token));
+        }
+
+        function computeTokenCoverage(referenceText, searchTokens) {
+            if (!searchTokens.length) {
+                return 0;
+            }
+
+            const normalizedReferenceText = normalizeGeocodeText(referenceText);
+            if (!normalizedReferenceText) {
+                return 0;
+            }
+
+            const matchedTokens = searchTokens.filter((token) => normalizedReferenceText.includes(token));
+            return matchedTokens.length / searchTokens.length;
+        }
+
+        function extractLeadingHouseNumber(addressQuery) {
+            const normalized = String(addressQuery || '').trim();
+            const match = normalized.match(/^\s*(\d+[a-zA-Z]?(?:[\/-]\d+[a-zA-Z]?)?)/);
+            return match ? normalizeGeocodeText(match[1]) : '';
+        }
+
+        function resolveExpectedHouseNumber(addressQuery) {
+            const leadingHouseNumber = extractLeadingHouseNumber(addressQuery);
+            if (leadingHouseNumber) {
+                return leadingHouseNumber;
+            }
+
+            const normalized = normalizeGeocodeText(addressQuery);
+            const alleyHouseNumberMatch = normalized.match(/(?:kiet|hem|ngo|ngach)\s*(\d+[a-zA-Z]?(?:[\/-]\d+[a-zA-Z]?)?)/i);
+            return alleyHouseNumberMatch ? normalizeGeocodeText(alleyHouseNumberMatch[1]) : '';
+        }
+
+        function resolveStreetSearchToken(addressQuery) {
+            const firstPart = String(addressQuery || '').split(',')[0] || '';
+            const withoutNumber = firstPart.replace(/^\s*\d+[a-zA-Z]?(?:[\/-]\d+[a-zA-Z]?)?\s*/u, '');
+            return normalizeGeocodeText(withoutNumber);
+        }
+
+        function resolveStreetSearchRaw(addressQuery) {
+            const firstPart = String(addressQuery || '').split(',')[0] || '';
+            return String(firstPart)
+                .replace(/^\s*\d+[a-zA-Z]?(?:[\/-]\d+[a-zA-Z]?)?\s*/u, '')
+                .trim();
+        }
+
+        function escapeRegex(value) {
+            return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        }
+
+        function resolveCandidateRoadText(candidate) {
+            return normalizeGeocodeText(
+                candidate?.address?.road ||
+                candidate?.address?.pedestrian ||
+                candidate?.address?.residential ||
+                candidate?.address?.street ||
+                candidate?.address?.path ||
+                ''
+            );
+        }
+
+        function resolveCandidateWardText(candidate) {
+            return normalizeGeocodeText(
+                candidate?.address?.suburb ||
+                candidate?.address?.quarter ||
+                candidate?.address?.neighbourhood ||
+                candidate?.address?.city_district ||
+                ''
+            );
+        }
+
+        function parseNumericHouseNumber(value) {
+            const match = String(value || '').match(/\d+/);
+            return match ? Number(match[0]) : null;
+        }
+
+        function isAlleyLikeText(value) {
+            const normalized = normalizeGeocodeText(value);
+            if (!normalized) {
+                return false;
+            }
+
+            return /(^|\s)(kiet|hem|ngo|ngach)(\s|$)/.test(normalized) || /\bk\s*\d+/i.test(normalized);
+        }
+
+        function isExplicitAlleyQuery(addressQuery) {
+            return isAlleyLikeText(addressQuery);
+        }
+
+        function resolvePresetGeocodeQueries(addressQuery) {
+            const normalized = normalizeGeocodeText(addressQuery);
+            if (!normalized) {
+                return [];
+            }
+
+            const presetRules = [
+                {
+                    keywords: ['vincom plaza'],
+                    queries: ['Vincom Plaza Ngo Quyen, Da Nang, Viet Nam']
+                },
+                {
+                    keywords: ['lotte mart', 'lotte'],
+                    queries: ['Lotte Mart Da Nang, Da Nang, Viet Nam']
+                },
+                {
+                    keywords: ['go da nang', 'big c da nang', 'go!'],
+                    queries: ['GO! Da Nang, Da Nang, Viet Nam']
+                },
+                {
+                    keywords: ['indochina riverside'],
+                    queries: ['Indochina Riverside Mall, Da Nang, Viet Nam']
+                },
+                {
+                    keywords: ['mi quang ba mua', 'mì quảng bà mua'],
+                    queries: ['Mi Quang Ba Mua, Da Nang, Viet Nam']
+                },
+                {
+                    keywords: ['banh xeo ba duong', 'bánh xèo bà dưỡng'],
+                    queries: ['Banh Xeo Ba Duong, Da Nang, Viet Nam']
+                },
+                {
+                    keywords: ['bun cha ca ba lu', 'bún chả cá bà lữ'],
+                    queries: ['Bun Cha Ca Ba Lu, Da Nang, Viet Nam']
+                }
+            ];
+
+            const matchedQueries = [];
+            for (const rule of presetRules) {
+                const matched = rule.keywords.some((keyword) => normalized.includes(normalizeGeocodeText(keyword)));
+                if (!matched) {
+                    continue;
+                }
+
+                matchedQueries.push(...rule.queries);
+            }
+
+            return [...new Set(matchedQueries.filter(Boolean))];
+        }
+
+        function resolveCuratedPoi(addressQuery) {
+            const normalized = normalizeGeocodeText(addressQuery);
+            if (!normalized) {
+                return null;
+            }
+
+            const curatedPois = [
+                {
+                    keywords: ['vincom plaza', 'vincom ngo quyen'],
+                    displayName: 'Vincom Plaza Ngô Quyền, Đà Nẵng, Việt Nam',
+                    latitude: 16.071221,
+                    longitude: 108.232909
+                },
+                {
+                    keywords: ['lotte mart', 'lotte da nang'],
+                    displayName: 'Lotte Mart Đà Nẵng, Đà Nẵng, Việt Nam',
+                    latitude: 16.0349012,
+                    longitude: 108.2292319
+                },
+                {
+                    keywords: ['go da nang', 'big c da nang', 'go! da nang'],
+                    displayName: 'GO! Đà Nẵng, Đà Nẵng, Việt Nam',
+                    latitude: 16.060321,
+                    longitude: 108.209004
+                },
+                {
+                    keywords: ['indochina riverside'],
+                    displayName: 'Indochina Riverside Mall, Đà Nẵng, Việt Nam',
+                    latitude: 16.069028,
+                    longitude: 108.224588
+                },
+                {
+                    keywords: ['mi quang ba mua', 'mì quảng bà mua'],
+                    displayName: 'Mì Quảng Bà Mua, Đà Nẵng, Việt Nam',
+                    latitude: 16.056186,
+                    longitude: 108.212327
+                },
+                {
+                    keywords: ['banh xeo ba duong', 'bánh xèo bà dưỡng'],
+                    displayName: 'Bánh Xèo Bà Dưỡng, Đà Nẵng, Việt Nam',
+                    latitude: 16.057089,
+                    longitude: 108.210625
+                }
+            ];
+
+            return (
+                curatedPois.find((poi) =>
+                    poi.keywords.some((keyword) => normalized.includes(normalizeGeocodeText(keyword)))
+                ) || null
+            );
+        }
+
+        function resolveEffectiveStreetToken(expectedStreetToken, queryRequestsAlley) {
+            const normalizedToken = normalizeGeocodeText(expectedStreetToken);
+            if (!queryRequestsAlley || !normalizedToken) {
+                return normalizedToken;
+            }
+
+            return normalizedToken
+                .replace(/^(kiet|hem|ngo|ngach)\s*\d+[a-zA-Z]?(?:[\/-]\d+[a-zA-Z]?)?\s*/i, '')
+                .trim();
+        }
+
+        function resolveCandidateCityText(candidate) {
+            return normalizeGeocodeText(
+                candidate?.address?.city ||
+                candidate?.address?.town ||
+                candidate?.address?.municipality ||
+                candidate?.address?.state ||
+                candidate?.address?.province ||
+                ''
+            );
+        }
+
+        function extractLaneMarkerForStreet(name, expectedStreetToken) {
+            const normalizedName = normalizeGeocodeText(name);
+            if (!normalizedName) {
+                return null;
+            }
+
+            const markerMatch = normalizedName.match(/^kiet\s+(\d+)\s+(.+)$/);
+            if (!markerMatch) {
+                return null;
+            }
+
+            const laneNumber = Number(markerMatch[1]);
+            const laneStreetToken = String(markerMatch[2] || '').trim();
+
+            if (!Number.isFinite(laneNumber) || laneNumber <= 0) {
+                return null;
+            }
+
+            if (expectedStreetToken && !laneStreetToken.includes(expectedStreetToken)) {
+                return null;
+            }
+
+            return {
+                laneNumber,
+                laneStreetToken
+            };
+        }
+
+        async function resolveHouseNumberByLaneInterpolation({
+            expectedHouseNumber,
+            expectedStreetToken,
+            aroundLatitude,
+            aroundLongitude,
+            normalizedWardId
+        }) {
+            const targetHouseNumber = parseNumericHouseNumber(expectedHouseNumber);
+            if (!Number.isFinite(targetHouseNumber) || targetHouseNumber <= 0) {
+                return null;
+            }
+
+            if (!expectedStreetToken) {
+                return null;
+            }
+
+            if (!Number.isFinite(aroundLatitude) || !Number.isFinite(aroundLongitude)) {
+                return null;
+            }
+
+            const overpassQuery = [
+                '[out:json][timeout:20];',
+                `way(around:2200,${aroundLatitude},${aroundLongitude})["highway"]["name"~"^Kiệt [0-9]+",i];`,
+                'out tags center;'
+            ].join('');
+
+            const overpassResponse = await axios.post(
+                'https://overpass-api.de/api/interpreter',
+                new URLSearchParams({ data: overpassQuery }).toString(),
+                {
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
+                    timeout: 9000
+                }
+            );
+
+            const elements = Array.isArray(overpassResponse?.data?.elements)
+                ? overpassResponse.data.elements
+                : [];
+
+            const lanePointByNumber = new Map();
+
+            for (const element of elements) {
+                const marker = extractLaneMarkerForStreet(element?.tags?.name, expectedStreetToken);
+                if (!marker) {
+                    continue;
+                }
+
+                const latitude = Number(element?.center?.lat);
+                const longitude = Number(element?.center?.lon);
+
+                if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+                    continue;
+                }
+
+                if (normalizedWardId) {
+                    const detection = await detectWardByCoordinates(latitude, longitude);
+                    const detectedWardId = String(detection?.wardId || '').trim();
+                    if (detectedWardId !== normalizedWardId) {
+                        continue;
+                    }
+                }
+
+                if (!lanePointByNumber.has(marker.laneNumber)) {
+                    lanePointByNumber.set(marker.laneNumber, {
+                        laneNumber: marker.laneNumber,
+                        latitude,
+                        longitude,
+                        name: String(element?.tags?.name || '').trim()
+                    });
+                }
+            }
+
+            const lanePoints = Array.from(lanePointByNumber.values()).sort((a, b) => a.laneNumber - b.laneNumber);
+
+            if (!lanePoints.length) {
+                return null;
+            }
+
+            const lowerMarker = [...lanePoints]
+                .reverse()
+                .find((item) => item.laneNumber <= targetHouseNumber) || null;
+
+            const upperMarker = lanePoints.find((item) => item.laneNumber >= targetHouseNumber) || null;
+
+            if (lowerMarker && upperMarker && lowerMarker.laneNumber !== upperMarker.laneNumber) {
+                const range = upperMarker.laneNumber - lowerMarker.laneNumber;
+                const offset = targetHouseNumber - lowerMarker.laneNumber;
+                const ratio = Math.min(1, Math.max(0, range > 0 ? offset / range : 0));
+
+                return {
+                    latitude: lowerMarker.latitude + (upperMarker.latitude - lowerMarker.latitude) * ratio,
+                    longitude: lowerMarker.longitude + (upperMarker.longitude - lowerMarker.longitude) * ratio,
+                    lowerMarker,
+                    upperMarker,
+                    method: 'interpolated-between-lanes'
+                };
+            }
+
+            const nearestMarker = lanePoints.reduce((best, current) => {
+                const bestDistance = Math.abs(best.laneNumber - targetHouseNumber);
+                const currentDistance = Math.abs(current.laneNumber - targetHouseNumber);
+                return currentDistance < bestDistance ? current : best;
+            });
+
+            return {
+                latitude: nearestMarker.latitude,
+                longitude: nearestMarker.longitude,
+                lowerMarker: nearestMarker,
+                upperMarker: nearestMarker,
+                method: 'nearest-lane-marker'
+            };
+        }
+
+        async function resolveHouseNumberByStreetAddressInterpolation({
+            expectedHouseNumber,
+            expectedStreetToken,
+            aroundLatitude,
+            aroundLongitude,
+            normalizedWardId
+        }) {
+            const targetHouseNumber = parseNumericHouseNumber(expectedHouseNumber);
+            if (!Number.isFinite(targetHouseNumber) || targetHouseNumber <= 0) {
+                return null;
+            }
+
+            if (!expectedStreetToken) {
+                return null;
+            }
+
+            if (!Number.isFinite(aroundLatitude) || !Number.isFinite(aroundLongitude)) {
+                return null;
+            }
+
+            const overpassQuery = [
+                '[out:json][timeout:20];',
+                '(',
+                `  node(around:2200,${aroundLatitude},${aroundLongitude})["addr:street"]["addr:housenumber"];`,
+                `  way(around:2200,${aroundLatitude},${aroundLongitude})["addr:street"]["addr:housenumber"];`,
+                ');',
+                'out center tags;'
+            ].join('\n');
+
+            const overpassResponse = await axios.post(
+                'https://overpass-api.de/api/interpreter',
+                new URLSearchParams({ data: overpassQuery }).toString(),
+                {
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
+                    timeout: 9000
+                }
+            );
+
+            const elements = Array.isArray(overpassResponse?.data?.elements)
+                ? overpassResponse.data.elements
+                : [];
+
+            const addressPoints = [];
+
+            for (const element of elements) {
+                const tags = element?.tags || {};
+                const streetName = normalizeGeocodeText(tags['addr:street']);
+                const houseNumber = parseNumericHouseNumber(tags['addr:housenumber']);
+                const latitude = Number(element?.lat ?? element?.center?.lat);
+                const longitude = Number(element?.lon ?? element?.center?.lon);
+
+                if (!streetName || !streetName.includes(expectedStreetToken)) {
+                    continue;
+                }
+
+                if (isAlleyLikeText(streetName)) {
+                    continue;
+                }
+
+                if (!Number.isFinite(houseNumber) || !Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+                    continue;
+                }
+
+                if (normalizedWardId) {
+                    const detection = await detectWardByCoordinates(latitude, longitude);
+                    const detectedWardId = String(detection?.wardId || '').trim();
+                    if (detectedWardId !== normalizedWardId) {
+                        continue;
+                    }
+                }
+
+                addressPoints.push({
+                    houseNumber,
+                    latitude,
+                    longitude,
+                    streetName
+                });
+            }
+
+            if (!addressPoints.length) {
+                return null;
+            }
+
+            addressPoints.sort((a, b) => a.houseNumber - b.houseNumber);
+
+            const lowerPoint = [...addressPoints].reverse().find((item) => item.houseNumber <= targetHouseNumber) || null;
+            const upperPoint = addressPoints.find((item) => item.houseNumber >= targetHouseNumber) || null;
+
+            if (lowerPoint && upperPoint && lowerPoint.houseNumber !== upperPoint.houseNumber) {
+                const range = upperPoint.houseNumber - lowerPoint.houseNumber;
+                const offset = targetHouseNumber - lowerPoint.houseNumber;
+                const ratio = Math.min(1, Math.max(0, range > 0 ? offset / range : 0));
+
+                return {
+                    latitude: lowerPoint.latitude + (upperPoint.latitude - lowerPoint.latitude) * ratio,
+                    longitude: lowerPoint.longitude + (upperPoint.longitude - lowerPoint.longitude) * ratio,
+                    lowerPoint,
+                    upperPoint,
+                    method: 'interpolated-between-housenumbers'
+                };
+            }
+
+            const nearestPoint = addressPoints.reduce((best, current) => {
+                const bestDistance = Math.abs(best.houseNumber - targetHouseNumber);
+                const currentDistance = Math.abs(current.houseNumber - targetHouseNumber);
+                return currentDistance < bestDistance ? current : best;
+            });
+
+            return {
+                latitude: nearestPoint.latitude,
+                longitude: nearestPoint.longitude,
+                lowerPoint: nearestPoint,
+                upperPoint: nearestPoint,
+                method: 'nearest-known-housenumber'
+            };
+        }
+
+        const geocodeResultCache = new Map();
+        const GEOCODE_RESULT_CACHE_TTL_MS = 5 * 60 * 1000;
+
+        function buildGeocodeCacheKey(addressQuery, wardId) {
+            return `${normalizeGeocodeText(addressQuery)}::${String(wardId || '').trim()}`;
+        }
+
+        function getCachedGeocodeResult(addressQuery, wardId) {
+            const cacheKey = buildGeocodeCacheKey(addressQuery, wardId);
+            const cacheEntry = geocodeResultCache.get(cacheKey);
+
+            if (!cacheEntry) {
+                return null;
+            }
+
+            if (Date.now() - cacheEntry.createdAt > GEOCODE_RESULT_CACHE_TTL_MS) {
+                geocodeResultCache.delete(cacheKey);
+                return null;
+            }
+
+            return cacheEntry.payload;
+        }
+
+        function setCachedGeocodeResult(addressQuery, wardId, payload) {
+            const cacheKey = buildGeocodeCacheKey(addressQuery, wardId);
+            geocodeResultCache.set(cacheKey, {
+                createdAt: Date.now(),
+                payload
+            });
+        }
+
+        function visitCoordinatePairs(coordinates, onPair) {
+            if (!Array.isArray(coordinates)) {
+                return;
+            }
+
+            if (
+                coordinates.length >= 2 &&
+                typeof coordinates[0] === 'number' &&
+                typeof coordinates[1] === 'number'
+            ) {
+                onPair(coordinates);
+                return;
+            }
+
+            coordinates.forEach((nested) => visitCoordinatePairs(nested, onPair));
+        }
+
+        function resolveBoundaryCenter(boundary) {
+            const features = extractBoundaryFeatures(boundary);
+            let minLatitude = Infinity;
+            let maxLatitude = -Infinity;
+            let minLongitude = Infinity;
+            let maxLongitude = -Infinity;
+            let hasPoint = false;
+
+            features.forEach((feature) => {
+                const geometry = feature?.geometry;
+                visitCoordinatePairs(geometry?.coordinates, (pair) => {
+                    const longitude = Number(pair[0]);
+                    const latitude = Number(pair[1]);
+
+                    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+                        return;
+                    }
+
+                    hasPoint = true;
+                    minLatitude = Math.min(minLatitude, latitude);
+                    maxLatitude = Math.max(maxLatitude, latitude);
+                    minLongitude = Math.min(minLongitude, longitude);
+                    maxLongitude = Math.max(maxLongitude, longitude);
+                });
+            });
+
+            if (!hasPoint) {
+                return null;
+            }
+
+            return {
+                latitude: (minLatitude + maxLatitude) / 2,
+                longitude: (minLongitude + maxLongitude) / 2
+            };
+        }
+
+        async function resolveWardCenterById(wardId) {
+            const normalizedWardId = String(wardId || '').trim();
+            if (!normalizedWardId) {
+                return null;
+            }
+
+            const wardRows = await getWardBoundaryRows();
+            const matchedWard = wardRows.find((ward) => String(ward.ward_id || '').trim() === normalizedWardId) || null;
+            if (!matchedWard) {
+                return null;
+            }
+
+            return resolveBoundaryCenter(matchedWard.boundary);
+        }
+
+        async function geocodePublicAddress(req, res) {
+            const addressQuery = String(req.body?.addressQuery || '').trim();
+            const normalizedWardId = String(req.body?.wardId || '').trim();
+            const normalizedAddressQuery = normalizeGeocodeText(addressQuery);
+
+            if (addressQuery.length < 3) {
+                return res.status(400).json({ message: 'addressQuery must be at least 3 characters long.' });
+            }
+
+            const cachedResult = getCachedGeocodeResult(addressQuery, normalizedWardId);
+            if (cachedResult) {
+                return res.json(cachedResult);
+            }
+
+            try {
+                let selectedWardName = '';
+                if (normalizedWardId) {
+                    const wardLookup = await pool.query(
+                        'SELECT name FROM wards WHERE ward_id::text = $1 LIMIT 1',
+                        [normalizedWardId]
+                    );
+
+                    selectedWardName = String(wardLookup.rows?.[0]?.name || '').trim();
+                }
+
+                const expectedHouseNumber = resolveExpectedHouseNumber(addressQuery);
+                const expectedStreetToken = resolveStreetSearchToken(addressQuery);
+                const expectedStreetRaw = resolveStreetSearchRaw(addressQuery);
+                const expectedWardToken = normalizeGeocodeText(selectedWardName);
+                const queryRequestsAlley = isExplicitAlleyQuery(addressQuery);
+                const effectiveStreetToken = resolveEffectiveStreetToken(expectedStreetToken, queryRequestsAlley);
+                const searchTokens = splitGeocodeTokens(effectiveStreetToken || addressQuery);
+                const presetQueries = resolvePresetGeocodeQueries(addressQuery);
+                const curatedPoi = !expectedHouseNumber ? resolveCuratedPoi(addressQuery) : null;
+                const houseRegex = expectedHouseNumber
+                    ? new RegExp(`(^|\\D)${escapeRegex(expectedHouseNumber)}(\\D|$)`, 'i')
+                    : null;
+
+                if (curatedPoi) {
+                    const poiDetection = await detectWardByCoordinates(curatedPoi.latitude, curatedPoi.longitude);
+                    const poiWardId = String(poiDetection?.wardId || '').trim();
+                    const resultPayload = {
+                        latitude: curatedPoi.latitude,
+                        longitude: curatedPoi.longitude,
+                        wardId: poiDetection?.wardId || null,
+                        wardName: poiDetection?.wardName || null,
+                        displayName: curatedPoi.displayName,
+                        exactHouseNumberMatched: true,
+                        source: 'preset-poi',
+                        isFallbackLocation: Boolean(normalizedWardId && poiWardId && poiWardId !== normalizedWardId)
+                    };
+
+                    setCachedGeocodeResult(addressQuery, normalizedWardId, resultPayload);
+                    return res.json(resultPayload);
+                }
+
+                const nominatimHeaders = {
+                    'Accept-Language': 'vi,en',
+                    'User-Agent': 'smart-city-discovery/1.0 (merchant geocode)'
+                };
+
+                const requestVariants = [];
+
+                if (expectedHouseNumber && expectedStreetRaw) {
+                    requestVariants.push({
+                        street: `${expectedHouseNumber} ${expectedStreetRaw}`,
+                        city: 'Đà Nẵng',
+                        country: 'Việt Nam',
+                        format: 'jsonv2',
+                        limit: 10,
+                        addressdetails: 1,
+                        countrycodes: 'vn'
+                    });
+                }
+
+                if (queryRequestsAlley && expectedHouseNumber && effectiveStreetToken) {
+                    requestVariants.push({
+                        street: `${expectedHouseNumber} ${effectiveStreetToken}`,
+                        city: 'Đà Nẵng',
+                        country: 'Việt Nam',
+                        format: 'jsonv2',
+                        limit: 10,
+                        addressdetails: 1,
+                        countrycodes: 'vn'
+                    });
+
+                    requestVariants.push({
+                        q: [`${expectedHouseNumber} ${effectiveStreetToken}`, selectedWardName, 'Đà Nẵng', 'Việt Nam']
+                            .filter(Boolean)
+                            .join(', '),
+                        format: 'jsonv2',
+                        limit: 10,
+                        addressdetails: 1,
+                        countrycodes: 'vn'
+                    });
+                }
+
+                requestVariants.push({
+                    q: [addressQuery, selectedWardName, 'Đà Nẵng', 'Việt Nam'].filter(Boolean).join(', '),
+                    format: 'jsonv2',
+                    limit: 10,
+                    addressdetails: 1,
+                    countrycodes: 'vn'
+                });
+
+                presetQueries.forEach((presetQuery) => {
+                    requestVariants.push({
+                        q: [presetQuery, selectedWardName, 'Đà Nẵng', 'Việt Nam'].filter(Boolean).join(', '),
+                        format: 'jsonv2',
+                        limit: 10,
+                        addressdetails: 1,
+                        countrycodes: 'vn'
+                    });
+                });
+
+                requestVariants.push({
+                    q: [addressQuery, 'Đà Nẵng', 'Việt Nam'].filter(Boolean).join(', '),
+                    format: 'jsonv2',
+                    limit: 10,
+                    addressdetails: 1,
+                    countrycodes: 'vn'
+                });
+
+                requestVariants.push({
+                    q: addressQuery,
+                    format: 'jsonv2',
+                    limit: 10,
+                    addressdetails: 1,
+                    countrycodes: 'vn'
+                });
+
+                const candidatesByKey = new Map();
+                let hasRateLimitFromNominatim = false;
+                let lastProviderError = null;
+
+                const dedupedRequestVariants = requestVariants.filter((variant, index, source) => {
+                    const key = JSON.stringify(variant);
+                    return source.findIndex((item) => JSON.stringify(item) === key) === index;
+                });
+
+                const nominatimResults = await Promise.allSettled(
+                    dedupedRequestVariants.map((params) =>
+                        axios.get('https://nominatim.openstreetmap.org/search', {
+                            params,
+                            headers: nominatimHeaders,
+                            timeout: 4500
+                        })
+                    )
+                );
+
+                nominatimResults.forEach((result) => {
+                    if (result.status === 'fulfilled') {
+                        const nextCandidates = Array.isArray(result.value?.data) ? result.value.data : [];
+                        nextCandidates.forEach((candidate) => {
+                            const uniqueKey =
+                                String(candidate?.place_id || '').trim() ||
+                                `${String(candidate?.osm_type || '').trim()}:${String(candidate?.osm_id || '').trim()}` ||
+                                `${String(candidate?.lat || '').trim()},${String(candidate?.lon || '').trim()}`;
+
+                            if (!uniqueKey || candidatesByKey.has(uniqueKey)) {
+                                return;
+                            }
+
+                            candidatesByKey.set(uniqueKey, candidate);
+                        });
+                        return;
+                    }
+
+                    const providerError = result.reason;
+                    const providerStatus = Number(providerError?.response?.status) || 0;
+                    if (providerStatus === 429) {
+                        hasRateLimitFromNominatim = true;
+                        return;
+                    }
+
+                    if (!lastProviderError) {
+                        lastProviderError = providerError;
+                    }
+                });
+
+                if (!candidatesByKey.size && hasRateLimitFromNominatim) {
+                    const photonQueries = [
+                        [addressQuery, selectedWardName, 'Đà Nẵng', 'Việt Nam'].filter(Boolean).join(', '),
+                        [addressQuery, 'Đà Nẵng', 'Việt Nam'].filter(Boolean).join(', ')
+                    ];
+
+                    for (const photonQuery of photonQueries) {
+                        if (!photonQuery) {
+                            continue;
+                        }
+
+                        try {
+                            const photonResponse = await axios.get('https://photon.komoot.io/api', {
+                                params: {
+                                    q: photonQuery,
+                                    lang: 'en',
+                                    limit: 10
+                                },
+                                timeout: 8000
+                            });
+
+                            const photonFeatures = Array.isArray(photonResponse?.data?.features)
+                                ? photonResponse.data.features
+                                : [];
+
+                            photonFeatures.forEach((feature, index) => {
+                                const latitude = Number(feature?.geometry?.coordinates?.[1]);
+                                const longitude = Number(feature?.geometry?.coordinates?.[0]);
+                                if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+                                    return;
+                                }
+
+                                const properties = feature?.properties || {};
+                                const photonCandidate = {
+                                    place_id: `${String(properties?.osm_type || 'photon').trim()}:${String(properties?.osm_id || index).trim()}`,
+                                    lat: String(latitude),
+                                    lon: String(longitude),
+                                    display_name: [
+                                        properties?.name,
+                                        properties?.street,
+                                        properties?.district,
+                                        properties?.city,
+                                        properties?.country
+                                    ]
+                                        .filter(Boolean)
+                                        .join(', '),
+                                    address: {
+                                        road: properties?.street || properties?.name || '',
+                                        suburb: properties?.district || properties?.state_district || '',
+                                        city_district: properties?.district || properties?.state_district || '',
+                                        city: properties?.city || '',
+                                        country: properties?.country || ''
+                                    }
+                                };
+
+                                const uniqueKey =
+                                    String(photonCandidate?.place_id || '').trim() ||
+                                    `${String(photonCandidate?.lat || '').trim()},${String(photonCandidate?.lon || '').trim()}`;
+
+                                if (!uniqueKey || candidatesByKey.has(uniqueKey)) {
+                                    return;
+                                }
+
+                                candidatesByKey.set(uniqueKey, photonCandidate);
+                            });
+                        } catch (photonError) {
+                            lastProviderError = photonError;
+                        }
+                    }
+                }
+
+                const candidates = Array.from(candidatesByKey.values());
+                if (!candidates.length) {
+                    if (lastProviderError) {
+                        throw lastProviderError;
+                    }
+                    return res.status(404).json({ message: 'No matching location found for this address.' });
+                }
+
+                const rankedCandidates = [];
+
+                const fallbackCandidates = [];
+
+                for (let index = 0; index < candidates.length; index += 1) {
+                    const candidate = candidates[index];
+                    const latitude = Number(candidate?.lat);
+                    const longitude = Number(candidate?.lon);
+
+                    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+                        continue;
+                    }
+
+                    const detection = await detectWardByCoordinates(latitude, longitude);
+                    const detectedWardId = String(detection?.wardId || '').trim();
+
+                    const displayText = normalizeGeocodeText(candidate?.display_name || '');
+                    const roadText = resolveCandidateRoadText(candidate);
+                    const wardText = resolveCandidateWardText(candidate);
+                    const cityText = resolveCandidateCityText(candidate);
+                    const candidateHouseNumber = normalizeGeocodeText(candidate?.address?.house_number || '');
+
+                    const cityMatched =
+                        cityText.includes('da nang') ||
+                        displayText.includes('da nang') ||
+                        displayText.includes('danang');
+
+                    const queryTargetsOutsideDaNang =
+                        normalizedAddressQuery.includes('hoi an') ||
+                        normalizedAddressQuery.includes('quang nam') ||
+                        normalizedAddressQuery.includes('thang binh') ||
+                        normalizedAddressQuery.includes('dien ban');
+
+                    if (!cityMatched && !normalizedWardId && !queryTargetsOutsideDaNang) {
+                        continue;
+                    }
+
+                    const displayTokenCoverage = computeTokenCoverage(displayText, searchTokens);
+                    const roadTokenCoverage = computeTokenCoverage(roadText, searchTokens);
+                    const relaxedPoiMatch =
+                        !expectedHouseNumber &&
+                        searchTokens.length >= 2 &&
+                        Math.max(displayTokenCoverage, roadTokenCoverage) >= 0.5;
+
+                    const streetMatched =
+                        !effectiveStreetToken ||
+                        roadText.includes(effectiveStreetToken) ||
+                        displayText.includes(effectiveStreetToken) ||
+                        relaxedPoiMatch;
+
+                    if (!streetMatched) {
+                        continue;
+                    }
+
+                    const candidateLooksLikeAlley = isAlleyLikeText(`${roadText} ${displayText}`);
+                    if (!queryRequestsAlley && candidateLooksLikeAlley) {
+                        continue;
+                    }
+
+                    const houseMatched =
+                        !expectedHouseNumber ||
+                        candidateHouseNumber === expectedHouseNumber ||
+                        (houseRegex ? houseRegex.test(displayText) : false);
+                    const hasHouseSignal =
+                        Boolean(candidateHouseNumber) || Boolean(houseRegex ? houseRegex.test(displayText) : false);
+
+                    const wardNameMatched =
+                        !expectedWardToken ||
+                        wardText.includes(expectedWardToken) ||
+                        displayText.includes(expectedWardToken);
+
+                    let score = 0;
+                    score += 120;
+                    score += cityMatched ? 35 : -10;
+                    if (roadText.includes(effectiveStreetToken) && effectiveStreetToken) {
+                        score += 80;
+                    }
+                    if (relaxedPoiMatch) {
+                        score += Math.round(Math.max(displayTokenCoverage, roadTokenCoverage) * 60);
+                    }
+                    if (wardNameMatched) {
+                        score += 45;
+                    }
+                    if (expectedHouseNumber) {
+                        if (houseMatched) {
+                            score += 260;
+                        } else if (hasHouseSignal) {
+                            score -= 260;
+                        } else {
+                            score -= 40;
+                        }
+                    }
+                    score += Math.max(0, 10 - index);
+
+                    const candidateData = {
+                        candidate,
+                        latitude,
+                        longitude,
+                        detection,
+                        detectedWardId,
+                        houseMatched,
+                        hasHouseSignal,
+                        score
+                    };
+
+                    if (normalizedWardId && detectedWardId !== normalizedWardId) {
+                        fallbackCandidates.push(candidateData);
+                    } else {
+                        rankedCandidates.push(candidateData);
+                    }
+                }
+
+                if (!rankedCandidates.length) {
+                    const fallbackAroundPoint = candidates.find((candidate) => {
+                        const latitude = Number(candidate?.lat);
+                        const longitude = Number(candidate?.lon);
+                        return Number.isFinite(latitude) && Number.isFinite(longitude);
+                    }) || null;
+
+                    const wardCenter = await resolveWardCenterById(normalizedWardId);
+
+                    const emergencyAroundLatitude = Number.isFinite(Number(wardCenter?.latitude))
+                        ? Number(wardCenter.latitude)
+                        : Number(fallbackAroundPoint?.lat);
+                    const emergencyAroundLongitude = Number.isFinite(Number(wardCenter?.longitude))
+                        ? Number(wardCenter.longitude)
+                        : Number(fallbackAroundPoint?.lon);
+
+                    if (Number.isFinite(emergencyAroundLatitude) && Number.isFinite(emergencyAroundLongitude) && expectedHouseNumber && effectiveStreetToken) {
+                        let emergencyInterpolationPoint = null;
+
+                        try {
+                            if (queryRequestsAlley) {
+                                emergencyInterpolationPoint = await resolveHouseNumberByLaneInterpolation({
+                                    expectedHouseNumber,
+                                    expectedStreetToken: effectiveStreetToken,
+                                    aroundLatitude: emergencyAroundLatitude,
+                                    aroundLongitude: emergencyAroundLongitude,
+                                    normalizedWardId
+                                });
+
+                                if (!emergencyInterpolationPoint) {
+                                    emergencyInterpolationPoint = await resolveHouseNumberByStreetAddressInterpolation({
+                                        expectedHouseNumber,
+                                        expectedStreetToken: effectiveStreetToken,
+                                        aroundLatitude: emergencyAroundLatitude,
+                                        aroundLongitude: emergencyAroundLongitude,
+                                        normalizedWardId
+                                    });
+                                }
+                            } else {
+                                emergencyInterpolationPoint = await resolveHouseNumberByStreetAddressInterpolation({
+                                    expectedHouseNumber,
+                                    expectedStreetToken: effectiveStreetToken,
+                                    aroundLatitude: emergencyAroundLatitude,
+                                    aroundLongitude: emergencyAroundLongitude,
+                                    normalizedWardId
+                                });
+                            }
+                        } catch {
+                            emergencyInterpolationPoint = null;
+                        }
+
+                        if (emergencyInterpolationPoint) {
+                            const emergencyLatitude = Number(emergencyInterpolationPoint.latitude);
+                            const emergencyLongitude = Number(emergencyInterpolationPoint.longitude);
+                            const emergencyDetection = await detectWardByCoordinates(emergencyLatitude, emergencyLongitude);
+                            const emergencyWardId = String(emergencyDetection?.wardId || '').trim();
+                            const emergencySourcePrefix = String(emergencyInterpolationPoint.method || '').includes('housenumber')
+                                ? 'house-interpolation'
+                                : 'lane-interpolation';
+                            const emergencyPayload = {
+                                latitude: emergencyLatitude,
+                                longitude: emergencyLongitude,
+                                wardId: emergencyDetection?.wardId || null,
+                                wardName: emergencyDetection?.wardName || null,
+                                displayName: String(fallbackAroundPoint?.display_name || addressQuery).trim(),
+                                exactHouseNumberMatched: true,
+                                source: `${emergencySourcePrefix}:${emergencyInterpolationPoint.method}`,
+                                isFallbackLocation: Boolean(normalizedWardId && emergencyWardId && emergencyWardId !== normalizedWardId)
+                            };
+
+                            setCachedGeocodeResult(addressQuery, normalizedWardId, emergencyPayload);
+                            return res.json(emergencyPayload);
+                        }
+                    }
+
+                    if (fallbackCandidates.length && normalizedWardId) {
+                        rankedCandidates.push(...fallbackCandidates);
+                    } else {
+                        if (!normalizedWardId) {
+                            return res.status(404).json({
+                                message: 'No matching location found for this address. Please refine address or pick on map.'
+                            });
+                        }
+
+                        return res.status(409).json({
+                            message:
+                                'Could not find a result matching this street within the selected ward. Please refine address or pick on map.'
+                        });
+                    }
+                }
+
+                rankedCandidates.sort((first, second) => second.score - first.score);
+                const bestMatch = rankedCandidates[0];
+                const isFallbackCandidate = normalizedWardId && String(bestMatch.detectedWardId || '').trim() !== normalizedWardId;
+                const hasConflictingHouseEvidence =
+                    expectedHouseNumber &&
+                    rankedCandidates.some((item) => item.hasHouseSignal) &&
+                    !rankedCandidates.some((item) => item.houseMatched);
+
+                let laneInterpolatedPoint = null;
+                if (expectedHouseNumber && !bestMatch.houseMatched) {
+                    try {
+                        if (queryRequestsAlley) {
+                            laneInterpolatedPoint = await resolveHouseNumberByLaneInterpolation({
+                                expectedHouseNumber,
+                                expectedStreetToken: effectiveStreetToken,
+                                aroundLatitude: bestMatch.latitude,
+                                aroundLongitude: bestMatch.longitude,
+                                normalizedWardId
+                            });
+                        } else {
+                            laneInterpolatedPoint = await resolveHouseNumberByStreetAddressInterpolation({
+                                expectedHouseNumber,
+                                expectedStreetToken: effectiveStreetToken,
+                                aroundLatitude: bestMatch.latitude,
+                                aroundLongitude: bestMatch.longitude,
+                                normalizedWardId
+                            });
+                        }
+                    } catch {
+                        laneInterpolatedPoint = null;
+                    }
+                }
+
+                if (hasConflictingHouseEvidence && !laneInterpolatedPoint && !isFallbackCandidate) {
+                    return res.status(409).json({
+                        message:
+                            'Could not find exact house number on this street in the selected ward. Please enter more detail or pick exactly on map.'
+                    });
+                }
+
+                const resolvedLatitude = Number.isFinite(laneInterpolatedPoint?.latitude)
+                    ? Number(laneInterpolatedPoint.latitude)
+                    : bestMatch.latitude;
+                const resolvedLongitude = Number.isFinite(laneInterpolatedPoint?.longitude)
+                    ? Number(laneInterpolatedPoint.longitude)
+                    : bestMatch.longitude;
+                const resolvedDetection = laneInterpolatedPoint
+                    ? await detectWardByCoordinates(resolvedLatitude, resolvedLongitude)
+                    : bestMatch.detection;
+                const resolvedWardId = String(resolvedDetection?.wardId || '').trim();
+                const isFallbackLocation = Boolean(normalizedWardId && resolvedWardId && resolvedWardId !== normalizedWardId);
+                const interpolationSourcePrefix =
+                    laneInterpolatedPoint && String(laneInterpolatedPoint.method || '').includes('housenumber')
+                        ? 'house-interpolation'
+                        : 'lane-interpolation';
+
+                const resultPayload = {
+                    latitude: resolvedLatitude,
+                    longitude: resolvedLongitude,
+                    wardId: resolvedDetection?.wardId || null,
+                    wardName: resolvedDetection?.wardName || null,
+                    displayName: String(bestMatch.candidate?.display_name || '').trim(),
+                    exactHouseNumberMatched: Boolean(bestMatch.houseMatched || laneInterpolatedPoint),
+                    source: laneInterpolatedPoint ? `${interpolationSourcePrefix}:${laneInterpolatedPoint.method}` : 'nominatim',
+                    isFallbackLocation
+                };
+
+                setCachedGeocodeResult(addressQuery, normalizedWardId, resultPayload);
+                return res.json(resultPayload);
+            } catch (error) {
+                const statusCode = Number(error?.response?.status) || 502;
+                return res.status(statusCode >= 400 && statusCode < 500 ? statusCode : 502).json({
+                    message: error?.response?.data?.message || 'Unable to geocode address at the moment.'
+                });
+            }
+        }
+
         async function listPublicVenues(req, res) {
             try {
                 const venueHasOwnerUserColumn = await hasVenueOwnerUserColumn();
@@ -5407,6 +6601,11 @@ async function generateWardIdFromName(name) {
                 const wardIdsFilter = parseTextList(req.query.wardIds);
                 const singleWardId = normalizeNullableText(req.query.wardId);
                 const requestedVenueId = normalizeNullableNumber(req.query.venueId);
+                const excludeVenueIdsFilter = parsePositiveIntegerList(req.query.excludeIds ?? req.query.exclude);
+                const requestedLimitRaw = Number(req.query.limit);
+                const requestedLimit = Number.isFinite(requestedLimitRaw)
+                    ? Math.max(1, Math.min(50, Math.floor(requestedLimitRaw)))
+                    : null;
                 const searchKeyword = String(req.query.q ?? req.query.search ?? '').trim().toLowerCase();
 
                 if (isMineRequest && !requesterId) {
@@ -5427,6 +6626,12 @@ async function generateWardIdFromName(name) {
                     return res
                         .status(400)
                         .json({ message: 'serviceIds must be a comma-separated list of positive integers' });
+                }
+
+                if (excludeVenueIdsFilter.invalid) {
+                    return res
+                        .status(400)
+                        .json({ message: 'excludeIds must be a comma-separated list of positive integers' });
                 }
 
                 if (Number.isNaN(requestedVenueId)) {
@@ -5466,6 +6671,11 @@ async function generateWardIdFromName(name) {
                 if (requestedVenueId !== null) {
                     values.push(requestedVenueId);
                     whereConditions.push(`venues.id = $${values.length}`);
+                }
+
+                if (excludeVenueIdsFilter.values.length) {
+                    values.push(excludeVenueIdsFilter.values);
+                    whereConditions.push(`NOT (venues.id = ANY($${values.length}::int[]))`);
                 }
 
                 if (serviceIdsFilter.values.length) {
@@ -5509,8 +6719,16 @@ async function generateWardIdFromName(name) {
                     effectiveCategoryIds.length === 0 &&
                     effectiveWardIds.length === 0 &&
                     requestedVenueId === null &&
+                    excludeVenueIdsFilter.values.length === 0 &&
                     serviceIdsFilter.values.length === 0 &&
+                    requestedLimit === null &&
                     !searchKeyword;
+
+                const limitSql = requestedLimit !== null ? `LIMIT $${values.length + 1}` : '';
+
+                if (requestedLimit !== null) {
+                    values.push(requestedLimit);
+                }
 
                 if (useCompactApprovedCache) {
                     const now = Date.now();
@@ -5604,6 +6822,7 @@ async function generateWardIdFromName(name) {
                 ) AS venue_primary_image ON true
                 WHERE ${whereConditions.join(' AND ')}
                 ORDER BY COALESCE(venues.approved_at, venues.created_at) DESC, venues.id DESC
+                ${limitSql}
             `,
                     values
                 );
@@ -6027,10 +7246,14 @@ async function generateWardIdFromName(name) {
 
                 const venueImages = extractVenueImageUrls(venue, venue?.venue_images);
                 const venueImageSet = new Set(venueImages);
+                const replyImages = reviewRows.flatMap((review) =>
+                    Array.isArray(review.replies)
+                        ? review.replies.flatMap((reply) => normalizeStringArray(reply.imageUrls))
+                        : []
+                );
                 const reviewImages = [
                     ...new Set(
-                        reviewRows
-                            .flatMap((review) => review.imageUrls || [])
+                        [...reviewRows.flatMap((review) => review.imageUrls || []), ...replyImages]
                             .filter((imageUrl) => !venueImageSet.has(imageUrl))
                     )
                 ];
@@ -6117,6 +7340,57 @@ async function generateWardIdFromName(name) {
                 return res.json({
                     venueId,
                     ...realtimePayload
+                });
+            } catch (error) {
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
+        async function getVenueServices(req, res) {
+            const venueId = Number(req.params.venueId);
+
+            if (!Number.isFinite(venueId)) {
+                return res.status(400).json({ message: 'Invalid venue id' });
+            }
+
+            try {
+                const isAdmin = normalizeRole(req.authUser?.role) === 'admin';
+                const venue = await getPublicVenueForDetail(venueId, isAdmin);
+
+                if (!venue) {
+                    return res.status(404).json({ message: 'Venue not found' });
+                }
+
+                const metadata = normalizeVenueMetadataObject(venue.metadata);
+
+                // Extract services from metadata
+                const servicesFromMetadata = [
+                    ...(Array.isArray(metadata.selectedServiceNames) ? metadata.selectedServiceNames : []),
+                    ...(Array.isArray(metadata.servicesOffered) ? metadata.servicesOffered : []),
+                    ...(Array.isArray(metadata.services) ? metadata.services : [])
+                ];
+
+                // Get merchant_services definitions
+                const servicesQuery = `
+                    SELECT id, name, slug, icon, description
+                    FROM merchant_services
+                    WHERE is_active = true
+                    ORDER BY sort_order ASC, name ASC
+                `;
+
+                const { rows: allServices } = await pool.query(servicesQuery);
+
+                // Filter only services that this venue offers
+                const venueServices = allServices.filter(service =>
+                    servicesFromMetadata.some(venueSvc =>
+                        String(venueSvc).toLowerCase().includes(String(service.name).toLowerCase()) ||
+                        String(venueSvc).toLowerCase().includes(String(service.slug).toLowerCase())
+                    )
+                );
+
+                return res.json({
+                    venueId,
+                    services: venueServices.length > 0 ? venueServices : []
                 });
             } catch (error) {
                 return res.status(500).json({ message: error.message });
@@ -9998,6 +11272,13 @@ async function generateWardIdFromName(name) {
                         [venueId]
                     );
 
+                    // Clear all caches related to this venue
+                    publicVenueDetailCache.delete(`public:${venueId}`);
+                    publicVenueDetailCache.delete(`admin:${venueId}`);
+                    publicVenueForDetailCache.delete(`public:${venueId}`);
+                    publicVenueForDetailCache.delete(`admin:${venueId}`);
+                    invalidateVenueCommunityBundleCacheByVenueId(venueId);
+
                     return res.json({
                         message: 'Venue rejected successfully',
                         venue: details.rows[0]
@@ -10058,6 +11339,13 @@ async function generateWardIdFromName(name) {
             `,
                     [venueId]
                 );
+
+                // Clear all caches related to this venue
+                publicVenueDetailCache.delete(`public:${venueId}`);
+                publicVenueDetailCache.delete(`admin:${venueId}`);
+                publicVenueForDetailCache.delete(`public:${venueId}`);
+                publicVenueForDetailCache.delete(`admin:${venueId}`);
+                invalidateVenueCommunityBundleCacheByVenueId(venueId);
 
                 return res.json({
                     message: 'Venue approved successfully',
@@ -12948,8 +14236,10 @@ async function generateWardIdFromName(name) {
         registerVersionedRoute('delete', '/forum/posts/:postId', authenticateOptionalLenient, deleteForumPost);
 
         registerVersionedRoute('get', '/wards', listPublicWards);
+        registerVersionedRoute('get', '/landing/stats', getLandingStats);
         registerVersionedRoute('get', '/cities/stats', listCitiesWithStats);
         registerVersionedRoute('post', '/gis/detect-ward', detectPublicWard);
+    registerVersionedRoute('post', '/gis/geocode-address', geocodePublicAddress);
         registerVersionedRoute('get', '/place-categories', listPublicPlaceCategories);
         registerVersionedRoute('get', '/merchant-services', listPublicMerchantServices);
         registerVersionedRoute('get', '/feedback/types', listPublicFeedbackTypes);
@@ -12962,6 +14252,7 @@ async function generateWardIdFromName(name) {
         registerVersionedRoute('get', '/venues/:venueId/reviews', listPublicVenueReviews);
         registerVersionedRoute('get', '/venues/:venueId/community', authenticateOptional, getVenueCommunityBundle);
         registerVersionedRoute('get', '/venues/:venueId/opening-hours', getVenueOpeningHoursRealtime);
+        registerVersionedRoute('get', '/venues/:venueId/services', getVenueServices);
         registerVersionedRoute('post', '/venues/:venueId/reviews', authenticateOptional, requireAuth, submitVenueReview);
     registerVersionedRoute('patch', '/venues/:venueId/reviews/:reviewId', authenticateOptional, requireAuth, updateVenueReview);
         registerVersionedRoute('post', '/venues/:venueId/reviews/:reviewId/like', authenticateOptional, requireAuth, toggleVenueReviewLike);

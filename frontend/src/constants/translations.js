@@ -121,6 +121,129 @@ const translations = {
       switchToLight: 'Switch to light mode',
       switchToDark: 'Switch to dark mode'
     },
+    landingInfo: {
+      stats: {
+        labels: {
+          users: 'Users',
+          venues: 'Locations',
+          merchants: 'Stores'
+        }
+      },
+      about: {
+        title: 'About Smart City Discovery',
+        description:
+          'Smart City Discovery helps you find and explore local food, shopping, and experiences quickly and easily around you.',
+        cards: [
+          {
+            title: 'Discover Local Places',
+            copy: 'Focus on featured places, food, and experiences so users can search by area quickly.',
+            cta: 'Learn more'
+          },
+          {
+            title: 'Support for Stores',
+            copy: 'Help merchants showcase images, menus, and promotions to reach more customers.',
+            cta: 'Learn more'
+          },
+          {
+            title: 'GIS Mindset',
+            copy: 'Maps and administrative layers are the core data foundation for future expansion.',
+            cta: 'Learn more'
+          }
+        ]
+      },
+      'all-city': {
+        title: 'All Cities',
+        description:
+          'Explore highlights of nearby cities. Find popular food spots, check-in places, and suggested routes for your trip.',
+        cards: [
+          {
+            title: 'Food Districts',
+            copy: 'Explore seafood, downtown hubs, and entertainment areas.',
+            cta: 'Explore'
+          },
+          {
+            title: 'Featured Landmarks',
+            copy: 'Iconic bridges, museums, temples, and popular check-in spots.',
+            cta: 'Explore'
+          },
+          {
+            title: 'Suggested Routes',
+            copy: 'Curated one-day or weekend itineraries for travelers.',
+            cta: 'Explore'
+          }
+        ]
+      },
+      aboutHighlight: {
+        kicker: 'Smart City Discovery',
+        title: 'Discover smart local experiences',
+        bullets: [
+          'Personalized local suggestions by area',
+          'Updated places, menus, and promotions',
+          'Map-first exploration for every journey'
+        ],
+        cta: 'Explore now →',
+        imageAlt: 'Discover local places'
+      },
+      allCity: {
+        sectionTitle: 'Explore Featured Cities',
+        searchPlaceholder: 'Search cities...',
+        filterAllLabel: 'All',
+        loadingLabel: 'Loading data...',
+        exploreCta: 'Explore →',
+        prevLabel: 'Previous places',
+        nextLabel: 'Next places'
+      },
+      service: {
+        title: 'Our Services',
+        description: 'Smart solutions connect users, merchants, and mapping in one seamless platform.',
+        kicker: 'Smart City Discovery',
+        heroTitle: 'Our Services',
+        heroDescription:
+          'Smart solutions connect users, merchants, and mapping in one seamless platform.',
+        primaryCta: 'Explore now',
+        secondaryCta: 'Contact',
+        heroImageAlt: 'Smart City services',
+        listTitle: 'Featured services',
+        detailCta: 'Details →',
+        items: [
+          {
+            icon: '🚚',
+            title: 'Smart delivery',
+            copy: 'Connect users with stores and delivery networks.',
+            slug: 'giao-hang-thong-minh'
+          },
+          {
+            icon: '📣',
+            title: 'Ads & Promotions',
+            copy: 'Show featured stores based on location and behavior.',
+            slug: 'quang-cao-promotion'
+          },
+          {
+            icon: '🧩',
+            title: 'Flexible modules',
+            copy: 'Customize each page without changing the shared layout.',
+            slug: 'module-linh-hoat'
+          },
+          {
+            icon: '🗺️',
+            title: 'GIS integration',
+            copy: 'Display maps by area and enable data analysis.',
+            slug: 'tich-hop-gis'
+          }
+        ],
+        highlightTitle: 'Smart Promotion System',
+        highlightDescription:
+          'A smart promotion system helps stores reach the right customers by location and behavior.',
+        highlightBullets: [
+          'Location-based targeting',
+          'Personalized promotions',
+          'Performance analytics'
+        ],
+        highlightImageAlt: 'Smart Promotion System',
+        ctaText: 'Want to list your store on the platform?',
+        ctaButton: 'Sign up now →'
+      }
+    },
     mapPage: {
       backToHome: 'Back to Home',
       title: 'City Map Explorer',
@@ -373,6 +496,129 @@ const translations = {
       dark: 'Tối',
       switchToLight: 'Chuyển sang chế độ sáng',
       switchToDark: 'Chuyển sang chế độ tối'
+    },
+    landingInfo: {
+      stats: {
+        labels: {
+          users: 'Người dùng',
+          venues: 'Địa điểm',
+          merchants: 'Cửa hàng'
+        }
+      },
+      about: {
+        title: 'Giới thiệu',
+        description:
+          'Smart City Discovery giúp bạn tìm kiếm và khám phá địa điểm ăn uống, mua sắm và trải nghiệm địa phương nhanh chóng ngay quanh bạn.',
+        cards: [
+          {
+            title: 'Khám Phá Địa Phương',
+            copy: 'Tập trung vào địa điểm, món ăn và trải nghiệm nổi bật để người dùng tìm nhanh theo khu vực.',
+            cta: 'Tìm hiểu thêm'
+          },
+          {
+            title: 'Hỗ Trợ Cửa Hàng',
+            copy: 'Cho merchant dễ dàng đưa hình ảnh, menu, ưu đãi giá tăng khả năng tiếp cận khách hàng.',
+            cta: 'Tìm hiểu thêm'
+          },
+          {
+            title: 'Tư Duy GIS',
+            copy: 'Bản đồ và khu vực hành chính được xem như lớp dữ liệu chính để mở rộng sau này.',
+            cta: 'Tìm hiểu thêm'
+          }
+        ]
+      },
+      'all-city': {
+        title: 'Tất cả thành phố',
+        description:
+          'Khám phá những điểm nổi bật của các thành phố gần bạn. Cùng tìm địa điểm ăn uống, địa điểm check-in phổ biến và lộ trình gợi ý cho chuyến đi của bạn.',
+        cards: [
+          {
+            title: 'Khu Ẩm Thực',
+            copy: 'Khám phá khu ẩm thực với hải sản, trung tâm thành phố và khu du lịch vui chơi.',
+            cta: 'Khám phá'
+          },
+          {
+            title: 'Địa Danh Nổi Bật',
+            copy: 'Tổng hợp các điểm check-in, cầu nổi tiếng, bảo tàng và chùa lớn trong thành phố.',
+            cta: 'Khám phá'
+          },
+          {
+            title: 'Lộ Trình Gợi Ý',
+            copy: 'Gợi ý hành trình di chuyển gọn trong 1 ngày hoặc cuối tuần cho khách du lịch.',
+            cta: 'Khám phá'
+          }
+        ]
+      },
+      aboutHighlight: {
+        kicker: 'Smart City Discovery',
+        title: 'Khám phá địa phương thông minh',
+        bullets: [
+          'Gợi ý địa điểm theo khu vực cá nhân hóa',
+          'Cập nhật món ăn, ưu đãi và dịch vụ nổi bật',
+          'Khám phá thành phố dựa trên bản đồ'
+        ],
+        cta: 'Khám phá ngay →',
+        imageAlt: 'Khám phá địa phương'
+      },
+      allCity: {
+        sectionTitle: 'Khám phá thành phố nổi bật',
+        searchPlaceholder: 'Tìm kiếm thành phố...',
+        filterAllLabel: 'Tất cả',
+        loadingLabel: 'Đang tải dữ liệu...',
+        exploreCta: 'Khám phá →',
+        prevLabel: 'Xem địa điểm trước',
+        nextLabel: 'Xem địa điểm tiếp theo'
+      },
+      service: {
+        title: 'Dịch vụ của chúng tôi',
+        description: 'Giải pháp thông minh giúp kết nối người dùng, cửa hàng và hệ thống bản đồ trong một nền tảng nhất.',
+        kicker: 'Smart City Discovery',
+        heroTitle: 'Dịch vụ của chúng tôi',
+        heroDescription:
+          'Giải pháp thông minh giúp kết nối người dùng, cửa hàng và hệ thống bản đồ trong một nền tảng nhất.',
+        primaryCta: 'Khám phá ngay',
+        secondaryCta: 'Liên hệ',
+        heroImageAlt: 'Dịch vụ Smart City',
+        listTitle: 'Dịch vụ nổi bật',
+        detailCta: 'Chi tiết →',
+        items: [
+          {
+            icon: '🚚',
+            title: 'Giao hàng thông minh',
+            copy: 'Kết nối người dùng với cửa hàng và hệ thống vận chuyển.',
+            slug: 'giao-hang-thong-minh'
+          },
+          {
+            icon: '📣',
+            title: 'Quảng cáo & Promotion',
+            copy: 'Hiển thị cửa hàng nổi bật theo vị trí và hành vi.',
+            slug: 'quang-cao-promotion'
+          },
+          {
+            icon: '🧩',
+            title: 'Module linh hoạt',
+            copy: 'Tùy chỉnh nội dung từng trang mà không ảnh hưởng layout chung.',
+            slug: 'module-linh-hoat'
+          },
+          {
+            icon: '🗺️',
+            title: 'Tích hợp GIS',
+            copy: 'Hiển thị bản đồ theo khu vực, hỗ trợ phân tích dữ liệu.',
+            slug: 'tich-hop-gis'
+          }
+        ],
+        highlightTitle: 'Smart Promotion System',
+        highlightDescription:
+          'Hệ thống quảng cáo thông minh giúp cửa hàng tiếp cận đúng khách hàng theo vị trí và hành vi.',
+        highlightBullets: [
+          'Nhắm mục tiêu theo vị trí',
+          'Cá nhân hóa ưu đãi',
+          'Theo dõi hiệu quả chiến dịch'
+        ],
+        highlightImageAlt: 'Smart Promotion System',
+        ctaText: 'Bạn muốn đưa cửa hàng lên hệ thống?',
+        ctaButton: 'Đăng ký ngay →'
+      }
     },
     mapPage: {
       backToHome: 'Về trang chủ',
