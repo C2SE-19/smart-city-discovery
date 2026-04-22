@@ -253,7 +253,8 @@
 
 /* Post Actions */
 .merchant-post-actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   padding: 12px 15px;
   border-top: 1px solid #f0f0f0;
@@ -265,8 +266,8 @@
 
 .merchant-post-edit-btn,
 .merchant-post-delete-btn,
-.merchant-post-pause-btn {
-  flex: 1;
+.merchant-post-pause-btn,
+.merchant-post-advertise-btn {
   padding: 8px;
   border: 1px solid #e8dcc8;
   background: white;
@@ -280,7 +281,8 @@
 
 .theme-dark .merchant-post-edit-btn,
 .theme-dark .merchant-post-delete-btn,
-.theme-dark .merchant-post-pause-btn {
+.theme-dark .merchant-post-pause-btn,
+.theme-dark .merchant-post-advertise-btn {
   background: #0b1221;
   border: 1px solid #1f2937;
   color: #cbd5e1;
@@ -308,6 +310,12 @@
   border-color: #f59e0b;
 }
 
+.merchant-post-advertise-btn:hover {
+  background: #3b82f6;
+  color: #ffffff;
+  border-color: #3b82f6;
+}
+
 .merchant-post-pause-btn.is-paused {
   border-color: #10b981;
   color: #047857;
@@ -329,7 +337,8 @@
 }
 
 .theme-dark .merchant-post-pause-btn:hover,
-.theme-dark .merchant-post-pause-btn.is-paused:hover {
+.theme-dark .merchant-post-pause-btn.is-paused:hover,
+.theme-dark .merchant-post-advertise-btn:hover {
   color: #0b1221;
 }
 
