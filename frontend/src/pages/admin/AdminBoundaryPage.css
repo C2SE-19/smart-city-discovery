@@ -199,10 +199,29 @@
 .admin-scroll-list {
   display: grid;
   gap: 8px;
+  height: 100%;
   max-height: none;
   min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(21, 94, 99, 0.36) rgba(21, 94, 99, 0.08);
   padding-right: 2px;
+}
+
+.admin-scroll-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.admin-scroll-list::-webkit-scrollbar-track {
+  border-radius: 999px;
+  background: rgba(21, 94, 99, 0.08);
+}
+
+.admin-scroll-list::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(21, 94, 99, 0.36);
 }
 
 .admin-list-item {
@@ -228,6 +247,7 @@
 .admin-list-item small {
   color: #5a757c;
   font-size: 0.72rem;
+  word-break: break-word;
 }
 
 .admin-list-item:hover {
@@ -431,7 +451,25 @@
   align-content: start;
   min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(21, 94, 99, 0.32) rgba(21, 94, 99, 0.08);
   padding-right: 2px;
+}
+
+.admin-detail-stack::-webkit-scrollbar {
+  width: 8px;
+}
+
+.admin-detail-stack::-webkit-scrollbar-track {
+  border-radius: 999px;
+  background: rgba(21, 94, 99, 0.08);
+}
+
+.admin-detail-stack::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(21, 94, 99, 0.32);
 }
 
 .admin-detail-stack h4 {
@@ -999,6 +1037,20 @@
 .admin-update-submitter {
   font-size: 0.75rem;
   color: #224f59;
+}
+
+.admin-field-new-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 0.61rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #a33f11;
+  border: 1px solid rgba(226, 120, 37, 0.42);
+  background: rgba(255, 229, 202, 0.85);
 }
 
 .admin-service-summary {

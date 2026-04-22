@@ -102,6 +102,20 @@ export async function submitVenueUpdateRequest(venueId, payload) {
   return response.data;
 }
 
+export async function updateVenueSimpleInfo(venueId, payload) {
+  const response = await apiClient.patch(`/venues/${venueId}/simple-update`, payload);
+  invalidateVenueScopedCaches(venueId);
+  clearVenuesListCaches();
+  return response.data;
+}
+
+export async function toggleMerchantVenuePauseStatus(venueId) {
+  const response = await apiClient.patch(`/venues/${venueId}/pause-toggle`);
+  invalidateVenueScopedCaches(venueId);
+  clearVenuesListCaches();
+  return response.data;
+}
+
 export async function deleteMerchantVenuePost(venueId) {
   const response = await apiClient.delete(`/venues/${venueId}`);
   invalidateVenueScopedCaches(venueId);

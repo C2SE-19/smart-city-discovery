@@ -5,6 +5,7 @@ const translations = {
       about: 'About',
       allCity: 'All City',
       service: 'Service',
+      forum: 'Forum',
       login: 'Login',
       search: 'Search'
     },
@@ -247,6 +248,131 @@ const translations = {
       backToHome: 'Back to Home',
       title: 'City Map Explorer',
       subtitle: 'Explore wards and approved places with live filtering.'
+    },
+    forumPage: {
+      title: 'Smart City Forum',
+      description:
+        'A place where the community shares city tips, location reviews, and useful local discussions.',
+      items: [
+        {
+          title: 'Share Experiences',
+          copy: 'Post your reviews about food spots, attractions, and routes you have tried.'
+        },
+        {
+          title: 'Quick Q&A',
+          copy: 'Ask questions and get suggestions from locals and travelers.'
+        },
+        {
+          title: 'Trending Topics',
+          copy: 'Follow active discussions so you do not miss new places.'
+        }
+      ],
+      postsTitle: 'Latest community posts',
+      posts: [
+        {
+          title: 'One-day Da Nang itinerary for first-time visitors',
+          excerpt:
+            'I followed this route: Dragon Bridge -> Han Market -> My Khe Beach, with cost notes and best check-in times.',
+          author: 'Minh Anh',
+          time: '2 hours ago',
+          category: 'Experience',
+          comments: 12
+        },
+        {
+          title: 'Which seafood restaurant near the beach is worth trying?',
+          excerpt:
+            'Please suggest a place for a group of six, ideally with parking and quick service in the evening.',
+          author: 'Thu Hang',
+          time: '5 hours ago',
+          category: 'Q&A',
+          comments: 8
+        },
+        {
+          title: 'Top 5 sunset spots for this weekend',
+          excerpt:
+            'I collected easy motorbike-access locations and sunset timing so everyone can catch better photos.',
+          author: 'Quoc Bao',
+          time: 'Yesterday',
+          category: 'Suggestions',
+          comments: 20
+        }
+      ],
+      ui: {
+        searchPlaceholder: 'Search by title, content, author, or topic...',
+        createPost: 'Create Post',
+        hideComposer: 'Close',
+        emptyResult: 'No posts match your keyword.',
+        formTitle: 'Create new post',
+        titleLabel: 'Title',
+        categoryLabel: 'Category',
+        anonymousPost: 'Post anonymously',
+        aliasLabel: 'Anonymous nickname',
+        contentLabel: 'Long content',
+        contentHint: 'Maximum 499 characters',
+        addImages: 'Add images',
+        removeImage: 'Remove image',
+        imageLimitHint: 'Maximum 3 images',
+        cancel: 'Cancel',
+        submit: 'Publish',
+        justNow: 'Just now',
+        commentLabel: 'comments',
+        byAuthor: 'Author:',
+        postLike: 'Like',
+        commentToggle: 'Comment',
+        reportPost: 'Report',
+        reportComment: 'Report comment',
+        reportCommentPrompt: 'Enter reason to report this comment:',
+        reportCommentSuccess: 'Comment report sent to admin successfully.',
+        reportCommentError: 'Unable to send comment report. Please try again.',
+        reportDialogTitle: 'Submit report',
+        reportDialogMessage: 'Your report will be sent to admin for review.',
+        reportDialogPlaceholder: 'Enter report reason...',
+        reportDialogConfirm: 'Submit report',
+        reportReasonRequired: 'Please enter a report reason.',
+        sharePost: 'Share',
+        shareSuccess: 'Post link copied to clipboard.',
+        shareError: 'Unable to copy post link. Please try again.',
+        loginRequiredAction: 'Please sign in to use this feature.',
+        loginRequiredComment: 'Please sign in to comment.',
+        deletePost: 'Delete',
+        deletePostConfirm: 'Are you sure you want to delete this post?',
+        deletePostError: 'Unable to delete this post. Please try again.',
+        deletePostOwnerOnly: 'Only the post author can delete this post.',
+        deleteDialogTitle: 'Confirm post deletion',
+        deleteDialogMessage: 'This action cannot be undone.',
+        deleteDialogConfirm: 'Delete post',
+        reportPrompt: 'Enter report reason for admin review:',
+        reportSuccess: 'Report sent to admin successfully.',
+        reportError: 'Unable to send report. Please try again.',
+        commentTitle: 'Comments',
+        commentPlaceholder: 'Write your comment...',
+        commentSubmit: 'Post comment',
+        commentAnonymous: 'Comment anonymously',
+        commentAliasLabel: 'Comment nickname',
+        commentPlusAria: 'Add image to comment',
+        noCommentsYet: 'No comments yet. Be the first one to share.',
+        replyToggle: 'Reply',
+        replyTitle: 'Reply',
+        replyPlaceholder: 'Write your reply...',
+        replySubmit: 'Post reply',
+        replyAnonymous: 'Reply anonymously',
+        replyAliasLabel: 'Reply nickname',
+        hideReplyComposer: 'Close reply',
+        imagePreviewClose: 'Close image preview',
+        deleteComment: 'Delete',
+        deleteCommentError: 'Unable to delete this comment. Please try again.',
+        deleteCommentOwnerOnly: 'Only the commenter or post owner can delete this comment.',
+        deleteCommentDialogTitle: 'Confirm comment deletion',
+        deleteCommentConfirm: 'Are you sure you want to delete this comment?',
+        deleteCommentDialogMessage: 'This action cannot be undone.',
+        deleteCommentDialogConfirm: 'Delete comment',
+        defaultAuthor: 'User',
+        loadingPosts: 'Loading forum posts...',
+        submitError: 'Unable to publish this post. Please try again.',
+        blockedWordsError: 'Your post contains inappropriate language. Please edit and try again.',
+        emptyAliasError: 'Please enter a nickname for anonymous posting.',
+        commentError: 'Unable to post comment. Please try again.'
+      }
     }
   },
   vi: {
@@ -255,6 +381,7 @@ const translations = {
       about: 'Giới thiệu',
       allCity: 'Tất cả thành phố',
       service: 'Dịch vụ',
+      forum: 'Diễn đàn',
       login: 'Đăng nhập',
       search: 'Tìm kiếm'
     },
@@ -497,6 +624,131 @@ const translations = {
       backToHome: 'Về trang chủ',
       title: 'Bản đồ thành phố',
       subtitle: 'Khám phá phường và địa điểm đã duyệt với bộ lọc thời gian thực.'
+    },
+    forumPage: {
+      title: 'Diễn đàn Smart City',
+      description:
+        'Nơi cộng đồng chia sẻ trải nghiệm địa điểm, mẹo khám phá thành phố và thảo luận cùng nhau.',
+      items: [
+        {
+          title: 'Chia sẻ trải nghiệm',
+          copy: 'Đăng bài về quán ăn, điểm check-in hoặc lịch trình bạn đã thử.'
+        },
+        {
+          title: 'Hỏi đáp nhanh',
+          copy: 'Đặt câu hỏi và nhận gợi ý từ cộng đồng theo từng khu vực.'
+        },
+        {
+          title: 'Chủ đề nổi bật',
+          copy: 'Theo dõi các thảo luận đang nổi để không bỏ lỡ điểm đến mới.'
+        }
+      ],
+      postsTitle: 'Bài viết mới từ cộng đồng',
+      posts: [
+        {
+          title: 'Review lịch trình 1 ngày ở Đà Nẵng cho người mới',
+          excerpt:
+            'Mình đi theo tuyến Cầu Rồng -> Chợ Hàn -> Bãi biển Mỹ Khê, chia sẻ luôn chi phí và thời điểm đẹp để check-in.',
+          author: 'Minh Anh',
+          time: '2 giờ trước',
+          category: 'Kinh nghiệm',
+          comments: 12
+        },
+        {
+          title: 'Quán hải sản nào gần biển ngon và giá ổn?',
+          excerpt:
+            'Mọi người gợi ý giúp mình quán đi nhóm 6 người, ưu tiên chỗ có bãi đỗ xe và phục vụ nhanh buổi tối.',
+          author: 'Thu Hằng',
+          time: '5 giờ trước',
+          category: 'Hỏi đáp',
+          comments: 8
+        },
+        {
+          title: 'Top 5 điểm ngắm hoàng hôn đẹp cuối tuần',
+          excerpt:
+            'Mình tổng hợp các điểm dễ đi bằng xe máy, có kèm thời gian mặt trời lặn để mọi người canh góc chụp.',
+          author: 'Quốc Bảo',
+          time: 'Hôm qua',
+          category: 'Gợi ý địa điểm',
+          comments: 20
+        }
+      ],
+      ui: {
+        searchPlaceholder: 'Tìm theo tiêu đề, nội dung, tác giả hoặc chủ đề...',
+        createPost: 'Đăng bài',
+        hideComposer: 'Đóng',
+        emptyResult: 'Hiện tại chưa có bài viết nào được đăng.',
+        formTitle: 'Tạo bài viết mới',
+        titleLabel: 'Tiêu đề',
+        categoryLabel: 'Chủ đề',
+        anonymousPost: 'Đăng bài ẩn danh',
+        aliasLabel: 'Biệt danh ẩn danh',
+        contentLabel: 'Nội dung dài',
+        contentHint: 'Tối đa 499 ký tự',
+        addImages: 'Thêm ảnh',
+        removeImage: 'Xóa ảnh',
+        imageLimitHint: 'Tối đa 3 ảnh',
+        cancel: 'Hủy',
+        submit: 'Đăng bài',
+        justNow: 'Vừa xong',
+        commentLabel: 'bình luận',
+        byAuthor: 'Tác giả:',
+        postLike: 'Thích',
+        commentToggle: 'Bình luận',
+        reportPost: 'Báo cáo',
+        reportComment: 'Báo cáo bình luận',
+        reportCommentPrompt: 'Nhập lý do báo cáo bình luận này:',
+        reportCommentSuccess: 'Đã gửi báo cáo bình luận tới quản trị viên.',
+        reportCommentError: 'Không thể gửi báo cáo bình luận. Vui lòng thử lại.',
+        reportDialogTitle: 'Gửi báo cáo',
+        reportDialogMessage: 'Nội dung báo cáo sẽ được gửi tới quản trị viên để xem xét.',
+        reportDialogPlaceholder: 'Nhập lý do báo cáo...',
+        reportDialogConfirm: 'Gửi báo cáo',
+        reportReasonRequired: 'Vui lòng nhập lý do báo cáo.',
+        sharePost: 'Chia sẻ',
+        shareSuccess: 'Đã sao chép liên kết bài viết.',
+        shareError: 'Không thể sao chép liên kết. Vui lòng thử lại.',
+        loginRequiredAction: 'Bạn cần đăng nhập để sử dụng chức năng này.',
+        loginRequiredComment: 'Bạn cần đăng nhập để bình luận.',
+        deletePost: 'Xóa',
+        deletePostConfirm: 'Bạn có chắc muốn xóa bài viết này không?',
+        deletePostError: 'Không thể xóa bài viết. Vui lòng thử lại.',
+        deletePostOwnerOnly: 'Chỉ tác giả bài viết mới có thể xóa.',
+        deleteDialogTitle: 'Xác nhận xóa bài viết',
+        deleteDialogMessage: 'Hành động này không thể hoàn tác.',
+        deleteDialogConfirm: 'Xóa bài viết',
+        reportPrompt: 'Nhập lý do báo cáo để gửi quản trị viên:',
+        reportSuccess: 'Đã gửi báo cáo tới quản trị viên.',
+        reportError: 'Không thể gửi báo cáo. Vui lòng thử lại.',
+        commentTitle: 'Bình luận',
+        commentPlaceholder: 'Nhập bình luận của bạn...',
+        commentSubmit: 'Gửi bình luận',
+        commentAnonymous: 'Bình luận ẩn danh',
+        commentAliasLabel: 'Biệt danh bình luận',
+        commentPlusAria: 'Thêm ảnh vào bình luận',
+        noCommentsYet: 'Chưa có bình luận nào. Hãy là người đầu tiên chia sẻ.',
+        replyToggle: 'Trả lời',
+        replyTitle: 'Phản hồi',
+        replyPlaceholder: 'Viết phản hồi của bạn...',
+        replySubmit: 'Gửi phản hồi',
+        replyAnonymous: 'Phản hồi ẩn danh',
+        replyAliasLabel: 'Biệt danh phản hồi',
+        hideReplyComposer: 'Đóng phản hồi',
+        imagePreviewClose: 'Đóng xem ảnh',
+        deleteComment: 'Xóa',
+        deleteCommentError: 'Không thể xóa bình luận. Vui lòng thử lại.',
+        deleteCommentOwnerOnly: 'Chỉ người bình luận hoặc chủ bài viết mới có thể xóa bình luận này.',
+        deleteCommentDialogTitle: 'Xác nhận xóa bình luận',
+        deleteCommentConfirm: 'Bạn có chắc muốn xóa bình luận này không?',
+        deleteCommentDialogMessage: 'Hành động này không thể hoàn tác.',
+        deleteCommentDialogConfirm: 'Xóa bình luận',
+        defaultAuthor: 'Người dùng',
+        loadingPosts: 'Đang tải bài viết...',
+        submitError: 'Không thể đăng bài. Vui lòng thử lại.',
+        blockedWordsError: 'Nội dung chứa từ ngữ không phù hợp. Vui lòng chỉnh sửa trước khi đăng.',
+        emptyAliasError: 'Vui lòng nhập biệt danh khi đăng ẩn danh.',
+        commentError: 'Không thể gửi bình luận. Vui lòng thử lại.'
+      }
     }
   }
 };

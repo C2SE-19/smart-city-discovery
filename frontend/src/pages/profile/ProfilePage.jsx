@@ -6,6 +6,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { APP_ROUTES } from '../../constants/routes';
 import axios from 'axios';
+import { FiGrid, FiHeart, FiMessageSquare, FiStar, FiUser } from 'react-icons/fi';
 import UserPreferenceWizard from '../../components/preferences/UserPreferenceWizard';
 import { fetchUserPreferences } from '../../services/api/userPreferencesApi';
 import './ProfilePage.css';
@@ -13,9 +14,9 @@ import './ProfilePage.css';
 const COPY = {
   vi: {
     menu: {
-      overview: 'Tổng Quan',
+      overview: 'Tổng quan',
       account: 'Thông tin tài khoản',
-      favorites: 'Yêu Thích',
+      favorites: 'Yêu thích',
       ratings: 'Đánh giá',
       posts: 'Bài viết của tôi',
       support: 'Góp ý & hỗ trợ'
@@ -41,6 +42,7 @@ const COPY = {
     },
     loading: 'Đang tải thông tin...',
     edit: '✎ Chỉnh sửa',
+    edit: 'Chỉnh sửa',
     save: 'Lưu',
     cancel: 'Hủy',
     ratingTitle: 'Đánh giá',
@@ -277,7 +279,7 @@ function ProfilePage() {
             hide: 'Ẩn',
             showPasswordForm: 'Thay đổi mật khẩu',
             hidePasswordForm: 'Ẩn đổi mật khẩu',
-            editInterests: 'Sửa sở thích',
+            editInterests: 'Chỉnh sửa sở thích',
             removeFavorite: 'Bỏ yêu thích',
             confirm: 'Có',
             decline: 'Không'
@@ -360,11 +362,11 @@ function ProfilePage() {
   }, [language, uiRaw]);
 
   const MenuItems = [
-    { id: 'overview', label: copy.menu.overview, icon: '🏠' },
-    { id: 'account-info', label: copy.menu.account, icon: '👤' },
-    { id: 'favorites', label: copy.menu.favorites, icon: '❤️' },
-    { id: 'ratings', label: copy.menu.ratings, icon: '⭐' },
-    { id: 'support', label: copy.menu.support, icon: '💬' }
+    { id: 'overview', label: copy.menu.overview, icon: FiGrid },
+    { id: 'account-info', label: copy.menu.account, icon: FiUser },
+    { id: 'favorites', label: copy.menu.favorites, icon: FiHeart },
+    { id: 'ratings', label: copy.menu.ratings, icon: FiStar },
+    { id: 'support', label: copy.menu.support, icon: FiMessageSquare }
   ];
   const [activeMenu, setActiveMenu] = useState('account-info');
   const [isEditing, setIsEditing] = useState(false);
@@ -710,7 +712,7 @@ function ProfilePage() {
 
   const handlePreferenceSaved = (savedPreference) => {
     setUserPreference(savedPreference || null);
-    setSuccessMessage('Preferences updated successfully.');
+    setSuccessMessage(language === 'vi' ? 'Cập nhật sở thích thành công.' : 'Preferences updated successfully.');
     setError('');
     setTimeout(() => setSuccessMessage(''), 1200);
   };
@@ -918,8 +920,8 @@ function ProfilePage() {
     switch (activeMenu) {
       case 'account-info':
         return (
-          <div className="profile-content">
-            <div className="profile-content-header">
+            <div className="profile-content">
+            <div className="profile-content-header" data-onboarding="profile-main-header">
               <h2>{copy.headings.personal}</h2>
               {!isEditing && (
                 <div className="profile-content-actions">
@@ -1246,7 +1248,7 @@ function ProfilePage() {
   return (
     <div className={`profile-page theme-${theme}`}>
       {/* Header Section */}
-      <div className="profile-header">
+      <div className="profile-header" data-onboarding="profile-header">
         <div className="user-card">
           <div className="user-avatar">
             <div className={`avatar-button ${avatarUploading ? 'is-uploading' : ''}`} aria-label="Avatar">
@@ -1270,7 +1272,7 @@ function ProfilePage() {
           <div className="user-info">
             <h1 className="user-name">
               {user?.fullname || 'User'}
-              <span className="verify-badge">âœ“</span>
+              <span className="verify-badge">✓</span>
             </h1>
           </div>
           <div className="avatar-menu">
@@ -1286,10 +1288,10 @@ function ProfilePage() {
             {avatarMenuOpen && (
               <div className="avatar-menu-dropdown">
                 <button type="button" onClick={handleOpenAvatarPicker}>
-                  Add avatar
+                  {language === 'vi' ? 'Thêm avatar' : 'Add avatar'}
                 </button>
                 <button type="button" onClick={handleEditAvatar}>
-                  Edit avatar
+                  {language === 'vi' ? 'Chỉnh sửa avatar' : 'Edit avatar'}
                 </button>
               </div>
             )}
@@ -1301,7 +1303,7 @@ function ProfilePage() {
         <div className="avatar-crop-overlay" role="dialog" aria-modal="true">
           <div className="avatar-crop-modal">
             <div className="avatar-crop-header">
-              <h3>Crop avatar</h3>
+              <h3>{language === 'vi' ? 'Cắt avatar' : 'Crop avatar'}</h3>
               <button type="button" className="avatar-crop-close" onClick={() => setAvatarCropOpen(false)}>
                 ×
               </button>
@@ -1329,10 +1331,10 @@ function ProfilePage() {
               />
               <div className="avatar-crop-actions">
                 <button type="button" className="btn-cancel" onClick={() => setAvatarCropOpen(false)}>
-                  Cancel
+                  {language === 'vi' ? 'Hủy' : 'Cancel'}
                 </button>
                 <button type="button" className="btn-save" onClick={handleUploadCroppedAvatar} disabled={avatarUploading}>
-                  Save avatar
+                  {language === 'vi' ? 'Lưu avatar' : 'Save avatar'}
                 </button>
               </div>
             </div>
@@ -1342,13 +1344,17 @@ function ProfilePage() {
 
       <div className="profile-container">
         {/* Sidebar */}
-        <aside className="profile-sidebar">
+        <aside className="profile-sidebar" data-onboarding="profile-sidebar">
           <nav className="sidebar-menu">
             {MenuItems.map((item) => {
+              const MenuIcon = item.icon;
+
               if (item.id === 'overview') {
                 return (
                   <div key={item.id} className="menu-item menu-item-heading">
-                    <span className="menu-icon">{item.icon}</span>
+                    <span className="menu-icon" aria-hidden="true">
+                      <MenuIcon />
+                    </span>
                     <span className="menu-label">{item.label}</span>
                   </div>
                 );
@@ -1366,7 +1372,9 @@ function ProfilePage() {
                     }
                   }}
                 >
-                  <span className="menu-icon">{item.icon}</span>
+                  <span className="menu-icon" aria-hidden="true">
+                    <MenuIcon />
+                  </span>
                   <span className="menu-label">{item.label}</span>
                 </button>
               );
@@ -1375,7 +1383,7 @@ function ProfilePage() {
         </aside>
 
         {/* Main Content */}
-        <main className="profile-main">
+        <main className="profile-main" data-onboarding="profile-main">
           {renderContent()}
         </main>
       </div>
@@ -1385,7 +1393,7 @@ function ProfilePage() {
         onClose={() => setPreferenceWizardOpen(false)}
         onSaved={handlePreferenceSaved}
         initialPreference={userPreference}
-        title="Update your interests"
+        title={language === 'vi' ? 'Cập nhật sở thích của bạn' : 'Update your interests'}
       />
     </div>
   );

@@ -319,10 +319,12 @@ function normalizeVenueUpdateSnapshot(snapshot) {
     phone: String(snapshot.phone || '').trim(),
     latitude: Number.isFinite(latitude) ? latitude : null,
     longitude: Number.isFinite(longitude) ? longitude : null,
-    wardId: String(snapshot.wardId || '').trim(),
-    categoryId: Number.isFinite(Number(snapshot.categoryId)) ? Number(snapshot.categoryId) : null,
-    coverImageUrl: String(snapshot.coverImageUrl || '').trim(),
-    businessLicenseImageUrl: String(snapshot.businessLicenseImageUrl || '').trim(),
+    wardId: String(snapshot.wardId || snapshot.ward_id || '').trim(),
+    categoryId: Number.isFinite(Number(snapshot.categoryId ?? snapshot.category_id))
+      ? Number(snapshot.categoryId ?? snapshot.category_id)
+      : null,
+    coverImageUrl: String(snapshot.coverImageUrl || snapshot.cover_image_url || '').trim(),
+    businessLicenseImageUrl: String(snapshot.businessLicenseImageUrl || snapshot.business_license_image_url || '').trim(),
     metadata: normalizeVenueMetadata(snapshot.metadata),
   };
 }
@@ -643,6 +645,29 @@ function formatCoordinate(value) {
   }
 
   return coordinate.toFixed(6);
+}
+
+function normalizeUpdateComparableValue(value) {
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Number(value.toFixed(6));
+  }
+
+  if (value === undefined) {
+    return null;
+  }
+
+  return value;
+}
+
+function hasUpdateFieldChanged(oldValue, newValue) {
+  return !areJsonValuesEqual(
+    normalizeUpdateComparableValue(oldValue),
+    normalizeUpdateComparableValue(newValue)
+  );
 }
 
 function MapViewportController({ center, zoom }) {
@@ -2826,6 +2851,41 @@ function AdminBoundaryPage() {
           'Not provided';
         const isRejectReasonProvided =
           Boolean(String(updateRejectReasons[selectedUpdateRequest?.id] || '').trim());
+        const changedFieldMap = {
+          name: hasUpdateFieldChanged(
+            selectedUpdateOldSnapshot.title || selectedUpdateOldSnapshot.name,
+            selectedUpdateProposedSnapshot.title || selectedUpdateProposedSnapshot.name
+          ),
+          address: hasUpdateFieldChanged(selectedUpdateOldSnapshot.address, selectedUpdateProposedSnapshot.address),
+          ward: hasUpdateFieldChanged(selectedUpdateOldSnapshot.wardId, selectedUpdateProposedSnapshot.wardId),
+          category: hasUpdateFieldChanged(selectedUpdateOldSnapshot.categoryId, selectedUpdateProposedSnapshot.categoryId),
+          phone: hasUpdateFieldChanged(selectedUpdateOldSnapshot.phone, selectedUpdateProposedSnapshot.phone),
+          contactEmail: hasUpdateFieldChanged(
+            selectedUpdateOldSnapshot.metadata?.contactEmail,
+            selectedUpdateProposedSnapshot.metadata?.contactEmail
+          ),
+          latitude: hasUpdateFieldChanged(selectedUpdateOldSnapshot.latitude, selectedUpdateProposedSnapshot.latitude),
+          longitude: hasUpdateFieldChanged(selectedUpdateOldSnapshot.longitude, selectedUpdateProposedSnapshot.longitude),
+          priceRange: hasUpdateFieldChanged(
+            [selectedUpdateOldSnapshot.metadata?.minPrice, selectedUpdateOldSnapshot.metadata?.maxPrice],
+            [selectedUpdateProposedSnapshot.metadata?.minPrice, selectedUpdateProposedSnapshot.metadata?.maxPrice]
+          ),
+          operatingHours: hasUpdateFieldChanged(
+            formatMetadataOperatingHours(selectedUpdateOldSnapshot?.metadata),
+            formatMetadataOperatingHours(selectedUpdateProposedSnapshot?.metadata)
+          ),
+          gallery: hasUpdateFieldChanged(
+            extractUpdateSnapshotGalleryImages(selectedUpdateOldSnapshot),
+            extractUpdateSnapshotGalleryImages(selectedUpdateProposedSnapshot)
+          ),
+          verification: hasUpdateFieldChanged(
+            selectedUpdateOldSnapshot.businessLicenseImageUrl,
+            selectedUpdateProposedSnapshot.businessLicenseImageUrl
+          )
+        };
+        const shouldShowNewBadge = (fieldKey) => (
+          selectedUpdateLocationView === 'new' && Boolean(changedFieldMap[fieldKey])
+        );
 
         return (
           <div className="admin-detail-panel">
@@ -2932,22 +2992,56 @@ function AdminBoundaryPage() {
                 <div className={`admin-update-compare-column ${selectedUpdateLocationView === 'new' ? 'is-proposed' : ''}`.trim()}>
                   <h5>{selectedUpdateLocationView === 'old' ? 'Old Location Data' : 'New Location Data'}</h5>
                   <ul className="admin-detail-meta">
-                    <li>Name: {selectedUpdateActiveSnapshot.title || selectedUpdateActiveSnapshot.name || 'Not provided'}</li>
-                    <li>Address: {selectedUpdateActiveSnapshot.address || 'Not provided'}</li>
-                    <li>Ward: {activeWardName}</li>
-                    <li>Category: {activeCategoryName}</li>
-                    <li>Phone: {selectedUpdateActiveSnapshot.phone || 'Not provided'}</li>
-                    <li>Contact email: {selectedUpdateActiveSnapshot.metadata?.contactEmail || 'Not provided'}</li>
-                    <li>Latitude: {formatCoordinate(selectedUpdateActiveSnapshot.latitude)}</li>
-                    <li>Longitude: {formatCoordinate(selectedUpdateActiveSnapshot.longitude)}</li>
+                    <li>
+                      Name: {selectedUpdateActiveSnapshot.title || selectedUpdateActiveSnapshot.name || 'Not provided'}
+                      {shouldShowNewBadge('name') ? <span className="admin-field-new-badge">NEW</span> : null}
+                    </li>
+                    <li>
+                      Address: {selectedUpdateActiveSnapshot.address || 'Not provided'}
+                      {shouldShowNewBadge('address') ? <span className="admin-field-new-badge">NEW</span> : null}
+                    </li>
+                    <li>
+                      Ward: {activeWardName}
+                      {shouldShowNewBadge('ward') ? <span className="admin-field-new-badge">NEW</span> : null}
+                    </li>
+                    <li>
+                      Category: {activeCategoryName}
+                      {shouldShowNewBadge('category') ? <span className="admin-field-new-badge">NEW</span> : null}
+                    </li>
+                    <li>
+                      Phone: {selectedUpdateActiveSnapshot.phone || 'Not provided'}
+                      {shouldShowNewBadge('phone') ? <span className="admin-field-new-badge">NEW</span> : null}
+                    </li>
+                    <li>
+                      Contact email: {selectedUpdateActiveSnapshot.metadata?.contactEmail || 'Not provided'}
+                      {shouldShowNewBadge('contactEmail') ? <span className="admin-field-new-badge">NEW</span> : null}
+                    </li>
+                    <li>
+                      Latitude: {formatCoordinate(selectedUpdateActiveSnapshot.latitude)}
+                      {shouldShowNewBadge('latitude') ? <span className="admin-field-new-badge">NEW</span> : null}
+                    </li>
+                    <li>
+                      Longitude: {formatCoordinate(selectedUpdateActiveSnapshot.longitude)}
+                      {shouldShowNewBadge('longitude') ? <span className="admin-field-new-badge">NEW</span> : null}
+                    </li>
                     <li>
                       Price range:
                       {' '}
                       {formatCurrencyVnd(selectedUpdateActiveSnapshot.metadata.minPrice)} - {formatCurrencyVnd(selectedUpdateActiveSnapshot.metadata.maxPrice)}
+                      {shouldShowNewBadge('priceRange') ? <span className="admin-field-new-badge">NEW</span> : null}
                     </li>
-                    <li>Operating hours: {selectedUpdateActiveOperatingHours}</li>
-                    <li>Gallery images: {selectedUpdateActiveGalleryImages.length || 0}</li>
-                    <li>Business license: {selectedUpdateActiveBusinessLicenseImage ? 'Uploaded' : 'Missing'}</li>
+                    <li>
+                      Operating hours: {selectedUpdateActiveOperatingHours}
+                      {shouldShowNewBadge('operatingHours') ? <span className="admin-field-new-badge">NEW</span> : null}
+                    </li>
+                    <li>
+                      Gallery images: {selectedUpdateActiveGalleryImages.length || 0}
+                      {shouldShowNewBadge('gallery') ? <span className="admin-field-new-badge">NEW</span> : null}
+                    </li>
+                    <li>
+                      Verification: {selectedUpdateActiveBusinessLicenseImage ? 'Uploaded' : 'Missing'}
+                      {shouldShowNewBadge('verification') ? <span className="admin-field-new-badge">NEW</span> : null}
+                    </li>
                   </ul>
 
                   {selectedUpdateActiveSnapshot.description ? <p>{selectedUpdateActiveSnapshot.description}</p> : null}
@@ -2978,8 +3072,8 @@ function AdminBoundaryPage() {
                   )}
 
                   {selectedUpdateActiveBusinessLicenseImage ? (
-                    <div className="admin-license-preview">
-                      <p>Business license preview</p>
+                    <div className="admin-license-preview admin-verification-preview">
+                      <p>Verification image</p>
                       <button
                         type="button"
                         className="admin-license-image-wrap"
@@ -2992,7 +3086,9 @@ function AdminBoundaryPage() {
                         />
                       </button>
                     </div>
-                  ) : null}
+                  ) : (
+                    <p className="admin-empty-note">No verification image provided in this snapshot.</p>
+                  )}
                 </div>
 
                 <div className="admin-form-field">

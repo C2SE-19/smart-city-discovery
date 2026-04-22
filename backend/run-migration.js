@@ -62,7 +62,14 @@ async function runMigration() {
       '20260403_add_user_status_fields.sql',
       '20260406_add_venues_submitter_user_id.sql',
       '20260408_create_user_ai_preferences.sql',
-      '20260410_create_venue_update_requests.sql'
+      '20260410_create_venue_update_requests.sql',
+      '20260417_create_forum_posts.sql',
+      '20260417_forum_media_comments_likes.sql',
+      '20260417_forum_post_reports.sql',
+      '20260420_add_parent_comment_to_forum_comments.sql',
+      '20260420_add_forum_post_ownership.sql',
+      '20260420_add_forum_comment_ownership.sql',
+      '20260420_create_forum_comment_reports.sql'
     ];
 
     const uniqueMigrationFiles = [...new Set(migrationFiles)];

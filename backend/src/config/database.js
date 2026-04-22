@@ -25,4 +25,4 @@ module.exports = {
   query,
   verifyConnection
 };
-console.log(env.database);
+// Removed stray debug log that referenced an undefined `env` variable.

@@ -9,7 +9,8 @@
     "backup:wards": "node scripts/backup-wards.js",
     "restore:wards": "node scripts/restore-wards.js",
     "restore:wards:latest": "node scripts/restore-wards.js --latest --mode merge",
-    "seed:venues:random": "node scripts/seed-random-venues.js"
+    "seed:venues:random": "node scripts/seed-random-venues.js",
+    "report:vision:taxonomy": "node scripts/vision-taxonomy-report.js"
   },
   "keywords": [],
   "author": "Smart City Team",
@@ -25,7 +26,7 @@
     "google-auth-library": "^10.6.1",
     "jsonwebtoken": "^9.0.3",
     "multer": "^1.4.5-lts.1",
-    "nodemailer": "^6.10.1",
+    "nodemailer": "^8.0.5",
     "openai": "^4.52.0",
     "pg": "^8.11.3"
   },

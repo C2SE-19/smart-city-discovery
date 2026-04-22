@@ -14,6 +14,8 @@ app.use(express.json({ limit: '20mb' }));
 
 // Chat route - BEFORE /api routes to have priority
 app.use("/api/chat", chatRoute);
+// Also expose a v2 endpoint so the frontend can switch without changing UI structure
+app.use("/api/chat-v2", chatRoute);
 
 app.get('/', (req, res) => {
   res.json({

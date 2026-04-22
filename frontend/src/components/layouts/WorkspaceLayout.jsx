@@ -108,7 +108,7 @@ function WorkspaceLayout() {
           <div key={group.title} className="nav-group">
             <p className="nav-group-title">{group.title}</p>
 
-            <div className="nav-links">
+            <div className="nav-links" data-onboarding="workspace-nav">
               {group.items.map((item) => (
                 <NavLink
                   key={item.path}

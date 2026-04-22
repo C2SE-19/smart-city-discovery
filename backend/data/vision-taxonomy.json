@@ -1,0 +1,1790 @@
+{
+  "version": "v1",
+  "updatedAt": "2026-04-15",
+  "notes": [
+    "This taxonomy is the source of truth for image label normalization.",
+    "The vision model should only output labels in this taxonomy or unknown.",
+    "If confidence is low or cues are weak, return unknown.",
+    "Each label includes bilingual display_names (vi/en) for UI language switching."
+  ],
+  "labels": {
+    "mi_cay": {
+      "kind": "food",
+      "aliases": [
+        "mi cay",
+        "my cay",
+        "miy cay",
+        "korean spicy noodles"
+      ],
+      "must_have_cues": [
+        "mi",
+        "cay"
+      ],
+      "confusable_with": [
+        "mi_xao",
+        "pho"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Mì cay",
+        "en": "Spicy Noodles"
+      }
+    },
+    "bun_dau_mam_tom": {
+      "kind": "food",
+      "aliases": [
+        "bun dau mam tom",
+        "bun dau",
+        "tofu vermicelli"
+      ],
+      "must_have_cues": [
+        "bun",
+        "dau"
+      ],
+      "confusable_with": [
+        "bun_cha"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Bún đậu mắm tôm",
+        "en": "Tofu Vermicelli with Shrimp Paste"
+      }
+    },
+    "bun_bo_hue": {
+      "kind": "food",
+      "aliases": [
+        "bun bo hue",
+        "bun bo",
+        "beef noodle soup"
+      ],
+      "must_have_cues": [
+        "bun",
+        "bo"
+      ],
+      "confusable_with": [
+        "pho",
+        "bun_rieu"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Bún bò Huế",
+        "en": "Hue Beef Noodle Soup"
+      }
+    },
+    "mi_quang": {
+      "kind": "food",
+      "aliases": [
+        "mi quang",
+        "my quang",
+        "quang noodle"
+      ],
+      "must_have_cues": [
+        "mi",
+        "quang"
+      ],
+      "confusable_with": [
+        "bun_bo_hue"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Mì Quảng",
+        "en": "Quang Noodles"
+      }
+    },
+    "cao_lau": {
+      "kind": "food",
+      "aliases": [
+        "cao lau"
+      ],
+      "must_have_cues": [
+        "cao",
+        "lau"
+      ],
+      "confusable_with": [
+        "mi_quang"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Cao lầu",
+        "en": "Cao Lau Noodles"
+      }
+    },
+    "cao_lau_hoi_an": {
+      "kind": "food",
+      "aliases": [
+        "cao lau hoi an",
+        "hoi an cao lau",
+        "cao lau",
+        "hoi an noodles"
+      ],
+      "display_names": {
+        "vi": "Cao lầu Hội An",
+        "en": "Hoi An Cao Lau"
+      },
+      "must_have_cues": [
+        "cao lau",
+        "hoi an"
+      ],
+      "confusable_with": [
+        "cao_lau",
+        "mi_quang"
+      ],
+      "allow_unknown": true
+    },
+    "pho": {
+      "kind": "food",
+      "aliases": [
+        "pho",
+        "pho bo",
+        "pho ga",
+        "vietnamese pho"
+      ],
+      "must_have_cues": [
+        "pho"
+      ],
+      "confusable_with": [
+        "bun_bo_hue",
+        "hu_tieu"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Phở",
+        "en": "Pho"
+      }
+    },
+    "bun_cha": {
+      "kind": "food",
+      "aliases": [
+        "bun cha"
+      ],
+      "must_have_cues": [
+        "bun",
+        "cha"
+      ],
+      "confusable_with": [
+        "bun_dau_mam_tom"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Bún chả",
+        "en": "Bun Cha"
+      }
+    },
+    "bun_rieu": {
+      "kind": "food",
+      "aliases": [
+        "bun rieu",
+        "bun rieu cua"
+      ],
+      "must_have_cues": [
+        "bun",
+        "rieu"
+      ],
+      "confusable_with": [
+        "bun_bo_hue",
+        "pho"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Bún riêu",
+        "en": "Crab Tomato Vermicelli Soup"
+      }
+    },
+    "bun_thit_nuong": {
+      "kind": "food",
+      "aliases": [
+        "bun thit nuong",
+        "grilled pork vermicelli"
+      ],
+      "must_have_cues": [
+        "bun",
+        "thit",
+        "nuong"
+      ],
+      "confusable_with": [
+        "bun_bo_hue",
+        "pho",
+        "bun_cha"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Bún thịt nướng",
+        "en": "Grilled Pork Vermicelli"
+      }
+    },
+    "com_tam": {
+      "kind": "food",
+      "aliases": [
+        "com tam",
+        "broken rice"
+      ],
+      "must_have_cues": [
+        "com",
+        "tam"
+      ],
+      "confusable_with": [
+        "com_ga"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Cơm tấm",
+        "en": "Broken Rice"
+      }
+    },
+    "banh_mi": {
+      "kind": "food",
+      "aliases": [
+        "banh mi",
+        "vietnamese sandwich"
+      ],
+      "must_have_cues": [
+        "banh",
+        "mi"
+      ],
+      "confusable_with": [],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Bánh mì",
+        "en": "Vietnamese Banh Mi"
+      }
+    },
+    "banh_mi_hoi_an": {
+      "kind": "food",
+      "aliases": [
+        "banh mi hoi an",
+        "hoi an banh mi",
+        "banh mi",
+        "hoi an sandwich"
+      ],
+      "display_names": {
+        "vi": "Bánh mì Hội An",
+        "en": "Hoi An Banh Mi"
+      },
+      "must_have_cues": [
+        "banh mi",
+        "hoi an"
+      ],
+      "confusable_with": [
+        "banh_mi"
+      ],
+      "allow_unknown": true
+    },
+    "hu_tieu": {
+      "kind": "food",
+      "aliases": [
+        "hu tieu"
+      ],
+      "must_have_cues": [
+        "hu",
+        "tieu"
+      ],
+      "confusable_with": [
+        "pho",
+        "bun_bo_hue"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Hủ tiếu",
+        "en": "Hu Tieu"
+      }
+    },
+    "banh_canh": {
+      "kind": "food",
+      "aliases": [
+        "banh canh",
+        "banh canh cua",
+        "banh canh ghe"
+      ],
+      "must_have_cues": [
+        "banh",
+        "canh"
+      ],
+      "confusable_with": [
+        "bun_bo_hue"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Bánh canh",
+        "en": "Thick Noodle Soup"
+      }
+    },
+    "banh_xeo": {
+      "kind": "food",
+      "aliases": [
+        "banh xeo",
+        "crispy pancake"
+      ],
+      "must_have_cues": [
+        "banh",
+        "xeo"
+      ],
+      "confusable_with": [],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Bánh xèo",
+        "en": "Vietnamese Crispy Pancake"
+      }
+    },
+    "banh_trang_tron": {
+      "kind": "food",
+      "aliases": [
+        "banh trang tron",
+        "mixed rice paper"
+      ],
+      "must_have_cues": [
+        "banh",
+        "trang",
+        "tron"
+      ],
+      "confusable_with": [
+        "goi_cuon"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Bánh tráng trộn",
+        "en": "Mixed Rice Paper"
+      }
+    },
+    "goi_cuon": {
+      "kind": "food",
+      "aliases": [
+        "goi cuon",
+        "fresh spring roll"
+      ],
+      "must_have_cues": [
+        "goi",
+        "cuon"
+      ],
+      "confusable_with": [
+        "nem_lui"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Gỏi cuốn",
+        "en": "Fresh Spring Rolls"
+      }
+    },
+    "nem_lui": {
+      "kind": "food",
+      "aliases": [
+        "nem lui",
+        "grilled lemongrass pork"
+      ],
+      "must_have_cues": [
+        "nem",
+        "lui"
+      ],
+      "confusable_with": [
+        "goi_cuon",
+        "bun_cha"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Nem lụi",
+        "en": "Lemongrass Pork Skewers"
+      }
+    },
+    "com_ga": {
+      "kind": "food",
+      "aliases": [
+        "com ga",
+        "chicken rice"
+      ],
+      "must_have_cues": [
+        "com",
+        "ga"
+      ],
+      "confusable_with": [
+        "com_tam",
+        "xoi_ga"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Cơm gà",
+        "en": "Chicken Rice"
+      }
+    },
+    "com_ga_hoi_an": {
+      "kind": "food",
+      "aliases": [
+        "com ga hoi an",
+        "hoi an chicken rice",
+        "com ga"
+      ],
+      "display_names": {
+        "vi": "Cơm gà Hội An",
+        "en": "Hoi An Chicken Rice"
+      },
+      "must_have_cues": [
+        "com ga",
+        "hoi an"
+      ],
+      "confusable_with": [
+        "com_ga",
+        "com_tam"
+      ],
+      "allow_unknown": true
+    },
+    "xoi_ga": {
+      "kind": "food",
+      "aliases": [
+        "xoi ga",
+        "chicken sticky rice"
+      ],
+      "must_have_cues": [
+        "xoi",
+        "ga"
+      ],
+      "confusable_with": [
+        "com_ga"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Xôi gà",
+        "en": "Chicken Sticky Rice"
+      }
+    },
+    "mi_xao": {
+      "kind": "food",
+      "aliases": [
+        "mi xao",
+        "my xao",
+        "stir fried noodles"
+      ],
+      "must_have_cues": [
+        "mi",
+        "xao"
+      ],
+      "confusable_with": [
+        "mi_cay"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Mì xào",
+        "en": "Stir-fried Noodles"
+      }
+    },
+    "lau": {
+      "kind": "food",
+      "aliases": [
+        "lau",
+        "hotpot",
+        "lau thai",
+        "lau hai san"
+      ],
+      "must_have_cues": [
+        "lau"
+      ],
+      "confusable_with": [
+        "chao"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Lẩu",
+        "en": "Hotpot"
+      }
+    },
+    "chao": {
+      "kind": "food",
+      "aliases": [
+        "chao",
+        "rice porridge",
+        "chao ga",
+        "chao long"
+      ],
+      "must_have_cues": [
+        "chao"
+      ],
+      "confusable_with": [
+        "pho",
+        "lau"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Cháo",
+        "en": "Rice Porridge"
+      }
+    },
+    "oc": {
+      "kind": "food",
+      "aliases": [
+        "oc",
+        "oc hut",
+        "snail dish"
+      ],
+      "must_have_cues": [
+        "oc"
+      ],
+      "confusable_with": [
+        "hai_san"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Ốc",
+        "en": "Snail Dishes"
+      }
+    },
+    "che": {
+      "kind": "food",
+      "aliases": [
+        "che",
+        "sweet dessert soup"
+      ],
+      "must_have_cues": [
+        "che"
+      ],
+      "confusable_with": [],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Chè",
+        "en": "Vietnamese Sweet Dessert Soup"
+      }
+    },
+    "bun_mam_nem": {
+      "kind": "food",
+      "aliases": [
+        "bun mam nem",
+        "bun mam",
+        "fermented fish sauce vermicelli"
+      ],
+      "must_have_cues": [
+        "bun",
+        "mam",
+        "nem"
+      ],
+      "confusable_with": [
+        "bun_thit_nuong",
+        "bun_cha"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Bún mắm nêm",
+        "en": "Vermicelli with Fermented Fish Sauce"
+      }
+    },
+    "bun_cha_ca": {
+      "kind": "food",
+      "aliases": [
+        "bun cha ca",
+        "fish cake noodle soup"
+      ],
+      "must_have_cues": [
+        "bun",
+        "cha ca"
+      ],
+      "confusable_with": [
+        "bun_bo_hue",
+        "bun_rieu"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Bún chả cá",
+        "en": "Fish Cake Noodle Soup"
+      }
+    },
+    "banh_trang_cuon_thit_heo": {
+      "kind": "food",
+      "aliases": [
+        "banh trang cuon thit heo",
+        "pork rice paper roll"
+      ],
+      "must_have_cues": [
+        "banh trang",
+        "thit heo",
+        "cuon"
+      ],
+      "confusable_with": [
+        "goi_cuon",
+        "banh_trang_tron"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Bánh tráng cuốn thịt heo",
+        "en": "Pork Rice Paper Rolls"
+      }
+    },
+    "banh_trang_dap": {
+      "kind": "food",
+      "aliases": [
+        "banh trang dap",
+        "dap hen",
+        "cracked rice paper"
+      ],
+      "must_have_cues": [
+        "banh trang",
+        "dap"
+      ],
+      "confusable_with": [
+        "banh_trang_cuon_thit_heo",
+        "banh_trang_tron"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Bánh tráng đập",
+        "en": "Cracked Rice Paper"
+      }
+    },
+    "ram_cuon_cai": {
+      "kind": "food",
+      "aliases": [
+        "ram cuon cai",
+        "fried spring roll with mustard greens"
+      ],
+      "must_have_cues": [
+        "ram",
+        "cuon",
+        "cai"
+      ],
+      "confusable_with": [
+        "goi_cuon",
+        "nem_lui"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Ram cuốn cải",
+        "en": "Fried Spring Roll with Mustard Greens"
+      }
+    },
+    "be_thui_cau_mong": {
+      "kind": "food",
+      "aliases": [
+        "be thui cau mong",
+        "thit be thui",
+        "grilled veal"
+      ],
+      "must_have_cues": [
+        "be thui",
+        "thit be"
+      ],
+      "confusable_with": [
+        "nem_lui",
+        "bun_thit_nuong"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Bê thui Cầu Mống",
+        "en": "Cau Mong Grilled Veal"
+      }
+    },
+    "mi_quang_ech": {
+      "kind": "food",
+      "aliases": [
+        "mi quang ech",
+        "my quang ech",
+        "frog quang noodle"
+      ],
+      "must_have_cues": [
+        "mi quang",
+        "ech"
+      ],
+      "confusable_with": [
+        "mi_quang",
+        "bun_bo_hue"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Mì Quảng ếch",
+        "en": "Frog Quang Noodles"
+      }
+    },
+    "goi_ca_nam_o": {
+      "kind": "food",
+      "aliases": [
+        "goi ca nam o",
+        "nam o fish salad",
+        "goi ca"
+      ],
+      "must_have_cues": [
+        "goi ca",
+        "nam o"
+      ],
+      "confusable_with": [
+        "goi_cuon",
+        "hai_san"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Gỏi cá Nam Ô",
+        "en": "Nam O Fish Salad"
+      }
+    },
+    "hai_san_da_nang": {
+      "kind": "food",
+      "aliases": [
+        "hai san da nang",
+        "da nang seafood",
+        "seafood"
+      ],
+      "must_have_cues": [
+        "hai san",
+        "seafood"
+      ],
+      "confusable_with": [
+        "oc",
+        "goi_ca_nam_o"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Hải sản Đà Nẵng",
+        "en": "Da Nang Seafood"
+      }
+    },
+    "cau_rong": {
+      "kind": "place",
+      "aliases": [
+        "cau rong",
+        "dragon bridge",
+        "dragon bridge da nang"
+      ],
+      "must_have_cues": [
+        "rong",
+        "dau rong",
+        "phun lua",
+        "phun nuoc"
+      ],
+      "confusable_with": [
+        "cau_thuan_phuoc",
+        "cau_song_han"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Cầu Rồng",
+        "en": "Dragon Bridge"
+      }
+    },
+    "cau_song_han": {
+      "kind": "place",
+      "aliases": [
+        "cau song han",
+        "song han bridge",
+        "cau quay"
+      ],
+      "must_have_cues": [
+        "song han",
+        "cau quay",
+        "xoay"
+      ],
+      "confusable_with": [
+        "cau_thuan_phuoc",
+        "cau_rong"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Cầu Sông Hàn",
+        "en": "Han River Bridge"
+      }
+    },
+    "cau_thuan_phuoc": {
+      "kind": "place",
+      "aliases": [
+        "cau thuan phuoc",
+        "thuan phuoc bridge"
+      ],
+      "must_have_cues": [
+        "cau treo",
+        "day vong",
+        "cua bien"
+      ],
+      "confusable_with": [
+        "cau_rong",
+        "cau_song_han"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Cầu Thuận Phước",
+        "en": "Thuan Phuoc Bridge"
+      }
+    },
+    "cau_tran_thi_ly": {
+      "kind": "place",
+      "aliases": [
+        "cau tran thi ly",
+        "tran thi ly bridge"
+      ],
+      "must_have_cues": [
+        "day vang",
+        "tru nghieng",
+        "canh buom"
+      ],
+      "confusable_with": [
+        "cau_tien_son"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Cầu Trần Thị Lý",
+        "en": "Tran Thi Ly Bridge"
+      }
+    },
+    "cau_nguyen_van_troi": {
+      "kind": "place",
+      "aliases": [
+        "cau nguyen van troi",
+        "nguyen van troi bridge"
+      ],
+      "must_have_cues": [
+        "cau cu",
+        "cau di bo cu"
+      ],
+      "confusable_with": [
+        "cau_song_han",
+        "cau_rong"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Cầu Nguyễn Văn Trỗi",
+        "en": "Nguyen Van Troi Bridge"
+      }
+    },
+    "cau_tien_son": {
+      "kind": "place",
+      "aliases": [
+        "cau tien son",
+        "cau tuyen son",
+        "tien son bridge"
+      ],
+      "must_have_cues": [
+        "tien son",
+        "tuyen son"
+      ],
+      "confusable_with": [
+        "cau_tran_thi_ly"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Cầu Tiên Sơn",
+        "en": "Tien Son Bridge"
+      }
+    },
+    "cau_vang": {
+      "kind": "place",
+      "aliases": [
+        "cau vang",
+        "golden bridge",
+        "cau ban tay"
+      ],
+      "must_have_cues": [
+        "ban tay",
+        "golden bridge"
+      ],
+      "confusable_with": [
+        "ba_na_hills"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Cầu Vàng",
+        "en": "Golden Bridge"
+      }
+    },
+    "cau_tinh_yeu": {
+      "kind": "place",
+      "aliases": [
+        "cau tinh yeu",
+        "love bridge"
+      ],
+      "must_have_cues": [
+        "moc khoa",
+        "love lock"
+      ],
+      "confusable_with": [
+        "cau_song_han"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Cầu Tình Yêu",
+        "en": "Love Bridge"
+      }
+    },
+    "cau_di_bo_nguyen_tat_thanh": {
+      "kind": "place",
+      "aliases": [
+        "cau di bo nguyen tat thanh",
+        "nguyen tat thanh walking bridge"
+      ],
+      "must_have_cues": [
+        "cau di bo",
+        "nguyen tat thanh"
+      ],
+      "confusable_with": [
+        "cau_nguyen_van_troi"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Cầu đi bộ Nguyễn Tất Thành",
+        "en": "Nguyen Tat Thanh Walking Bridge"
+      }
+    },
+    "cau_cam_le": {
+      "kind": "place",
+      "aliases": [
+        "cau cam le",
+        "cam le bridge"
+      ],
+      "must_have_cues": [
+        "cam le"
+      ],
+      "confusable_with": [
+        "cau_nguyen_tri_phuong",
+        "cau_hoa_xuan"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Cầu Cẩm Lệ",
+        "en": "Cam Le Bridge"
+      }
+    },
+    "cau_nguyen_tri_phuong": {
+      "kind": "place",
+      "aliases": [
+        "cau nguyen tri phuong",
+        "nguyen tri phuong bridge"
+      ],
+      "must_have_cues": [
+        "nguyen tri phuong"
+      ],
+      "confusable_with": [
+        "cau_cam_le",
+        "cau_hoa_xuan"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Cầu Nguyễn Tri Phương",
+        "en": "Nguyen Tri Phuong Bridge"
+      }
+    },
+    "cau_hoa_xuan": {
+      "kind": "place",
+      "aliases": [
+        "cau hoa xuan",
+        "hoa xuan bridge"
+      ],
+      "must_have_cues": [
+        "hoa xuan"
+      ],
+      "confusable_with": [
+        "cau_cam_le",
+        "cau_nguyen_tri_phuong"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Cầu Hòa Xuân",
+        "en": "Hoa Xuan Bridge"
+      }
+    },
+    "cau_nam_o": {
+      "kind": "place",
+      "aliases": [
+        "cau nam o",
+        "nam o bridge"
+      ],
+      "must_have_cues": [
+        "nam o",
+        "cu de"
+      ],
+      "confusable_with": [
+        "cau_lien_chieu"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Cầu Nam Ô",
+        "en": "Nam O Bridge"
+      }
+    },
+    "cau_lien_chieu": {
+      "kind": "place",
+      "aliases": [
+        "cau lien chieu",
+        "lien chieu bridge"
+      ],
+      "must_have_cues": [
+        "lien chieu"
+      ],
+      "confusable_with": [
+        "cau_nam_o"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Cầu Liên Chiểu",
+        "en": "Lien Chieu Bridge"
+      }
+    },
+    "cau_co_co": {
+      "kind": "place",
+      "aliases": [
+        "cau co co",
+        "co co bridge"
+      ],
+      "must_have_cues": [
+        "co co"
+      ],
+      "confusable_with": [
+        "cau_bai_dai"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Cầu Cổ Cò",
+        "en": "Co Co Bridge"
+      }
+    },
+    "cau_bai_dai": {
+      "kind": "place",
+      "aliases": [
+        "cau bai dai",
+        "bai dai bridge"
+      ],
+      "must_have_cues": [
+        "bai dai"
+      ],
+      "confusable_with": [
+        "cau_co_co"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Cầu Bãi Dài",
+        "en": "Bai Dai Bridge"
+      }
+    },
+    "cau_do": {
+      "kind": "place",
+      "aliases": [
+        "cau do",
+        "do bridge"
+      ],
+      "must_have_cues": [
+        "cau do"
+      ],
+      "confusable_with": [
+        "cau_cam_le"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Cầu Đỏ",
+        "en": "Do Bridge"
+      }
+    },
+    "ba_na_hills": {
+      "kind": "place",
+      "aliases": [
+        "ba na hills",
+        "banahills",
+        "sun world ba na hills"
+      ],
+      "must_have_cues": [
+        "ba na",
+        "hills"
+      ],
+      "confusable_with": [
+        "cau_vang"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Bà Nà Hills",
+        "en": "Ba Na Hills"
+      }
+    },
+    "ngu_hanh_son": {
+      "kind": "place",
+      "aliases": [
+        "ngu hanh son",
+        "marble mountains"
+      ],
+      "must_have_cues": [
+        "marble",
+        "ngu hanh son"
+      ],
+      "confusable_with": [],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Ngũ Hành Sơn",
+        "en": "Marble Mountains"
+      }
+    },
+    "chua_linh_ung": {
+      "kind": "place",
+      "aliases": [
+        "chua linh ung",
+        "linh ung pagoda"
+      ],
+      "must_have_cues": [
+        "linh ung",
+        "pagoda"
+      ],
+      "confusable_with": [],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Chùa Linh Ứng",
+        "en": "Linh Ung Pagoda"
+      }
+    },
+    "asia_park": {
+      "kind": "place",
+      "aliases": [
+        "asia park",
+        "sun world asia park"
+      ],
+      "must_have_cues": [
+        "asia park"
+      ],
+      "confusable_with": [],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Asia Park",
+        "en": "Asia Park"
+      }
+    },
+    "bai_bien_my_khe": {
+      "kind": "place",
+      "aliases": [
+        "bai bien my khe",
+        "my khe beach"
+      ],
+      "must_have_cues": [
+        "my khe",
+        "beach"
+      ],
+      "confusable_with": [
+        "bai_bien_non_nuoc",
+        "bai_rang_son_tra"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Bãi biển Mỹ Khê",
+        "en": "My Khe Beach"
+      }
+    },
+    "bai_bien_non_nuoc": {
+      "kind": "place",
+      "aliases": [
+        "bai bien non nuoc",
+        "non nuoc beach"
+      ],
+      "must_have_cues": [
+        "non nuoc",
+        "beach"
+      ],
+      "confusable_with": [
+        "bai_bien_my_khe"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Bãi biển Non Nước",
+        "en": "Non Nuoc Beach"
+      }
+    },
+    "bai_rang_son_tra": {
+      "kind": "place",
+      "aliases": [
+        "bai rang",
+        "bai rang son tra"
+      ],
+      "must_have_cues": [
+        "bai rang",
+        "son tra"
+      ],
+      "confusable_with": [
+        "bai_bien_my_khe",
+        "ban_dao_son_tra"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Bãi Rạng Sơn Trà",
+        "en": "Bai Rang Son Tra"
+      }
+    },
+    "ban_dao_son_tra": {
+      "kind": "place",
+      "aliases": [
+        "ban dao son tra",
+        "son tra peninsula"
+      ],
+      "must_have_cues": [
+        "son tra",
+        "peninsula"
+      ],
+      "confusable_with": [
+        "chua_linh_ung",
+        "dinh_ban_co"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Bán đảo Sơn Trà",
+        "en": "Son Tra Peninsula"
+      }
+    },
+    "dinh_ban_co": {
+      "kind": "place",
+      "aliases": [
+        "dinh ban co",
+        "ban co peak",
+        "chessboard peak"
+      ],
+      "must_have_cues": [
+        "ban co",
+        "peak"
+      ],
+      "confusable_with": [
+        "ban_dao_son_tra"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Đỉnh Bàn Cờ",
+        "en": "Chessboard Peak"
+      }
+    },
+    "ghe_ban": {
+      "kind": "place",
+      "aliases": [
+        "ghe ban",
+        "ghe ban reef"
+      ],
+      "must_have_cues": [
+        "ghe ban",
+        "reef"
+      ],
+      "confusable_with": [
+        "ban_dao_son_tra"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Ghềnh Bàng",
+        "en": "Ghe Bang Reef"
+      }
+    },
+    "deo_hai_van": {
+      "kind": "place",
+      "aliases": [
+        "deo hai van",
+        "hai van pass"
+      ],
+      "must_have_cues": [
+        "hai van",
+        "pass"
+      ],
+      "confusable_with": [
+        "hai_van_quan"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Đèo Hải Vân",
+        "en": "Hai Van Pass"
+      }
+    },
+    "hai_van_quan": {
+      "kind": "place",
+      "aliases": [
+        "hai van quan",
+        "hai van gate"
+      ],
+      "must_have_cues": [
+        "hai van quan",
+        "gate"
+      ],
+      "confusable_with": [
+        "deo_hai_van"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Hải Vân Quan",
+        "en": "Hai Van Gate"
+      }
+    },
+    "bao_tang_cham": {
+      "kind": "place",
+      "aliases": [
+        "bao tang cham",
+        "cham museum",
+        "museum of cham sculpture"
+      ],
+      "must_have_cues": [
+        "cham museum",
+        "bao tang cham"
+      ],
+      "confusable_with": [],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Bảo tàng Chăm",
+        "en": "Cham Museum"
+      }
+    },
+    "cho_han": {
+      "kind": "place",
+      "aliases": [
+        "cho han",
+        "han market"
+      ],
+      "must_have_cues": [
+        "cho han",
+        "han market"
+      ],
+      "confusable_with": [
+        "cho_con",
+        "cho_dem_helio"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Chợ Hàn",
+        "en": "Han Market"
+      }
+    },
+    "cho_con": {
+      "kind": "place",
+      "aliases": [
+        "cho con",
+        "con market"
+      ],
+      "must_have_cues": [
+        "cho con",
+        "con market"
+      ],
+      "confusable_with": [
+        "cho_han"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Chợ Cồn",
+        "en": "Con Market"
+      }
+    },
+    "cho_dem_helio": {
+      "kind": "place",
+      "aliases": [
+        "cho dem helio",
+        "helio night market",
+        "helio center"
+      ],
+      "must_have_cues": [
+        "helio",
+        "night market"
+      ],
+      "confusable_with": [
+        "cho_han",
+        "cho_con"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Chợ đêm Helio",
+        "en": "Helio Night Market"
+      }
+    },
+    "pho_di_bo_bach_dang": {
+      "kind": "place",
+      "aliases": [
+        "pho di bo bach dang",
+        "bach dang walking street"
+      ],
+      "must_have_cues": [
+        "bach dang",
+        "walking street"
+      ],
+      "confusable_with": [
+        "cau_tinh_yeu",
+        "cau_song_han"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Phố đi bộ Bạch Đằng",
+        "en": "Bach Dang Walking Street"
+      }
+    },
+    "cong_vien_bien_dong": {
+      "kind": "place",
+      "aliases": [
+        "cong vien bien dong",
+        "bien dong park",
+        "east sea park"
+      ],
+      "must_have_cues": [
+        "bien dong",
+        "park"
+      ],
+      "confusable_with": [
+        "bai_bien_my_khe"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Công viên Biển Đông",
+        "en": "Bien Dong Park"
+      }
+    },
+    "nui_than_tai": {
+      "kind": "place",
+      "aliases": [
+        "nui than tai",
+        "than tai hot springs",
+        "suoi khoang nong nui than tai"
+      ],
+      "must_have_cues": [
+        "than tai",
+        "hot spring"
+      ],
+      "confusable_with": [
+        "hoa_phu_thanh"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Núi Thần Tài",
+        "en": "Than Tai Hot Springs Park"
+      }
+    },
+    "hoa_phu_thanh": {
+      "kind": "place",
+      "aliases": [
+        "hoa phu thanh",
+        "hoa phu thanh tourist area",
+        "rafting hoa phu thanh"
+      ],
+      "must_have_cues": [
+        "hoa phu thanh",
+        "rafting"
+      ],
+      "confusable_with": [
+        "nui_than_tai"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Khu du lịch Hòa Phú Thành",
+        "en": "Hoa Phu Thanh Tourist Area"
+      }
+    },
+    "intercontinental_son_tra": {
+      "kind": "place",
+      "aliases": [
+        "intercontinental danang",
+        "intercontinental son tra",
+        "intercontinental sun peninsula"
+      ],
+      "must_have_cues": [
+        "intercontinental",
+        "sun peninsula"
+      ],
+      "confusable_with": [
+        "furama_resort",
+        "nha_hang_sang_trong"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "InterContinental Sơn Trà",
+        "en": "InterContinental Son Tra"
+      }
+    },
+    "furama_resort": {
+      "kind": "place",
+      "aliases": [
+        "furama resort",
+        "furama danang"
+      ],
+      "must_have_cues": [
+        "furama",
+        "resort"
+      ],
+      "confusable_with": [
+        "intercontinental_son_tra"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Furama Resort Đà Nẵng",
+        "en": "Furama Resort Da Nang"
+      }
+    },
+    "sky36": {
+      "kind": "place",
+      "aliases": [
+        "sky36",
+        "sky 36 rooftop",
+        "novotel sky36"
+      ],
+      "must_have_cues": [
+        "sky36",
+        "rooftop",
+        "nightlife"
+      ],
+      "confusable_with": [
+        "beach_club_cao_cap"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Sky36",
+        "en": "Sky36"
+      }
+    },
+    "nha_hang_sang_trong": {
+      "kind": "place",
+      "aliases": [
+        "fine dining",
+        "nha hang sang trong",
+        "luxury restaurant",
+        "high end restaurant"
+      ],
+      "must_have_cues": [
+        "fine dining",
+        "luxury",
+        "sang trong"
+      ],
+      "confusable_with": [
+        "quan_hai_san_binh_dan",
+        "quan_an_via_he"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Nhà hàng sang trọng",
+        "en": "Luxury Restaurant"
+      }
+    },
+    "beach_club_cao_cap": {
+      "kind": "place",
+      "aliases": [
+        "beach club",
+        "luxury beach club",
+        "pool lounge"
+      ],
+      "must_have_cues": [
+        "beach club",
+        "pool",
+        "lounge"
+      ],
+      "confusable_with": [
+        "bai_bien_my_khe",
+        "sky36"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Beach club cao cấp",
+        "en": "Luxury Beach Club"
+      }
+    },
+    "quan_hai_san_binh_dan": {
+      "kind": "place",
+      "aliases": [
+        "quan hai san binh dan",
+        "seafood street",
+        "seafood local",
+        "quan oc via he"
+      ],
+      "must_have_cues": [
+        "hai san",
+        "binh dan",
+        "seafood"
+      ],
+      "confusable_with": [
+        "nha_hang_sang_trong",
+        "quan_an_via_he"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Quán hải sản bình dân",
+        "en": "Budget Seafood Restaurant"
+      }
+    },
+    "quan_an_via_he": {
+      "kind": "place",
+      "aliases": [
+        "quan an via he",
+        "street food stall",
+        "food cart",
+        "local sidewalk eatery"
+      ],
+      "must_have_cues": [
+        "via he",
+        "street food",
+        "food cart"
+      ],
+      "confusable_with": [
+        "quan_hai_san_binh_dan",
+        "nha_hang_sang_trong"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Quán ăn vỉa hè",
+        "en": "Street Food Stall"
+      }
+    },
+    "pho_co_hoi_an": {
+      "kind": "place",
+      "aliases": [
+        "pho co hoi an",
+        "hoi an ancient town",
+        "old town hoi an"
+      ],
+      "display_names": {
+        "vi": "Phố cổ Hội An",
+        "en": "Hoi An Ancient Town"
+      },
+      "must_have_cues": [
+        "hoi an",
+        "ancient town",
+        "den long"
+      ],
+      "confusable_with": [
+        "cho_dem_helio",
+        "pho_di_bo_bach_dang"
+      ],
+      "allow_unknown": true
+    },
+    "hoi_an": {
+      "kind": "place",
+      "aliases": [
+        "hoi an",
+        "hoi an town",
+        "hoi an city"
+      ],
+      "display_names": {
+        "vi": "Hội An",
+        "en": "Hoi An"
+      },
+      "must_have_cues": [
+        "hoi an"
+      ],
+      "confusable_with": [
+        "pho_co_hoi_an"
+      ],
+      "allow_unknown": true
+    },
+    "rung_dua_bay_mau": {
+      "kind": "place",
+      "aliases": [
+        "rung dua bay mau",
+        "cam thanh coconut village",
+        "basket boat hoi an"
+      ],
+      "must_have_cues": [
+        "coconut",
+        "basket boat",
+        "bay mau"
+      ],
+      "confusable_with": [
+        "cu_lao_cham"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Rừng dừa Bảy Mẫu",
+        "en": "Bay Mau Coconut Forest"
+      }
+    },
+    "lang_rau_tra_que": {
+      "kind": "place",
+      "aliases": [
+        "lang rau tra que",
+        "tra que vegetable village",
+        "tra que village"
+      ],
+      "must_have_cues": [
+        "tra que",
+        "vegetable village"
+      ],
+      "confusable_with": [
+        "rung_dua_bay_mau"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Làng rau Trà Quế",
+        "en": "Tra Que Vegetable Village"
+      }
+    },
+    "bien_an_bang": {
+      "kind": "place",
+      "aliases": [
+        "bien an bang",
+        "an bang beach"
+      ],
+      "must_have_cues": [
+        "an bang",
+        "beach"
+      ],
+      "confusable_with": [
+        "bai_bien_my_khe",
+        "bai_bien_non_nuoc"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Biển An Bàng",
+        "en": "An Bang Beach"
+      }
+    },
+    "cu_lao_cham": {
+      "kind": "place",
+      "aliases": [
+        "cu lao cham",
+        "cham island",
+        "cham islands"
+      ],
+      "display_names": {
+        "vi": "Cù Lao Chàm",
+        "en": "Cham Islands"
+      },
+      "must_have_cues": [
+        "cu lao cham",
+        "cham island"
+      ],
+      "confusable_with": [
+        "ban_dao_son_tra",
+        "rung_dua_bay_mau"
+      ],
+      "allow_unknown": true
+    },
+    "thanh_dia_my_son": {
+      "kind": "place",
+      "aliases": [
+        "thanh dia my son",
+        "my son sanctuary",
+        "my son"
+      ],
+      "display_names": {
+        "vi": "Thánh địa Mỹ Sơn",
+        "en": "My Son Sanctuary"
+      },
+      "must_have_cues": [
+        "my son",
+        "sanctuary",
+        "cham"
+      ],
+      "confusable_with": [
+        "bao_tang_cham"
+      ],
+      "allow_unknown": true
+    },
+    "vinwonders_nam_hoi_an": {
+      "kind": "place",
+      "aliases": [
+        "vinwonders nam hoi an",
+        "vinpearl nam hoi an",
+        "south hoi an park"
+      ],
+      "must_have_cues": [
+        "vinwonders",
+        "nam hoi an"
+      ],
+      "confusable_with": [
+        "asia_park",
+        "ba_na_hills"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "VinWonders Nam Hội An",
+        "en": "VinWonders Nam Hoi An"
+      }
+    },
+    "ban_cung": {
+      "kind": "place",
+      "aliases": [
+        "ban cung",
+        "cung ten",
+        "archery",
+        "archery club",
+        "archery range",
+        "target shooting"
+      ],
+      "must_have_cues": [
+        "archery",
+        "ban cung",
+        "cung"
+      ],
+      "confusable_with": [
+        "asia_park"
+      ],
+      "allow_unknown": true,
+      "display_names": {
+        "vi": "Bắn cung",
+        "en": "Archery"
+      }
+    }
+  }
+}
