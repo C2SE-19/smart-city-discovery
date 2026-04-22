@@ -359,6 +359,16 @@ function MerchantVenueForm({ editVenueId = null }) {
     openTime: '',
     closeTime: ''
   };
+  const selectedWardName =
+    wards.find((ward) => String(ward.ward_id) === String(formData.wardId || ''))?.name || '';
+  const initialAddressQuery = [
+    String(formData.address || '').trim(),
+    String(selectedWardName || '').trim(),
+    'Đà Nẵng',
+    'Việt Nam'
+  ]
+    .filter(Boolean)
+    .join(', ');
 
   useEffect(() => {
     async function loadPlaceCategories() {
@@ -1472,6 +1482,7 @@ function MerchantVenueForm({ editVenueId = null }) {
         onClose={() => setIsLocationPickerOpen(false)}
         onLocationSelect={handleLocationSelect}
         selectedWardId={formData.wardId}
+        initialAddressQuery={initialAddressQuery}
         defaultLocation={
           formData.latitude && formData.longitude
             ? { lat: formData.latitude, lng: formData.longitude }

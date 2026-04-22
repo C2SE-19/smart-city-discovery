@@ -23,10 +23,10 @@ const COPY = {
     },
     headings: {
       personal: 'Thông tin cá nhân',
-      favorites: 'Yêu thích',
+      favorites: 'Yêu Thích',
       ratings: 'Đánh giá của tôi',
       posts: 'Bài viết của tôi',
-      support: 'Góp ý & hỗ trợ'
+      support: 'Góp ý & Hỗ trợ'
     },
     placeholder: {
       favorites: 'Các địa điểm yêu thích của bạn sẽ hiển thị ở đây',
@@ -41,6 +41,7 @@ const COPY = {
       address: 'Địa chỉ'
     },
     loading: 'Đang tải thông tin...',
+    edit: '✎ Chỉnh sửa',
     edit: 'Chỉnh sửa',
     save: 'Lưu',
     cancel: 'Hủy',
@@ -76,13 +77,155 @@ const COPY = {
       address: 'Address'
     },
     loading: 'Loading profile...',
-    edit: 'âœŽ Edit',
+  edit: '✎ Edit',
     save: 'Save',
     cancel: 'Cancel',
     ratingTitle: 'Ratings',
     ratingCount: '4.7 (0 reviews)'
   }
 };
+
+const VI_COPY_OVERRIDE = {
+  menu: {
+    overview: 'Tổng Quan',
+    account: 'Thông tin tài khoản',
+    favorites: 'Yêu Thích',
+    ratings: 'Đánh giá',
+    posts: 'Bài viết của tôi',
+    support: 'Góp ý & hỗ trợ'
+  },
+  headings: {
+    personal: 'Thông tin cá nhân',
+    favorites: 'Yêu Thích',
+    ratings: 'Đánh giá của tôi',
+    posts: 'Bài viết của tôi',
+    support: 'Góp ý & hỗ trợ'
+  },
+  placeholder: {
+    favorites: 'Các địa điểm yêu thích của bạn sẽ hiển thị ở đây',
+    ratings: 'Các đánh giá bạn đã gửi sẽ hiển thị ở đây',
+    posts: 'Các bài viết của bạn sẽ hiển thị ở đây',
+    support: 'Liên hệ với chúng tôi để được hỗ trợ tốt nhất'
+  },
+  labels: {
+    name: 'Họ và tên',
+    email: 'Email',
+    phone: 'Số điện thoại',
+    address: 'Địa chỉ'
+  },
+  loading: 'Đang tải thông tin...',
+  edit: '✎ Chỉnh sửa',
+  save: 'Lưu',
+  cancel: 'Hủy',
+  ratingTitle: 'Đánh giá',
+  ratingCount: '4.7 (0 đánh giá)'
+};
+
+const VI_UI_OVERRIDE = {
+  labels: {
+    currentPassword: 'Mật khẩu hiện tại',
+    newPassword: 'Mật khẩu mới',
+    confirmPassword: 'Xác nhận mật khẩu mới'
+  },
+  helpers: {
+    emailLocked: 'Email đã khóa, không thể thay đổi.',
+    passwordRule: '(Mật khẩu phải từ 8 ký tự, có 1 chữ viết hoa và ký tự đặc biệt.)'
+  },
+  placeholders: {
+    phone: 'Nhập số điện thoại',
+    currentPassword: 'Nhập mật khẩu hiện tại',
+    newPassword: 'Ít nhất 8 ký tự',
+    confirmPassword: 'Nhập lại mật khẩu mới'
+  },
+  actions: {
+    show: 'Hiện',
+    hide: 'Ẩn',
+    showPasswordForm: 'Thay đổi mật khẩu',
+    hidePasswordForm: 'Ẩn đổi mật khẩu',
+    editInterests: 'Sửa sở thích',
+    removeFavorite: 'Bỏ yêu thích',
+    confirm: 'Có',
+    decline: 'Không'
+  },
+  favorites: {
+    removeTitle: 'Bỏ yêu thích',
+    removeMessage: 'Bạn có muốn bỏ yêu thích mục "{name}" không?',
+    unnamed: 'Không có tên'
+  },
+  messages: {
+    nameRequired: 'Vui lòng nhập họ tên.',
+    emailInvalid: 'Email không đúng định dạng.',
+    phoneInvalid: 'Số điện thoại không đúng định dạng.',
+    passwordRequired: 'Vui lòng nhập đầy đủ mật khẩu hiện tại, mật khẩu mới và xác nhận.',
+    passwordLength: 'Mật khẩu mới phải có ít nhất 8 ký tự.',
+    passwordUpper: 'Mật khẩu mới phải có ít nhất 1 chữ in hoa (A-Z).',
+    passwordSpecial: 'Mật khẩu mới phải có ít nhất 1 ký tự đặc biệt.',
+    passwordMismatch: 'Xác nhận mật khẩu không khớp.',
+    saveSuccess: 'Lưu thành công.',
+    saveFailed: 'Cập nhật thất bại. Vui lòng thử lại.',
+    favoriteRemoved: 'Đã bỏ yêu thích.',
+    favoriteRemoveFailed: 'Không thể bỏ yêu thích. Vui lòng thử lại.'
+  }
+};
+
+function shouldRepairMojibake(value) {
+  const text = String(value || '');
+  return /Ã|Ä|á»|â|ðŸ|�/.test(text);
+}
+
+function repairMojibakeText(value) {
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  if (!shouldRepairMojibake(value)) {
+    return value;
+  }
+
+  try {
+    const bytes = Uint8Array.from(value, (char) => char.charCodeAt(0));
+    const decoded = new TextDecoder('utf-8').decode(bytes);
+    return decoded || value;
+  } catch {
+    return value;
+  }
+}
+
+function repairMojibakeDeep(input) {
+  if (Array.isArray(input)) {
+    return input.map((item) => repairMojibakeDeep(item));
+  }
+
+  if (input && typeof input === 'object') {
+    return Object.keys(input).reduce((accumulator, key) => {
+      accumulator[key] = repairMojibakeDeep(input[key]);
+      return accumulator;
+    }, {});
+  }
+
+  return repairMojibakeText(input);
+}
+
+function mergeDeep(baseValue, overrideValue) {
+  if (Array.isArray(baseValue) || Array.isArray(overrideValue)) {
+    return overrideValue ?? baseValue;
+  }
+
+  if (
+    baseValue &&
+    typeof baseValue === 'object' &&
+    overrideValue &&
+    typeof overrideValue === 'object'
+  ) {
+    const keys = new Set([...Object.keys(baseValue), ...Object.keys(overrideValue)]);
+    return [...keys].reduce((accumulator, key) => {
+      accumulator[key] = mergeDeep(baseValue[key], overrideValue[key]);
+      return accumulator;
+    }, {});
+  }
+
+  return overrideValue ?? baseValue;
+}
 
 
 function ProfilePage() {
@@ -91,7 +234,14 @@ function ProfilePage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { theme } = useTheme();
-  const copy = COPY[language] || COPY.vi;
+  const copy = useMemo(() => {
+    const source = COPY[language] || COPY.vi;
+    if (language !== 'vi') {
+      return source;
+    }
+
+    return mergeDeep(repairMojibakeDeep(source), VI_COPY_OVERRIDE);
+  }, [language]);
 
   const handleFavoriteCardClick = (item) => {
     if (String(item?.itemType || '').toLowerCase() !== 'place' || !item?.itemId) {
@@ -105,7 +255,7 @@ function ProfilePage() {
     setConfirmFavorite(item);
   };
 
-  const ui =
+  const uiRaw =
     language === 'vi'
       ? {
           labels: {
@@ -202,6 +352,15 @@ function ProfilePage() {
             favoriteRemoveFailed: 'Unable to remove favorite. Please try again.'
           }
         };
+
+  const ui = useMemo(() => {
+    if (language !== 'vi') {
+      return uiRaw;
+    }
+
+    return mergeDeep(repairMojibakeDeep(uiRaw), VI_UI_OVERRIDE);
+  }, [language, uiRaw]);
+
   const MenuItems = [
     { id: 'overview', label: copy.menu.overview, icon: FiGrid },
     { id: 'account-info', label: copy.menu.account, icon: FiUser },
@@ -667,7 +826,7 @@ function ProfilePage() {
 
   const handleUploadCroppedAvatar = async () => {
     if (!token) {
-      setError('Báº¡n cáº§n Ä‘Äƒng nháº­p Ä‘á»ƒ cáº­p nháº­t áº£nh Ä‘áº¡i diá»‡n.');
+      setError('Bạn cần đăng nhập để cập nhật ảnh đại diện.');
       setSuccessMessage('');
       setTimeout(() => setError(''), 1500);
       return;
@@ -680,7 +839,7 @@ function ProfilePage() {
 
       const blob = await getCroppedAvatarBlob();
       if (!blob) {
-        setError('KhÃ´ng thá»ƒ cáº¯t áº£nh. Vui lÃ²ng thá»­ láº¡i.');
+        setError('Không thể cắt ảnh. Vui lòng thử lại.');
         setTimeout(() => setError(''), 1500);
         return;
       }
@@ -705,7 +864,7 @@ function ProfilePage() {
         updateUser({ avatarUrl: nextAvatar });
       }
       setAvatarCropOpen(false);
-      setSuccessMessage('Cáº­p nháº­t áº£nh Ä‘áº¡i diá»‡n thÃ nh cÃ´ng.');
+      setSuccessMessage('Cập nhật ảnh đại diện thành công.');
       setTimeout(() => setSuccessMessage(''), 1200);
     } catch (err) {
       console.error('Avatar upload error:', err);
