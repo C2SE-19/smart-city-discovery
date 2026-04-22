@@ -8,6 +8,7 @@
     "dev:frontend": "npm --prefix frontend run dev"
   },
   "dependencies": {
+    "intro.js": "^8.3.2",
     "openai": "^6.34.0"
   }
 }

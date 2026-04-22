@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useLanguage } from '../../contexts/LanguageContext';
 import {
   fetchUserPreferences,
   fetchUserPreferenceOptions,
   saveUserPreferences
 } from '../../services/api/userPreferencesApi';
 import './UserPreferenceWizard.css';
+
+const NEW_ACCOUNT_ONBOARDING_KEY = 'smart-city-onboarding:new-account';
 
 const FALLBACK_OPTIONS = {
   ageRanges: [
@@ -152,6 +155,7 @@ export default function UserPreferenceWizard({
   currentCoordinates,
   title = 'Tell us what fits you'
 }) {
+  const { language } = useLanguage();
   const [step, setStep] = useState(1);
   const [options, setOptions] = useState(FALLBACK_OPTIONS);
   const [form, setForm] = useState(() => buildInitialForm(initialPreference, FALLBACK_OPTIONS));
@@ -211,6 +215,48 @@ export default function UserPreferenceWizard({
     [options.interestsByAgeRange, form.ageRangeKey]
   );
 
+  const copy = useMemo(
+    () =>
+      language === 'vi'
+        ? {
+            title,
+            stepLabel: (currentStep) => `BƯỚC ${currentStep} / 2`,
+            loading: 'Đang tải tùy chọn...',
+            ageRange: 'Độ tuổi phù hợp',
+            gender: 'Giới tính',
+            visitTimes: 'Thời gian bạn thường ra ngoài',
+            interests: 'Sở thích',
+            closeLabel: 'Đóng biểu mẫu sở thích',
+            next: 'Tiếp theo',
+            back: 'Quay lại',
+            cancel: 'Hủy',
+            save: 'Lưu sở thích',
+            saving: 'Đang lưu...',
+            stepOneError: 'Vui lòng chọn độ tuổi, giới tính và ít nhất một khung giờ.',
+            stepTwoError: 'Vui lòng chọn ít nhất một sở thích.',
+            saveError: 'Hiện chưa thể lưu sở thích. Vui lòng thử lại.'
+          }
+        : {
+            title,
+            stepLabel: (currentStep) => `STEP ${currentStep} OF 2`,
+            loading: 'Loading options...',
+            ageRange: 'Suitable age range',
+            gender: 'Gender',
+            visitTimes: 'Time you usually go out',
+            interests: 'Interests',
+            closeLabel: 'Close preference form',
+            next: 'Next',
+            back: 'Back',
+            cancel: 'Cancel',
+            save: 'Save preferences',
+            saving: 'Saving...',
+            stepOneError: 'Please select age range, gender, and at least one preferred time.',
+            stepTwoError: 'Please choose at least one interest.',
+            saveError: 'Unable to save preferences right now.'
+          },
+    [language, title]
+  );
+
   if (!isOpen) {
     return null;
   }
@@ -247,7 +293,7 @@ export default function UserPreferenceWizard({
 
   const handleNext = () => {
     if (!stepOneValid) {
-      setError('Please select age range, gender, and at least one preferred time.');
+      setError(copy.stepOneError);
       return;
     }
 
@@ -257,7 +303,7 @@ export default function UserPreferenceWizard({
 
   const handleSave = async () => {
     if (!stepTwoValid) {
-      setError('Please choose at least one interest.');
+      setError(copy.stepTwoError);
       return;
     }
 
@@ -280,6 +326,23 @@ export default function UserPreferenceWizard({
       }
 
       const response = await saveUserPreferences(payload);
+      try {
+        const rawPendingAccount = window.localStorage.getItem(NEW_ACCOUNT_ONBOARDING_KEY);
+        if (rawPendingAccount) {
+          const parsedPendingAccount = JSON.parse(rawPendingAccount);
+          window.localStorage.setItem(
+            NEW_ACCOUNT_ONBOARDING_KEY,
+            JSON.stringify({
+              ...parsedPendingAccount,
+              preferencesSaved: true,
+              preferencesSavedAt: new Date().toISOString()
+            })
+          );
+          window.dispatchEvent(new CustomEvent('smart-city-preferences-saved'));
+        }
+      } catch {
+        // Ignore onboarding marker sync errors.
+      }
       if (typeof onSaved === 'function') {
         onSaved(response?.preference || null);
       }
@@ -287,7 +350,7 @@ export default function UserPreferenceWizard({
         onClose();
       }
     } catch (saveError) {
-      setError(saveError?.response?.data?.message || saveError?.message || 'Unable to save preferences right now.');
+      setError(saveError?.response?.data?.message || saveError?.message || copy.saveError);
     } finally {
       setSaving(false);
     }
@@ -298,27 +361,27 @@ export default function UserPreferenceWizard({
       <div className="preference-wizard-modal">
         <div className="preference-wizard-header">
           <div>
-            <h3>{title}</h3>
-            <p>Step {step} of 2</p>
+            <h3>{copy.title}</h3>
+            <p>{copy.stepLabel(step)}</p>
           </div>
           <button
             type="button"
             className="preference-wizard-close"
             onClick={onClose}
-            aria-label="Close preference form"
+            aria-label={copy.closeLabel}
           >
             x
           </button>
         </div>
 
         {loadingOptions ? (
-          <div className="preference-wizard-loading">Loading options...</div>
+          <div className="preference-wizard-loading">{copy.loading}</div>
         ) : (
           <div className="preference-wizard-body">
             {step === 1 ? (
               <div className="preference-wizard-step">
                 <label className="preference-wizard-field">
-                  <span>Suitable age range</span>
+                  <span>{copy.ageRange}</span>
                   <select
                     value={form.ageRangeKey}
                     onChange={(event) => handleAgeRangeChange(event.target.value)}
@@ -332,7 +395,7 @@ export default function UserPreferenceWizard({
                 </label>
 
                 <label className="preference-wizard-field">
-                  <span>Gender</span>
+                  <span>{copy.gender}</span>
                   <select
                     value={form.preferredGender}
                     onChange={(event) =>
@@ -351,7 +414,7 @@ export default function UserPreferenceWizard({
                 </label>
 
                 <fieldset className="preference-wizard-fieldset">
-                  <legend>Time you usually go out</legend>
+                  <legend>{copy.visitTimes}</legend>
                   <div className="preference-wizard-chip-grid">
                     {options.visitTimes.map((timeOption) => {
                       const checked = form.preferredTimes.includes(timeOption.key);
@@ -375,7 +438,7 @@ export default function UserPreferenceWizard({
             ) : (
               <div className="preference-wizard-step">
                 <fieldset className="preference-wizard-fieldset">
-                  <legend>Interests</legend>
+                  <legend>{copy.interests}</legend>
                   <div className="preference-wizard-interest-grid">
                     {availableInterests.map((interest) => {
                       const checked = form.interests.includes(interest.key);
@@ -411,7 +474,7 @@ export default function UserPreferenceWizard({
                   }}
                   disabled={saving}
                 >
-                  Back
+                  {copy.back}
                 </button>
               ) : (
                 <button
@@ -420,7 +483,7 @@ export default function UserPreferenceWizard({
                   onClick={onClose}
                   disabled={saving}
                 >
-                  Cancel
+                  {copy.cancel}
                 </button>
               )}
 
@@ -431,7 +494,7 @@ export default function UserPreferenceWizard({
                   onClick={handleNext}
                   disabled={!stepOneValid || saving}
                 >
-                  Next
+                  {copy.next}
                 </button>
               ) : (
                 <button
@@ -440,7 +503,7 @@ export default function UserPreferenceWizard({
                   onClick={handleSave}
                   disabled={!stepTwoValid || saving}
                 >
-                  {saving ? 'Saving...' : 'Save preferences'}
+                  {saving ? copy.saving : copy.save}
                 </button>
               )}
             </div>

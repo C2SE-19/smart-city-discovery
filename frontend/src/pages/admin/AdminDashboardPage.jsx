@@ -67,7 +67,7 @@ function ChartBars({ compact = false }) {
 function AdminDashboardPage() {
   return (
     <div className="admin-dashboard-page">
-      <section className="admin-dashboard-hero">
+      <section className="admin-dashboard-hero" data-onboarding="admin-hero">
         <div>
           <p className="admin-dashboard-kicker">Administrative overview</p>
           <h1>Monitor wards, merchant submissions and promotion activity in one place.</h1>
@@ -83,7 +83,7 @@ function AdminDashboardPage() {
         </div>
       </section>
 
-      <section className="admin-metrics-strip">
+      <section className="admin-metrics-strip" data-onboarding="admin-metrics">
         {metricCards.map((card) => (
           <article key={card.label} className="admin-metric-card">
             <strong>{card.value}</strong>

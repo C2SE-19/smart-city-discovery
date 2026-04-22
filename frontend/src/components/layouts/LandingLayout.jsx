@@ -703,7 +703,13 @@ function LandingLayout() {
     <div className="landing-shell">
       <div className="landing-page">
         <header className="landing-header">
-          <Link to="/" className="landing-logo" aria-label="Smart City homepage" onClick={handleHomeClick}>
+          <Link
+            to="/"
+            className="landing-logo"
+            aria-label="Smart City homepage"
+            onClick={handleHomeClick}
+            data-onboarding="landing-logo"
+          >
             <span className="landing-logo-mark">
               <img src={logo} alt="Smart City Logo" className="landing-logo-image" />
             </span>
@@ -713,7 +719,7 @@ function LandingLayout() {
             </span>
           </Link>
 
-          <nav className="landing-nav" aria-label="Primary">
+          <nav className="landing-nav" aria-label="Primary" data-onboarding="landing-nav">
             <NavLink
               to="/"
               end
@@ -740,9 +746,26 @@ function LandingLayout() {
             >
               {t.header.service}
             </NavLink>
+            <NavLink
+              to={APP_ROUTES.FORUM}
+              className={({ isActive }) => `landing-nav-link${isActive ? ' is-active' : ''}`}
+            >
+              {t.header.forum}
+            </NavLink>
           </nav>
 
           <div className="landing-header-actions">
+            <button
+              type="button"
+              className="landing-onboarding-trigger"
+              aria-label="Mở lại hướng dẫn"
+              title="Mở lại hướng dẫn"
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent('smart-city-onboarding-restart'));
+              }}
+            >
+              ?
+            </button>
             <select
               value={language}
               onChange={(e) => changeLanguage(e.target.value)}
@@ -842,11 +865,11 @@ function LandingLayout() {
             </div>
             
             {!user ? (
-              <Link to="/login" className="landing-login">
+              <Link to="/login" className="landing-login" data-onboarding="landing-login">
                 {t.header.login}
               </Link>
             ) : (
-              <div className="landing-profile-menu" ref={profileMenuRef}>
+              <div className="landing-profile-menu" ref={profileMenuRef} data-onboarding="landing-profile">
                 <button 
                   type="button" 
                   className="landing-profile-button"

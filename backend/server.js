@@ -20,6 +20,14 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
+// Mount LLM-backed chat route (v2) from src so frontend can call /api/chat-v2
+try {
+    const chatV2 = require('./src/routes/chat.route');
+    app.use('/api/chat-v2', chatV2);
+} catch (e) {
+    console.warn('Could not mount /api/chat-v2:', e.message);
+}
+
 // Initialize Google OAuth2 Client
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
@@ -143,7 +151,7 @@ const venueOwnerColumnState = {
     checkedAt: 0
 };
 
-const MAX_INLINE_IMAGE_URL_LENGTH = 200000;
+const MAX_INLINE_IMAGE_URL_LENGTH = 2000000;
 const MAX_METADATA_JSON_LENGTH = 300000;
 
 function sanitizeLargeInlineAssetUrl(value) {
@@ -693,6 +701,50 @@ function normalizeVenueUpdateSnapshot(value) {
             value.businessLicenseImageUrl ?? value.business_license_image_url
         ),
         metadata: normalizeVenueMetadataObject(value.metadata)
+    };
+}
+
+const VENUE_REVIEW_METADATA_KEYS = [
+    'category',
+    'categoryName',
+    'categoryId',
+    'wardId',
+    'wardName',
+    'imagesCount',
+    'galleryImages'
+];
+
+const VENUE_SIMPLE_METADATA_KEYS = [
+    'minPrice',
+    'maxPrice',
+    'startTime',
+    'endTime',
+    'weeklyOpenHours',
+    'weeklySchedule',
+    'selectedServices',
+    'selectedServiceNames',
+    'contactEmail'
+];
+
+function pickVenueMetadataFields(metadata, allowedKeys) {
+    const source = normalizeVenueMetadataObject(metadata);
+
+    return allowedKeys.reduce((result, key) => {
+        if (Object.prototype.hasOwnProperty.call(source, key)) {
+            result[key] = source[key];
+        }
+
+        return result;
+    }, {});
+}
+
+function mergeVenueReviewMetadata(currentMetadata, proposedMetadata) {
+    const baseMetadata = normalizeVenueMetadataObject(currentMetadata);
+    const reviewMetadata = pickVenueMetadataFields(proposedMetadata, VENUE_REVIEW_METADATA_KEYS);
+
+    return {
+        ...baseMetadata,
+        ...reviewMetadata
     };
 }
 
@@ -3444,6 +3496,40 @@ async function generateWardIdFromName(name) {
             return Number(parsed.toFixed(2));
         }
 
+        const REFINE_IMPLICIT_NEARBY_DEFAULT_DISTANCE_KM = 6;
+        const REFINE_IMPLICIT_NEARBY_INTENT_PATTERNS = [
+            /\bnearby\b/,
+            /\bnearest\b/,
+            /\bnear\s+me\b/,
+            /\bclose\s+to\s+me\b/,
+            /\baround\s+me\b/,
+            /\baround\s+my\s+location\b/,
+            /\bgan\s+toi\b/,
+            /\bgan\s+minh\b/,
+            /\bgan\s+day\b/,
+            /\bgan\s+nhat\b/,
+            /\bxung\s+quanh\s+(?:toi|minh|day)\b/,
+            /\bquanh\s+(?:toi|minh|day)\b/,
+            /\bvi\s+tri\s+hien\s+tai\b/,
+            /\bkhu\s+vuc\s+(?:toi|minh)\b/,
+            /\bcurrent\s+location\b/,
+            /\bmy\s+location\b/,
+            /\baroundme\b/,
+            /\baround_me\b/
+        ];
+
+        function detectImplicitNearbyIntent(normalizedQuery, locationPhrases = []) {
+            if (!normalizedQuery) {
+                return false;
+            }
+
+            if (Array.isArray(locationPhrases) && locationPhrases.length > 0) {
+                return false;
+            }
+
+            return REFINE_IMPLICIT_NEARBY_INTENT_PATTERNS.some((pattern) => pattern.test(normalizedQuery));
+        }
+
         const REFINE_CUISINE_HINTS = [
             ['hotpot', ['lau', 'hotpot', 'shabu']],
             ['bbq', ['nuong', 'bbq', 'grill']],
@@ -3847,6 +3933,10 @@ async function generateWardIdFromName(name) {
             const preferredTimeWindows = detectTimeWindowsFromQuery(normalizedQuery);
             const locationPhrases = extractLocationPhrasesFromRefineQuery(normalizedQuery);
             const locationKeywords = extractLocationKeywordsFromPhrases(locationPhrases);
+            const implicitNearbyIntent = detectImplicitNearbyIntent(normalizedQuery, locationPhrases);
+            const effectiveDistanceCapKm = Number.isFinite(distanceCapKm)
+                ? distanceCapKm
+                : (implicitNearbyIntent ? REFINE_IMPLICIT_NEARBY_DEFAULT_DISTANCE_KM : null);
             const requireLocationMatch = locationPhrases.length > 0;
             const requireActivityMatch = activityKeywords.length > 0;
             const requireServiceMatch = serviceKeywords.length > 0;
@@ -3876,7 +3966,7 @@ async function generateWardIdFromName(name) {
             const hasStructuredConstraints =
                 Number.isFinite(budgetCapVnd)
                 || Number.isFinite(budgetFloorVnd)
-                || Number.isFinite(distanceCapKm)
+                || Number.isFinite(effectiveDistanceCapKm)
                 || requireOpenNow
                 || locationPhrases.length > 0
                 || activityKeywords.length > 0
@@ -3889,7 +3979,7 @@ async function generateWardIdFromName(name) {
             return {
                 maxBudgetVnd: Number.isFinite(budgetCapVnd) ? budgetCapVnd : null,
                 minBudgetVnd: Number.isFinite(budgetFloorVnd) ? budgetFloorVnd : null,
-                maxDistanceKm: Number.isFinite(distanceCapKm) ? distanceCapKm : null,
+                maxDistanceKm: Number.isFinite(effectiveDistanceCapKm) ? effectiveDistanceCapKm : null,
                 strictBudgetCap,
                 strictBudgetFloor,
                 requireOpenNow,
@@ -4101,10 +4191,17 @@ async function generateWardIdFromName(name) {
             const includeKeywords = normalizeRefineKeywordList(normalized.includeKeywords)
                 .filter((token) => !blockedIncludeTokens.has(token));
 
+            const implicitNearbyIntent = detectImplicitNearbyIntent(normalizedQuery, locationPhrases);
+            let maxDistanceKm = Number.isFinite(normalized.maxDistanceKm) ? normalized.maxDistanceKm : null;
+
+            if (!Number.isFinite(maxDistanceKm) && implicitNearbyIntent) {
+                maxDistanceKm = REFINE_IMPLICIT_NEARBY_DEFAULT_DISTANCE_KM;
+            }
+
             const hasStructuredConstraints =
                 Number.isFinite(normalized.maxBudgetVnd)
                 || Number.isFinite(normalized.minBudgetVnd)
-                || Number.isFinite(normalized.maxDistanceKm)
+                || Number.isFinite(maxDistanceKm)
                 || Boolean(normalized.requireOpenNow)
                 || locationPhrases.length > 0
                 || activityKeywords.length > 0
@@ -4141,7 +4238,7 @@ async function generateWardIdFromName(name) {
             return {
                 maxBudgetVnd,
                 minBudgetVnd,
-                maxDistanceKm: Number.isFinite(normalized.maxDistanceKm) ? normalized.maxDistanceKm : null,
+                maxDistanceKm,
                 strictBudgetCap,
                 strictBudgetFloor,
                 requireOpenNow: Boolean(normalized.requireOpenNow),
@@ -4291,6 +4388,8 @@ async function generateWardIdFromName(name) {
                             'You parse user refine requests for venue recommendation constraints.',
                             'You are pass 1 of 2.',
                             'Understand Vietnamese, teencode abbreviations, and English, including mixed phrases.',
+                            'Do not require full details. Infer intent from short refine requests.',
+                            'If query implies nearby intent (gan toi, xung quanh, near me, nearby, nearest) without explicit km, set maxDistanceKm to 6.',
                             'Extract only constraints implied by user intent.',
                             schemaPrompt
                         ].join(' '),
@@ -4325,6 +4424,7 @@ async function generateWardIdFromName(name) {
                             '6) If minBudgetVnd is present and query says tren/hon/from/at least/minimum, strictBudgetFloor must be true.',
                             '7) Do not force requireKeywordMatch when structured constraints exist.',
                             '8) Remove duplicate overlap between location/activity/dish/service/name/cuisine/include keywords.',
+                            '9) If query implies nearby intent (gan toi, xung quanh, near me, nearby, nearest) and maxDistanceKm is missing, set maxDistanceKm to 6.',
                             schemaPrompt
                         ].join(' '),
                         userPrompt: JSON.stringify({
@@ -4650,6 +4750,7 @@ async function generateWardIdFromName(name) {
                                         'Read the full sentence intent, not isolated tokens.',
                                         'Only return venues that satisfy explicit user requirements from the whole sentence.',
                                         'Extract requiredDimensions from the user sentence and keep them strict.',
+                                        'If query implies nearby intent (gan toi, xung quanh, near me, nearby, nearest), distance must be required and far venues must not match.',
                                         'If intent is unclear, vague, or contradictory, set understood=false and return empty matches.',
                                         'Do not guess or broaden by assumptions.',
                                         'Return strict JSON with keys:',
@@ -9059,6 +9160,241 @@ async function generateWardIdFromName(name) {
             }
         }
 
+        async function updateMerchantVenueSimpleInfo(req, res) {
+            const venueId = Number(req.params.venueId);
+
+            if (!Number.isFinite(venueId)) {
+                return res.status(400).json({ message: 'Invalid venue id' });
+            }
+
+            try {
+                const currentUserId = await getAuthenticatedChatUserId(req);
+                const isAdmin = normalizeRole(req.authUser?.role) === 'admin';
+
+                if (!currentUserId && !isAdmin) {
+                    return res.status(401).json({ message: 'Missing authentication token' });
+                }
+
+                const venueHasOwnerUserColumn = await hasVenueOwnerUserColumn();
+                const resolvedOwnerUserSql = buildResolvedVenueOwnerUserSql('venues');
+                const ownerSelect = venueHasOwnerUserColumn
+                    ? `${resolvedOwnerUserSql} AS owner_user_id,`
+                    : `NULL::uuid AS owner_user_id,`;
+
+                const venueResult = await pool.query(
+                    `
+                        SELECT
+                            venues.id,
+                            venues.name,
+                            venues.title,
+                            ${ownerSelect}
+                            venues.submitted_by_user_id,
+                            venues.description,
+                            venues.phone,
+                            venues.metadata,
+                            venues.status::text AS status
+                        FROM venues
+                        WHERE venues.id = $1
+                        LIMIT 1
+                    `,
+                    [venueId]
+                );
+
+                if (!venueResult.rows.length) {
+                    return res.status(404).json({ message: 'Venue not found' });
+                }
+
+                const venue = venueResult.rows[0];
+                const ownerCandidateIds = extractVenueOwnerCandidateIds(venue);
+                const isOwner = Boolean(currentUserId && ownerCandidateIds.includes(String(currentUserId || '').trim()));
+
+                if (!isAdmin && !isOwner) {
+                    return res.status(403).json({ message: 'You do not have permission to edit this venue' });
+                }
+
+                if (String(venue.status || '').toLowerCase() !== 'approved') {
+                    return res.status(400).json({ message: 'Only approved venues can be updated directly' });
+                }
+
+                const body = req.body || {};
+                const existingMetadata = normalizeVenueMetadataObject(venue.metadata);
+                const incomingMetadata = body.metadata && typeof body.metadata === 'object' && !Array.isArray(body.metadata)
+                    ? body.metadata
+                    : {};
+                const allowedSimpleMetadata = pickVenueMetadataFields(incomingMetadata, VENUE_SIMPLE_METADATA_KEYS);
+                const normalizedMetadata = {
+                    ...existingMetadata,
+                    ...allowedSimpleMetadata
+                };
+
+                const hasPhoneField = Object.prototype.hasOwnProperty.call(body, 'phone');
+                const hasDescriptionField = Object.prototype.hasOwnProperty.call(body, 'description');
+                const normalizedPhone = hasPhoneField
+                    ? normalizeNullableText(body.phone)
+                    : normalizeNullableText(venue.phone);
+                const normalizedDescription = hasDescriptionField
+                    ? normalizeNullableText(body.description)
+                    : normalizeNullableText(venue.description);
+
+                if (!normalizedPhone) {
+                    return res.status(400).json({ message: 'Phone number is required' });
+                }
+
+                if (!/^\d{10,11}$/.test(normalizedPhone)) {
+                    return res.status(400).json({ message: 'Phone number must contain 10-11 digits' });
+                }
+
+                const normalizedMinPrice =
+                    normalizedMetadata.minPrice === undefined || normalizedMetadata.minPrice === null || normalizedMetadata.minPrice === ''
+                        ? null
+                        : Number(normalizedMetadata.minPrice);
+                const normalizedMaxPrice =
+                    normalizedMetadata.maxPrice === undefined || normalizedMetadata.maxPrice === null || normalizedMetadata.maxPrice === ''
+                        ? null
+                        : Number(normalizedMetadata.maxPrice);
+
+                if (normalizedMinPrice !== null && (!Number.isFinite(normalizedMinPrice) || normalizedMinPrice < 0)) {
+                    return res.status(400).json({ message: 'minPrice must be a non-negative number' });
+                }
+
+                if (normalizedMaxPrice !== null && (!Number.isFinite(normalizedMaxPrice) || normalizedMaxPrice < 0)) {
+                    return res.status(400).json({ message: 'maxPrice must be a non-negative number' });
+                }
+
+                if (normalizedMinPrice !== null || normalizedMaxPrice !== null) {
+                    if (normalizedMinPrice === null || normalizedMaxPrice === null) {
+                        return res.status(400).json({ message: 'Both minPrice and maxPrice are required when setting a price range' });
+                    }
+
+                    if (normalizedMinPrice >= normalizedMaxPrice) {
+                        return res.status(400).json({ message: 'maxPrice must be greater than minPrice' });
+                    }
+                }
+
+                normalizedMetadata.minPrice = normalizedMinPrice;
+                normalizedMetadata.maxPrice = normalizedMaxPrice;
+
+                const metadataStartTime = String(normalizedMetadata.startTime || '').trim();
+                const metadataEndTime = String(normalizedMetadata.endTime || '').trim();
+                const hasCanonicalWeeklySchedule =
+                    normalizedMetadata.weeklySchedule &&
+                    typeof normalizedMetadata.weeklySchedule === 'object' &&
+                    !Array.isArray(normalizedMetadata.weeklySchedule);
+                const hasLegacyWeeklyOpenHours =
+                    normalizedMetadata.weeklyOpenHours &&
+                    typeof normalizedMetadata.weeklyOpenHours === 'object' &&
+                    !Array.isArray(normalizedMetadata.weeklyOpenHours);
+                const hasGlobalTimeRange =
+                    /^\d{2}:\d{2}$/.test(metadataStartTime) &&
+                    /^\d{2}:\d{2}$/.test(metadataEndTime) &&
+                    metadataStartTime < metadataEndTime;
+
+                if (hasCanonicalWeeklySchedule || hasLegacyWeeklyOpenHours || hasGlobalTimeRange) {
+                    const weeklyScheduleCandidate = resolveWeeklyScheduleSource(normalizedMetadata, allowedSimpleMetadata);
+                    const normalizedScheduleResult = normalizeWeeklyScheduleInput(weeklyScheduleCandidate, {
+                        fallbackStart: metadataStartTime,
+                        fallbackEnd: metadataEndTime
+                    });
+
+                    if (normalizedScheduleResult.error) {
+                        return res.status(400).json({ message: normalizedScheduleResult.error });
+                    }
+
+                    normalizedMetadata.weeklySchedule = normalizedScheduleResult.value;
+                }
+
+                const requestedServiceIds = normalizeServiceIds(normalizedMetadata.selectedServices);
+                if (requestedServiceIds.length) {
+                    const servicesResult = await pool.query(
+                        `
+                            SELECT id, name
+                            FROM merchant_services
+                            WHERE id = ANY($1::int[])
+                              AND is_active = true
+                        `,
+                        [requestedServiceIds]
+                    );
+
+                    if (servicesResult.rows.length !== requestedServiceIds.length) {
+                        return res.status(400).json({ message: 'Selected services are invalid or inactive' });
+                    }
+
+                    const serviceNameMap = new Map(
+                        servicesResult.rows.map((service) => [Number(service.id), service.name])
+                    );
+
+                    normalizedMetadata.selectedServices = requestedServiceIds;
+                    normalizedMetadata.selectedServiceNames = requestedServiceIds
+                        .map((serviceId) => serviceNameMap.get(serviceId))
+                        .filter(Boolean);
+                } else {
+                    normalizedMetadata.selectedServices = [];
+                    normalizedMetadata.selectedServiceNames = [];
+                }
+
+                const normalizedContactEmail = normalizeNullableText(
+                    normalizedMetadata.contactEmail ?? req.authUser?.email
+                );
+
+                if (normalizedContactEmail && !isValidEmail(normalizedContactEmail)) {
+                    return res.status(400).json({ message: 'contactEmail is invalid' });
+                }
+
+                if (normalizedContactEmail) {
+                    normalizedMetadata.contactEmail = normalizedContactEmail;
+                } else {
+                    delete normalizedMetadata.contactEmail;
+                }
+
+                const previousSnapshot = {
+                    phone: normalizeNullableText(venue.phone),
+                    description: normalizeNullableText(venue.description),
+                    metadata: pickVenueMetadataFields(existingMetadata, VENUE_SIMPLE_METADATA_KEYS)
+                };
+                const nextSnapshot = {
+                    phone: normalizedPhone,
+                    description: normalizedDescription,
+                    metadata: pickVenueMetadataFields(normalizedMetadata, VENUE_SIMPLE_METADATA_KEYS)
+                };
+
+                if (areJsonValuesEqual(previousSnapshot, nextSnapshot)) {
+                    return res.status(400).json({ message: 'No changes detected. Please update at least one simple field.' });
+                }
+
+                const updateResult = await pool.query(
+                    `
+                        UPDATE venues
+                        SET
+                            description = $2,
+                            phone = $3,
+                            metadata = $4::jsonb,
+                            updated_at = now()
+                        WHERE id = $1
+                        RETURNING id, description, phone, metadata, updated_at
+                    `,
+                    [venueId, normalizedDescription, normalizedPhone, normalizedMetadata]
+                );
+
+                if (!updateResult.rows.length) {
+                    return res.status(404).json({ message: 'Venue not found' });
+                }
+
+                invalidateVenueCommunityBundleCacheByVenueId(venueId);
+                publicCompactApprovedVenuesCache = { timestamp: 0, data: null };
+                publicVenueDetailCache.delete(`public:${venueId}`);
+                publicVenueDetailCache.delete(`admin:${venueId}`);
+                publicVenueForDetailCache.delete(`public:${venueId}`);
+                publicVenueForDetailCache.delete(`admin:${venueId}`);
+
+                return res.json({
+                    message: 'Simple venue information updated successfully.',
+                    venue: updateResult.rows[0]
+                });
+            } catch (error) {
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
         async function deleteMerchantVenue(req, res) {
             const venueId = Number(req.params.venueId);
 
@@ -9163,6 +9499,99 @@ async function generateWardIdFromName(name) {
                 return res.json({
                     message: 'Venue deleted successfully',
                     deletedVenueId: venueId
+                });
+            } catch (error) {
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
+        async function toggleMerchantVenuePauseStatus(req, res) {
+            const venueId = Number(req.params.venueId);
+
+            if (!Number.isFinite(venueId)) {
+                return res.status(400).json({ message: 'Invalid venue id' });
+            }
+
+            try {
+                const currentUserId = await getAuthenticatedChatUserId(req);
+                const isAdmin = normalizeRole(req.authUser?.role) === 'admin';
+
+                if (!currentUserId && !isAdmin) {
+                    return res.status(401).json({ message: 'Missing authentication token' });
+                }
+
+                const venueHasOwnerUserColumn = await hasVenueOwnerUserColumn();
+                const resolvedOwnerUserSql = buildResolvedVenueOwnerUserSql('venues');
+                const ownerSelect = venueHasOwnerUserColumn
+                    ? `${resolvedOwnerUserSql} AS owner_user_id,`
+                    : `NULL::uuid AS owner_user_id,`;
+
+                const venueResult = await pool.query(
+                    `
+                        SELECT
+                            venues.id,
+                            venues.name,
+                            venues.title,
+                            ${ownerSelect}
+                            venues.submitted_by_user_id,
+                            venues.status::text AS status
+                        FROM venues
+                        WHERE venues.id = $1
+                        LIMIT 1
+                    `,
+                    [venueId]
+                );
+
+                if (!venueResult.rows.length) {
+                    return res.status(404).json({ message: 'Venue not found' });
+                }
+
+                const venue = venueResult.rows[0];
+                const ownerCandidateIds = extractVenueOwnerCandidateIds(venue);
+                const isOwner = Boolean(currentUserId && ownerCandidateIds.includes(String(currentUserId || '').trim()));
+
+                if (!isAdmin && !isOwner) {
+                    return res.status(403).json({ message: 'You do not have permission to update this venue' });
+                }
+
+                const currentStatus = String(venue.status || '').toLowerCase();
+                if (!['approved', 'hidden'].includes(currentStatus)) {
+                    return res.status(400).json({ message: 'Only approved or paused venues can be toggled' });
+                }
+
+                const nextStatus = currentStatus === 'hidden' ? 'approved' : 'hidden';
+
+                const updateResult = await pool.query(
+                    `
+                        UPDATE venues
+                        SET
+                            status = $2,
+                            updated_at = now()
+                        WHERE id = $1
+                        RETURNING id, status
+                    `,
+                    [venueId, nextStatus]
+                );
+
+                if (!updateResult.rows.length) {
+                    return res.status(404).json({ message: 'Venue not found' });
+                }
+
+                invalidateVenueCommunityBundleCacheByVenueId(venueId);
+                publicCompactApprovedVenuesCache = { timestamp: 0, data: null };
+                publicVenueDetailCache.delete(`public:${venueId}`);
+                publicVenueDetailCache.delete(`admin:${venueId}`);
+                publicVenueForDetailCache.delete(`public:${venueId}`);
+                publicVenueForDetailCache.delete(`admin:${venueId}`);
+
+                const isPaused = nextStatus === 'hidden';
+
+                return res.json({
+                    message: isPaused
+                        ? 'Venue has been paused and hidden from public pages.'
+                        : 'Venue is active again and visible on public pages.',
+                    venue: updateResult.rows[0],
+                    isPaused,
                 });
             } catch (error) {
                 return res.status(500).json({ message: error.message });
@@ -9377,6 +9806,26 @@ async function generateWardIdFromName(name) {
                     });
                 }
 
+                const currentVenueResult = await client.query(
+                    `
+                        SELECT metadata
+                        FROM venues
+                        WHERE id = $1
+                        LIMIT 1
+                    `,
+                    [targetVenueId]
+                );
+
+                if (!currentVenueResult.rows.length) {
+                    await client.query('ROLLBACK');
+                    return res.status(404).json({ message: 'Venue not found for this update request' });
+                }
+
+                const mergedReviewMetadata = mergeVenueReviewMetadata(
+                    currentVenueResult.rows[0].metadata,
+                    proposedSnapshot.metadata
+                );
+
                 const venueUpdateResult = await client.query(
                     `
                         UPDATE venues
@@ -9384,15 +9833,13 @@ async function generateWardIdFromName(name) {
                             name = $2,
                             title = $3,
                             address = $4,
-                            description = $5,
-                            phone = $6,
-                            latitude = $7,
-                            longitude = $8,
-                            ward_id = $9,
-                            category_id = $10,
-                            cover_image_url = $11,
-                            business_license_image_url = $12,
-                            metadata = $13::jsonb,
+                            latitude = $5,
+                            longitude = $6,
+                            ward_id = $7,
+                            category_id = $8,
+                            cover_image_url = $9,
+                            business_license_image_url = $10,
+                            metadata = $11::jsonb,
                             status = 'approved',
                             approved_at = now(),
                             rejected_at = NULL,
@@ -9406,15 +9853,13 @@ async function generateWardIdFromName(name) {
                         proposedSnapshot.name,
                         proposedSnapshot.title || proposedSnapshot.name,
                         proposedSnapshot.address,
-                        proposedSnapshot.description,
-                        proposedSnapshot.phone,
                         proposedSnapshot.latitude,
                         proposedSnapshot.longitude,
                         proposedSnapshot.wardId,
                         Number.isNaN(proposedSnapshot.categoryId) ? null : proposedSnapshot.categoryId,
                         proposedSnapshot.coverImageUrl,
                         proposedSnapshot.businessLicenseImageUrl,
-                        proposedSnapshot.metadata,
+                        mergedReviewMetadata,
                     ]
                 );
 
@@ -12761,6 +13206,1035 @@ async function generateWardIdFromName(name) {
         registerVersionedRoute('post', '/chat/threads/:threadId/read', authenticateRequest, checkUserStatus, markChatThreadRead);
         registerVersionedRoute('delete', '/chat/threads/:threadId', authenticateRequest, checkUserStatus, deleteChatThread);
 
+        const FORUM_PROFANITY_PATTERNS = [
+            'dit me', 'ditme', 'dit bo', 'ditba', 'dit', 'dm ', 'vcl', 'vl', 'cc', 'cmm', 'dmm',
+            'địt', 'đụ', 'đéo', 'deo', 'lon', 'cac', 'cặc', 'lồn', 'ngu', 'oc cho', 'occho',
+            'do ngu', 'mat day', 'hon lao', 'vo hoc', 'cho chet', 'chó chết'
+        ];
+
+        function normalizeForumText(value) {
+            return String(value || '')
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .toLowerCase()
+                .replace(/[^a-z0-9\s]/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+        }
+
+        function forumContainsProfanity(text) {
+            const normalized = normalizeForumText(text);
+            return FORUM_PROFANITY_PATTERNS.some((pattern) => normalized.includes(pattern));
+        }
+
+        function sanitizeForumImageList(input, maxImages = 3) {
+            if (!Array.isArray(input)) {
+                return [];
+            }
+
+            const images = input
+                .map((item) => String(item || '').trim())
+                .filter(Boolean)
+                .filter((item) => /^data:image\//i.test(item) || /^https?:\/\//i.test(item));
+
+            const uniqueImages = [...new Set(images)];
+            return uniqueImages.slice(0, maxImages);
+        }
+
+        function normalizeActorKey(value) {
+            return String(value || '')
+                .trim()
+                .replace(/[^a-zA-Z0-9_-]/g, '')
+                .slice(0, 80);
+        }
+
+        function isGenericForumAuthorName(value) {
+            const normalized = normalizeForumText(value);
+            return normalized === 'nguoi dung' || normalized === 'user';
+        }
+
+        async function resolveForumAuthorName(req, requestedAuthorName) {
+            const trimmedRequestedName = String(requestedAuthorName || '').trim();
+            if (trimmedRequestedName && !isGenericForumAuthorName(trimmedRequestedName)) {
+                return trimmedRequestedName;
+            }
+
+            const authUserId = String(req.authUser?.id || '').trim();
+            if (authUserId) {
+                try {
+                    const userResult = await pool.query(
+                        'SELECT fullname, username, email FROM users WHERE id = $1 LIMIT 1',
+                        [authUserId]
+                    );
+
+                    if (userResult.rows.length) {
+                        const userRow = userResult.rows[0];
+                        const candidates = [
+                            String(userRow.fullname || '').trim(),
+                            String(userRow.username || '').trim(),
+                            String(userRow.email || '').trim()
+                        ];
+
+                        for (const candidate of candidates) {
+                            if (!candidate) {
+                                continue;
+                            }
+
+                            const derived = candidate.includes('@')
+                                ? String(candidate).split('@')[0].trim()
+                                : candidate;
+
+                            if (derived && !isGenericForumAuthorName(derived)) {
+                                return derived;
+                            }
+                        }
+                    }
+                } catch (error) {
+                    console.warn('resolveForumAuthorName lookup error:', error.message);
+                }
+            }
+
+            const authEmail = String(req.authUser?.email || '').trim();
+            if (authEmail) {
+                const emailName = authEmail.split('@')[0].trim();
+                if (emailName && !isGenericForumAuthorName(emailName)) {
+                    return emailName;
+                }
+            }
+
+            return 'Người dùng';
+        }
+
+        function mapForumComment(row) {
+            const isAnonymous = Boolean(row.is_anonymous);
+            const alias = String(row.anonymous_alias || '').trim();
+            const author = isAnonymous
+                ? alias || 'Người dùng ẩn danh'
+                : String(row.author_name || '').trim() || 'Người dùng';
+            const rawParentId = row.parent_comment_id;
+            const parentCommentId = rawParentId === null || rawParentId === undefined
+                ? null
+                : Number(rawParentId) || null;
+            const creatorUserId = row.creator_user_id ? String(row.creator_user_id) : null;
+            const authorActorKey = row.author_actor_key ? String(row.author_actor_key) : null;
+            const reportCount = Number(row.report_count || row.comment_report_count || 0);
+            const lastReportedAt = row.last_reported_at || null;
+            const reportReasons = Array.isArray(row.comment_report_reasons)
+                ? row.comment_report_reasons
+                : (Array.isArray(row.report_reasons) ? row.report_reasons : []);
+
+            return {
+                id: row.id,
+                postId: row.post_id,
+                parentCommentId,
+                content: row.content,
+                author,
+                isAnonymous,
+                anonymousAlias: alias || null,
+                images: Array.isArray(row.comment_images) ? row.comment_images : [],
+                creatorUserId,
+                authorActorKey,
+                reportCount,
+                isReported: reportCount > 0,
+                lastReportedAt,
+                reportReasons,
+                createdAt: row.created_at,
+                time: row.created_at
+            };
+        }
+
+        function mapForumPost(row) {
+            const isAnonymous = Boolean(row.is_anonymous);
+            const alias = String(row.anonymous_alias || '').trim();
+            const author = isAnonymous
+                ? alias || 'Người dùng ẩn danh'
+                : String(row.author_name || '').trim() || 'Người dùng';
+            const creatorUserId = row.creator_user_id ? String(row.creator_user_id) : null;
+            const authorActorKey = row.author_actor_key ? String(row.author_actor_key) : null;
+            const reportCount = Number(row.post_report_count || row.report_count || 0);
+            const commentReportCount = Number(row.comment_report_count || 0);
+            const hasReportedContent = Boolean(reportCount > 0 || commentReportCount > 0);
+            const postReportReasons = Array.isArray(row.post_report_reasons) ? row.post_report_reasons : [];
+
+            return {
+                id: row.id,
+                title: row.title,
+                category: row.category,
+                content: row.content,
+                excerpt: row.content,
+                author,
+                comments: Number(row.comments_count || 0),
+                likesCount: Number(row.likes_count || 0),
+                images: Array.isArray(row.post_images) ? row.post_images : [],
+                createdAt: row.created_at,
+                time: row.created_at,
+                isAnonymous,
+                anonymousAlias: alias || null,
+                creatorUserId,
+                authorActorKey,
+                reportCount,
+                commentReportCount,
+                hasReportedContent,
+                lastReportedAt: row.last_reported_at || null,
+                postReportReasons,
+                commentsList: Array.isArray(row.comments_list) ? row.comments_list.map(mapForumComment) : []
+            };
+        }
+
+        async function listAdminForumPosts(req, res) {
+            try {
+                const search = String(req.query?.search || '').trim();
+                const queryParams = [];
+                let whereClause = '';
+
+                if (search) {
+                    queryParams.push(`%${search}%`);
+                    whereClause = `
+                        WHERE (
+                            p.title ILIKE $${queryParams.length}
+                            OR p.content ILIKE $${queryParams.length}
+                            OR p.category ILIKE $${queryParams.length}
+                            OR COALESCE(p.author_name, '') ILIKE $${queryParams.length}
+                            OR EXISTS (
+                                SELECT 1
+                                FROM forum_comments fc_search
+                                WHERE fc_search.post_id = p.id
+                                  AND (
+                                      fc_search.content ILIKE $${queryParams.length}
+                                      OR COALESCE(fc_search.author_name, '') ILIKE $${queryParams.length}
+                                      OR COALESCE(fc_search.anonymous_alias, '') ILIKE $${queryParams.length}
+                                  )
+                            )
+                        )
+                    `;
+                }
+
+                const result = await pool.query(
+                    `
+                        SELECT
+                            p.id,
+                            p.title,
+                            p.category,
+                            p.content,
+                            p.author_name,
+                            p.creator_user_id,
+                            p.author_actor_key,
+                            p.is_anonymous,
+                            p.anonymous_alias,
+                            p.comments_count,
+                            p.likes_count,
+                            p.post_images,
+                            p.created_at,
+                            COALESCE(post_reports.report_count, 0) AS post_report_count,
+                            COALESCE(comment_reports.report_count, 0) AS comment_report_count,
+                            COALESCE(
+                                (
+                                    SELECT json_agg(report_item ORDER BY report_item.created_at DESC)
+                                    FROM (
+                                        SELECT
+                                            fpr.id,
+                                            fpr.actor_key,
+                                            fpr.reason,
+                                            fpr.created_at
+                                        FROM forum_post_reports fpr
+                                        WHERE fpr.post_id = p.id
+                                        ORDER BY fpr.created_at DESC
+                                        LIMIT 20
+                                    ) report_item
+                                ),
+                                '[]'::json
+                            ) AS post_report_reasons,
+                            GREATEST(
+                                COALESCE(post_reports.last_reported_at, 'epoch'::timestamptz),
+                                COALESCE(comment_reports.last_reported_at, 'epoch'::timestamptz)
+                            ) AS last_reported_at,
+                            COALESCE(
+                                (
+                                    SELECT json_agg(c ORDER BY c.is_reported DESC, c.last_reported_at DESC NULLS LAST, c.created_at DESC)
+                                    FROM (
+                                        SELECT
+                                            fc.id,
+                                            fc.post_id,
+                                            fc.parent_comment_id,
+                                            fc.content,
+                                            fc.author_name,
+                                            fc.creator_user_id,
+                                            fc.author_actor_key,
+                                            fc.is_anonymous,
+                                            fc.anonymous_alias,
+                                            fc.comment_images,
+                                            fc.created_at,
+                                            COALESCE(fcr.report_count, 0) AS report_count,
+                                            COALESCE(
+                                                (
+                                                    SELECT json_agg(comment_report_item ORDER BY comment_report_item.created_at DESC)
+                                                    FROM (
+                                                        SELECT
+                                                            report.id,
+                                                            report.actor_key,
+                                                            report.reason,
+                                                            report.created_at
+                                                        FROM forum_comment_reports report
+                                                        WHERE report.comment_id = fc.id
+                                                        ORDER BY report.created_at DESC
+                                                        LIMIT 20
+                                                    ) comment_report_item
+                                                ),
+                                                '[]'::json
+                                            ) AS comment_report_reasons,
+                                            fcr.last_reported_at,
+                                            (COALESCE(fcr.report_count, 0) > 0) AS is_reported
+                                        FROM forum_comments fc
+                                        LEFT JOIN (
+                                            SELECT
+                                                comment_id,
+                                                COUNT(*)::int AS report_count,
+                                                MAX(created_at) AS last_reported_at
+                                            FROM forum_comment_reports
+                                            GROUP BY comment_id
+                                        ) fcr ON fcr.comment_id = fc.id
+                                        WHERE fc.post_id = p.id
+                                        ORDER BY fc.created_at DESC
+                                        LIMIT 200
+                                    ) c
+                                ),
+                                '[]'::json
+                            ) AS comments_list
+                        FROM forum_posts p
+                        LEFT JOIN (
+                            SELECT
+                                post_id,
+                                COUNT(*)::int AS report_count,
+                                MAX(created_at) AS last_reported_at
+                            FROM forum_post_reports
+                            GROUP BY post_id
+                        ) post_reports ON post_reports.post_id = p.id
+                        LEFT JOIN (
+                            SELECT
+                                fc.post_id,
+                                COUNT(*)::int AS report_count,
+                                MAX(fcr.created_at) AS last_reported_at
+                            FROM forum_comment_reports fcr
+                            INNER JOIN forum_comments fc ON fc.id = fcr.comment_id
+                            GROUP BY fc.post_id
+                        ) comment_reports ON comment_reports.post_id = p.id
+                        ${whereClause}
+                        ORDER BY
+                            (COALESCE(post_reports.report_count, 0) > 0 OR COALESCE(comment_reports.report_count, 0) > 0) DESC,
+                            GREATEST(
+                                COALESCE(post_reports.last_reported_at, 'epoch'::timestamptz),
+                                COALESCE(comment_reports.last_reported_at, 'epoch'::timestamptz)
+                            ) DESC,
+                            p.created_at DESC
+                        LIMIT 200
+                    `,
+                    queryParams
+                );
+
+                return res.json({ data: result.rows.map(mapForumPost) });
+            } catch (error) {
+                console.error('listAdminForumPosts error:', error);
+                return res.status(500).json({ message: 'Không thể tải dữ liệu diễn đàn cho quản trị viên.' });
+            }
+        }
+
+        async function listForumPosts(req, res) {
+            try {
+                const result = await pool.query(
+                    `
+                        SELECT
+                            p.id,
+                            p.title,
+                            p.category,
+                            p.content,
+                            p.author_name,
+                            p.creator_user_id,
+                            p.author_actor_key,
+                            p.is_anonymous,
+                            p.anonymous_alias,
+                            p.comments_count,
+                            p.likes_count,
+                            p.post_images,
+                            p.created_at,
+                            COALESCE(
+                                (
+                                    SELECT json_agg(c ORDER BY c.created_at DESC)
+                                    FROM (
+                                        SELECT
+                                            fc.id,
+                                            fc.post_id,
+                                            fc.parent_comment_id,
+                                            fc.content,
+                                            fc.author_name,
+                                            fc.creator_user_id,
+                                            fc.author_actor_key,
+                                            fc.is_anonymous,
+                                            fc.anonymous_alias,
+                                            fc.comment_images,
+                                            fc.created_at
+                                        FROM forum_comments fc
+                                        WHERE fc.post_id = p.id
+                                        ORDER BY fc.created_at DESC
+                                        LIMIT 100
+                                    ) c
+                                ),
+                                '[]'::json
+                            ) AS comments_list
+                        FROM forum_posts p
+                        ORDER BY p.created_at DESC
+                        LIMIT 100
+                    `
+                );
+
+                return res.json({ data: result.rows.map(mapForumPost) });
+            } catch (error) {
+                console.error('listForumPosts error:', error);
+                return res.status(500).json({ message: 'Không thể tải bài viết diễn đàn.' });
+            }
+        }
+
+        async function createForumPost(req, res) {
+            try {
+                const title = String(req.body?.title || '').trim();
+                const category = String(req.body?.category || '').trim();
+                const content = String(req.body?.content || '').trim();
+                const isAnonymous = Boolean(req.body?.isAnonymous);
+                const anonymousAlias = String(req.body?.anonymousAlias || '').trim();
+                const authorName = await resolveForumAuthorName(req, req.body?.authorName);
+                const actorKey = normalizeActorKey(req.body?.actorKey);
+                const creatorUserId = req.authUser?.id || null;
+                const postImages = sanitizeForumImageList(req.body?.images, 3);
+
+                if (!title || !category || !content) {
+                    return res.status(400).json({ message: 'Vui lòng nhập đầy đủ tiêu đề, chủ đề và nội dung.' });
+                }
+
+                if (content.length > 499) {
+                    return res.status(400).json({ message: 'Nội dung dài tối đa 499 ký tự.' });
+                }
+
+                if (isAnonymous && anonymousAlias.length < 2) {
+                    return res.status(400).json({ message: 'Vui lòng nhập biệt danh tối thiểu 2 ký tự khi đăng ẩn danh.' });
+                }
+
+                if (forumContainsProfanity(`${title} ${category} ${content} ${anonymousAlias}`)) {
+                    return res.status(400).json({ message: 'Nội dung chứa từ ngữ không phù hợp. Vui lòng chỉnh sửa trước khi đăng.' });
+                }
+
+                const insertResult = await pool.query(
+                    `
+                        INSERT INTO forum_posts (
+                            title, category, content, author_name, creator_user_id, author_actor_key, is_anonymous, anonymous_alias, post_images
+                        )
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+                        RETURNING id, title, category, content, author_name, creator_user_id, author_actor_key, is_anonymous, anonymous_alias, comments_count, likes_count, post_images, created_at
+                    `,
+                    [
+                        title,
+                        category,
+                        content,
+                        isAnonymous ? null : authorName,
+                        creatorUserId,
+                        actorKey || null,
+                        isAnonymous,
+                        isAnonymous ? anonymousAlias : null,
+                        JSON.stringify(postImages)
+                    ]
+                );
+
+                return res.status(201).json({ data: mapForumPost(insertResult.rows[0]) });
+            } catch (error) {
+                console.error('createForumPost error:', error);
+                return res.status(500).json({ message: 'Không thể đăng bài lúc này. Vui lòng thử lại.' });
+            }
+        }
+
+        async function createForumComment(req, res) {
+            try {
+                const postId = Number(req.params?.postId);
+                const authUserId = String(req.authUser?.id || '').trim();
+                const rawParentCommentId = req.body?.parentCommentId;
+                const parentCommentId =
+                    rawParentCommentId === null || rawParentCommentId === undefined || rawParentCommentId === ''
+                        ? null
+                        : Number(rawParentCommentId);
+                const content = String(req.body?.content || '').trim();
+                const isAnonymous = Boolean(req.body?.isAnonymous);
+                const anonymousAlias = String(req.body?.anonymousAlias || '').trim();
+                const authorName = await resolveForumAuthorName(req, req.body?.authorName);
+                const actorKey = normalizeActorKey(req.body?.actorKey);
+                const creatorUserId = authUserId || null;
+                const commentImages = sanitizeForumImageList(req.body?.images, 3);
+
+                if (!authUserId) {
+                    return res.status(401).json({ message: 'Bạn cần đăng nhập để bình luận.' });
+                }
+
+                if (!Number.isFinite(postId) || postId <= 0) {
+                    return res.status(400).json({ message: 'Bài viết không hợp lệ.' });
+                }
+
+                if (!content) {
+                    return res.status(400).json({ message: 'Vui lòng nhập nội dung bình luận.' });
+                }
+
+                if (parentCommentId !== null && (!Number.isFinite(parentCommentId) || parentCommentId <= 0)) {
+                    return res.status(400).json({ message: 'Phản hồi bình luận không hợp lệ.' });
+                }
+
+                if (content.length > 499) {
+                    return res.status(400).json({ message: 'Nội dung bình luận tối đa 499 ký tự.' });
+                }
+
+                if (isAnonymous && anonymousAlias.length < 2) {
+                    return res.status(400).json({ message: 'Vui lòng nhập biệt danh tối thiểu 2 ký tự khi bình luận ẩn danh.' });
+                }
+
+                if (forumContainsProfanity(`${content} ${anonymousAlias}`)) {
+                    return res.status(400).json({ message: 'Bình luận chứa từ ngữ không phù hợp. Vui lòng chỉnh sửa trước khi đăng.' });
+                }
+
+                const postCheck = await pool.query('SELECT id FROM forum_posts WHERE id = $1 LIMIT 1', [postId]);
+                if (!postCheck.rows.length) {
+                    return res.status(404).json({ message: 'Không tìm thấy bài viết.' });
+                }
+
+                if (parentCommentId !== null) {
+                    const parentCheck = await pool.query(
+                        'SELECT id FROM forum_comments WHERE id = $1 AND post_id = $2 LIMIT 1',
+                        [parentCommentId, postId]
+                    );
+
+                    if (!parentCheck.rows.length) {
+                        return res.status(404).json({ message: 'Không tìm thấy bình luận gốc để phản hồi.' });
+                    }
+                }
+
+                const insertResult = await pool.query(
+                    `
+                        INSERT INTO forum_comments (
+                            post_id, parent_comment_id, content, author_name, creator_user_id, author_actor_key, is_anonymous, anonymous_alias, comment_images
+                        )
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+                        RETURNING id, post_id, parent_comment_id, content, author_name, creator_user_id, author_actor_key, is_anonymous, anonymous_alias, comment_images, created_at
+                    `,
+                    [
+                        postId,
+                        parentCommentId,
+                        content,
+                        isAnonymous ? null : authorName,
+                        creatorUserId,
+                        actorKey || null,
+                        isAnonymous,
+                        isAnonymous ? anonymousAlias : null,
+                        JSON.stringify(commentImages)
+                    ]
+                );
+
+                await pool.query(
+                    'UPDATE forum_posts SET comments_count = comments_count + 1, updated_at = NOW() WHERE id = $1',
+                    [postId]
+                );
+
+                return res.status(201).json({ data: mapForumComment(insertResult.rows[0]) });
+            } catch (error) {
+                console.error('createForumComment error:', error);
+                return res.status(500).json({ message: 'Không thể đăng bình luận lúc này. Vui lòng thử lại.' });
+            }
+        }
+
+        async function toggleForumPostLike(req, res) {
+            try {
+                const postId = Number(req.params?.postId);
+                const actorKey = normalizeActorKey(req.body?.actorKey);
+
+                if (!Number.isFinite(postId) || postId <= 0) {
+                    return res.status(400).json({ message: 'Bài viết không hợp lệ.' });
+                }
+
+                if (!actorKey) {
+                    return res.status(400).json({ message: 'Thiếu thông tin người dùng để thực hiện thao tác thích.' });
+                }
+
+                const postCheck = await pool.query('SELECT id FROM forum_posts WHERE id = $1 LIMIT 1', [postId]);
+                if (!postCheck.rows.length) {
+                    return res.status(404).json({ message: 'Không tìm thấy bài viết.' });
+                }
+
+                const existing = await pool.query(
+                    'SELECT id FROM forum_post_likes WHERE post_id = $1 AND actor_key = $2 LIMIT 1',
+                    [postId, actorKey]
+                );
+
+                let liked = false;
+                if (existing.rows.length) {
+                    await pool.query('DELETE FROM forum_post_likes WHERE post_id = $1 AND actor_key = $2', [postId, actorKey]);
+                    await pool.query(
+                        'UPDATE forum_posts SET likes_count = GREATEST(likes_count - 1, 0), updated_at = NOW() WHERE id = $1',
+                        [postId]
+                    );
+                } else {
+                    await pool.query(
+                        'INSERT INTO forum_post_likes (post_id, actor_key) VALUES ($1, $2) ON CONFLICT (post_id, actor_key) DO NOTHING',
+                        [postId, actorKey]
+                    );
+                    await pool.query(
+                        'UPDATE forum_posts SET likes_count = likes_count + 1, updated_at = NOW() WHERE id = $1',
+                        [postId]
+                    );
+                    liked = true;
+                }
+
+                const likesResult = await pool.query('SELECT likes_count FROM forum_posts WHERE id = $1', [postId]);
+                const likesCount = Number(likesResult.rows?.[0]?.likes_count || 0);
+
+                return res.json({ data: { postId, liked, likesCount } });
+            } catch (error) {
+                console.error('toggleForumPostLike error:', error);
+                return res.status(500).json({ message: 'Không thể cập nhật lượt thích lúc này. Vui lòng thử lại.' });
+            }
+        }
+
+        async function reportForumPost(req, res) {
+            try {
+                const postId = Number(req.params?.postId);
+                const actorKey = normalizeActorKey(req.body?.actorKey);
+                const reason = String(req.body?.reason || '').trim();
+
+                if (!Number.isFinite(postId) || postId <= 0) {
+                    return res.status(400).json({ message: 'Bài viết không hợp lệ.' });
+                }
+
+                if (!actorKey) {
+                    return res.status(400).json({ message: 'Thiếu thông tin người dùng để báo cáo.' });
+                }
+
+                if (reason.length < 3) {
+                    return res.status(400).json({ message: 'Lý do báo cáo cần ít nhất 3 ký tự.' });
+                }
+
+                if (forumContainsProfanity(reason)) {
+                    return res.status(400).json({ message: 'Lý do báo cáo chứa từ ngữ không phù hợp.' });
+                }
+
+                const postCheck = await pool.query('SELECT id FROM forum_posts WHERE id = $1 LIMIT 1', [postId]);
+                if (!postCheck.rows.length) {
+                    return res.status(404).json({ message: 'Không tìm thấy bài viết.' });
+                }
+
+                await pool.query(
+                    `
+                        INSERT INTO forum_post_reports (post_id, actor_key, reason)
+                        VALUES ($1, $2, $3)
+                    `,
+                    [postId, actorKey, reason]
+                );
+
+                return res.status(201).json({ data: { postId, actorKey } });
+            } catch (error) {
+                console.error('reportForumPost error:', error);
+                return res.status(500).json({ message: 'Không thể gửi báo cáo lúc này. Vui lòng thử lại.' });
+            }
+        }
+
+        async function reportForumComment(req, res) {
+            try {
+                const postId = Number(req.params?.postId);
+                const commentId = Number(req.params?.commentId);
+                const actorKey = normalizeActorKey(req.body?.actorKey);
+                const reason = String(req.body?.reason || '').trim();
+
+                if (!Number.isFinite(postId) || postId <= 0) {
+                    return res.status(400).json({ message: 'Bài viết không hợp lệ.' });
+                }
+
+                if (!Number.isFinite(commentId) || commentId <= 0) {
+                    return res.status(400).json({ message: 'Bình luận không hợp lệ.' });
+                }
+
+                if (!actorKey) {
+                    return res.status(400).json({ message: 'Thiếu thông tin người dùng để báo cáo.' });
+                }
+
+                if (reason.length < 3) {
+                    return res.status(400).json({ message: 'Lý do báo cáo cần ít nhất 3 ký tự.' });
+                }
+
+                if (forumContainsProfanity(reason)) {
+                    return res.status(400).json({ message: 'Lý do báo cáo chứa từ ngữ không phù hợp.' });
+                }
+
+                const commentCheck = await pool.query(
+                    'SELECT id FROM forum_comments WHERE id = $1 AND post_id = $2 LIMIT 1',
+                    [commentId, postId]
+                );
+
+                if (!commentCheck.rows.length) {
+                    return res.status(404).json({ message: 'Không tìm thấy bình luận.' });
+                }
+
+                await pool.query(
+                    `
+                        INSERT INTO forum_comment_reports (comment_id, actor_key, reason)
+                        VALUES ($1, $2, $3)
+                    `,
+                    [commentId, actorKey, reason]
+                );
+
+                return res.status(201).json({ data: { postId, commentId, actorKey } });
+            } catch (error) {
+                console.error('reportForumComment error:', error);
+                return res.status(500).json({ message: 'Không thể gửi báo cáo bình luận lúc này. Vui lòng thử lại.' });
+            }
+        }
+
+        async function deleteForumPost(req, res) {
+            try {
+                const postId = Number(req.params?.postId);
+                const actorKey = normalizeActorKey(req.body?.actorKey);
+                const requestAuthorName = String(req.body?.authorName || '').trim();
+                const authUserId = String(req.authUser?.id || '').trim();
+
+                if (!Number.isFinite(postId) || postId <= 0) {
+                    return res.status(400).json({ message: 'Bài viết không hợp lệ.' });
+                }
+
+                const postResult = await pool.query(
+                    `
+                        SELECT id, author_name, creator_user_id, author_actor_key, is_anonymous
+                        FROM forum_posts
+                        WHERE id = $1
+                        LIMIT 1
+                    `,
+                    [postId]
+                );
+
+                if (!postResult.rows.length) {
+                    return res.status(404).json({ message: 'Không tìm thấy bài viết.' });
+                }
+
+                const post = postResult.rows[0];
+                const postCreatorUserId = post.creator_user_id ? String(post.creator_user_id) : '';
+                const postActorKey = post.author_actor_key ? String(post.author_actor_key) : '';
+                const postAuthorName = String(post.author_name || '').trim();
+                const isAnonymous = Boolean(post.is_anonymous);
+
+                const allowByUserId = Boolean(authUserId && postCreatorUserId && authUserId === postCreatorUserId);
+                const allowByActorKey = Boolean(actorKey && postActorKey && actorKey === postActorKey);
+                const allowLegacyByAuthorName = Boolean(
+                    !isAnonymous &&
+                    requestAuthorName &&
+                    postAuthorName &&
+                    requestAuthorName === postAuthorName
+                );
+
+                if (!allowByUserId && !allowByActorKey && !allowLegacyByAuthorName) {
+                    return res.status(403).json({ message: 'Bạn chỉ có thể xóa bài viết do chính bạn đăng.' });
+                }
+
+                await pool.query('DELETE FROM forum_posts WHERE id = $1', [postId]);
+                return res.json({ data: { postId } });
+            } catch (error) {
+                console.error('deleteForumPost error:', error);
+                return res.status(500).json({ message: 'Không thể xóa bài viết lúc này. Vui lòng thử lại.' });
+            }
+        }
+
+        async function deleteForumComment(req, res) {
+            const postId = Number(req.params?.postId);
+            const commentId = Number(req.params?.commentId);
+            const actorKey = normalizeActorKey(req.body?.actorKey);
+            const requestAuthorName = String(req.body?.authorName || '').trim();
+            const authUserId = String(req.authUser?.id || '').trim();
+
+            if (!Number.isFinite(postId) || postId <= 0) {
+                return res.status(400).json({ message: 'Bài viết không hợp lệ.' });
+            }
+
+            if (!Number.isFinite(commentId) || commentId <= 0) {
+                return res.status(400).json({ message: 'Bình luận không hợp lệ.' });
+            }
+
+            let client;
+
+            try {
+                const identityResult = await pool.query(
+                    `
+                        SELECT
+                            p.id AS post_id,
+                            p.author_name AS post_author_name,
+                            p.creator_user_id AS post_creator_user_id,
+                            p.author_actor_key AS post_actor_key,
+                            p.is_anonymous AS post_is_anonymous,
+                            c.id AS comment_id,
+                            c.author_name AS comment_author_name,
+                            c.creator_user_id AS comment_creator_user_id,
+                            c.author_actor_key AS comment_actor_key,
+                            c.is_anonymous AS comment_is_anonymous
+                        FROM forum_posts p
+                        INNER JOIN forum_comments c ON c.post_id = p.id
+                        WHERE p.id = $1 AND c.id = $2
+                        LIMIT 1
+                    `,
+                    [postId, commentId]
+                );
+
+                if (!identityResult.rows.length) {
+                    return res.status(404).json({ message: 'Không tìm thấy bình luận cần xóa.' });
+                }
+
+                const identity = identityResult.rows[0];
+                const postCreatorUserId = identity.post_creator_user_id ? String(identity.post_creator_user_id) : '';
+                const postActorKey = identity.post_actor_key ? String(identity.post_actor_key) : '';
+                const postAuthorName = String(identity.post_author_name || '').trim();
+                const postIsAnonymous = Boolean(identity.post_is_anonymous);
+
+                const commentCreatorUserId = identity.comment_creator_user_id ? String(identity.comment_creator_user_id) : '';
+                const commentActorKey = identity.comment_actor_key ? String(identity.comment_actor_key) : '';
+                const commentAuthorName = String(identity.comment_author_name || '').trim();
+                const commentIsAnonymous = Boolean(identity.comment_is_anonymous);
+
+                const allowByPostOwner = Boolean(
+                    (authUserId && postCreatorUserId && authUserId === postCreatorUserId)
+                    || (actorKey && postActorKey && actorKey === postActorKey)
+                    || (!postIsAnonymous && requestAuthorName && postAuthorName && requestAuthorName === postAuthorName)
+                );
+
+                const allowByCommentOwner = Boolean(
+                    (authUserId && commentCreatorUserId && authUserId === commentCreatorUserId)
+                    || (actorKey && commentActorKey && actorKey === commentActorKey)
+                    || (!commentIsAnonymous && requestAuthorName && commentAuthorName && requestAuthorName === commentAuthorName)
+                );
+
+                if (!allowByPostOwner && !allowByCommentOwner) {
+                    return res.status(403).json({ message: 'Bạn chỉ có thể xóa bình luận của bạn hoặc bình luận trong bài viết của bạn.' });
+                }
+
+                client = await pool.connect();
+                await client.query('BEGIN');
+
+                const treeResult = await client.query(
+                    `
+                        WITH RECURSIVE comment_tree AS (
+                            SELECT id
+                            FROM forum_comments
+                            WHERE id = $1 AND post_id = $2
+                            UNION ALL
+                            SELECT child.id
+                            FROM forum_comments child
+                            INNER JOIN comment_tree parent_tree ON child.parent_comment_id = parent_tree.id
+                            WHERE child.post_id = $2
+                        )
+                        SELECT id
+                        FROM comment_tree
+                    `,
+                    [commentId, postId]
+                );
+
+                if (!treeResult.rows.length) {
+                    await client.query('ROLLBACK');
+                    return res.status(404).json({ message: 'Không tìm thấy bình luận cần xóa.' });
+                }
+
+                const deletedCount = treeResult.rows.length;
+
+                await client.query(
+                    'DELETE FROM forum_comments WHERE id = $1 AND post_id = $2',
+                    [commentId, postId]
+                );
+
+                await client.query(
+                    'UPDATE forum_posts SET comments_count = GREATEST(comments_count - $2, 0), updated_at = NOW() WHERE id = $1',
+                    [postId, deletedCount]
+                );
+
+                await client.query('COMMIT');
+                return res.json({ data: { postId, commentId, deletedCount } });
+            } catch (error) {
+                if (client) {
+                    try {
+                        await client.query('ROLLBACK');
+                    } catch (_rollbackError) {
+                        // ignore rollback error
+                    }
+                }
+
+                console.error('deleteForumComment error:', error);
+                return res.status(500).json({ message: 'Không thể xóa bình luận lúc này. Vui lòng thử lại.' });
+            } finally {
+                if (client) {
+                    client.release();
+                }
+            }
+        }
+
+        async function deleteAdminForumPost(req, res) {
+            try {
+                const postId = Number(req.params?.postId);
+
+                if (!Number.isFinite(postId) || postId <= 0) {
+                    return res.status(400).json({ message: 'Bài viết không hợp lệ.' });
+                }
+
+                const postCheck = await pool.query('SELECT id FROM forum_posts WHERE id = $1 LIMIT 1', [postId]);
+                if (!postCheck.rows.length) {
+                    return res.status(404).json({ message: 'Không tìm thấy bài viết.' });
+                }
+
+                await pool.query('DELETE FROM forum_posts WHERE id = $1', [postId]);
+                return res.json({ data: { postId } });
+            } catch (error) {
+                console.error('deleteAdminForumPost error:', error);
+                return res.status(500).json({ message: 'Không thể xóa bài viết lúc này. Vui lòng thử lại.' });
+            }
+        }
+
+        async function deleteAdminForumComment(req, res) {
+            const postId = Number(req.params?.postId);
+            const commentId = Number(req.params?.commentId);
+            let client;
+
+            if (!Number.isFinite(postId) || postId <= 0) {
+                return res.status(400).json({ message: 'Bài viết không hợp lệ.' });
+            }
+
+            if (!Number.isFinite(commentId) || commentId <= 0) {
+                return res.status(400).json({ message: 'Bình luận không hợp lệ.' });
+            }
+
+            try {
+                const identityResult = await pool.query(
+                    `
+                        SELECT c.id
+                        FROM forum_comments c
+                        WHERE c.post_id = $1 AND c.id = $2
+                        LIMIT 1
+                    `,
+                    [postId, commentId]
+                );
+
+                if (!identityResult.rows.length) {
+                    return res.status(404).json({ message: 'Không tìm thấy bình luận cần xóa.' });
+                }
+
+                client = await pool.connect();
+                await client.query('BEGIN');
+
+                const treeResult = await client.query(
+                    `
+                        WITH RECURSIVE comment_tree AS (
+                            SELECT id
+                            FROM forum_comments
+                            WHERE id = $1 AND post_id = $2
+                            UNION ALL
+                            SELECT child.id
+                            FROM forum_comments child
+                            INNER JOIN comment_tree parent_tree ON child.parent_comment_id = parent_tree.id
+                            WHERE child.post_id = $2
+                        )
+                        SELECT id
+                        FROM comment_tree
+                    `,
+                    [commentId, postId]
+                );
+
+                if (!treeResult.rows.length) {
+                    await client.query('ROLLBACK');
+                    return res.status(404).json({ message: 'Không tìm thấy bình luận cần xóa.' });
+                }
+
+                const deletedCount = treeResult.rows.length;
+
+                await client.query(
+                    'DELETE FROM forum_comments WHERE id = $1 AND post_id = $2',
+                    [commentId, postId]
+                );
+
+                await client.query(
+                    'UPDATE forum_posts SET comments_count = GREATEST(comments_count - $2, 0), updated_at = NOW() WHERE id = $1',
+                    [postId, deletedCount]
+                );
+
+                await client.query('COMMIT');
+                return res.json({ data: { postId, commentId, deletedCount } });
+            } catch (error) {
+                if (client) {
+                    try {
+                        await client.query('ROLLBACK');
+                    } catch (_rollbackError) {
+                        // ignore rollback error
+                    }
+                }
+
+                console.error('deleteAdminForumComment error:', error);
+                return res.status(500).json({ message: 'Không thể xóa bình luận lúc này. Vui lòng thử lại.' });
+            } finally {
+                if (client) {
+                    client.release();
+                }
+            }
+        }
+
+        async function dismissAdminForumPostReports(req, res) {
+            try {
+                const postId = Number(req.params?.postId);
+
+                if (!Number.isFinite(postId) || postId <= 0) {
+                    return res.status(400).json({ message: 'Bài viết không hợp lệ.' });
+                }
+
+                const postCheck = await pool.query('SELECT id FROM forum_posts WHERE id = $1 LIMIT 1', [postId]);
+                if (!postCheck.rows.length) {
+                    return res.status(404).json({ message: 'Không tìm thấy bài viết.' });
+                }
+
+                const deletedResult = await pool.query('DELETE FROM forum_post_reports WHERE post_id = $1', [postId]);
+                return res.json({ data: { postId, dismissedCount: Number(deletedResult.rowCount || 0) } });
+            } catch (error) {
+                console.error('dismissAdminForumPostReports error:', error);
+                return res.status(500).json({ message: 'Không thể hủy báo cáo bài viết lúc này. Vui lòng thử lại.' });
+            }
+        }
+
+        async function dismissAdminForumCommentReports(req, res) {
+            try {
+                const postId = Number(req.params?.postId);
+                const commentId = Number(req.params?.commentId);
+
+                if (!Number.isFinite(postId) || postId <= 0) {
+                    return res.status(400).json({ message: 'Bài viết không hợp lệ.' });
+                }
+
+                if (!Number.isFinite(commentId) || commentId <= 0) {
+                    return res.status(400).json({ message: 'Bình luận không hợp lệ.' });
+                }
+
+                const commentCheck = await pool.query(
+                    'SELECT id FROM forum_comments WHERE id = $1 AND post_id = $2 LIMIT 1',
+                    [commentId, postId]
+                );
+
+                if (!commentCheck.rows.length) {
+                    return res.status(404).json({ message: 'Không tìm thấy bình luận.' });
+                }
+
+                const deletedResult = await pool.query('DELETE FROM forum_comment_reports WHERE comment_id = $1', [commentId]);
+                return res.json({ data: { postId, commentId, dismissedCount: Number(deletedResult.rowCount || 0) } });
+            } catch (error) {
+                console.error('dismissAdminForumCommentReports error:', error);
+                return res.status(500).json({ message: 'Không thể hủy báo cáo bình luận lúc này. Vui lòng thử lại.' });
+            }
+        }
+
+        registerVersionedRoute('get', '/forum/posts', listForumPosts);
+        registerVersionedRoute('post', '/forum/posts', authenticateOptionalLenient, createForumPost);
+        registerVersionedRoute('post', '/forum/posts/:postId/comments', authenticateOptionalLenient, createForumComment);
+        registerVersionedRoute('delete', '/forum/posts/:postId/comments/:commentId', authenticateOptionalLenient, deleteForumComment);
+        registerVersionedRoute('post', '/forum/posts/:postId/likes/toggle', toggleForumPostLike);
+        registerVersionedRoute('post', '/forum/posts/:postId/report', reportForumPost);
+        registerVersionedRoute('post', '/forum/posts/:postId/comments/:commentId/report', reportForumComment);
+        registerVersionedRoute('delete', '/forum/posts/:postId', authenticateOptionalLenient, deleteForumPost);
+
         registerVersionedRoute('get', '/wards', listPublicWards);
         registerVersionedRoute('get', '/landing/stats', getLandingStats);
         registerVersionedRoute('get', '/cities/stats', listCitiesWithStats);
@@ -12787,6 +14261,8 @@ async function generateWardIdFromName(name) {
         registerVersionedRoute('delete', '/venues/:venueId/reviews/:reviewId/replies/:replyId', authenticateOptional, requireAuth, deleteVenueReviewReply);
         registerVersionedRoute('delete', '/venues/:venueId/reviews/:reviewId', authenticateOptional, requireAuth, deleteVenueReview);
         registerVersionedRoute('get', '/venues/:venueId/edit-draft', authenticateRequest, checkUserStatus, getMerchantVenueEditDraft);
+        registerVersionedRoute('patch', '/venues/:venueId/simple-update', authenticateRequest, checkUserStatus, updateMerchantVenueSimpleInfo);
+        registerVersionedRoute('patch', '/venues/:venueId/pause-toggle', authenticateRequest, checkUserStatus, toggleMerchantVenuePauseStatus);
         registerVersionedRoute('post', '/venues/:venueId/update-request', authenticateRequest, checkUserStatus, submitMerchantVenueUpdateRequest);
         registerVersionedRoute('delete', '/venues/:venueId', authenticateRequest, checkUserStatus, deleteMerchantVenue);
         registerVersionedRoute('post', '/venues', authenticateOptionalLenient, createVenueSubmission);
@@ -12804,6 +14280,11 @@ async function generateWardIdFromName(name) {
         registerVersionedRoute('patch', '/admin/merchant-services/:serviceId', authenticateRequest, requireAdminRole, updateAdminMerchantService);
         registerVersionedRoute('delete', '/admin/merchant-services/:serviceId', authenticateRequest, requireAdminRole, deleteAdminMerchantService);
         registerVersionedRoute('get', '/admin/venues', authenticateRequest, requireAdminRole, listAdminVenues);
+        registerVersionedRoute('get', '/admin/forum/posts', authenticateRequest, requireAdminRole, listAdminForumPosts);
+        registerVersionedRoute('delete', '/admin/forum/posts/:postId', authenticateRequest, requireAdminRole, deleteAdminForumPost);
+        registerVersionedRoute('delete', '/admin/forum/posts/:postId/comments/:commentId', authenticateRequest, requireAdminRole, deleteAdminForumComment);
+        registerVersionedRoute('delete', '/admin/forum/posts/:postId/reports', authenticateRequest, requireAdminRole, dismissAdminForumPostReports);
+        registerVersionedRoute('delete', '/admin/forum/posts/:postId/comments/:commentId/reports', authenticateRequest, requireAdminRole, dismissAdminForumCommentReports);
         registerVersionedRoute('get', '/admin/venues/:venueId/reviews', authenticateRequest, requireAdminRole, listAdminVenueReviews);
         registerVersionedRoute('get', '/admin/venues/update-requests', authenticateRequest, requireAdminRole, listAdminVenueUpdateRequests);
         registerVersionedRoute('patch', '/admin/venues/update-requests/:requestId/moderation', authenticateRequest, requireAdminRole, moderateVenueUpdateRequest);
@@ -13780,6 +15261,7 @@ async function generateWardIdFromName(name) {
                     : requiredRefineDimensionsFromConstraints;
                 const requiresConcurrentDimensionMatch = requiredRefineDimensions.length >= 2;
                 const semanticScoreThreshold = requiresConcurrentDimensionMatch ? 0.62 : 0.48;
+                const hasDistanceConstraint = Number.isFinite(refineConstraints.maxDistanceKm);
 
                 if (!semanticRefine.understood) {
                     refinedVenues = [...heuristicRefinedVenues];
@@ -13793,6 +15275,10 @@ async function generateWardIdFromName(name) {
 
                             const semanticScore = Number(semanticMatch.score || 0);
                             if (semanticScore < semanticScoreThreshold) {
+                                return false;
+                            }
+
+                            if (hasDistanceConstraint && !venue.passesRefine) {
                                 return false;
                             }
 
@@ -13847,10 +15333,10 @@ async function generateWardIdFromName(name) {
 
                 const fallbackConstraintSummary = buildRefineConstraintsSummary(refineConstraints);
                 const hasConstraintSignals = hasStructuredRefineSignals(refineConstraints);
-                const semanticSummary = String(semanticRefine.summary || '').trim();
-                const refineSummary = semanticSummary
-                    || (semanticRefine.understood
-                        ? (hasConstraintSignals ? fallbackConstraintSummary : 'Semantic intent understood. Strict sentence-level filtering applied.')
+                const refineSummary = hasConstraintSignals
+                    ? fallbackConstraintSummary
+                    : (semanticRefine.understood
+                        ? 'Semantic intent understood. Applied sentence-level matching without hard numeric constraints.'
                         : (heuristicRefinedVenues.length
                             ? 'Semantic parser uncertain. Returned broader heuristic refine results from approved venues.'
                             : 'Unable to confidently understand this refine sentence. Please rewrite with clearer details.'));
@@ -14302,6 +15788,26 @@ async function generateWardIdFromName(name) {
             return String(value || '').trim().toLowerCase();
         }
 
+        function normalizeVisionLanguage(value) {
+            const normalized = normalizeVisionText(value);
+            return normalized === 'vi' ? 'vi' : 'en';
+        }
+
+        const VISION_TAXONOMY_PATH = path.join(__dirname, 'data', 'vision-taxonomy.json');
+        const VISION_TAXONOMY_CACHE_TTL_MS = 60_000;
+        const VISION_TAXONOMY_MIN_CONFIDENCE = Math.max(
+            0,
+            Math.min(1, Number(process.env.VISION_TAXONOMY_MIN_CONFIDENCE || 0.55))
+        );
+        const VISION_TAXONOMY_LOG_ENABLED = String(process.env.VISION_TAXONOMY_LOG_ENABLED || 'true').trim().toLowerCase() !== 'false';
+        const VISION_TAXONOMY_LOG_PATH = String(process.env.VISION_TAXONOMY_LOG_PATH || '').trim()
+            || path.join(__dirname, 'logs', 'vision-taxonomy-eval.log');
+        const visionTaxonomyState = {
+            loadedAt: 0,
+            taxonomy: null,
+            aliasIndex: new Map()
+        };
+
         function safeParseJsonObject(rawValue) {
             try {
                 const parsed = JSON.parse(rawValue);
@@ -14368,6 +15874,361 @@ async function generateWardIdFromName(name) {
                 .normalize('NFD')
                 .replace(/[\u0300-\u036f]/g, '')
                 .replace(/đ/g, 'd');
+        }
+
+        function loadVisionTaxonomyFromDisk() {
+            try {
+                const raw = fs.readFileSync(VISION_TAXONOMY_PATH, 'utf8');
+                const parsed = safeParseJsonObject(raw);
+                const labels = parsed?.labels && typeof parsed.labels === 'object' ? parsed.labels : {};
+
+                return {
+                    version: String(parsed?.version || 'unknown'),
+                    labels
+                };
+            } catch (error) {
+                console.error('Vision taxonomy load error:', error?.message || error);
+                return {
+                    version: 'missing',
+                    labels: {}
+                };
+            }
+        }
+
+        function buildVisionTaxonomyAliasIndex(taxonomy) {
+            const aliasIndex = new Map();
+            const labels = taxonomy?.labels && typeof taxonomy.labels === 'object' ? taxonomy.labels : {};
+
+            Object.entries(labels).forEach(([labelId, meta]) => {
+                const kind = normalizeVisionText(meta?.kind);
+                const aliases = Array.isArray(meta?.aliases) ? meta.aliases : [];
+                const mustHaveCues = Array.isArray(meta?.must_have_cues) ? meta.must_have_cues : [];
+
+                const normalizedAliases = [
+                    labelId,
+                    ...aliases
+                ]
+                    .map((value) => normalizeVisionNoAccent(value))
+                    .filter(Boolean);
+
+                normalizedAliases.forEach((alias) => {
+                    if (!aliasIndex.has(alias)) {
+                        aliasIndex.set(alias, []);
+                    }
+
+                    aliasIndex.get(alias).push({
+                        labelId,
+                        kind: kind || 'unknown',
+                        aliases,
+                        mustHaveCues,
+                        allowUnknown: meta?.allow_unknown !== false
+                    });
+                });
+            });
+
+            return aliasIndex;
+        }
+
+        function getVisionTaxonomy() {
+            const now = Date.now();
+            if (
+                visionTaxonomyState.taxonomy
+                && now - visionTaxonomyState.loadedAt < VISION_TAXONOMY_CACHE_TTL_MS
+            ) {
+                return visionTaxonomyState;
+            }
+
+            const taxonomy = loadVisionTaxonomyFromDisk();
+            visionTaxonomyState.taxonomy = taxonomy;
+            visionTaxonomyState.aliasIndex = buildVisionTaxonomyAliasIndex(taxonomy);
+            visionTaxonomyState.loadedAt = now;
+
+            return visionTaxonomyState;
+        }
+
+        function clampVisionConfidence(value) {
+            const n = Number(value);
+            if (!Number.isFinite(n)) {
+                return 0;
+            }
+
+            return Math.max(0, Math.min(1, n));
+        }
+
+        function writeVisionTaxonomyEvalLog(payload = {}) {
+            if (!VISION_TAXONOMY_LOG_ENABLED) {
+                return;
+            }
+
+            try {
+                fs.mkdirSync(path.dirname(VISION_TAXONOMY_LOG_PATH), { recursive: true });
+                const line = JSON.stringify({
+                    timestamp: new Date().toISOString(),
+                    ...payload
+                });
+
+                fs.appendFile(VISION_TAXONOMY_LOG_PATH, `${line}\n`, (error) => {
+                    if (error) {
+                        console.error('Vision taxonomy log append error:', error?.message || error);
+                    }
+                });
+            } catch (error) {
+                console.error('Vision taxonomy log write error:', error?.message || error);
+            }
+        }
+
+        function scoreTaxonomyCandidateFromEvidence(candidate, evidenceText) {
+            if (!candidate || !evidenceText) {
+                return 0;
+            }
+
+            const aliasValues = [candidate.labelId, ...(candidate.aliases || [])]
+                .map((value) => normalizeVisionNoAccent(value))
+                .filter(Boolean);
+
+            const cueValues = Array.isArray(candidate.mustHaveCues)
+                ? candidate.mustHaveCues.map((value) => normalizeVisionNoAccent(value)).filter(Boolean)
+                : [];
+
+            let score = 0;
+
+            aliasValues.forEach((alias) => {
+                if (evidenceText === alias) {
+                    score += 8;
+                } else if (evidenceText.includes(alias)) {
+                    score += alias.includes(' ') ? 5 : 2;
+                }
+            });
+
+            cueValues.forEach((cue) => {
+                if (evidenceText.includes(cue)) {
+                    score += cue.includes(' ') ? 4 : 2;
+                }
+            });
+
+            return score;
+        }
+
+        function resolveTaxonomyDisplayLabel(meta = {}, labelId = '', language = 'en') {
+            const normalizedLanguage = normalizeVisionLanguage(language);
+            const displayNames = meta?.display_names && typeof meta.display_names === 'object'
+                ? meta.display_names
+                : {};
+
+            const preferredDisplay = String(displayNames[normalizedLanguage] || '').trim();
+            if (preferredDisplay) {
+                return preferredDisplay;
+            }
+
+            const aliases = Array.isArray(meta?.aliases) ? meta.aliases : [];
+            const accentRegex = /[^\x00-\x7F]/;
+            const asciiAlias = aliases.find((alias) => {
+                const text = String(alias || '').trim();
+                return text && !accentRegex.test(text);
+            });
+            const accentedAlias = aliases.find((alias) => {
+                const text = String(alias || '').trim();
+                return text && accentRegex.test(text);
+            });
+
+            if (normalizedLanguage === 'vi' && accentedAlias) {
+                return accentedAlias;
+            }
+
+            if (normalizedLanguage === 'en' && asciiAlias) {
+                return asciiAlias;
+            }
+
+            if (aliases.length) {
+                return String(aliases[0] || '').trim();
+            }
+
+            return String(labelId || '').replace(/_/g, ' ').trim();
+        }
+
+        function resolveCanonicalRuleDisplay(rule, language = 'en') {
+            if (!rule || typeof rule !== 'object') {
+                return '';
+            }
+
+            const normalizedLanguage = normalizeVisionLanguage(language);
+            const variants = Array.isArray(rule.variants) ? rule.variants : [];
+            if (!variants.length) {
+                return String(rule.canonical || '').trim();
+            }
+
+            const accentRegex = /[^\x00-\x7F]/;
+            if (normalizedLanguage === 'vi') {
+                const viVariant = variants.find((item) => {
+                    const text = String(item || '').trim();
+                    return text && accentRegex.test(text);
+                });
+                if (viVariant) {
+                    return String(viVariant).trim();
+                }
+            }
+
+            if (normalizedLanguage === 'en') {
+                const enVariant = variants.find((item) => {
+                    const text = String(item || '').trim();
+                    return text && !accentRegex.test(text);
+                });
+                if (enVariant) {
+                    return String(enVariant).trim();
+                }
+            }
+
+            return String(rule.canonical || variants[0] || '').trim();
+        }
+
+        function normalizeVisionPayloadWithTaxonomy(visionPayload = {}, target = 'any', language = 'en') {
+            const { taxonomy, aliasIndex } = getVisionTaxonomy();
+            const labels = taxonomy?.labels && typeof taxonomy.labels === 'object' ? taxonomy.labels : {};
+
+            if (!Object.keys(labels).length || !aliasIndex?.size) {
+                return {
+                    applied: false,
+                    reason: 'taxonomy_unavailable'
+                };
+            }
+
+            const normalizedTarget = normalizeVisionText(target);
+            const isStrictTargetMode = normalizedTarget === 'food' || normalizedTarget === 'place';
+            const evidenceValues = uniqueVisionValues([
+                visionPayload?.label,
+                ...(visionPayload?.alternativeLabels || []),
+                ...(visionPayload?.keywords || []),
+                ...(visionPayload?.visualClues || [])
+            ]);
+
+            const normalizedEvidence = evidenceValues
+                .map((value) => normalizeVisionNoAccent(value))
+                .filter(Boolean);
+
+            if (!normalizedEvidence.length) {
+                return {
+                    applied: true,
+                    matched: false,
+                    label: 'unknown',
+                    kind: 'unknown',
+                    confidence: 0
+                };
+            }
+
+            const scoreByLabel = new Map();
+
+            normalizedEvidence.forEach((evidenceText) => {
+                aliasIndex.forEach((candidateList, aliasKey) => {
+                    if (evidenceText !== aliasKey && !evidenceText.includes(aliasKey) && !aliasKey.includes(evidenceText)) {
+                        return;
+                    }
+
+                    candidateList.forEach((candidate) => {
+                        if (isStrictTargetMode && candidate?.kind !== normalizedTarget) {
+                            return;
+                        }
+
+                        const labelId = candidate.labelId;
+                        const current = scoreByLabel.get(labelId) || 0;
+                        const delta = scoreTaxonomyCandidateFromEvidence(candidate, evidenceText);
+                        scoreByLabel.set(labelId, current + delta);
+                    });
+                });
+            });
+
+            if (!scoreByLabel.size) {
+                return {
+                    applied: true,
+                    matched: false,
+                    label: 'unknown',
+                    kind: 'unknown',
+                    confidence: 0
+                };
+            }
+
+            const ranked = [...scoreByLabel.entries()]
+                .map(([labelId, score]) => {
+                    const meta = labels[labelId] || {};
+                    const kind = normalizeVisionText(meta.kind || 'unknown');
+                    const mustHaveCues = Array.isArray(meta.must_have_cues) ? meta.must_have_cues : [];
+                    const cueMatchedCount = mustHaveCues
+                        .map((cue) => normalizeVisionNoAccent(cue))
+                        .filter((cue) => cue && normalizedEvidence.some((evidence) => evidence.includes(cue))).length;
+
+                    const hasMustHaveEvidence = mustHaveCues.length ? cueMatchedCount > 0 : score >= 6;
+                    const preferredAlias = resolveTaxonomyDisplayLabel(meta, labelId, language);
+
+                    return {
+                        labelId,
+                        score,
+                        kind: ['food', 'place'].includes(kind) ? kind : 'unknown',
+                        hasMustHaveEvidence,
+                        cueMatchedCount,
+                        preferredAlias,
+                        aliases: Array.isArray(meta.aliases) ? meta.aliases.filter(Boolean) : []
+                    };
+                })
+                .filter((item) => {
+                    if (!isStrictTargetMode) {
+                        return true;
+                    }
+
+                    return item.kind === normalizedTarget;
+                })
+                .sort((a, b) => b.score - a.score);
+
+            if (!ranked.length) {
+                return {
+                    applied: true,
+                    matched: false,
+                    label: 'unknown',
+                    kind: 'unknown',
+                    confidence: 0,
+                    topCandidates: []
+                };
+            }
+
+            const best = ranked[0];
+            const second = ranked[1];
+            const modelConfidence = clampVisionConfidence(visionPayload?.confidence);
+            const evidenceConfidence = Math.max(0, Math.min(1, best.score / 20));
+            let blendedConfidence = (evidenceConfidence * 0.65) + (modelConfidence * 0.35);
+
+            if (second && best.score <= second.score + 1) {
+                blendedConfidence -= 0.1;
+            }
+
+            blendedConfidence = clampVisionConfidence(blendedConfidence);
+
+            if (!best.hasMustHaveEvidence || blendedConfidence < VISION_TAXONOMY_MIN_CONFIDENCE) {
+                return {
+                    applied: true,
+                    matched: false,
+                    label: 'unknown',
+                    kind: 'unknown',
+                    confidence: blendedConfidence,
+                    topCandidates: ranked.slice(0, 3).map((item) => ({
+                        labelId: item.labelId,
+                        kind: item.kind,
+                        score: item.score
+                    }))
+                };
+            }
+
+            return {
+                applied: true,
+                matched: true,
+                labelId: best.labelId,
+                label: best.preferredAlias,
+                kind: best.kind,
+                confidence: blendedConfidence,
+                aliases: best.aliases,
+                topCandidates: ranked.slice(0, 3).map((item) => ({
+                    labelId: item.labelId,
+                    kind: item.kind,
+                    score: item.score
+                }))
+            };
         }
 
         function isGenericVisionLabel(value) {
@@ -14632,6 +16493,21 @@ async function generateWardIdFromName(name) {
                 pattern: /\b(cau\s*di\s*bo\s*nguyen\s*tat\s*thanh|nguyen\s*tat\s*thanh\s*walking\s*bridge)\b/
             },
             {
+                canonical: 'cầu liên chiểu',
+                variants: ['cầu liên chiểu', 'cau lien chieu', 'lien chieu bridge'],
+                pattern: /\bcau\s*lien\s*chieu\b/
+            },
+            {
+                canonical: 'cầu cổ cò',
+                variants: ['cầu cổ cò', 'cau co co', 'co co bridge'],
+                pattern: /\bcau\s*co\s*co\b/
+            },
+            {
+                canonical: 'cầu bãi dài',
+                variants: ['cầu bãi dài', 'cau bai dai', 'bai dai bridge'],
+                pattern: /\bcau\s*bai\s*dai\b/
+            },
+            {
                 canonical: 'bà nà hills',
                 variants: ['bà nà hills', 'ba na hills', 'banahills'],
                 pattern: /\bba\s*na\s*hills\b/
@@ -14660,26 +16536,35 @@ async function generateWardIdFromName(name) {
                 return null;
             }
 
-            const matched = CANONICAL_PLACE_RULES.find((rule) => rule.pattern.test(haystack));
+            const matched = CANONICAL_PLACE_RULES.find((rule) => {
+                if (rule.pattern.test(haystack)) {
+                    return true;
+                }
+
+                return (rule.variants || []).some((variant) => {
+                    const normalizedVariant = normalizeVisionNoAccent(variant);
+                    return normalizedVariant && normalizedVariant.length >= 5 && haystack.includes(normalizedVariant);
+                });
+            });
             return matched || null;
         }
 
         const DANANG_BRIDGE_CATALOG = [
             {
                 canonical: 'cầu thuận phước',
-                notes: 'cầu treo dây võng dài, gần cửa biển'
+                notes: 'cầu treo dây võng rất dài, nằm ở cửa biển nơi sông Hàn đổ ra vịnh Đà Nẵng'
             },
             {
                 canonical: 'cầu sông hàn',
-                notes: 'cầu quay, biểu tượng trung tâm sông hàn'
+                notes: 'cầu quay đầu tiên do kỹ sư Việt Nam thiết kế, phần giữa cầu có thể xoay 90 độ'
             },
             {
                 canonical: 'cầu rồng',
-                notes: 'hình rồng, có phun lửa hoặc nước cuối tuần'
+                notes: 'hình dáng rồng vươn ra biển, có phun lửa và phun nước vào 21:00 tối thứ 7 và chủ nhật'
             },
             {
                 canonical: 'cầu nguyễn văn trỗi',
-                notes: 'cầu lâu đời, hiện nổi bật như cầu đi bộ'
+                notes: 'cầu có tuổi đời lâu, hiện giữ lại làm cầu đi bộ chụp ảnh và tham quan'
             },
             {
                 canonical: 'cầu trần thị lý',
@@ -14687,19 +16572,19 @@ async function generateWardIdFromName(name) {
             },
             {
                 canonical: 'cầu tiên sơn',
-                notes: 'còn gọi tuyên sơn, thiên về giao thông vận tải'
+                notes: 'còn gọi cầu tuyên sơn, nối Hải Châu và Ngũ Hành Sơn, trục giao thông quan trọng'
             },
             {
                 canonical: 'cầu cẩm lệ',
-                notes: 'kết nối khu trung tâm với quận cẩm lệ'
+                notes: 'bắc qua sông Cẩm Lệ, kết nối trục vào phía nam thành phố'
             },
             {
                 canonical: 'cầu nguyễn tri phương',
-                notes: 'kết nối khu hòa xuân và trung tâm'
+                notes: 'bắc qua sông Cẩm Lệ, kết nối các khu đô thị mới về trung tâm'
             },
             {
                 canonical: 'cầu hòa xuân',
-                notes: 'phục vụ khu đô thị sinh thái hòa xuân'
+                notes: 'bắc qua sông Cẩm Lệ, phục vụ khu đô thị Hòa Xuân'
             },
             {
                 canonical: 'cầu đỏ',
@@ -14707,11 +16592,23 @@ async function generateWardIdFromName(name) {
             },
             {
                 canonical: 'cầu nam ô',
-                notes: 'bắc qua sông cu đê, dáng vòm'
+                notes: 'bắc qua sông Cu Đê, kết nối quốc lộ 1 và đường sắt khu Nam Ô'
             },
             {
                 canonical: 'cầu phò nam',
                 notes: 'cầu treo khu thượng nguồn sông cu đê'
+            },
+            {
+                canonical: 'cầu liên chiểu',
+                notes: 'bắc qua khu vực sông Cu Đê, kết nối hướng Liên Chiểu'
+            },
+            {
+                canonical: 'cầu cổ cò',
+                notes: 'bắc qua sông Cổ Cò, tuyến kết nối du lịch ven biển'
+            },
+            {
+                canonical: 'cầu bãi dài',
+                notes: 'khu vực sông Cổ Cò, phục vụ kết nối ven biển và du lịch'
             },
             {
                 canonical: 'cầu vàng',
@@ -14726,6 +16623,125 @@ async function generateWardIdFromName(name) {
                 notes: 'cầu đi bộ vươn ra biển khu nguyễn tất thành'
             }
         ];
+
+        const BRIDGE_VISUAL_CUE_RULES = [
+            {
+                canonical: 'cầu rồng',
+                cues: [
+                    'cau rong',
+                    'dragon bridge',
+                    'rong',
+                    'dau rong',
+                    'phun lua',
+                    'phun nuoc',
+                    'fire breathing bridge'
+                ]
+            },
+            {
+                canonical: 'cầu thuận phước',
+                cues: [
+                    'cau thuan phuoc',
+                    'thuan phuoc bridge',
+                    'cau treo',
+                    'day vong',
+                    'cua bien'
+                ]
+            },
+            {
+                canonical: 'cầu sông hàn',
+                cues: ['cau song han', 'song han bridge', 'cau quay', 'han river bridge', 'xoay 90 do']
+            },
+            {
+                canonical: 'cầu trần thị lý',
+                cues: ['cau tran thi ly', 'tran thi ly bridge', 'day vang', 'tru nghieng', 'canh buom']
+            },
+            {
+                canonical: 'cầu nguyễn văn trỗi',
+                cues: ['cau nguyen van troi', 'nguyen van troi bridge', 'cau di bo cu', 'cau cu']
+            },
+            {
+                canonical: 'cầu tiên sơn',
+                cues: ['cau tien son', 'cau tuyen son', 'tien son bridge', 'tuyen son bridge']
+            },
+            {
+                canonical: 'cầu cẩm lệ',
+                cues: ['cau cam le', 'cam le bridge']
+            },
+            {
+                canonical: 'cầu nguyễn tri phương',
+                cues: ['cau nguyen tri phuong', 'nguyen tri phuong bridge']
+            },
+            {
+                canonical: 'cầu hòa xuân',
+                cues: ['cau hoa xuan', 'hoa xuan bridge']
+            },
+            {
+                canonical: 'cầu nam ô',
+                cues: ['cau nam o', 'nam o bridge', 'song cu de']
+            },
+            {
+                canonical: 'cầu liên chiểu',
+                cues: ['cau lien chieu', 'lien chieu bridge']
+            },
+            {
+                canonical: 'cầu cổ cò',
+                cues: ['cau co co', 'co co bridge', 'song co co']
+            },
+            {
+                canonical: 'cầu bãi dài',
+                cues: ['cau bai dai', 'bai dai bridge']
+            },
+            {
+                canonical: 'cầu vàng',
+                cues: ['cau vang', 'golden bridge', 'ban tay', 'giant hands bridge']
+            },
+            {
+                canonical: 'cầu tình yêu',
+                cues: ['cau tinh yeu', 'love bridge', 'moc khoa tinh yeu', 'lock bridge']
+            },
+            {
+                canonical: 'cầu đi bộ nguyễn tất thành',
+                cues: ['cau di bo nguyen tat thanh', 'nguyen tat thanh walking bridge', 'cau di bo moi']
+            }
+        ];
+
+        function resolveBridgeVisualCueRule(values = []) {
+            const normalizedHaystack = normalizeVisionNoAccent(values.join(' '));
+
+            if (!normalizedHaystack || !hasBridgeSignal(values)) {
+                return null;
+            }
+
+            const ranked = BRIDGE_VISUAL_CUE_RULES
+                .map((rule) => {
+                    const score = (rule.cues || []).reduce((total, cue) => {
+                        const normalizedCue = normalizeVisionNoAccent(cue);
+                        if (!normalizedCue || !normalizedHaystack.includes(normalizedCue)) {
+                            return total;
+                        }
+
+                        return total + (normalizedCue.includes(' ') ? 3 : 1);
+                    }, 0);
+
+                    return { canonical: rule.canonical, score };
+                })
+                .sort((a, b) => b.score - a.score);
+
+            const best = ranked[0];
+            const second = ranked[1];
+
+            if (!best || best.score < 3) {
+                return null;
+            }
+
+            if (second && best.score <= second.score) {
+                return null;
+            }
+
+            return CANONICAL_PLACE_RULES.find(
+                (rule) => normalizeVisionNoAccent(rule.canonical) === normalizeVisionNoAccent(best.canonical)
+            ) || null;
+        }
 
         function hasBridgeSignal(values = []) {
             const normalized = normalizeVisionNoAccent(values.join(' '));
@@ -14791,9 +16807,15 @@ async function generateWardIdFromName(name) {
                 .join('\n');
 
             const systemPrompt = [
-                'Bạn là AI xác minh cầu tại Đà Nẵng từ ảnh.',
+                'Bạn là mô-đun PHỤ chuyên gia xác minh CẦU trong pipeline AI xác minh món ăn/địa điểm từ ảnh.',
+                'Chỉ chạy suy luận trong ngữ cảnh cầu khi đã có tín hiệu cầu từ bước phân tích tổng quát.',
                 'Nhiệm vụ: chọn ĐÚNG 1 cầu trong catalog nếu đủ bằng chứng.',
-                'Nếu không chắc chắn thì trả về unknown, không được đoán bừa sang cầu nổi tiếng.',
+                'Nếu không chắc chắn thì trả về unknown, không được đoán bừa.',
+                'Không được mặc định Cầu Thuận Phước khi ảnh có dấu hiệu Cầu Rồng (hình rồng, đầu rồng, phun lửa/phun nước).',
+                'Nếu thấy dấu hiệu rồng rõ thì phải ưu tiên Cầu Rồng.',
+                'Nhóm cầu biểu tượng bắc qua sông Hàn: Cầu Rồng, Cầu Sông Hàn, Cầu Thuận Phước, Cầu Trần Thị Lý, Cầu Nguyễn Văn Trỗi, Cầu Tiên Sơn.',
+                'Nhóm cầu du lịch/đi bộ đặc biệt: Cầu Vàng, Cầu Tình Yêu, Cầu đi bộ Nguyễn Tất Thành.',
+                'Nhóm cầu khác nội thành: Cầu Cẩm Lệ, Cầu Nguyễn Tri Phương, Cầu Hòa Xuân, Cầu Nam Ô, Cầu Liên Chiểu, Cầu Cổ Cò, Cầu Bãi Dài, Cầu Đỏ.',
                 'Chỉ trả JSON object hợp lệ.',
                 'Schema JSON:',
                 '{"selectedCanonical":"string","confidence":0,"reason":"string","alternatives":["string"]}',
@@ -14882,11 +16904,29 @@ async function generateWardIdFromName(name) {
             return matched || null;
         }
 
+        function extractVisionServiceNames(metadata) {
+            if (!metadata || typeof metadata !== 'object') {
+                return [];
+            }
+
+            const selectedServiceNames = Array.isArray(metadata.selectedServiceNames)
+                ? metadata.selectedServiceNames
+                : [];
+
+            return selectedServiceNames
+                .map((item) => String(item || '').trim())
+                .filter(Boolean);
+        }
+
         function scoreVisionVenueCandidate(venue, terms = [], primaryLabel = '', target = 'any') {
             const normalizedLabel = normalizeVisionNoAccent(primaryLabel);
             const normalizedTerms = Array.isArray(terms)
                 ? terms.map((item) => normalizeVisionNoAccent(item)).filter(Boolean)
                 : [];
+
+            const descriptionText = normalizeVisionNoAccent(venue?.description || '');
+            const serviceNames = extractVisionServiceNames(venue?.metadata);
+            const serviceText = normalizeVisionNoAccent(serviceNames.join(' '));
 
             const nameText = normalizeVisionNoAccent(venue?.name || venue?.title || '');
             const searchable = normalizeVisionNoAccent([
@@ -14894,6 +16934,7 @@ async function generateWardIdFromName(name) {
                 venue?.title,
                 venue?.address,
                 venue?.description,
+                ...serviceNames,
                 venue?.ward_name,
                 venue?.category_name
             ].filter(Boolean).join(' '));
@@ -14913,6 +16954,11 @@ async function generateWardIdFromName(name) {
             normalizedTerms.forEach((term) => {
                 if (nameText.includes(term)) {
                     score += 20;
+                } else if (descriptionText.includes(term)) {
+                    // Description often contains detailed activity/food signals not present in title.
+                    score += 15;
+                } else if (serviceText.includes(term)) {
+                    score += 14;
                 } else if (searchable.includes(term)) {
                     score += 12;
                 }
@@ -14935,6 +16981,17 @@ async function generateWardIdFromName(name) {
             if (hasSpecificPrimaryLabel && overlapCount === 0) {
                 // Penalize popularity-only matches when the image label is specific.
                 score -= 26;
+            }
+
+            if (descriptionText && normalizedTerms.length) {
+                const descriptionTokenSet = new Set(tokenizeVisionValue(descriptionText));
+                const descriptionOverlap = normalizedTerms
+                    .flatMap((value) => tokenizeVisionValue(value))
+                    .reduce((total, token) => total + (descriptionTokenSet.has(token) ? 1 : 0), 0);
+
+                if (descriptionOverlap > 0) {
+                    score += Math.min(20, descriptionOverlap * 4.5);
+                }
             }
 
             const normalizedTarget = normalizeVisionText(target);
@@ -15115,7 +17172,8 @@ async function generateWardIdFromName(name) {
                 category: String(venue.category_name || '').trim(),
                 ward: String(venue.ward_name || '').trim(),
                 address: String(venue.address || '').trim(),
-                description: String(venue.description || '').slice(0, 220).trim(),
+                description: String(venue.description || '').slice(0, 360).trim(),
+                serviceNames: extractVisionServiceNames(venue.metadata),
                 averageRating: Number(venue.average_rating || 0),
                 totalReviews: Number(venue.total_reviews || 0)
             }));
@@ -15124,6 +17182,8 @@ async function generateWardIdFromName(name) {
                 'Bạn là AI rerank kết quả tìm kiếm địa điểm từ ảnh.',
                 'Nhiệm vụ: xếp hạng các venue theo độ khớp với ảnh và hint.',
                 'Ưu tiên độ liên quan ngữ nghĩa + từ khóa cụ thể hơn độ nổi tiếng.',
+                'Bắt buộc đọc kỹ description và serviceNames của từng venue để so khớp nội dung ảnh.',
+                'Nếu mô tả venue thể hiện đúng hoạt động/món ăn trong ảnh thì phải ưu tiên venue đó.',
                 'Không đoán bừa: nếu venue không đủ liên quan thì score thấp.',
                 'Chỉ trả JSON object hợp lệ.',
                 'Schema JSON:',
@@ -15243,7 +17303,9 @@ async function generateWardIdFromName(name) {
             const preferredKind = normalizedTarget === 'food' ? 'food' : normalizedTarget === 'place' ? 'place' : 'unknown';
 
             const systemPrompt = [
-                'Bạn là AI nhận diện ảnh cho ứng dụng khám phá địa điểm.',
+                'Bạn là AI CHÍNH chuyên gia xác minh món ăn/địa điểm từ hình ảnh người dùng gửi lên.',
+                'Mô-đun này là phân tích tổng quát; chuyên gia cầu chỉ là bước phụ khi có tín hiệu cầu.',
+                'Mục tiêu là trả nhãn đúng nhất theo nội dung thật của ảnh người dùng gửi lên.',
                 'Chỉ trả về JSON object hợp lệ, không thêm markdown.',
                 'Schema JSON:',
                 '{"label":"string","alternativeLabels":["string"],"keywords":["string"],"visualClues":["string"],"kind":"food|place|unknown","confidence":0}',
@@ -15256,9 +17318,12 @@ async function generateWardIdFromName(name) {
                 'Nếu ảnh là món nướng, món cuốn, món bún, món phở, hãy ưu tiên đúng kiểu món đó thay vì suy đoán sang món khác.',
                 'Nếu không chắc thì kind=unknown và confidence thấp.',
                 `Ưu tiên kind=${preferredKind} nếu ảnh phù hợp.`,
-                'Nếu kind=place và ảnh là cầu hoặc địa danh ở Đà Nẵng, hãy cố gắng trả về tên đúng trong catalog thay vì mặc định Cầu Rồng.',
-                'Catalog địa danh ưu tiên: Cầu Thuận Phước, Cầu Rồng, Cầu Sông Hàn, Cầu Trần Thị Lý, Cầu Nguyễn Văn Trỗi, Bà Nà Hills, Ngũ Hành Sơn, Chùa Linh Ứng, Asia Park.',
-                'Chỉ dùng Cầu Rồng khi có đặc trưng cầu rồng rõ ràng; nếu không chắc, hãy trả kind=unknown hoặc một tên địa danh khác phù hợp hơn.'
+                'Ràng buộc bắt buộc theo target tìm kiếm:',
+                'Nếu target=place thì không được trả label là món ăn; chỉ trả place hoặc unknown.',
+                'Nếu target=food thì không được trả label là địa điểm; chỉ trả food hoặc unknown.',
+                'Nếu kind=place và ảnh là cầu ở Đà Nẵng, hãy nêu đúng tên cầu nếu có đặc trưng rõ; nếu chưa rõ thì giữ ở mức trung lập và để bước xác minh cầu xử lý tiếp.',
+                'Không mặc định về bất kỳ cây cầu nổi tiếng nào khi chưa đủ bằng chứng.',
+                'Ví dụ địa danh thường gặp để tham chiếu ngữ cảnh: Cầu Rồng, Cầu Sông Hàn, Cầu Thuận Phước, Cầu Trần Thị Lý, Cầu Nguyễn Văn Trỗi, Bà Nà Hills, Ngũ Hành Sơn, Chùa Linh Ứng, Asia Park.'
             ].join(' ');
 
             const response = await axios.post(
@@ -15327,6 +17392,7 @@ async function generateWardIdFromName(name) {
         const searchVenuesByImageVisionHandler = async (req, res) => {
             try {
                 const target = normalizeVisionText(req.body?.target || 'any');
+                const requestLanguage = normalizeVisionLanguage(req.body?.language || 'en');
                 const imageDataUrl = String(req.body?.imageDataUrl || '').trim();
 
                 if (!/^data:image\//i.test(imageDataUrl)) {
@@ -15337,7 +17403,26 @@ async function generateWardIdFromName(name) {
                     return res.status(413).json({ message: 'Image is too large. Please choose a smaller image.' });
                 }
 
-                const vision = await detectImageSearchPayload(imageDataUrl, target);
+                let vision = await detectImageSearchPayload(imageDataUrl, target);
+                const taxonomyNormalized = normalizeVisionPayloadWithTaxonomy(vision, target, requestLanguage);
+
+                if (taxonomyNormalized?.applied) {
+                    const normalizedLabel = String(taxonomyNormalized.label || 'unknown').trim();
+                    const normalizedAliases = Array.isArray(taxonomyNormalized.aliases)
+                        ? taxonomyNormalized.aliases
+                        : [];
+
+                    vision = {
+                        ...vision,
+                        label: normalizedLabel,
+                        kind: taxonomyNormalized.kind || 'unknown',
+                        confidence: clampVisionConfidence(taxonomyNormalized.confidence),
+                        alternativeLabels: taxonomyNormalized.matched
+                            ? uniqueVisionValues([...normalizedAliases, ...(vision.alternativeLabels || [])]).slice(0, 4)
+                            : uniqueVisionValues(vision.alternativeLabels || []).slice(0, 4)
+                    };
+                }
+
                 const visionHints = [
                     vision.label,
                     ...(vision.alternativeLabels || []),
@@ -15360,6 +17445,21 @@ async function generateWardIdFromName(name) {
                     target === 'place'
                         ? await verifyDanangBridgeFromImage(imageDataUrl, vision)
                         : null;
+
+                const bridgeVisualCueRule =
+                    target === 'place'
+                        ? resolveBridgeVisualCueRule([
+                            vision.label,
+                            ...(vision.alternativeLabels || []),
+                            ...(vision.keywords || []),
+                            ...(vision.visualClues || []),
+                            ...terms
+                        ])
+                        : null;
+
+                if (bridgeVisualCueRule) {
+                    canonicalPlaceRule = bridgeVisualCueRule;
+                }
 
                 const bridgeVerificationEvidenceValues = [
                     vision.label,
@@ -15409,8 +17509,51 @@ async function generateWardIdFromName(name) {
                     ...(vision.alternativeLabels || [])
                 ]).find((item) => !isGenericVisionLabel(item)) || String(vision.label || '').trim();
                 const specificLabel = hasGenericLabel ? '' : String(vision.label || '').trim();
-                const canonicalText = canonicalRule?.canonical || '';
-                const searchText = canonicalText || specificLabel || bestGuessLabel || effectiveTerms[0] || '';
+                const canonicalText = resolveCanonicalRuleDisplay(canonicalRule, requestLanguage);
+                const rawSearchText = canonicalText || specificLabel || bestGuessLabel || effectiveTerms[0] || '';
+                const fallbackReadableTerm = uniqueVisionValues(effectiveTerms || [])
+                    .find((term) => {
+                        const normalized = normalizeVisionNoAccent(term);
+                        if (!normalized || normalized === 'unknown') {
+                            return false;
+                        }
+
+                        if (isGenericVisionLabel(term)) {
+                            return false;
+                        }
+
+                        return !['place', 'food', 'dia diem', 'mon an', 'landmark'].includes(normalized);
+                    }) || '';
+                const searchText = normalizeVisionNoAccent(rawSearchText) === 'unknown'
+                    ? (
+                        fallbackReadableTerm
+                        || (target === 'food'
+                            ? (requestLanguage === 'en' ? 'food from image' : 'món ăn từ ảnh')
+                            : (requestLanguage === 'en' ? 'place from image' : 'địa điểm từ ảnh'))
+                    )
+                    : rawSearchText;
+
+                writeVisionTaxonomyEvalLog({
+                    target,
+                    taxonomyApplied: Boolean(taxonomyNormalized?.applied),
+                    taxonomyMatched: Boolean(taxonomyNormalized?.matched),
+                    taxonomyLabelId: taxonomyNormalized?.labelId || null,
+                    taxonomyConfidence: clampVisionConfidence(taxonomyNormalized?.confidence),
+                    modelDetectedLabel: String(vision.label || '').trim(),
+                    modelDetectedKind: String(vision.kind || '').trim(),
+                    modelConfidence: clampVisionConfidence(vision.confidence),
+                    canonicalFood: canonicalFoodRule?.canonical || null,
+                    canonicalPlace: canonicalPlaceRule?.canonical || null,
+                    searchTerms: Array.isArray(effectiveTerms) ? effectiveTerms.slice(0, 10) : [],
+                    topTaxonomyCandidates: Array.isArray(taxonomyNormalized?.topCandidates)
+                        ? taxonomyNormalized.topCandidates.slice(0, 3)
+                        : [],
+                    venueResultCount: Array.isArray(venueResults) ? venueResults.length : 0,
+                    firstVenueId: venueResults?.[0]?.id || null,
+                    firstVenueName: venueResults?.[0]?.name || venueResults?.[0]?.title || null,
+                    aiRerankApplied: Boolean(rerankResult?.applied),
+                    aiRerankModel: rerankResult?.model || null
+                });
 
                 return res.json({
                     success: true,
@@ -15421,6 +17564,16 @@ async function generateWardIdFromName(name) {
                     visualClues: vision.visualClues || [],
                     detectedKind: vision.kind,
                     confidence: vision.confidence,
+                    taxonomyNormalization: taxonomyNormalized?.applied
+                        ? {
+                            matched: Boolean(taxonomyNormalized.matched),
+                            labelId: taxonomyNormalized.labelId || '',
+                            confidence: clampVisionConfidence(taxonomyNormalized.confidence),
+                            topCandidates: Array.isArray(taxonomyNormalized.topCandidates)
+                                ? taxonomyNormalized.topCandidates
+                                : []
+                        }
+                        : null,
                     canonicalFood: canonicalFoodRule?.canonical || '',
                     canonicalPlace: canonicalPlaceRule?.canonical || '',
                     bridgeVerification: bridgeVerification
@@ -15643,7 +17796,20 @@ async function generateWardIdFromName(name) {
                 if (weatherQuery && intent !== 'entertainment') {
                     venueResults = await findVenueMatches(weatherQuery.searchText, 5, weatherQuery.category || 'food');
                     if (venueResults.length) {
-                        reply = `Thời tiết ${weatherQuery.label} thì bạn có thể thử ${weatherQuery.suggestion}. Dưới đây là một số gợi ý quán phù hợp:`;
+                        // Build a short, varied reply instead of a fixed template
+                        const openers = ['ừ', 'nè', 'ok', 'hmm', 'ừm'];
+                        const emojis = ['😄', '🙂', '😉', '👍'];
+                        const opener = openers[Math.floor(Math.random() * openers.length)];
+                        const emo = emojis[Math.floor(Math.random() * emojis.length)];
+                        const topNames = venueResults.slice(0, 2).map(v => v.name).join(' hoặc ');
+
+                        const replyVariants = [
+                            `${opener} ${weatherQuery.suggestion}, thử ${topNames} ${emo}`,
+                            `${opener} ${topNames} hợp lắm ${emo}`,
+                            `${opener} trời ${weatherQuery.label} thì ${weatherQuery.suggestion} hợp đó, ví dụ: ${topNames}`
+                        ];
+
+                        reply = replyVariants[Math.floor(Math.random() * replyVariants.length)];
                         return res.json({ reply, venueResults });
                     }
                 }
