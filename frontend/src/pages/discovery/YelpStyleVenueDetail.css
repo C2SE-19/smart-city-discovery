@@ -1,0 +1,644 @@
+/* ============================================
+   YELP-STYLE VENUE DETAIL PAGE CSS
+   ============================================ */
+
+.yelp-style-venue-detail {
+  display: grid;
+  gap: 24px;
+  padding: 16px;
+  max-width: 1200px;
+  margin: 0 auto;
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ============================================
+   HEADER
+   ============================================ */
+
+.yelp-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.yelp-back-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 16px;
+  background: white;
+  border: 1px solid #e1e1e1;
+  border-radius: 24px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #2b2b2b;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.yelp-back-btn:hover {
+  background: #f5f5f5;
+  border-color: #ccc;
+  transform: translateX(-2px);
+}
+
+.yelp-back-btn:active {
+  transform: translateX(-1px);
+  background: #efefef;
+}
+
+/* ============================================
+   HERO SECTION
+   ============================================ */
+
+.yelp-hero-section {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  background: white;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* ============================================
+   IMAGE SLIDER
+   ============================================ */
+
+.yelp-image-slider-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.yelp-image-slider {
+  position: relative;
+  width: 100%;
+  padding-bottom: 100%; /* 1:1 aspect ratio */
+  background: #f0f0f0;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.yelp-main-image {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  animation: imageSlide 0.3s ease;
+}
+
+@keyframes imageSlide {
+  from {
+    opacity: 0.8;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Slider Navigation Buttons */
+
+.yelp-slider-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 40px;
+  height: 40px;
+  background: rgba(0, 0, 0, 0.5);
+  border: none;
+  border-radius: 50%;
+  color: white;
+  font-size: 20px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  z-index: 10;
+}
+
+.yelp-slider-btn:hover {
+  background: rgba(0, 0, 0, 0.7);
+  transform: translateY(-50%) scale(1.1);
+}
+
+.yelp-slider-prev {
+  left: 12px;
+}
+
+.yelp-slider-next {
+  right: 12px;
+}
+
+/* Image Counter */
+
+.yelp-image-counter {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  background: rgba(0, 0, 0, 0.6);
+  color: white;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  z-index: 5;
+}
+
+/* See All Photos Button */
+
+.yelp-see-all-photos-btn {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  background: rgba(0, 0, 0, 0.7);
+  color: white;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  z-index: 5;
+}
+
+.yelp-see-all-photos-btn:hover {
+  background: rgba(0, 0, 0, 0.85);
+  transform: translateY(-2px);
+}
+
+/* Thumbnail Gallery */
+
+.yelp-thumbnail-gallery {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 4px 0;
+  scroll-behavior: smooth;
+}
+
+.yelp-thumbnail-gallery::-webkit-scrollbar {
+  height: 4px;
+}
+
+.yelp-thumbnail-gallery::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
+}
+
+.yelp-thumbnail-gallery::-webkit-scrollbar-thumb {
+  background: #d0d0d0;
+  border-radius: 4px;
+}
+
+.yelp-thumbnail {
+  flex: 0 0 80px;
+  width: 80px;
+  height: 80px;
+  border: 2px solid transparent;
+  border-radius: 6px;
+  overflow: hidden;
+  cursor: pointer;
+  background: #f0f0f0;
+  transition: all 0.2s ease;
+  opacity: 0.6;
+}
+
+.yelp-thumbnail img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.yelp-thumbnail:hover {
+  opacity: 0.8;
+  transform: scale(1.05);
+}
+
+.yelp-thumbnail.active {
+  border-color: #d7263d;
+  opacity: 1;
+}
+
+.yelp-thumbnail-more {
+  flex: 0 0 80px;
+  width: 80px;
+  height: 80px;
+  border: 2px solid #e1e1e1;
+  border-radius: 6px;
+  background: #f9f9f9;
+  cursor: pointer;
+  font-weight: 600;
+  color: #2b2b2b;
+  transition: all 0.2s ease;
+}
+
+.yelp-thumbnail-more:hover {
+  background: #f0f0f0;
+  border-color: #999;
+}
+
+/* ============================================
+   INFO SECTION
+   ============================================ */
+
+.yelp-info-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px;
+  background: white;
+}
+
+/* Title */
+
+.yelp-venue-title {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 700;
+  color: #2b2b2b;
+  line-height: 1.2;
+}
+
+/* Address */
+
+.yelp-venue-address {
+  margin: 0;
+  font-size: 14px;
+  color: #666;
+  line-height: 1.5;
+}
+
+/* Rating Section */
+
+.yelp-rating-section {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.yelp-stars {
+  display: flex;
+  gap: 2px;
+}
+
+.star {
+  font-size: 16px;
+  color: #d7263d;
+}
+
+.star.empty {
+  color: #ddd;
+  opacity: 0.3;
+}
+
+.yelp-rating-text {
+  font-size: 14px;
+  color: #666;
+  font-weight: 500;
+}
+
+/* Badges */
+
+.yelp-badges {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.yelp-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  background: #f0f0f0;
+  color: #2b2b2b;
+}
+
+.yelp-badge-claimed {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.yelp-badge-category {
+  background: #f3e5f5;
+  color: #6a1b9a;
+}
+
+/* Status Section */
+
+.yelp-status-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: #f9f9f9;
+  border-radius: 6px;
+}
+
+.yelp-status-badge {
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.yelp-status-badge.open {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.yelp-status-badge.closed {
+  background: #ffebee;
+  color: #c62828;
+}
+
+.yelp-hours-text {
+  font-size: 13px;
+  color: #666;
+}
+
+/* Price Range */
+
+.yelp-price-range {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.yelp-price-label {
+  font-size: 14px;
+  color: #2b2b2b;
+  font-weight: 500;
+  background: #fff3cd;
+  padding: 6px 12px;
+  border-radius: 6px;
+}
+
+/* Action Buttons */
+
+.yelp-action-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.yelp-btn {
+  padding: 10px 16px;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.yelp-btn-primary {
+  background: #d7263d;
+  color: white;
+  grid-column: 1 / -1;
+}
+
+.yelp-btn-primary:hover {
+  background: #b91c31;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(215, 38, 61, 0.3);
+}
+
+.yelp-btn-secondary {
+  background: white;
+  color: #2b2b2b;
+  border: 1px solid #e1e1e1;
+}
+
+.yelp-btn-secondary:hover {
+  background: #f5f5f5;
+  border-color: #999;
+}
+
+.yelp-btn-secondary.saved {
+  background: #ffe0e6;
+  border-color: #d7263d;
+  color: #d7263d;
+}
+
+/* ============================================
+   DESCRIPTION SECTION
+   ============================================ */
+
+.yelp-description-section {
+  background: white;
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.yelp-description-section h3 {
+  margin: 0 0 12px 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: #2b2b2b;
+}
+
+.yelp-description-text {
+  margin: 0;
+  font-size: 14px;
+  color: #666;
+  line-height: 1.6;
+}
+
+/* ============================================
+   QUICK INFO SECTION
+   ============================================ */
+
+.yelp-quick-info-section {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 16px;
+}
+
+.yelp-quick-info-card {
+  background: white;
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.yelp-quick-info-card h4 {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #2b2b2b;
+}
+
+.yelp-quick-info-card p {
+  margin: 0;
+  font-size: 13px;
+  color: #666;
+  line-height: 1.5;
+}
+
+/* ============================================
+   GALLERY MODAL
+   ============================================ */
+
+.yelp-gallery-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.9);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.2s ease;
+}
+
+.yelp-gallery-modal-content {
+  position: relative;
+  width: 90%;
+  max-width: 1000px;
+  max-height: 90vh;
+  overflow-y: auto;
+  background: #1a1a1a;
+  border-radius: 8px;
+}
+
+.yelp-gallery-modal-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  border: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 18px;
+  transition: all 0.2s ease;
+  z-index: 10;
+}
+
+.yelp-gallery-modal-close:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.yelp-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 8px;
+  padding: 16px;
+}
+
+.yelp-gallery-image {
+  width: 100%;
+  height: auto;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+
+.yelp-gallery-image:hover {
+  transform: scale(1.02);
+}
+
+/* ============================================
+   RESPONSIVE DESIGN
+   ============================================ */
+
+@media (max-width: 768px) {
+  .yelp-hero-section {
+    grid-template-columns: 1fr;
+  }
+
+  .yelp-info-section {
+    padding: 16px;
+  }
+
+  .yelp-venue-title {
+    font-size: 22px;
+  }
+
+  .yelp-action-buttons {
+    grid-template-columns: 1fr;
+  }
+
+  .yelp-btn-primary {
+    grid-column: auto;
+  }
+
+  .yelp-quick-info-section {
+    grid-template-columns: 1fr;
+  }
+
+  .yelp-gallery-grid {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  }
+}
+
+@media (max-width: 480px) {
+  .yelp-style-venue-detail {
+    padding: 8px;
+    gap: 16px;
+  }
+
+  .yelp-venue-title {
+    font-size: 18px;
+  }
+
+  .yelp-thumbnail-gallery {
+    gap: 6px;
+  }
+
+  .yelp-thumbnail {
+    flex: 0 0 60px;
+    width: 60px;
+    height: 60px;
+  }
+
+  .yelp-thumbnail-more {
+    flex: 0 0 60px;
+    width: 60px;
+    height: 60px;
+  }
+
+  .yelp-info-section {
+    padding: 12px;
+  }
+
+  .yelp-action-buttons {
+    gap: 8px;
+  }
+
+  .yelp-btn {
+    padding: 8px 12px;
+    font-size: 12px;
+  }
+}

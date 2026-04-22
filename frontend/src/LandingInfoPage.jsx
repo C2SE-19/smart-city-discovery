@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useLanguage } from './contexts/LanguageContext';
-import { useTheme } from './contexts/ThemeContext';
 import { fetchDaNangFeaturedPlaces } from './services/api/landingApi';
 import { APP_ROUTES } from './constants/routes';
 import translations from './constants/translations';
@@ -13,7 +12,6 @@ import cityLandmark from './assets/images/landing/city-landmark.svg';
 import cityFood from './assets/images/landing/city-food.svg';
 import cityRoute from './assets/images/landing/city-route.svg';
 import anh2 from './assets/images/1.png';
-import serviceHeroImage from './assets/images/anh1.png';
 import anh5 from './assets/images/anh5.png';
 import anh6 from './assets/images/anh6.png';
 import './LandingInfoPage.css';
@@ -104,16 +102,15 @@ const normalizeCategoryLabel = (category) =>
 
 function LandingInfoPage({ title, description, cards, stats = null }) {
   const location = useLocation();
-  const { language, changeLanguage } = useLanguage();
-  const { theme, toggleTheme } = useTheme();
-  const t = translations[language];
+  const { language } = useLanguage();
+  const t = translations[language] || translations.vi;
+  const landingCopy = t.landingInfo || translations.vi.landingInfo;
   const [loadedPlaces, setLoadedPlaces] = useState(null);
   const [loadingPlaces, setLoadingPlaces] = useState(false);
   const [activeFilter, setActiveFilter] = useState('All');
   const [searchTerm, setSearchTerm] = useState('');
   const carouselRef = useRef(null);
   const cardsPerView = 4;
-  const [currentIndex, setCurrentIndex] = useState(0);
 
   // Xác định loại trang dựa vào route
   const pageType = useMemo(() => {
@@ -156,14 +153,70 @@ function LandingInfoPage({ title, description, cards, stats = null }) {
     };
   }, [pageType]);
 
-  // Stats mặc định
+  const pageCopy = landingCopy?.[pageType] || {};
+  const resolvedTitle = pageCopy.title || title || '';
+  const resolvedDescription = pageCopy.description || description || '';
+
+  const statsLabels = landingCopy?.stats?.labels || {
+    users: 'Người dùng',
+    venues: 'Địa điểm'
+  };
+
+  // Mặc định nếu không có stats (placeholder khi đang tải)
   const defaultStats = [
-    { number: '10,000+', label: 'Người dùng' },
-    { number: '500+', label: 'Địa điểm' },
-    { number: '50+', label: 'Cửa hàng' }
+    { number: '--', label: statsLabels.users },
+    { number: '--', label: statsLabels.venues }
   ];
 
-  const displayStats = stats || defaultStats;
+  // Xác định stats: dùng prop, hoặc lấy từ localStorage, hoặc dùng mặc định
+  let resolvedStats = defaultStats;
+  
+  if (stats && Array.isArray(stats) && stats.length > 0) {
+    resolvedStats = stats;
+  } else {
+    // Thử lấy từ localStorage
+    try {
+      const cached = localStorage.getItem('landingStats');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          resolvedStats = parsed;
+        }
+      }
+    } catch (e) {
+      console.warn('Could not read stats from localStorage:', e);
+    }
+  }
+
+  // Đảm bảo label đúng
+  const displayStats = resolvedStats.slice(0, 2).map((stat, index) => {
+    const labels = [statsLabels.users, statsLabels.venues];
+    return {
+      ...stat,
+      label: labels[index] || stat.label
+    };
+  });
+
+  const resolvedCards = useMemo(() => {
+    if (!cards || cards.length === 0) {
+      return cards || [];
+    }
+
+    const translatedCards = pageCopy.cards || [];
+    if (!translatedCards.length) {
+      return cards;
+    }
+
+    return cards.map((card, index) => {
+      const translated = translatedCards[index] || {};
+      return {
+        ...card,
+        title: translated.title || card.title,
+        copy: translated.copy || card.copy,
+        cta: translated.cta || card.cta
+      };
+    });
+  }, [cards, pageCopy.cards]);
 
   const formattedPlaces = useMemo(() => {
     if (loadedPlaces && Array.isArray(loadedPlaces)) {
@@ -210,13 +263,13 @@ function LandingInfoPage({ title, description, cards, stats = null }) {
     );
 
     return [
-      { value: 'All', label: 'Tất cả' },
+      { value: 'All', label: landingCopy.allCity?.filterAllLabel || 'Tất cả' },
       ...orderedCategories.map((category) => ({ value: category, label: category })),
       ...remainingCategories.map((category) => ({ value: category, label: category }))
     ];
-  }, [formattedPlaces]);
+  }, [formattedPlaces, landingCopy.allCity?.filterAllLabel]);
 
-  const serviceItems = [
+  const serviceItems = landingCopy?.service?.items || [
     {
       icon: '🚚',
       title: 'Giao hàng thông minh',
@@ -284,18 +337,18 @@ function LandingInfoPage({ title, description, cards, stats = null }) {
       {/* Heading Section */}
       {pageType !== 'service' && (
         <div className="landing-info-heading">
-          <h2>{title}</h2>
+          <h2>{resolvedTitle}</h2>
           <span className="landing-info-divider" />
         </div>
       )}
 
       {/* Description */}
-      {pageType !== 'service' && <p className="landing-info-copy">{description}</p>}
+  {pageType !== 'service' && <p className="landing-info-copy">{resolvedDescription}</p>}
 
       {/* Cards Grid */}
-      {cards?.length > 0 && (
+      {resolvedCards?.length > 0 && (
         <div className="landing-info-grid">
-          {cards.map((card) => (
+          {resolvedCards.map((card) => (
             <article key={card.title} className="landing-info-card">
               {card.image && (
                 <div className="landing-info-card-image">
@@ -324,19 +377,19 @@ function LandingInfoPage({ title, description, cards, stats = null }) {
       {pageType === 'about' && (
         <div className="landing-info-about-highlight" id="discover">
           <div className="landing-info-about-text">
-            <div className="landing-info-about-kicker">Smart City Discovery</div>
-            <h3>Khám phá địa phương thông minh</h3>
+            <div className="landing-info-about-kicker">{landingCopy.aboutHighlight?.kicker || 'Smart City Discovery'}</div>
+            <h3>{landingCopy.aboutHighlight?.title || 'Khám phá địa phương thông minh'}</h3>
             <ul>
-              <li>✓ Tìm kiếm địa điểm thông minh</li>
-              <li>✓ Gợi ý địa điểm bằng trí tuệ nhân tạo</li>
-              <li>✓ Tích hợp các lớp bản đồ hiện đại</li>
+              {(landingCopy.aboutHighlight?.bullets || []).map((item) => (
+                <li key={item}>✓ {item}</li>
+              ))}
             </ul>
             <Link to="/landing/kham-pha-dia-phuong" className="landing-info-explore-btn">
-              Khám phá ngay →
+              {landingCopy.aboutHighlight?.cta || 'Khám phá ngay →'}
             </Link>
           </div>
           <div className="landing-info-about-image">
-            <img src={anh2} alt="Khám phá địa phương" loading="lazy" />
+            <img src={anh2} alt={landingCopy.aboutHighlight?.imageAlt || 'Khám phá địa phương'} loading="lazy" />
           </div>
         </div>
       )}
@@ -358,22 +411,28 @@ function LandingInfoPage({ title, description, cards, stats = null }) {
         <div className="landing-info-service">
           <div className="landing-info-service-hero">
             <div className="landing-info-service-hero-text">
-              <span className="landing-info-service-kicker">Smart City Discovery</span>
-              <h3>Dịch vụ của chúng tôi</h3>
-              <p>Giải pháp thông minh giúp kết nối người dùng, cửa hàng và hệ thống bản đồ trong một nền tảng nhất.</p>
+              <span className="landing-info-service-kicker">
+                {landingCopy.service?.kicker || 'Smart City Discovery'}
+              </span>
+              <h3>{landingCopy.service?.heroTitle || 'Dịch vụ của chúng tôi'}</h3>
+              <p>{landingCopy.service?.heroDescription || resolvedDescription}</p>
               <div className="landing-info-service-actions">
-                <Link to="/landing/dich-vu-tong-quan" className="landing-info-service-primary">Khám phá ngay</Link>
-                <Link to={APP_ROUTES.FEEDBACK} className="landing-info-service-secondary">Liên hệ</Link>
+                <Link to="/landing/dich-vu-tong-quan" className="landing-info-service-primary">
+                  {landingCopy.service?.primaryCta || 'Khám phá ngay'}
+                </Link>
+                <Link to={APP_ROUTES.FEEDBACK} className="landing-info-service-secondary">
+                  {landingCopy.service?.secondaryCta || 'Liên hệ'}
+                </Link>
               </div>
             </div>
             <div className="landing-info-service-hero-image">
-              <img src={anh5} alt="Dịch vụ Smart City" loading="lazy" />
+              <img src={anh5} alt={landingCopy.service?.heroImageAlt || 'Dịch vụ Smart City'} loading="lazy" />
             </div>
           </div>
 
           <div className="landing-info-service-body">
             <div className="landing-info-service-list">
-              <h4>Dịch vụ nổi bật</h4>
+              <h4>{landingCopy.service?.listTitle || 'Dịch vụ nổi bật'}</h4>
               {serviceItems.map((item) => (
                 <div key={item.slug} className="landing-info-service-item">
                   <span className="landing-info-service-icon">{item.icon}</span>
@@ -382,30 +441,33 @@ function LandingInfoPage({ title, description, cards, stats = null }) {
                     <p>{item.copy}</p>
                   </div>
                   <Link to={`/service-detail/${item.slug}`} className="landing-info-service-link">
-                    Chi tiết →
+                    {landingCopy.service?.detailCta || 'Chi tiết →'}
                   </Link>
                 </div>
               ))}
             </div>
 
             <div className="landing-info-service-highlight">
-              <img src={anh6} alt="Smart Promotion System" loading="lazy" />
+              <img src={anh6} alt={landingCopy.service?.highlightImageAlt || 'Smart Promotion System'} loading="lazy" />
               <div className="landing-info-service-highlight-card">
-                <h4>Smart Promotion System</h4>
-                <p>Hệ thống quảng cáo thông minh giúp cửa hàng tiếp cận đúng khách hàng theo vị trí và hành vi.</p>
+                <h4>{landingCopy.service?.highlightTitle || 'Smart Promotion System'}</h4>
+                <p>
+                  {landingCopy.service?.highlightDescription ||
+                    'Hệ thống quảng cáo thông minh giúp cửa hàng tiếp cận đúng khách hàng theo vị trí và hành vi.'}
+                </p>
                 <ul>
-                  <li>✓ AI gợi ý</li>
-                  <li>✓ Target chính xác</li>
-                  <li>✓ Tăng doanh thu</li>
+                  {(landingCopy.service?.highlightBullets || []).map((item) => (
+                    <li key={item}>✓ {item}</li>
+                  ))}
                 </ul>
               </div>
             </div>
           </div>
 
           <div className="landing-info-service-cta">
-            <p>Bạn muốn đưa cửa hàng lên hệ thống?</p>
+            <p>{landingCopy.service?.ctaText || 'Bạn muốn đưa cửa hàng lên hệ thống?'}</p>
             <Link to={APP_ROUTES.MERCHANT_DASHBOARD} className="landing-info-service-primary">
-              Đăng ký ngay →
+              {landingCopy.service?.ctaButton || 'Đăng ký ngay →'}
             </Link>
           </div>
         </div>
@@ -414,13 +476,15 @@ function LandingInfoPage({ title, description, cards, stats = null }) {
       {/* Cities Section (Cho All City) */}
       {pageType === 'all-city' && (
         <div className="landing-info-cities-section">
-          <h3 className="landing-info-cities-title">Khám Phá Thành Phố Nổi Bật</h3>
+          <h3 className="landing-info-cities-title">
+            {landingCopy.allCity?.sectionTitle || 'Khám Phá Thành Phố Nổi Bật'}
+          </h3>
           
           {/* Search Bar */}
           <div className="landing-info-cities-search">
             <input 
               type="text" 
-              placeholder="Tìm kiếm thành phố..." 
+              placeholder={landingCopy.allCity?.searchPlaceholder || 'Tìm kiếm thành phố...'} 
               className="landing-info-cities-search-input"
               value={searchTerm}
               onChange={(event) => setSearchTerm(event.target.value)}
@@ -444,7 +508,7 @@ function LandingInfoPage({ title, description, cards, stats = null }) {
           {/* Loading State */}
           {loadingPlaces && (
             <div className="landing-info-cities-loading">
-              Đang tải dữ liệu...
+              {landingCopy.allCity?.loadingLabel || 'Đang tải dữ liệu...'}
             </div>
           )}
 
@@ -455,7 +519,7 @@ function LandingInfoPage({ title, description, cards, stats = null }) {
                 type="button"
                 className="landing-info-cities-nav landing-info-cities-nav-left"
                 onClick={() => handleCarouselScroll(-1)}
-                aria-label="Xem địa điểm trước"
+                aria-label={landingCopy.allCity?.prevLabel || 'Xem địa điểm trước'}
               >
                 ←
               </button>
@@ -474,7 +538,7 @@ function LandingInfoPage({ title, description, cards, stats = null }) {
                       <p>{place.count}</p>
                     </div>
                     <Link to={resolvePlaceLink(place)} className="landing-info-city-link">
-                      Khám phá →
+                      {landingCopy.allCity?.exploreCta || 'Khám phá →'}
                     </Link>
                   </div>
                 ))}
@@ -483,7 +547,7 @@ function LandingInfoPage({ title, description, cards, stats = null }) {
                 type="button"
                 className="landing-info-cities-nav landing-info-cities-nav-right"
                 onClick={() => handleCarouselScroll(1)}
-                aria-label="Xem địa điểm tiếp theo"
+                aria-label={landingCopy.allCity?.nextLabel || 'Xem địa điểm tiếp theo'}
               >
                 →
               </button>

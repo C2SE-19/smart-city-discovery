@@ -5,6 +5,7 @@ import {
 	createVenueReviewReply,
 	createVenueReview,
 	deleteVenueReview,
+	deleteVenueReviewReply,
 	updateVenueReview,
 	fetchVenueCommunityBundle,
 	fetchVenueDetails,
@@ -15,9 +16,14 @@ import {
 import { submitFeedback } from '../../services/feedbackService';
 import { APP_ROUTES } from '../../constants/routes';
 import { useAuth } from '../../contexts/AuthContext';
+import { useLanguage } from '../../contexts/LanguageContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { normalizeVenueMetadata } from '../../components/map/cityMapUtils';
 import { fetchVenueChatThread, markChatThreadRead, sendVenueChatMessage } from '../../services/api/chatApi';
+import HeroVenueSection from './HeroVenueSection';
+import VenueInfoSection from './VenueInfoSection';
+import SimilarVenuesSection from './SimilarVenuesSection';
+import VenueLocationMap from './VenueLocationMap';
 import './VenueDetailPage.css';
 
 const FALLBACK_VENUE_IMAGE =
@@ -68,24 +74,64 @@ const REPORT_SEVERITY_OPTIONS = [
 
 const PAGE_I18N = {
 	vi: {
-		replyRequired: 'Discussion content is required.',
-		replyBlocked: 'Discussion contains inappropriate words.',
-		replySubmitFail: 'Unable to send discussion.',
-		repliesEmpty: 'No discussions yet.',
-		repliesLoginHint: 'Please sign in to discuss.',
-		discuss: 'Discuss',
-		replyTitle: 'Discuss review',
-		rating: 'Rating',
-		notSelected: 'Not selected',
-		title: 'Title',
-		detailComment: 'Detailed comment',
-		uploadMedia: 'Photo & Video',
-		maxSixImages: 'Up to 6 images',
-		submitComment: 'Comment',
-		submitting: 'Submitting...',
-		replyPlaceholder: 'Write detailed discussion...',
-		reviewCommentPlaceholder: 'Write detailed comment...',
-		replyTitlePlaceholder: 'Title'
+		replyRequired: 'Nội dung thảo luận là bắt buộc.',
+		replyBlocked: 'Thảo luận có chứa từ ngữ không phù hợp.',
+		replySubmitFail: 'Không thể gửi thảo luận.',
+		repliesEmpty: 'Chưa có thảo luận nào.',
+		repliesLoginHint: 'Vui lòng đăng nhập để thảo luận.',
+		discuss: 'Thảo luận',
+		replyTitle: 'Thảo luận đánh giá',
+		rating: 'Đánh giá',
+		notSelected: 'Chưa chọn',
+		title: 'Tiêu đề',
+		detailComment: 'Nội dung chi tiết',
+		uploadMedia: 'Ảnh & Video',
+		maxSixImages: 'Tối đa 6 ảnh',
+		submitComment: 'Bình luận',
+		submitting: 'Đang gửi...',
+		replyPlaceholder: 'Viết thảo luận chi tiết...',
+		reviewCommentPlaceholder: 'Viết bình luận chi tiết...',
+		replyTitlePlaceholder: 'Tiêu đề',
+		updating: 'Đang cập nhật',
+		weekDays: ['Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7', 'Chủ nhật'],
+		aboutTitle: 'Giới thiệu',
+		servicesTitle: 'Dịch vụ cung cấp',
+		serviceFallback: 'Dịch vụ',
+		servicesEmpty: 'Chủ quán chưa cập nhật dịch vụ.',
+		contactTitle: 'Thông tin liên hệ',
+		phoneLabel: 'Đây là số điện thoại',
+		addressLabel: 'Đây là địa chỉ của quán',
+		notUpdated: 'Chưa cập nhật',
+		messageVenue: 'Gửi tin nhắn cho quán',
+		chatOwnerFallback: 'Chủ quán',
+		openNow: 'Đang mở cửa',
+		closedNow: 'Đang đóng cửa',
+		areaUpdating: 'Đang cập nhật khu vực',
+		currentVenueInfo: 'Thông tin quán hiện tại',
+		noAddressYet: 'Chưa có địa chỉ',
+		reviewsUnit: 'đánh giá',
+		loadingMessages: 'Đang tải tin nhắn...',
+		chatUnavailable: 'Quán này chưa liên kết chủ quán để nhắn tin.',
+		openFromHeaderHint: 'Mở chat từ biểu tượng tin nhắn ở header để phản hồi với vai trò chủ quán.',
+		startChatHint: 'Bắt đầu trò chuyện với quán này. Tin nhắn được nhóm theo chủ quán.',
+		typeMessagePlaceholder: 'Nhập tin nhắn cho quán...',
+		send: 'Gửi',
+		sending: 'Đang gửi...',
+		signIn: 'Đăng nhập',
+		other: 'Khác',
+		mapSectionTitle: '📍 Vị trí & Giờ hoạt động',
+		mapOpeningHours: '⏰ Giờ hoạt động',
+		mapNoSchedule: 'Chưa có lịch hoạt động',
+		mapAddressLabel: 'Đây là địa chỉ của quán',
+		mapAddressFallback: 'Chưa cập nhật địa chỉ',
+		openInternalMap: 'Mở trên bản đồ Smart City',
+		similarTitle: 'Quán tương tự',
+		similarDescriptionPrefix: 'Các địa điểm cùng nhóm',
+		similarDescriptionMiddle: 'tại',
+		similarLoading: 'Đang tải gợi ý...',
+		similarEmpty: 'Hiện chưa có quán tương tự phù hợp trong khu vực này.',
+		similarErrorPrefix: 'Lỗi:',
+		similarView: 'Xem →'
 	},
 	en: {
 		replyRequired: 'Discussion content is required.',
@@ -106,6 +152,47 @@ const PAGE_I18N = {
 		replyPlaceholder: 'Write detailed discussion...',
 		reviewCommentPlaceholder: 'Write detailed comment...',
 		replyTitlePlaceholder: 'Title'
+		,
+		updating: 'Updating',
+		weekDays: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'],
+		aboutTitle: 'About',
+		servicesTitle: 'Services Offered',
+		serviceFallback: 'Service',
+		servicesEmpty: 'The venue owner has not updated services yet.',
+		contactTitle: 'Contact information',
+		phoneLabel: 'Phone number',
+		addressLabel: 'Venue address',
+		notUpdated: 'Not updated',
+		messageVenue: 'Send message to venue',
+		chatOwnerFallback: 'Venue owner',
+		openNow: 'Open now',
+		closedNow: 'Closed now',
+		areaUpdating: 'Area updating',
+		currentVenueInfo: 'Current venue info',
+		noAddressYet: 'No address yet',
+		reviewsUnit: 'reviews',
+		loadingMessages: 'Loading messages...',
+		chatUnavailable: 'This venue is not linked to an owner for chat yet.',
+		openFromHeaderHint: 'Open chat from the header message icon to reply as venue owner.',
+		startChatHint: 'Start chatting with this venue. Messages are grouped by venue owner.',
+		typeMessagePlaceholder: 'Type your message to this venue...',
+		send: 'Send',
+		sending: 'Sending...',
+		signIn: 'Sign in',
+		other: 'Other',
+		mapSectionTitle: '📍 Location & Hours',
+		mapOpeningHours: '⏰ Opening Hours',
+		mapNoSchedule: 'No schedule available',
+		mapAddressLabel: 'Venue address',
+		mapAddressFallback: 'Address not updated',
+		openInternalMap: 'Open in Smart City map',
+		similarTitle: 'Similar venues',
+		similarDescriptionPrefix: 'Places in the same',
+		similarDescriptionMiddle: 'at',
+		similarLoading: 'Loading suggestions...',
+		similarEmpty: 'No matching similar venues found in this area yet.',
+		similarErrorPrefix: 'Error:',
+		similarView: 'View →'
 	}
 };
 const CHAT_DELETE_SYNC_KEY = 'chat_thread_deleted_sync';
@@ -404,10 +491,27 @@ function truncateVenueDescription(description, maxLength = VENUE_DESCRIPTION_COL
 
 function resolveWeeklySchedule(venue) {
 	const metadata = normalizeVenueMetadata(venue?.metadata);
-	const canonicalSource =
+	const canonicalSourceObject =
 		metadata.weeklySchedule && typeof metadata.weeklySchedule === 'object' && !Array.isArray(metadata.weeklySchedule)
 			? metadata.weeklySchedule
 			: null;
+
+	const canonicalSourceArray = Array.isArray(metadata.weeklySchedule)
+		? metadata.weeklySchedule.reduce((accumulator, item) => {
+			const itemKey = String(item?.key || item?.day || '').trim().toLowerCase();
+			if (!itemKey) {
+				return accumulator;
+			}
+
+			accumulator[itemKey] = {
+				start: String(item?.start || item?.open || item?.openTime || '').trim(),
+				end: String(item?.end || item?.close || item?.closeTime || '').trim(),
+				off: Boolean(item?.off || item?.isClosed)
+			};
+
+			return accumulator;
+		}, {})
+		: null;
 
 	const legacySource =
 		metadata.weeklyOpenHours && typeof metadata.weeklyOpenHours === 'object' && !Array.isArray(metadata.weeklyOpenHours)
@@ -427,17 +531,38 @@ function resolveWeeklySchedule(venue) {
 			}, {})
 			: null;
 
-	const source = canonicalSource || legacySource;
+	const source = canonicalSourceObject || canonicalSourceArray || legacySource;
 	const fallbackStart = String(metadata.startTime || '').trim();
 	const fallbackEnd = String(metadata.endTime || '').trim();
 	const hasFallbackRange =
 		/^\d{2}:\d{2}$/.test(fallbackStart) && /^\d{2}:\d{2}$/.test(fallbackEnd) && fallbackStart < fallbackEnd;
+	const resolveDaySource = (day) => {
+		if (!source || typeof source !== 'object') {
+			return {};
+		}
+
+		const dayCandidates = [
+			day.key,
+			day.label,
+			day.label.toLowerCase(),
+			day.label.toUpperCase()
+		];
+
+		for (const candidate of dayCandidates) {
+			const value = source?.[candidate];
+			if (value && typeof value === 'object') {
+				return value;
+			}
+		}
+
+		return {};
+	};
 
 		if (source || hasFallbackRange) {
 			return WEEK_DAYS.map((day) => {
-				const item = source?.[day.key] || {};
-				const start = String(item.start || '').trim() || (hasFallbackRange ? fallbackStart : '');
-				const end = String(item.end || '').trim() || (hasFallbackRange ? fallbackEnd : '');
+			const item = resolveDaySource(day);
+			const start = String(item.start || item.open || item.openTime || '').trim() || (hasFallbackRange ? fallbackStart : '');
+			const end = String(item.end || item.close || item.closeTime || '').trim() || (hasFallbackRange ? fallbackEnd : '');
 				const off = Boolean(item.off) || start === 'OFF' || end === 'OFF';
 
 			return {
@@ -448,6 +573,57 @@ function resolveWeeklySchedule(venue) {
 				off
 			};
 		});
+	}
+
+	return [];
+}
+
+function resolveVenueServicesFromMetadata(venue) {
+	const metadata = normalizeVenueMetadata(venue?.metadata);
+
+	const normalizedFromNamedArray = (source) => {
+		if (!Array.isArray(source)) {
+			return [];
+		}
+
+		return source
+			.map((item) => {
+				if (typeof item === 'string') {
+					const name = item.trim();
+					return name ? { name } : null;
+				}
+
+				if (item && typeof item === 'object') {
+					const name = String(item.name || item.label || item.title || '').trim();
+					if (!name) {
+						return null;
+					}
+
+					return {
+						name,
+						description: String(item.description || '').trim(),
+						icon: String(item.icon || '').trim()
+					};
+				}
+
+				return null;
+			})
+			.filter(Boolean);
+	};
+
+	const prioritizedSources = [
+		metadata.selectedServiceNames,
+		metadata.services,
+		metadata.serviceNames,
+		metadata.availableServices,
+		metadata.amenities
+	];
+
+	for (const source of prioritizedSources) {
+		const normalized = normalizedFromNamedArray(source);
+		if (normalized.length) {
+			return normalized;
+		}
 	}
 
 	return [];
@@ -542,10 +718,50 @@ function normalizeScheduleLabel(item) {
 	return WEEK_DAYS.find((day) => day.key === key)?.label || item?.label || '';
 }
 
+function normalizeTextForIcon(value) {
+	return String(value || '')
+		.toLowerCase()
+		.normalize('NFD')
+		.replace(/[\u0300-\u036f]/g, '')
+		.trim();
+}
+
+function resolveServiceIcon(service) {
+	const normalizedName = normalizeTextForIcon(service?.name || service?.label || service?.title || '');
+
+	if (!normalizedName) {
+		return '🛎️';
+	}
+
+	const serviceIconRules = [
+		{ keywords: ['online', 'dat san', 'booking', 'reservation'], icon: '📱' },
+		{ keywords: ['ship', 'delivery', 'giao hang'], icon: '🚚' },
+		{ keywords: ['takeaway', 'mang ve'], icon: '🥡' },
+		{ keywords: ['ve theo gio', 'hour', 'gio'], icon: '⏱️' },
+		{ keywords: ['dung cu', 'equipment', 'cho thue'], icon: '🏸' },
+		{ keywords: ['lop', 'huan luyen', 'training', 'coach'], icon: '🎓' },
+		{ keywords: ['parking', 'giu xe'], icon: '🅿️' },
+		{ keywords: ['wifi', 'internet'], icon: '📶' },
+		{ keywords: ['private', 'phong rieng', 'vip'], icon: '🔒' },
+		{ keywords: ['event', 'su kien'], icon: '🎉' },
+		{ keywords: ['kids', 'tre em'], icon: '🧒' },
+		{ keywords: ['pet', 'thu cung'], icon: '🐾' },
+		{ keywords: ['music', 'am nhac'], icon: '🎵' },
+		{ keywords: ['food', 'do an', 'restaurant', 'am thuc'], icon: '🍽️' }
+	];
+
+	const matchedRule = serviceIconRules.find((rule) =>
+		rule.keywords.some((keyword) => normalizedName.includes(keyword))
+	);
+
+	return matchedRule?.icon || '🛎️';
+}
+
 function VenueDetailPage() {
 	const { venueId } = useParams();
 	const location = useLocation();
 	const navigate = useNavigate();
+	const { language } = useLanguage();
 	const { token, user } = useAuth();
 	const { theme } = useTheme();
 	const apiUrl = useMemo(() => import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api', []);
@@ -554,12 +770,14 @@ function VenueDetailPage() {
 	const [error, setError] = useState('');
 	const [venue, setVenue] = useState(null);
 	const [reviews, setReviews] = useState([]);
+	const [venueServices, setVenueServices] = useState([]);
 	const [communityStats, setCommunityStats] = useState({ averageRating: 0, totalReviews: 0 });
 	const [venueGalleryImages, setVenueGalleryImages] = useState([]);
 	const [allReviewImages, setAllReviewImages] = useState([]);
 	const [showOpeningHoursModal, setShowOpeningHoursModal] = useState(false);
 	const [showCommentModal, setShowCommentModal] = useState(false);
 	const [showImagesModal, setShowImagesModal] = useState(false);
+	const [activeImagePreview, setActiveImagePreview] = useState(null);
 	const [showFavoritesModal, setShowFavoritesModal] = useState(false);
 	const [showShareModal, setShowShareModal] = useState(false);
 	const [showVenueReportModal, setShowVenueReportModal] = useState(false);
@@ -596,7 +814,7 @@ function VenueDetailPage() {
 		content: '',
 		images: []
 	});
-	const i18n = PAGE_I18N.en;
+	const i18n = PAGE_I18N[language] || PAGE_I18N.vi;
 	const [favoriteLoading, setFavoriteLoading] = useState(false);
 	const [isFavorite, setIsFavorite] = useState(false);
 	const [favoriteError, setFavoriteError] = useState('');
@@ -630,6 +848,7 @@ function VenueDetailPage() {
 	}, [apiBase, venueId]);
 
 	const weeklySchedule = useMemo(() => resolveWeeklySchedule(venue), [venue]);
+	const fallbackVenueServices = useMemo(() => resolveVenueServicesFromMetadata(venue), [venue]);
 	const todaySchedule = useMemo(() => resolveTodaySchedule(weeklySchedule), [weeklySchedule]);
 	const venuePriceRange = useMemo(() => resolveVenuePriceRange(venue), [venue]);
 	const fullVenueDescription = useMemo(() => resolveVenueDescription(venue), [venue]);
@@ -1010,6 +1229,38 @@ function VenueDetailPage() {
 	useEffect(() => {
 		setIsDescriptionExpanded(false);
 	}, [venueId]);
+
+	// Fetch venue services
+	useEffect(() => {
+		if (!venueId) return;
+		let active = true;
+
+		async function loadVenueServices() {
+			try {
+				const response = await axios.get(
+					`${apiUrl}/venues/${venueId}/services`,
+					{ headers: { 'Content-Type': 'application/json' } }
+				);
+				if (!active) {
+					return;
+				}
+
+				const servicesFromApi = Array.isArray(response.data?.services) ? response.data.services : [];
+				setVenueServices(servicesFromApi.length ? servicesFromApi : fallbackVenueServices);
+			} catch (err) {
+				console.error('Error fetching venue services:', err);
+				if (active) {
+					setVenueServices(fallbackVenueServices);
+				}
+			}
+		}
+
+		loadVenueServices();
+
+		return () => {
+			active = false;
+		};
+	}, [venueId, apiUrl, fallbackVenueServices]);
 
 	useEffect(() => {
 		let active = true;
@@ -1795,6 +2046,37 @@ function VenueDetailPage() {
 		}
 	};
 
+	const handleDeleteReply = async (review, reply) => {
+		if (!reply?.canDelete) {
+			return;
+		}
+
+		const confirmed = window.confirm('Are you sure you want to delete this discussion?');
+		if (!confirmed) {
+			return;
+		}
+
+		setReviewActionError('');
+		try {
+			await deleteVenueReviewReply(venueId, review.id, reply.id);
+			await reloadCommunityData();
+		} catch (error) {
+			setReviewActionError(error?.response?.data?.message || 'Unable to delete this discussion.');
+		}
+	};
+
+	const handleOpenImagePreview = (imageUrl, altText = 'Review attachment') => {
+		const resolvedUrl = resolveAssetUrl(imageUrl, apiBase);
+		if (!resolvedUrl) {
+			return;
+		}
+
+		setActiveImagePreview({
+			url: resolvedUrl,
+			alt: altText
+		});
+	};
+
 	const handleEditReview = (review) => {
 		if (!review?.canDelete) {
 			return;
@@ -1849,270 +2131,323 @@ function VenueDetailPage() {
 	const isRealtimeReady = Boolean(currentOpen);
 	const displayStart = currentOpen?.start || todaySchedule?.open || 'N/A';
 	const displayEnd = currentOpen?.end || todaySchedule?.close || 'N/A';
-	const displayStatusText = !isRealtimeReady ? 'Updating' : currentOpen?.isOpen ? 'Open now' : 'Closed now';
+	const displayStatusText = !isRealtimeReady ? i18n.updating : currentOpen?.isOpen ? i18n.openNow : i18n.closedNow;
 	const showOpenState = isRealtimeReady ? currentOpen?.isOpen : !todaySchedule?.off;
-	const displaySchedule = openingRealtime?.weeklySchedule || weeklySchedule;
+	const displaySchedule =
+		Array.isArray(openingRealtime?.weeklySchedule) && openingRealtime.weeklySchedule.length > 0
+			? openingRealtime.weeklySchedule
+			: weeklySchedule;
+	const venueAddress = String(venue?.address || '').trim();
+	const venueLatitude = Number(venue?.latitude);
+	const venueLongitude = Number(venue?.longitude);
+
+	const handleOpenInternalVenueMap = () => {
+		const params = new URLSearchParams();
+		const venueId = String(venue?.id || '').trim();
+
+		if (venueId) {
+			params.set('venueId', venueId);
+		}
+
+		if (Number.isFinite(venueLatitude) && Number.isFinite(venueLongitude)) {
+			params.set('lat', String(venueLatitude));
+			params.set('lng', String(venueLongitude));
+		}
+
+		navigate(`${APP_ROUTES.CITY_MAP}${params.toString() ? `?${params.toString()}` : ''}`);
+	};
 
 	return (
 		<section className={`venue-detail-page theme-${theme}`}>
-			<div className="venue-detail-topbar">
-				<button type="button" className="venue-detail-back-btn" onClick={handleBackNavigation}>
-					← Back
-				</button>
-			</div>
+			{/* Hero Section with Image Auto-Rotation */}
+			<HeroVenueSection
+				venue={venue}
+				images={venueGalleryImages}
+				onPreviewImage={(imageUrl) => handleOpenImagePreview(imageUrl, 'Venue cover image')}
+				onBackClick={handleBackNavigation}
+				onWriteReview={() => {
+					setEditingReviewId(null);
+					setReviewError('');
+					setReviewForm({ rating: null, title: '', comment: '', images: [] });
+					setShowCommentModal(true);
+				}}
+				onAddPhotos={() => setShowImagesModal(true)}
+				onShare={() => setShowShareModal(true)}
+				onSave={handleToggleFavorite}
+				isSaved={isFavorite}
+				isOpen={showOpenState}
+				rating={Number(communityStats.averageRating || 0)}
+				reviews={Number(communityStats.totalReviews || 0)}
+				category={String(venue?.category || 'Dining').trim()}
+				openingHours={`${formatDisplayTime(displayStart)} - ${formatDisplayTime(displayEnd)}`}
+			/>
 
-			<article className="venue-detail-hero-card">
-				<div className="venue-detail-cover-wrap">
-					<img src={resolveCoverImage(venue)} alt={resolveVenueName(venue)} className="venue-detail-cover" />
-				</div>
 
-				<div className="venue-detail-main-info">
-					<div className="venue-detail-quick-actions">
-						<button
-							type="button"
-							className={`venue-icon-btn venue-chat-toggle-btn ${showChatWidget ? 'is-active' : ''}`}
-							onClick={() => {
-								if (!authToken) {
-									navigate(APP_ROUTES.LOGIN);
-									return;
-								}
-
-								setShowChatWidget((current) => !current);
+			{/* Venue Info Layout */}
+			<div className="venue-detail-info-grid">
+				<div className="venue-detail-info-left">
+					<VenueInfoSection
+						description={visibleVenueDescription || (language === 'vi' ? 'Chưa có mô tả cho quán này.' : 'No description available for this venue.')}
+						services={Array.isArray(venueServices) ? venueServices : []}
+						labels={{
+							aboutTitle: i18n.aboutTitle,
+							servicesTitle: i18n.servicesTitle,
+							serviceFallback: i18n.serviceFallback,
+							noDescription: language === 'vi' ? 'Chưa có mô tả cho quán này.' : 'No description available for this venue.'
+						}}
+						resolveServiceIcon={resolveServiceIcon}
+						showServices={false}
+					/>
+					{venue ? (
+						<VenueLocationMap
+							venue={venue}
+							address={venueAddress}
+							latitude={venueLatitude}
+							longitude={venueLongitude}
+							weeklySchedule={displaySchedule || []}
+							currentStatusText={displayStatusText}
+							isOpenNow={showOpenState}
+							labels={{
+								title: i18n.mapSectionTitle,
+								openingHours: i18n.mapOpeningHours,
+								noSchedule: i18n.mapNoSchedule,
+								weekDays: i18n.weekDays,
+								addressLabel: i18n.mapAddressLabel,
+								addressFallback: i18n.mapAddressFallback,
+								openMapTitle: i18n.openInternalMap
 							}}
-							aria-label="Open venue chat"
-						>
-							💬
-						</button>
-						<button
-							type="button"
-							className={`venue-icon-btn ${isFavorite ? 'is-active' : ''}`}
-							onClick={handleToggleFavorite}
-							disabled={favoriteLoading}
-							aria-label="Favorite"
-						>
-							{isFavorite ? '♥' : '♡'}
-						</button>
-					</div>
-
-					{showChatWidget ? (
-						<div className="venue-chat-widget">
-							<div className="venue-chat-widget-header">
-								<div className="venue-chat-widget-brand">
-									<div className="venue-chat-widget-avatar">
-										<img src={resolveCoverImage(venue)} alt={resolveVenueName(venue)} loading="lazy" />
-									</div>
-									<div>
-										<strong>{chatVenueMeta?.ownerName || 'Venue owner'}</strong>
-										<p>{showOpenState ? 'Open now' : 'Closed now'} · {venue.ward_name || 'Area updating'}</p>
-									</div>
-								</div>
-								<div className="venue-chat-widget-actions">
-									<button
-										type="button"
-										className="venue-chat-widget-minimize"
-										onClick={() => setShowChatWidget(false)}
-										aria-label="Collapse chat"
-									>
-										−
-									</button>
-								</div>
-							</div>
-
-							<div className="venue-chat-widget-body">
-								<div className="venue-chat-widget-intro">
-									<p className="venue-chat-widget-intro-title">Current venue info</p>
-									<p><strong>{resolveVenueName(venue)}</strong></p>
-									<p>📍 {venue.address || 'No address yet'}</p>
-									<p>💲 {venuePriceRange}</p>
-									<p>⭐ {Number(communityStats.averageRating || 0).toFixed(1)}/5 · {communityStats.totalReviews} reviews</p>
-								</div>
-
-								<div className="venue-chat-widget-messages" ref={chatListRef}>
-									{chatLoading ? (
-										<div className="venue-chat-widget-empty">
-													<p>Loading messages...</p>
-										</div>
-									) : chatError ? (
-										<div className="venue-chat-widget-empty">
-											<p>{chatError}</p>
-										</div>
-									) : chatMessages.length ? (
-										chatMessages.map((message) => {
-											const contextLine = buildChatContextLine(message, chatVenueMeta);
-											const resolvedMessageVenueName = String(message?.venueName || '').trim();
-											const shouldShowVenueContext = Boolean(contextLine || resolvedMessageVenueName);
-
-											return (
-											<article
-												key={message.id}
-												className={`venue-chat-widget-bubble ${message.sender === 'seller' ? 'is-seller' : 'is-customer'}`}
-											>
-												<header>
-													<strong>{message.author}</strong>
-													<span>{new Date(message.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</span>
-												</header>
-                                                {shouldShowVenueContext ? <p className="venue-chat-widget-context">{contextLine}</p> : null}
-														<p>{message.content}</p>
-													</article>
-												);
-											})
-									) : !canUseVenueChat ? (
-										<div className="venue-chat-widget-empty">
-											<p>This venue is not linked to an owner for chat yet.</p>
-										</div>
-									) : isCurrentUserVenueOwner && !effectiveSelectedChatThreadId ? (
-										<div className="venue-chat-widget-empty">
-											<p>Open chat from the header message icon to reply as venue owner.</p>
-										</div>
-									) : (
-										<div className="venue-chat-widget-empty">
-											<p>Start chatting with this venue. Messages are grouped by venue owner.</p>
-										</div>
-									)}
-								</div>
-
-								<form className="venue-chat-widget-form" onSubmit={handleSendChatMessage}>
-									<textarea
-										rows="3"
-										value={chatInput}
-										onChange={(event) => setChatInput(event.target.value)}
-										placeholder="Type your message to this venue..."
-										disabled={!authToken || !canUseVenueChat}
-									/>
-									<div className="venue-chat-widget-form-footer">
-										<span>{chatMessages.length} messages</span>
-										<select
-											className="venue-chat-widget-context-select"
-											value={selectedChatContextValue}
-											onChange={(event) => setSelectedChatContextValue(event.target.value)}
-											disabled={!authToken || !canUseVenueChat || chatSending || chatLoading}
-										>
-											{chatContextOptions.map((option) => (
-												<option key={`chat-context-${option.id}`} value={String(option.id)}>
-													{option.name}
-												</option>
-											))}
-											<option value="other">Other</option>
-										</select>
-                                        {authToken ? (
-                                            <button
-                                                type="submit"
-                                                disabled={chatSending || chatLoading || !chatInput.trim() || !canUseVenueChat || (isCurrentUserVenueOwner && !activeChatThreadId)}
-                                            >
-												{chatSending ? 'Sending...' : 'Send'}
-                                            </button>
-                                        ) : (
-                                            <button type="button" onClick={() => navigate(APP_ROUTES.LOGIN)}>
-												Sign in
-                                            </button>
-                                        )}
-									</div>
-								</form>
-							</div>
-						</div>
+							onOpenInternalMap={handleOpenInternalVenueMap}
+						/>
 					) : null}
-
-					<h1>{resolveVenueName(venue)}</h1>
-					{venue.address ? (
-						<button
-							type="button"
-							className="venue-detail-address-link"
-							onClick={handleGoToMapLocation}
-							title="Click to open this location on the city map"
-						>
-							📍 {venue.address}
-						</button>
-					) : (
-						<p className="venue-detail-address">📍 No address yet</p>
-					)}
-					{venue.ward_name ? <p className="venue-detail-ward">🗺️ {venue.ward_name}</p> : null}
-
-					<p className="venue-detail-opening-inline">
-						<span className={showOpenState ? 'is-open' : 'is-close'}>
-							{displayStatusText}
-						</span>
-						<span>
-							{formatDisplayTime(displayStart)} - {formatDisplayTime(displayEnd)}
-						</span>
-						<button
-							type="button"
-							className="venue-open-info-btn"
-							onClick={() => setShowOpeningHoursModal(true)}
-							aria-label="View opening hours details"
-						>
-							!
-						</button>
-					</p>
-
-					<p className="venue-detail-price-row">$ {venuePriceRange}</p>
-
-					<div className="venue-detail-rating-row">
-						<StarRatingDisplay rating={communityStats.averageRating || 0} />
-						<span>{Number(communityStats.averageRating || 0).toFixed(1)}/5 ({communityStats.totalReviews} reviews)</span>
+					<div className="venue-services-container venue-services-container--after-location">
+						<h2>{i18n.servicesTitle}</h2>
+						{Array.isArray(venueServices) && venueServices.length > 0 ? (
+							<div className="services-grid">
+								{venueServices.map((service, idx) => (
+									<div key={idx} className="service-card">
+										<div className="service-icon">
+											{resolveServiceIcon(service)}
+										</div>
+										<div className="service-name">
+											{service.name || i18n.serviceFallback}
+										</div>
+										{service.description && (
+											<div className="service-description">
+												{service.description}
+											</div>
+										)}
+									</div>
+								))}
+							</div>
+						) : (
+							<p className="venue-services-empty">{i18n.servicesEmpty}</p>
+						)}
 					</div>
-
-					<div className="venue-detail-description-wrap">
-						<p className="venue-detail-description">
-							<strong>Description :</strong> {visibleVenueDescription || 'Description is being updated.'}
-						</p>
-						{collapsedVenueDescription.truncated ? (
+				</div>
+				<div className="venue-detail-info-right">
+					<div className="venue-detail-contact-card">
+						<h3>{i18n.contactTitle}</h3>
+						<div className="venue-detail-contact-item">
+							<span className="venue-detail-contact-label">{i18n.phoneLabel}</span>
+							<a
+								href={`tel:${String(venue?.phone || '').trim()}`}
+								className="venue-detail-contact-value"
+							>
+								{String(venue?.phone || '').trim() || i18n.notUpdated}
+							</a>
+						</div>
+						<div className="venue-detail-contact-item">
+							<span className="venue-detail-contact-label">{i18n.addressLabel}</span>
 							<button
 								type="button"
-								className="venue-detail-description-toggle"
-								onClick={() => setIsDescriptionExpanded((current) => !current)}
+								className="venue-detail-location-btn"
+								onClick={handleOpenInternalVenueMap}
+								title={i18n.openInternalMap}
 							>
-								{isDescriptionExpanded ? 'Show less' : 'Show more'}
+								📍 {venueAddress || i18n.notUpdated}
 							</button>
-						) : null}
+						</div>
+
+						<div className="venue-detail-chat-anchor">
+							<button
+								type="button"
+								className="venue-detail-message-btn"
+								onClick={() => {
+									if (!authToken) {
+										navigate(APP_ROUTES.LOGIN);
+										return;
+									}
+
+									setShowChatWidget((prev) => !prev);
+								}}
+							>
+								{i18n.messageVenue}
+							</button>
+
+							{showChatWidget && authToken && canUseVenueChat ? (
+								<div className="venue-chat-widget">
+									<div className="venue-chat-widget-header">
+										<div className="venue-chat-widget-brand">
+											<div className="venue-chat-widget-avatar">
+												<img src={resolveCoverImage(venue)} alt={resolveVenueName(venue)} loading="lazy" />
+											</div>
+											<div>
+												<strong>{chatVenueMeta?.ownerName || i18n.chatOwnerFallback}</strong>
+												<p>{showOpenState ? i18n.openNow : i18n.closedNow} · {venue.ward_name || i18n.areaUpdating}</p>
+											</div>
+										</div>
+										<div className="venue-chat-widget-actions">
+											<button
+												type="button"
+												className="venue-chat-widget-minimize"
+												onClick={() => setShowChatWidget(false)}
+												aria-label="Collapse chat"
+											>
+												−
+											</button>
+										</div>
+									</div>
+
+									<div className="venue-chat-widget-body">
+										<div className="venue-chat-widget-intro">
+											<p className="venue-chat-widget-intro-title">{i18n.currentVenueInfo}</p>
+											<p><strong>{resolveVenueName(venue)}</strong></p>
+											<p>📍 {venue.address || i18n.noAddressYet}</p>
+											<p>💲 {venuePriceRange}</p>
+											<p>⭐ {Number(communityStats.averageRating || 0).toFixed(1)}/5 · {communityStats.totalReviews} {i18n.reviewsUnit}</p>
+										</div>
+
+										<div className="venue-chat-widget-messages" ref={chatListRef}>
+											{chatLoading ? (
+												<div className="venue-chat-widget-empty">
+													<p>{i18n.loadingMessages}</p>
+												</div>
+											) : chatError ? (
+												<div className="venue-chat-widget-empty">
+													<p>{chatError}</p>
+												</div>
+											) : chatMessages.length ? (
+												chatMessages.map((message) => {
+													const contextLine = buildChatContextLine(message, chatVenueMeta);
+													const resolvedMessageVenueName = String(message?.venueName || '').trim();
+													const shouldShowVenueContext = Boolean(contextLine || resolvedMessageVenueName);
+
+													return (
+													<article
+														key={message.id}
+														className={`venue-chat-widget-bubble ${message.sender === 'seller' ? 'is-seller' : 'is-customer'}`}
+													>
+														<header>
+															<strong>{message.author}</strong>
+															<span>{new Date(message.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</span>
+														</header>
+														{shouldShowVenueContext ? <p className="venue-chat-widget-context">{contextLine}</p> : null}
+														<p>{message.content}</p>
+													</article>
+													);
+												})
+											) : !canUseVenueChat ? (
+												<div className="venue-chat-widget-empty">
+													<p>{i18n.chatUnavailable}</p>
+												</div>
+											) : isCurrentUserVenueOwner && !effectiveSelectedChatThreadId ? (
+												<div className="venue-chat-widget-empty">
+													<p>{i18n.openFromHeaderHint}</p>
+												</div>
+											) : (
+												<div className="venue-chat-widget-empty">
+													<p>{i18n.startChatHint}</p>
+												</div>
+											)}
+										</div>
+
+										<form className="venue-chat-widget-form" onSubmit={handleSendChatMessage}>
+											<textarea
+												rows="3"
+												value={chatInput}
+												onChange={(event) => setChatInput(event.target.value)}
+												placeholder={i18n.typeMessagePlaceholder}
+												disabled={!authToken || !canUseVenueChat}
+											/>
+											<div className="venue-chat-widget-form-footer">
+												<span>{chatMessages.length} messages</span>
+												<select
+													className="venue-chat-widget-context-select"
+													value={selectedChatContextValue}
+													onChange={(event) => setSelectedChatContextValue(event.target.value)}
+													disabled={!authToken || !canUseVenueChat || chatSending || chatLoading}
+												>
+													{chatContextOptions.map((option) => (
+														<option key={`chat-context-${option.id}`} value={String(option.id)}>
+															{option.name}
+														</option>
+													))}
+													<option value="other">{i18n.other}</option>
+												</select>
+												{authToken ? (
+													<button
+														type="submit"
+														disabled={chatSending || chatLoading || !chatInput.trim() || !canUseVenueChat || (isCurrentUserVenueOwner && !activeChatThreadId)}
+													>
+														{chatSending ? i18n.sending : i18n.send}
+													</button>
+												) : (
+													<button type="button" onClick={() => navigate(APP_ROUTES.LOGIN)}>
+														{i18n.signIn}
+													</button>
+												)}
+											</div>
+										</form>
+									</div>
+								</div>
+							) : null}
+						</div>
 					</div>
 
-					{favoriteError ? <p className="venue-form-error">{favoriteError}</p> : null}
-
-					<div className="venue-detail-bottom-actions">
-						<button
-							type="button"
-							className="venue-report-btn"
-							onClick={openVenueReportModal}
-						>
-							⚑ Report
-						</button>
-					</div>
+					<SimilarVenuesSection
+						currentVenueId={venue?.id}
+						currentCategoryId={Number(venue?.category_id || 0)}
+						currentWardId={String(venue?.ward_id || '').trim()}
+						currentCategoryLabel={String(venue?.category_name || venue?.category || '').trim()}
+						currentWardLabel={String(venue?.ward_name || '').trim()}
+						maxItems={3}
+						labels={{
+							title: i18n.similarTitle,
+							descriptionPrefix: i18n.similarDescriptionPrefix,
+							descriptionMiddle: i18n.similarDescriptionMiddle,
+							loading: i18n.similarLoading,
+							empty: i18n.similarEmpty,
+							errorPrefix: i18n.similarErrorPrefix,
+							viewLabel: i18n.similarView,
+							reviews: i18n.reviewsUnit,
+							defaultCategoryLabel: language === 'vi' ? 'địa điểm' : 'venues',
+							defaultWardLabel: language === 'vi' ? 'khu vực này' : 'this area'
+						}}
+						onVenueClick={(venueId) => {
+							navigate(`/venues/${venueId}`);
+							window.scrollTo(0, 0);
+						}}
+					/>
 				</div>
-			</article>
-
-			<div className="venue-detail-actions-row">
-				<button
-					type="button"
-					className="venue-action-btn"
-					onClick={handleOpenFavoriteCollection}
-					disabled={favoriteCollectionLoading}
-				>
-					{isFavorite ? '♥' : '♡'} Favorites & Collections
-				</button>
-				<button
-					type="button"
-					className="venue-action-btn"
-					onClick={() => {
-						setEditingReviewId(null);
-						setReviewError('');
-						setReviewForm({ rating: null, title: '', comment: '', images: [] });
-						setShowCommentModal(true);
-					}}
-				>
-					💬 Review
-				</button>
-				<button type="button" className="venue-action-btn" onClick={() => setShowImagesModal(true)}>🖼️ Images</button>
-				<button
-					type="button"
-					className="venue-action-btn"
-					onClick={() => setShowShareModal(true)}
-				>
-					↗ Share
-				</button>
 			</div>
 
+
 			<section className="venue-detail-reviews-section">
-				<h2>Reviews</h2>
+				<div className="venue-detail-reviews-header">
+					<h2>Reviews</h2>
+					<button
+						type="button"
+						className="venue-review-quick-comment-btn"
+						onClick={() => {
+							setEditingReviewId(null);
+							setReviewError('');
+							setReviewForm({ rating: null, title: '', comment: '', images: [] });
+							setShowCommentModal(true);
+						}}
+					>
+						{language === 'vi' ? '💬 Bình luận ngay' : '💬 Add a comment'}
+					</button>
+				</div>
 				{reviewActionError ? <p className="venue-form-error">{reviewActionError}</p> : null}
 
 				{!reviews.length ? <p>No reviews for this venue yet.</p> : null}
@@ -2136,6 +2471,8 @@ function VenueDetailPage() {
 											src={resolveAssetUrl(imageUrl, apiBase)}
 											alt="Review attachment"
 											loading="lazy"
+											className="venue-review-clickable-image"
+											onClick={() => handleOpenImagePreview(imageUrl, 'Review attachment')}
 										/>
 									))}
 								</div>
@@ -2211,6 +2548,8 @@ function VenueDetailPage() {
 															src={resolveAssetUrl(imageUrl, apiBase)}
 															alt="Reply attachment"
 															loading="lazy"
+															className="venue-review-clickable-image"
+															onClick={() => handleOpenImagePreview(imageUrl, 'Reply attachment')}
 														/>
 													))}
 												</div>
@@ -2234,6 +2573,17 @@ function VenueDetailPage() {
 													<span aria-hidden="true">💬</span>
 													<span>{i18n.discuss}</span>
 												</button>
+
+												{reply.canDelete ? (
+													<button
+														type="button"
+														className="venue-review-action-btn is-danger"
+														onClick={() => handleDeleteReply(review, reply)}
+													>
+														<span aria-hidden="true">🗑</span>
+														<span>Delete</span>
+													</button>
+												) : null}
 											</div>
 										</div>
 									))}
@@ -2671,6 +3021,8 @@ function VenueDetailPage() {
 											src={resolveAssetUrl(imageUrl, apiBase)}
 											alt="Venue gallery"
 											loading="lazy"
+											className="venue-review-clickable-image"
+											onClick={() => handleOpenImagePreview(imageUrl, 'Venue gallery image')}
 											onError={(event) => {
 												event.currentTarget.onerror = null;
 												event.currentTarget.src = FALLBACK_VENUE_IMAGE;
@@ -2692,6 +3044,8 @@ function VenueDetailPage() {
 											src={resolveAssetUrl(imageUrl, apiBase)}
 											alt="Review gallery"
 											loading="lazy"
+											className="venue-review-clickable-image"
+											onClick={() => handleOpenImagePreview(imageUrl, 'Review gallery image')}
 											onError={(event) => {
 												event.currentTarget.onerror = null;
 												event.currentTarget.src = FALLBACK_VENUE_IMAGE;
@@ -2701,6 +3055,24 @@ function VenueDetailPage() {
 								</div>
 							) : null}
 						</section>
+					</div>
+				</div>
+			) : null}
+
+			{activeImagePreview ? (
+				<div className="venue-modal-overlay" onClick={() => setActiveImagePreview(null)}>
+					<div className="venue-modal-card venue-modal-image-preview" onClick={(event) => event.stopPropagation()}>
+						<button type="button" className="venue-modal-close" onClick={() => setActiveImagePreview(null)}>×</button>
+						<img
+							className="venue-image-preview-full"
+							src={activeImagePreview.url}
+							alt={activeImagePreview.alt || 'Preview image'}
+							loading="lazy"
+							onError={(event) => {
+								event.currentTarget.onerror = null;
+								event.currentTarget.src = FALLBACK_VENUE_IMAGE;
+							}}
+						/>
 					</div>
 				</div>
 			) : null}
