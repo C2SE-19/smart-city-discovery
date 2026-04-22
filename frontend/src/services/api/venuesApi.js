@@ -240,3 +240,18 @@ export async function detectWardRequest(payload) {
   const response = await apiClient.post('/gis/detect-ward', payload);
   return response.data;
 }
+
+export async function geocodeVenueAddress(payload, options = {}) {
+  const { signal, timeout = 6500 } = options || {};
+  const response = await apiClient.post('/gis/geocode-address', payload, {
+    signal,
+    timeout,
+  });
+  return response.data;
+}
+
+export function clearVenueDetailCache(venueId) {
+  invalidateVenueScopedCaches(venueId);
+  clearVenuesListCaches();
+}
+

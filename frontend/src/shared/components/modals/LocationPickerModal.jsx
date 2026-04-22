@@ -3,7 +3,7 @@ import { GeoJSON, MapContainer, Marker, Pane, TileLayer, Tooltip, useMap, useMap
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { fetchWards } from '../../../services/api/wardsApi';
-import { detectWardRequest } from '../../../services/api/venuesApi';
+import { detectWardRequest, geocodeVenueAddress } from '../../../services/api/venuesApi';
 import './LocationPickerModal.css';
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
 import markerShadow from 'leaflet/dist/images/marker-shadow.png';
@@ -12,6 +12,12 @@ const DEFAULT_LOCATION = { lat: 16.0471, lng: 108.2068 };
 const DEFAULT_ZOOM = 13;
 const SELECTED_WARD_ZOOM = 14;
 const PICKED_LOCATION_ZOOM = 17;
+
+function stripLeadingHouseNumber(addressQuery) {
+  return String(addressQuery || '')
+    .replace(/^\s*\d+[a-zA-Z]?(?:[/-]\d+[a-zA-Z]?)?\s*/u, '')
+    .trim();
+}
 
 function normalizeBoundaryInput(boundary) {
   if (!boundary) {
@@ -267,15 +273,24 @@ function MapViewportController({ center, zoom }) {
   return null;
 }
 
-function LocationPickerModal({ isOpen, onClose, onLocationSelect, defaultLocation = null, selectedWardId = '' }) {
+function LocationPickerModal({
+  isOpen,
+  onClose,
+  onLocationSelect,
+  defaultLocation = null,
+  selectedWardId = '',
+  initialAddressQuery = ''
+}) {
   const [selectedLocation, setSelectedLocation] = useState(null);
   const [mapCenter, setMapCenter] = useState(DEFAULT_LOCATION);
   const [mapZoom, setMapZoom] = useState(DEFAULT_ZOOM);
   const [wards, setWards] = useState([]);
   const [loadingWards, setLoadingWards] = useState(false);
   const [isValidatingLocation, setIsValidatingLocation] = useState(false);
+  const [isResolvingAddress, setIsResolvingAddress] = useState(false);
   const [wardLoadError, setWardLoadError] = useState('');
   const [selectionError, setSelectionError] = useState('');
+  const [addressResolveMessage, setAddressResolveMessage] = useState('');
 
   const defaultLocationLatitude = Number(defaultLocation?.lat);
   const defaultLocationLongitude = Number(defaultLocation?.lng);
@@ -336,8 +351,182 @@ function LocationPickerModal({ isOpen, onClose, onLocationSelect, defaultLocatio
     setMapCenter(selectedWardCenter || defaultCenter);
     setMapZoom(selectedWardCenter ? SELECTED_WARD_ZOOM : hasDefaultLocation ? PICKED_LOCATION_ZOOM : DEFAULT_ZOOM);
     setSelectionError('');
+    setAddressResolveMessage('');
     setIsValidatingLocation(false);
+    setIsResolvingAddress(false);
   }, [isOpen, hasDefaultLocation, defaultCenter, selectedWardCenter]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    const normalizedAddressQuery = String(initialAddressQuery || '').trim();
+    if (!normalizedAddressQuery) {
+      return;
+    }
+
+    let isMounted = true;
+    const abortController = new AbortController();
+
+    const resolveAddressToMapPoint = async () => {
+      setIsResolvingAddress(true);
+      setAddressResolveMessage('Searching map position from entered address...');
+
+      try {
+        const normalizedAddressWithoutHouseNumber = stripLeadingHouseNumber(normalizedAddressQuery);
+        const geocodeAttempts = [
+          {
+            addressQuery: normalizedAddressQuery,
+            wardId: normalizedSelectedWardId || null
+          }
+        ];
+
+        if (
+          normalizedAddressWithoutHouseNumber &&
+          normalizedAddressWithoutHouseNumber !== normalizedAddressQuery
+        ) {
+          geocodeAttempts.push({
+            addressQuery: normalizedAddressWithoutHouseNumber,
+            wardId: normalizedSelectedWardId || null
+          });
+        }
+
+        if (normalizedSelectedWardId) {
+          geocodeAttempts.push({
+            addressQuery: normalizedAddressQuery,
+            wardId: null
+          });
+
+          if (
+            normalizedAddressWithoutHouseNumber &&
+            normalizedAddressWithoutHouseNumber !== normalizedAddressQuery
+          ) {
+            geocodeAttempts.push({
+              addressQuery: normalizedAddressWithoutHouseNumber,
+              wardId: null
+            });
+          }
+        }
+
+        const dedupedAttempts = geocodeAttempts.filter((attempt, index, source) => {
+          const attemptKey = `${attempt.addressQuery}::${attempt.wardId || ''}`;
+          return source.findIndex((item) => `${item.addressQuery}::${item.wardId || ''}` === attemptKey) === index;
+        });
+
+        let geocoded = null;
+        let lastGeocodeError = null;
+
+        for (const attempt of dedupedAttempts) {
+          try {
+            const nextResult = await geocodeVenueAddress(attempt, {
+              signal: abortController.signal,
+              timeout: 6500,
+            });
+            geocoded = nextResult;
+            break;
+          } catch (attemptError) {
+            lastGeocodeError = attemptError;
+
+            if (attemptError?.code === 'ERR_CANCELED') {
+              return;
+            }
+
+            const attemptStatusCode = Number(attemptError?.response?.status) || 0;
+            if (attemptStatusCode === 429) {
+              break;
+            }
+          }
+        }
+
+        if (!geocoded) {
+          throw lastGeocodeError || new Error('Unable to geocode address');
+        }
+
+        if (!isMounted) {
+          return;
+        }
+
+        const latitude = Number(geocoded?.latitude ?? geocoded?.lat);
+        const longitude = Number(geocoded?.longitude ?? geocoded?.lng);
+
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+          setAddressResolveMessage('Could not locate this address. Please click directly on the map.');
+          return;
+        }
+
+        const nextLocation = { lat: latitude, lng: longitude };
+        const isWithinAllowedBoundary =
+          !allowedBoundaries.length ||
+          allowedBoundaries.some((boundary) => isPointInsideBoundary(nextLocation, boundary));
+
+        const isFallback = Boolean(geocoded?.isFallbackLocation);
+
+        setSelectedLocation(nextLocation);
+        setMapCenter(nextLocation);
+        setMapZoom(PICKED_LOCATION_ZOOM);
+        setSelectionError('');
+        const hasExactHouseNumberMatch = Boolean(geocoded?.exactHouseNumberMatched);
+        const detectedWardName = String(geocoded?.wardName || geocoded?.ward_name || '').trim();
+        const selectedWardName = String(selectedWard?.name || '').trim();
+        
+        let messageText = hasExactHouseNumberMatch
+          ? 'Address found. Map moved to the exact location.'
+          : 'Address found at street level. Please fine-tune the pin if house number is not exact.';
+        
+        if (isFallback) {
+          if (selectedWardName && detectedWardName) {
+            messageText += ` (⚠️ You selected ${selectedWardName}, but this address is in ${detectedWardName}.)`;
+          } else if (detectedWardName) {
+            messageText += ` (⚠️ This address is in ${detectedWardName}, outside the selected ward.)`;
+          } else {
+            messageText += ' (⚠️ Location is approximate - found outside selected ward area)';
+          }
+        }
+
+        if (!isWithinAllowedBoundary && !isFallback) {
+          if (selectedWardName) {
+            messageText += ` (⚠️ Address found outside ${selectedWardName}. You can still inspect this point, then adjust ward/address or pick manually.)`;
+          } else {
+            messageText += ' (⚠️ Address found outside available ward boundaries. Please fine-tune manually.)';
+          }
+        }
+        
+        setAddressResolveMessage(messageText);
+      } catch (error) {
+        if (!isMounted) {
+          return;
+        }
+
+        if (error?.code === 'ERR_CANCELED') {
+          return;
+        }
+
+        setAddressResolveMessage(
+          error?.response?.data?.message ||
+            'Could not geocode the entered address. Please click directly on the map.'
+        );
+      } finally {
+        if (isMounted) {
+          setIsResolvingAddress(false);
+        }
+      }
+
+    };
+
+    resolveAddressToMapPoint();
+
+    return () => {
+      isMounted = false;
+      abortController.abort();
+    };
+  }, [
+    allowedBoundaries,
+    initialAddressQuery,
+    isOpen,
+    normalizedSelectedWardId,
+    selectedWard
+  ]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -539,8 +728,10 @@ function LocationPickerModal({ isOpen, onClose, onLocationSelect, defaultLocatio
             </div>
 
             {loadingWards ? <p className="ward-load-note">Loading ward boundaries...</p> : null}
+            {isResolvingAddress ? <p className="ward-load-note">Finding location from entered address...</p> : null}
             {isValidatingLocation ? <p className="ward-load-note">Validating selected location...</p> : null}
             {wardLoadError ? <p className="ward-load-error">{wardLoadError}</p> : null}
+            {addressResolveMessage ? <p className="map-geocode-note">{addressResolveMessage}</p> : null}
             {selectionError ? <p className="map-selection-error">{selectionError}</p> : null}
           </div>
         </div>
