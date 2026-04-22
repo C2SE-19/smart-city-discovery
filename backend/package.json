@@ -6,8 +6,6 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "start:lan": "node start-lan.js",
-    "dev:lan": "nodemon start-lan.js",
     "backup:wards": "node scripts/backup-wards.js",
     "restore:wards": "node scripts/restore-wards.js",
     "restore:wards:latest": "node scripts/restore-wards.js --latest --mode merge",

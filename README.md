@@ -9,29 +9,42 @@ node server.js
 cd frontend
 npm run dev
 
-## Chạy LAN (3000 + 5173 + 5174)
+## Chạy LAN (backend 3000, frontend 5173/5174)
 
-Nếu bạn muốn truy cập giống nhau qua nhiều cổng (ví dụ: `http://10.50.1.240:3000/`, `:5173`, `:5174`) và vẫn dùng chung API + frontend build:
+Yêu cầu demo theo thầy: **backend chỉ chạy ở port 3000** (Swagger/API), còn **frontend chạy riêng** ở port 5173 và 5174.
 
-1) Build frontend
+### 1) Backend (port 3000)
 
 ```bash
-npm --prefix frontend run build
-```
-
-2) Chạy backend (mở thêm cổng)
-
-CMD (Windows):
-
-```bat
 cd backend
 npm install
+npm start
+```
+
+Swagger UI:
+- `http://10.50.1.240:3000/` (tự redirect)
+- `http://10.50.1.240:3000/api/docs`
+
+### 2) Frontend (port 5173 + 5174)
+
+Build frontend:
+
+```bash
+cd frontend
+npm install
+npm run build
+```
+
+Chạy frontend LAN (serve `frontend/dist` và proxy `/api`, `/uploads` về backend `:3000`):
+
+```bash
 npm run start:lan
 ```
 
-Swagger UI: `http://10.50.1.240:3000/api/docs`
-
-Gợi ý: kiểm tra nhanh bằng `curl http://10.50.1.240:5173/api/v1/venues`.
+Check nhanh:
+- `http://10.50.1.240:5173/`
+- `http://10.50.1.240:5174/`
+- `curl http://10.50.1.240:5173/api/v1/venues`
 
 
 git checkout VoVanAnhKhoa

@@ -46,10 +46,10 @@ function resolveApiOrigin(baseUrl) {
     return window.location.origin;
   }
 
-  return 'http://localhost:5000';
+  return 'http://localhost:3000';
 }
 
-const DEFAULT_API_BASE_URL = import.meta.env.DEV ? 'http://localhost:5000/api/v1' : '/api';
+const DEFAULT_API_BASE_URL = import.meta.env.DEV ? 'http://localhost:3000/api/v1' : '/api';
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL;
 const API_ORIGIN = resolveApiOrigin(API_BASE_URL);
 

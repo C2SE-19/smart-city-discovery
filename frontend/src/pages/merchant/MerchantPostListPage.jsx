@@ -32,7 +32,7 @@ const FALLBACK_POST_IMAGE = 'https://via.placeholder.com/200x150?text=Venue';
 function resolveApiOrigin() {
   const configuredBaseUrl =
     import.meta.env.VITE_API_BASE_URL
-    || (import.meta.env.DEV ? 'http://localhost:5000/api/v1' : '/api');
+    || (import.meta.env.DEV ? 'http://localhost:3000/api/v1' : '/api');
 
   if (typeof window !== 'undefined') {
     try {
@@ -45,7 +45,7 @@ function resolveApiOrigin() {
   try {
     return new URL(configuredBaseUrl).origin;
   } catch {
-    return 'http://localhost:5000';
+    return 'http://localhost:3000';
   }
 }
 

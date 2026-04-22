@@ -495,8 +495,8 @@ function resolveAssetUrl(rawUrl) {
 
   const configuredBaseUrl =
     import.meta.env.VITE_API_BASE_URL
-    || (import.meta.env.DEV ? 'http://localhost:5000/api/v1' : '/api');
-  let apiOrigin = 'http://localhost:5000';
+    || (import.meta.env.DEV ? 'http://localhost:3000/api/v1' : '/api');
+  let apiOrigin = 'http://localhost:3000';
 
   if (typeof window !== 'undefined') {
     try {
@@ -508,7 +508,7 @@ function resolveAssetUrl(rawUrl) {
     try {
       apiOrigin = new URL(configuredBaseUrl).origin;
     } catch {
-      apiOrigin = 'http://localhost:5000';
+      apiOrigin = 'http://localhost:3000';
     }
   }
 
