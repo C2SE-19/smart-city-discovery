@@ -41,7 +41,6 @@ const COPY = {
       address: 'Địa chỉ'
     },
     loading: 'Đang tải thông tin...',
-    edit: '✎ Chỉnh sửa',
     edit: 'Chỉnh sửa',
     save: 'Lưu',
     cancel: 'Hủy',
