@@ -27,6 +27,7 @@ import AdminVenueApprovalPage from './pages/admin/AdminVenueApprovalPage';
 import AdminFeedbackManagementPage from './pages/admin/AdminFeedbackManagementPage';
 import AdminForumManagementPage from './pages/admin/AdminForumManagementPage';
 import AdminForumOverviewPage from './pages/admin/AdminForumOverviewPage';
+import AdminForumKeywordBanPage from './pages/admin/AdminForumKeywordBanPage';
 import AdminAdPackagesPage from './pages/admin/AdminAdPackagesPage';
 import MerchantWorkbenchPage from './pages/merchant/MerchantWorkbenchPage';
 import MerchantWorkbenchEditPage from './pages/merchant/MerchantWorkbenchEditPage';
@@ -113,6 +114,7 @@ function AppRoutes() {
         <Route path="forum" element={<Navigate replace to={APP_ROUTES.ADMIN_FORUM_REPORTS} />} />
         <Route path="forum/reports" element={<AdminForumManagementPage />} />
         <Route path="forum/view" element={<AdminForumOverviewPage />} />
+        <Route path="forum/keywords" element={<AdminForumKeywordBanPage />} />
         <Route path="users" element={<AdminUserManagementPage />} />
         <Route path="reports" element={<AdminReportsPage />} />
         <Route path="packages" element={<AdminAdPackagesPage />} />

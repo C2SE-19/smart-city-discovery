@@ -241,6 +241,45 @@
   background: rgba(255, 236, 205, 0.95);
 }
 
+.admin-forum-overview-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.admin-forum-overview-delete-comment-button {
+  border: 1px solid rgba(155, 111, 12, 0.45);
+  background: linear-gradient(140deg, #e2a42f 0%, #b7811e 100%);
+  color: #fff;
+  border-radius: 10px;
+  font: inherit;
+  font-weight: 700;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.admin-forum-overview-delete-button {
+  border: 1px solid rgba(181, 47, 47, 0.5);
+  background: linear-gradient(140deg, #e95050 0%, #bd2a2a 100%);
+  color: #fff;
+  border-radius: 10px;
+  font: inherit;
+  font-weight: 700;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.admin-forum-overview-delete-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.admin-forum-overview-delete-comment-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .admin-forum-overview-comments {
   border: 1px solid rgba(99, 120, 170, 0.2);
   border-radius: 12px;
@@ -271,6 +310,19 @@
   padding: 8px;
   display: grid;
   gap: 6px;
+}
+
+.admin-forum-overview-comment-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #53678a;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.admin-forum-overview-comment-select input {
+  margin: 0;
 }
 
 .admin-forum-overview-comments li.is-reported {

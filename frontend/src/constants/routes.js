@@ -19,6 +19,7 @@ export const APP_ROUTES = {
   ADMIN_FORUM: '/admin/forum',
   ADMIN_FORUM_REPORTS: '/admin/forum/reports',
   ADMIN_FORUM_VIEW: '/admin/forum/view',
+  ADMIN_FORUM_KEYWORDS: '/admin/forum/keywords',
   ADMIN_USERS: '/admin/users',
   ADMIN_REPORTS: '/admin/reports',
   ADMIN_PACKAGES: '/admin/packages',
