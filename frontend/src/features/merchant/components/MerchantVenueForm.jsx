@@ -1153,6 +1153,7 @@ function MerchantVenueForm({ editVenueId = null }) {
         {/* Section 2: Basic Info */}
         <div className="form-section" data-onboarding="merchant-form-basic">
           <div className="section-header">
+            <span className="merchant-onboarding-anchor" data-onboarding-anchor="merchant-form-basic" aria-hidden="true" />
             <h2>2. Basic Information</h2>
           </div>
 
@@ -1236,6 +1237,7 @@ function MerchantVenueForm({ editVenueId = null }) {
         {/* Section 3: Location & Hours */}
         <div className="form-section" data-onboarding="merchant-form-location">
           <div className="section-header">
+            <span className="merchant-onboarding-anchor" data-onboarding-anchor="merchant-form-location" aria-hidden="true" />
             <h2>3. Location & Hours</h2>
           </div>
 
@@ -1407,6 +1409,7 @@ function MerchantVenueForm({ editVenueId = null }) {
         {/* Section 4: Services */}
         <div className="form-section" data-onboarding="merchant-form-services">
           <div className="section-header">
+            <span className="merchant-onboarding-anchor" data-onboarding-anchor="merchant-form-services" aria-hidden="true" />
             <h2>4. Services Offered</h2>
             <p className="section-hint">
               {servicesLoading ? 'Loading services...' : 'Select all applicable services'}
