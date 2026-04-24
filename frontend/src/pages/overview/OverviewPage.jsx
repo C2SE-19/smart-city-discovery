@@ -142,6 +142,10 @@ function resolveWeatherEmoji(conditionMain) {
 }
 
 function formatDistanceKm(value) {
+  if (value === null || value === undefined || value === '') {
+    return 'N/A';
+  }
+
   const distanceKm = Number(value);
   if (!Number.isFinite(distanceKm) || distanceKm < 0) {
     return 'N/A';
@@ -152,6 +156,117 @@ function formatDistanceKm(value) {
   }
 
   return `${distanceKm.toFixed(1)} km`;
+}
+
+function parseCoordinateValue(value) {
+  const normalizedValue = typeof value === 'string'
+    ? value.trim().replace(',', '.')
+    : value;
+  const parsed = Number(normalizedValue);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function hasValidCoordinates(coordinates) {
+  const latitude = Number(coordinates?.latitude);
+  const longitude = Number(coordinates?.longitude);
+
+  return Number.isFinite(latitude) && Number.isFinite(longitude);
+}
+
+function resolveVenueCoordinatesForDistance(venue) {
+  const metadata = normalizeVenueMetadata(venue?.metadata);
+  const locationMetadata = metadata?.location && typeof metadata.location === 'object'
+    ? metadata.location
+    : {};
+
+  const latitudeCandidates = [
+    venue?.latitude,
+    metadata?.latitude,
+    metadata?.lat,
+    locationMetadata?.latitude,
+    locationMetadata?.lat,
+  ];
+  const longitudeCandidates = [
+    venue?.longitude,
+    metadata?.longitude,
+    metadata?.lng,
+    metadata?.lon,
+    locationMetadata?.longitude,
+    locationMetadata?.lng,
+    locationMetadata?.lon,
+  ];
+
+  const latitude = latitudeCandidates
+    .map((candidate) => parseCoordinateValue(candidate))
+    .find((candidate) => candidate !== null);
+  const longitude = longitudeCandidates
+    .map((candidate) => parseCoordinateValue(candidate))
+    .find((candidate) => candidate !== null);
+
+  if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
+    return { latitude: null, longitude: null };
+  }
+
+  if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+    return { latitude: null, longitude: null };
+  }
+
+  return { latitude, longitude };
+}
+
+function computeDistanceKm(fromLatitude, fromLongitude, toLatitude, toLongitude) {
+  const lat1 = Number(fromLatitude);
+  const lon1 = Number(fromLongitude);
+  const lat2 = Number(toLatitude);
+  const lon2 = Number(toLongitude);
+
+  if (![lat1, lon1, lat2, lon2].every((value) => Number.isFinite(value))) {
+    return null;
+  }
+
+  const earthRadiusKm = 6371;
+  const toRadians = (degrees) => (degrees * Math.PI) / 180;
+  const deltaLat = toRadians(lat2 - lat1);
+  const deltaLon = toRadians(lon2 - lon1);
+  const a =
+    Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2)
+    + Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2))
+    * Math.sin(deltaLon / 2) * Math.sin(deltaLon / 2);
+
+  return 2 * earthRadiusKm * Math.asin(Math.sqrt(a));
+}
+
+function resolveBrowserCoordinates({
+  fallbackCoordinates = DEFAULT_CITY_COORDINATES,
+  timeoutMs = 8000,
+  maximumAgeMs = 60000,
+} = {}) {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) {
+      resolve(fallbackCoordinates);
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const latitude = Number(position?.coords?.latitude);
+        const longitude = Number(position?.coords?.longitude);
+
+        if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+          resolve({ latitude, longitude });
+          return;
+        }
+
+        resolve(fallbackCoordinates);
+      },
+      () => resolve(fallbackCoordinates),
+      {
+        enableHighAccuracy: true,
+        timeout: timeoutMs,
+        maximumAge: maximumAgeMs,
+      }
+    );
+  });
 }
 
 function formatLocationClockByOffset(offsetSeconds) {
@@ -317,13 +432,26 @@ function FilterGroup({ title, options, selectedValues, optionValue, optionLabel,
   );
 }
 
-function VenueCard({ venue, isFavorite, onToggleFavorite, onExplore, showDistance = false }) {
+function VenueCard({ venue, isFavorite, onToggleFavorite, onExplore, showDistance = false, userCoordinates = null }) {
   const venueName = venue.name || venue.title || 'Untitled venue';
   const venueAddress = venue.address || 'Address not available';
   const wardName = venue.ward_name || venue.wardName;
   const { isOpen, timeRange } = resolveVenueOpenState(venue);
   const priceRange = resolveVenuePriceRange(venue);
-  const distanceLabel = formatDistanceKm(venue.distanceKm);
+  const venueCoordinates = resolveVenueCoordinatesForDistance(venue);
+  const distanceFromClientCoordinates = hasValidCoordinates(userCoordinates)
+    ? computeDistanceKm(
+      userCoordinates.latitude,
+      userCoordinates.longitude,
+      venueCoordinates.latitude,
+      venueCoordinates.longitude
+    )
+    : null;
+  const fallbackDistanceKm = Number(venue.distanceKm);
+  const resolvedDistanceKm = Number.isFinite(distanceFromClientCoordinates)
+    ? Number(distanceFromClientCoordinates.toFixed(3))
+    : (Number.isFinite(fallbackDistanceKm) ? fallbackDistanceKm : null);
+  const distanceLabel = formatDistanceKm(resolvedDistanceKm);
 
   return (
     <article
@@ -487,7 +615,9 @@ function OverviewPage() {
   };
 
   const apiUrl = useMemo(
-    () => import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api',
+    () =>
+      import.meta.env.VITE_API_BASE_URL
+      || (import.meta.env.DEV ? 'http://localhost:3000/api' : '/api'),
     []
   );
 
@@ -1155,14 +1285,24 @@ function OverviewPage() {
     setShowFilterPanel(false);
 
     try {
+      const fallbackCoordinates = hasValidCoordinates(geoCoordinates)
+        ? geoCoordinates
+        : DEFAULT_CITY_COORDINATES;
+      const latestCoordinates = await resolveBrowserCoordinates({
+        fallbackCoordinates,
+        timeoutMs: 9000,
+        maximumAgeMs: 0,
+      });
+      setGeoCoordinates(latestCoordinates);
+
       const params = {
         limit: 24,
         preferOpenNow: true,
         currentTimeIso: new Date().toISOString()
       };
 
-      const latitude = Number(geoCoordinates.latitude);
-      const longitude = Number(geoCoordinates.longitude);
+      const latitude = Number(latestCoordinates.latitude);
+      const longitude = Number(latestCoordinates.longitude);
 
       if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
         params.latitude = latitude;
@@ -1222,6 +1362,16 @@ function OverviewPage() {
     setAiRefineError('');
 
     try {
+      const fallbackCoordinates = hasValidCoordinates(geoCoordinates)
+        ? geoCoordinates
+        : DEFAULT_CITY_COORDINATES;
+      const latestCoordinates = await resolveBrowserCoordinates({
+        fallbackCoordinates,
+        timeoutMs: 9000,
+        maximumAgeMs: 0,
+      });
+      setGeoCoordinates(latestCoordinates);
+
       const payload = {
         query: refineText,
         scope: 'global',
@@ -1229,8 +1379,8 @@ function OverviewPage() {
         currentTimeIso: new Date().toISOString()
       };
 
-      const latitude = Number(geoCoordinates.latitude);
-      const longitude = Number(geoCoordinates.longitude);
+      const latitude = Number(latestCoordinates.latitude);
+      const longitude = Number(latestCoordinates.longitude);
       if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
         payload.latitude = latitude;
         payload.longitude = longitude;
@@ -1276,40 +1426,16 @@ function OverviewPage() {
   useEffect(() => {
     let isMounted = true;
 
-    const resolveUserCoordinates = () =>
-      new Promise((resolve) => {
-        if (!navigator.geolocation) {
-          resolve(DEFAULT_CITY_COORDINATES);
-          return;
-        }
-
-        navigator.geolocation.getCurrentPosition(
-          (position) => {
-            const latitude = Number(position?.coords?.latitude);
-            const longitude = Number(position?.coords?.longitude);
-
-            if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
-              resolve({ latitude, longitude });
-              return;
-            }
-
-            resolve(DEFAULT_CITY_COORDINATES);
-          },
-          () => resolve(DEFAULT_CITY_COORDINATES),
-          {
-            enableHighAccuracy: true,
-            timeout: 8000,
-            maximumAge: 60 * 1000
-          }
-        );
-      });
-
     const loadRealtimeWeather = async () => {
       setWeatherLoading(true);
       setWeatherError('');
 
       try {
-        const coordinates = await resolveUserCoordinates();
+        const coordinates = await resolveBrowserCoordinates({
+          fallbackCoordinates: DEFAULT_CITY_COORDINATES,
+          timeoutMs: 8000,
+          maximumAgeMs: 60 * 1000,
+        });
         if (!isMounted) {
           return;
         }
@@ -2091,6 +2217,7 @@ function OverviewPage() {
                     onToggleFavorite={handleToggleFavorite}
                     onExplore={handleExploreVenue}
                     showDistance
+                    userCoordinates={geoCoordinates}
                   />
                 ))}
               </div>
