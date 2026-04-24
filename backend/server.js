@@ -20,12 +20,37 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Mount LLM-backed chat route (v2) from src so frontend can call /api/chat-v2
+const swaggerUi = require('swagger-ui-express');
+const swaggerJsdoc = require('swagger-jsdoc');
+
+const swaggerApis = [
+    path.join(__dirname, 'src', 'routes', '*.js').replace(/\\/g, '/')
+];
+
+const options = {
+  definition: {
+    openapi: '3.0.0',
+    info: {
+      title: 'Smart City API',
+      version: '1.0.0',
+    },
+  },
+    apis: swaggerApis,
+};
+
+const specs = swaggerJsdoc(options);
+
+app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(specs));
+
+// ===== 1. API routes (đặt trước) =====
+let chatV2;
+
 try {
-    const chatV2 = require('./src/routes/chat.route');
+    chatV2 = require('./src/routes/chat.route');
     app.use('/api/chat-v2', chatV2);
+    console.log('✅ chat-v2 route loaded');
 } catch (e) {
-    console.warn('Could not mount /api/chat-v2:', e.message);
+    console.warn('❌ Could not mount /api/chat-v2:', e.message);
 }
 
 // Initialize Google OAuth2 Client
@@ -383,6 +408,603 @@ function requireAuth(req, res, next) {
     }
 
     return next();
+}
+
+const AD_PACKAGE_ALLOWED_DURATIONS = new Set([1, 3, 6]);
+const AD_PACKAGE_TIER_PRIORITY = {
+    basic: 1,
+    boosted: 2,
+    premium: 3
+};
+const AD_PACKAGE_PRIORITY_TIER = {
+    1: 'basic',
+    2: 'boosted',
+    3: 'premium'
+};
+
+function parseAdPackageDescription(rawDescription) {
+    if (typeof rawDescription !== 'string') {
+        return {};
+    }
+
+    const normalizedDescription = rawDescription.trim();
+    if (!normalizedDescription) {
+        return {};
+    }
+
+    try {
+        const parsed = JSON.parse(normalizedDescription);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            return parsed;
+        }
+    } catch {
+        return {};
+    }
+
+    return {};
+}
+
+function normalizeAdPackageFeatures(rawFeatures) {
+    const source = rawFeatures && typeof rawFeatures === 'object' ? rawFeatures : {};
+    const postLimitEnabled = Boolean(source.postLimitEnabled);
+    const parsedPostLimit = Number(source.postLimit);
+
+    return {
+        showInTrending: Boolean(source.showInTrending),
+        showOnHomepageBanner: Boolean(source.showOnHomepageBanner),
+        priorityReview: Boolean(source.priorityReview),
+        postLimitEnabled,
+        postLimit:
+            postLimitEnabled && Number.isFinite(parsedPostLimit) && parsedPostLimit > 0
+                ? Math.trunc(parsedPostLimit)
+                : null
+    };
+}
+
+function resolveAdPackageTier(row, descriptionPayload) {
+    const tierFromDescription = String(descriptionPayload?.tier || '')
+        .trim()
+        .toLowerCase();
+
+    if (Object.prototype.hasOwnProperty.call(AD_PACKAGE_TIER_PRIORITY, tierFromDescription)) {
+        return tierFromDescription;
+    }
+
+    return AD_PACKAGE_PRIORITY_TIER[Number(row?.priority_level)] || 'basic';
+}
+
+function mapAdPackageRow(row) {
+    const descriptionPayload = parseAdPackageDescription(row?.description);
+    const tier = resolveAdPackageTier(row, descriptionPayload);
+    const normalizedFeatures = normalizeAdPackageFeatures(descriptionPayload.features || {});
+    const durationHours = Number(row?.duration_hours);
+    const durationDays = Number.isFinite(durationHours) && durationHours > 0 ? Math.max(30, Math.round(durationHours / 24)) : 30;
+    const durationMonths = Math.max(1, Math.round(durationDays / 30));
+
+    return {
+        id: String(row?.id || ''),
+        name: String(row?.name || 'Untitled package').trim() || 'Untitled package',
+        tier,
+        durationMonths,
+        durationDays: durationMonths * 30,
+        features: normalizedFeatures,
+        createdAt: row?.created_at || null,
+        updatedAt: row?.updated_at || null
+    };
+}
+
+async function listPublicAdPackages(req, res) {
+    try {
+        const result = await pool.query(
+            `
+                SELECT id, name, description, duration_hours, priority_level, status, created_at, updated_at
+                FROM ad_packages
+                WHERE COALESCE(status::text, 'active') = 'active'
+                ORDER BY created_at DESC, id DESC
+            `
+        );
+
+        return res.json(result.rows.map(mapAdPackageRow));
+    } catch (error) {
+        console.error('List ad packages error:', error);
+        return res.status(500).json({ message: 'Could not load ad packages right now.' });
+    }
+}
+
+async function createAdminAdPackage(req, res) {
+    const normalizedName = String(req.body?.name || '').trim();
+    const normalizedTier = String(req.body?.tier || '')
+        .trim()
+        .toLowerCase();
+    const durationMonths = Number.parseInt(req.body?.durationMonths, 10);
+    const normalizedFeatures = normalizeAdPackageFeatures(req.body?.features || {});
+
+    if (normalizedName.length < 3) {
+        return res.status(400).json({ message: 'Package name must contain at least 3 characters.' });
+    }
+
+    if (!Object.prototype.hasOwnProperty.call(AD_PACKAGE_TIER_PRIORITY, normalizedTier)) {
+        return res.status(400).json({ message: 'Invalid package type.' });
+    }
+
+    if (!AD_PACKAGE_ALLOWED_DURATIONS.has(durationMonths)) {
+        return res.status(400).json({ message: 'Invalid package duration. Allowed values are 1, 3, or 6 months.' });
+    }
+
+    if (normalizedFeatures.postLimitEnabled && (!normalizedFeatures.postLimit || normalizedFeatures.postLimit < 1)) {
+        return res.status(400).json({ message: 'Post quantity limit must be greater than 0 when enabled.' });
+    }
+
+    const descriptionPayload = {
+        tier: normalizedTier,
+        features: normalizedFeatures,
+        createdBy: req.authUser?.id || null
+    };
+
+    const durationHours = durationMonths * 30 * 24;
+    const priorityLevel = AD_PACKAGE_TIER_PRIORITY[normalizedTier];
+
+    try {
+        const result = await pool.query(
+            `
+                INSERT INTO ad_packages (name, description, duration_hours, priority_level, price, status, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, 'active', NOW(), NOW())
+                RETURNING id, name, description, duration_hours, priority_level, status, created_at, updated_at
+            `,
+            [normalizedName, JSON.stringify(descriptionPayload), durationHours, priorityLevel, 0]
+        );
+
+        return res.status(201).json(mapAdPackageRow(result.rows[0]));
+    } catch (error) {
+        console.error('Create admin ad package error:', error);
+        return res.status(500).json({ message: 'Could not create ad package right now.' });
+    }
+}
+
+async function archiveAdminAdPackage(req, res) {
+    const packageId = Number.parseInt(req.params?.packageId, 10);
+
+    if (!Number.isFinite(packageId) || packageId <= 0) {
+        return res.status(400).json({ message: 'Invalid package id.' });
+    }
+
+    try {
+        const result = await pool.query(
+            `
+                UPDATE ad_packages
+                SET status = 'inactive',
+                    updated_at = NOW()
+                WHERE id = $1
+                RETURNING id
+            `,
+            [packageId]
+        );
+
+        if (!result.rows.length) {
+            return res.status(404).json({ message: 'Package not found.' });
+        }
+
+        return res.json({ success: true, removedId: String(result.rows[0].id) });
+    } catch (error) {
+        console.error('Archive admin ad package error:', error);
+        return res.status(500).json({ message: 'Could not remove this package right now.' });
+    }
+}
+
+function clampAdPackageStatsMonthWindow(rawMonths) {
+    const parsed = Number.parseInt(rawMonths, 10);
+
+    if (!Number.isFinite(parsed)) {
+        return 6;
+    }
+
+    return Math.min(12, Math.max(3, parsed));
+}
+
+function normalizeAdPackageMonthKey(rawMonthKey) {
+    const normalized = String(rawMonthKey || '').trim();
+    return /^\d{4}-\d{2}$/.test(normalized) ? normalized : '';
+}
+
+function buildAdPackageMonthKeys(monthWindow) {
+    const now = new Date();
+    const keys = [];
+
+    for (let index = monthWindow - 1; index >= 0; index -= 1) {
+        const monthDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - index, 1));
+        const month = String(monthDate.getUTCMonth() + 1).padStart(2, '0');
+        const year = monthDate.getUTCFullYear();
+        keys.push(`${year}-${month}`);
+    }
+
+    return keys;
+}
+
+async function updateAdminAdPackage(req, res) {
+    const packageId = Number.parseInt(req.params?.packageId, 10);
+
+    if (!Number.isFinite(packageId) || packageId <= 0) {
+        return res.status(400).json({ message: 'Invalid package id.' });
+    }
+
+    try {
+        const existingResult = await pool.query(
+            `
+                SELECT id, name, description, duration_hours, priority_level, status, created_at, updated_at
+                FROM ad_packages
+                WHERE id = $1
+                LIMIT 1
+            `,
+            [packageId]
+        );
+
+        if (!existingResult.rows.length) {
+            return res.status(404).json({ message: 'Package not found.' });
+        }
+
+        const existingRow = existingResult.rows[0];
+        const existingMappedPackage = mapAdPackageRow(existingRow);
+        const existingDescription = parseAdPackageDescription(existingRow.description);
+
+        const nextNameRaw = Object.prototype.hasOwnProperty.call(req.body || {}, 'name')
+            ? String(req.body?.name || '').trim()
+            : existingMappedPackage.name;
+        const nextTierRaw = Object.prototype.hasOwnProperty.call(req.body || {}, 'tier')
+            ? String(req.body?.tier || '').trim().toLowerCase()
+            : existingMappedPackage.tier;
+        const nextDurationMonths = Object.prototype.hasOwnProperty.call(req.body || {}, 'durationMonths')
+            ? Number.parseInt(req.body?.durationMonths, 10)
+            : Number(existingMappedPackage.durationMonths);
+        const nextFeatures = Object.prototype.hasOwnProperty.call(req.body || {}, 'features')
+            ? normalizeAdPackageFeatures(req.body?.features || {})
+            : normalizeAdPackageFeatures(existingMappedPackage.features || existingDescription.features || {});
+
+        if (nextNameRaw.length < 3) {
+            return res.status(400).json({ message: 'Package name must contain at least 3 characters.' });
+        }
+
+        if (!Object.prototype.hasOwnProperty.call(AD_PACKAGE_TIER_PRIORITY, nextTierRaw)) {
+            return res.status(400).json({ message: 'Invalid package type.' });
+        }
+
+        if (!AD_PACKAGE_ALLOWED_DURATIONS.has(nextDurationMonths)) {
+            return res.status(400).json({ message: 'Invalid package duration. Allowed values are 1, 3, or 6 months.' });
+        }
+
+        if (nextFeatures.postLimitEnabled && (!nextFeatures.postLimit || nextFeatures.postLimit < 1)) {
+            return res.status(400).json({ message: 'Post quantity limit must be greater than 0 when enabled.' });
+        }
+
+        const nextDescription = {
+            ...existingDescription,
+            tier: nextTierRaw,
+            features: nextFeatures,
+            updatedBy: req.authUser?.id || null,
+            updatedAt: new Date().toISOString()
+        };
+
+        const durationHours = nextDurationMonths * 30 * 24;
+        const priorityLevel = AD_PACKAGE_TIER_PRIORITY[nextTierRaw];
+
+        const updatedResult = await pool.query(
+            `
+                UPDATE ad_packages
+                SET name = $2,
+                    description = $3,
+                    duration_hours = $4,
+                    priority_level = $5,
+                    updated_at = NOW()
+                WHERE id = $1
+                RETURNING id, name, description, duration_hours, priority_level, status, created_at, updated_at
+            `,
+            [packageId, nextNameRaw, JSON.stringify(nextDescription), durationHours, priorityLevel]
+        );
+
+        return res.json(mapAdPackageRow(updatedResult.rows[0]));
+    } catch (error) {
+        console.error('Update admin ad package error:', error);
+        return res.status(500).json({ message: 'Could not update this package right now.' });
+    }
+}
+
+async function assignAdPackageToVenue(req, res) {
+    const packageId = Number.parseInt(req.params?.packageId, 10);
+    const venueId = Number.parseInt(req.body?.venueId, 10);
+    const requesterUserId = String(req.authUser?.id || '').trim();
+    const requesterRole = normalizeRole(req.authUser?.role);
+
+    if (!Number.isFinite(packageId) || packageId <= 0) {
+        return res.status(400).json({ message: 'Invalid package id.' });
+    }
+
+    if (!Number.isFinite(venueId) || venueId <= 0) {
+        return res.status(400).json({ message: 'Invalid venue id.' });
+    }
+
+    if (!requesterUserId) {
+        return res.status(401).json({ message: 'Missing authentication context.' });
+    }
+
+    try {
+        const packageResult = await pool.query(
+            `
+                SELECT id, name, description, duration_hours, priority_level, status, created_at, updated_at
+                FROM ad_packages
+                WHERE id = $1
+                  AND COALESCE(status::text, 'active') = 'active'
+                LIMIT 1
+            `,
+            [packageId]
+        );
+
+        if (!packageResult.rows.length) {
+            return res.status(404).json({ message: 'Package not found or inactive.' });
+        }
+
+        const venueResult = await pool.query(
+            `
+                SELECT
+                    venues.id,
+                    COALESCE(venues.title, venues.name, CONCAT('Venue #', venues.id::text)) AS venue_name,
+                    ${buildResolvedVenueOwnerUserSql('venues')} AS owner_user_id
+                FROM venues
+                WHERE venues.id = $1
+                LIMIT 1
+            `,
+            [venueId]
+        );
+
+        if (!venueResult.rows.length) {
+            return res.status(404).json({ message: 'Venue not found.' });
+        }
+
+        const ownerUserId = String(venueResult.rows[0]?.owner_user_id || '').trim();
+        if (requesterRole !== 'admin' && ownerUserId && ownerUserId !== requesterUserId) {
+            return res.status(403).json({ message: 'You can only assign packages to your own venues.' });
+        }
+
+        const assignmentResult = await pool.query(
+            `
+                INSERT INTO ad_package_assignments (ad_package_id, user_id, venue_id, created_at, updated_at)
+                VALUES ($1, $2, $3, NOW(), NOW())
+                ON CONFLICT (user_id, venue_id)
+                DO UPDATE
+                SET ad_package_id = EXCLUDED.ad_package_id,
+                    updated_at = NOW()
+                RETURNING id, ad_package_id, user_id, venue_id, created_at, updated_at
+            `,
+            [packageId, requesterUserId, venueId]
+        );
+
+        return res.json({
+            success: true,
+            package: mapAdPackageRow(packageResult.rows[0]),
+            assignment: assignmentResult.rows[0]
+        });
+    } catch (error) {
+        console.error('Assign ad package to venue error:', error);
+        return res.status(500).json({ message: 'Could not assign package right now.' });
+    }
+}
+
+async function getMyVenueAdPackageAssignment(req, res) {
+    const venueId = Number.parseInt(req.params?.venueId, 10);
+    const requesterUserId = String(req.authUser?.id || '').trim();
+
+    if (!Number.isFinite(venueId) || venueId <= 0) {
+        return res.status(400).json({ message: 'Invalid venue id.' });
+    }
+
+    if (!requesterUserId) {
+        return res.status(401).json({ message: 'Missing authentication context.' });
+    }
+
+    try {
+        const result = await pool.query(
+            `
+                SELECT
+                    assignments.id AS assignment_id,
+                    assignments.created_at AS assigned_at,
+                    assignments.updated_at AS updated_at,
+                    packages.id,
+                    packages.name,
+                    packages.description,
+                    packages.duration_hours,
+                    packages.priority_level,
+                    packages.status,
+                    packages.created_at,
+                    packages.updated_at AS package_updated_at
+                FROM ad_package_assignments AS assignments
+                JOIN ad_packages AS packages
+                  ON packages.id = assignments.ad_package_id
+                WHERE assignments.user_id = $1
+                  AND assignments.venue_id = $2
+                  AND COALESCE(packages.status::text, 'active') = 'active'
+                LIMIT 1
+            `,
+            [requesterUserId, venueId]
+        );
+
+        if (!result.rows.length) {
+            return res.json({ assignment: null });
+        }
+
+        const row = result.rows[0];
+        const mappedPackage = mapAdPackageRow(row);
+
+        return res.json({
+            assignment: {
+                assignmentId: String(row.assignment_id),
+                assignedAt: row.updated_at || row.assigned_at || null,
+                package: mappedPackage
+            }
+        });
+    } catch (error) {
+        console.error('Get venue ad package assignment error:', error);
+        return res.status(500).json({ message: 'Could not load selected package right now.' });
+    }
+}
+
+async function getAdminAdPackageStats(req, res) {
+    const monthWindow = clampAdPackageStatsMonthWindow(req.query?.months);
+
+    try {
+        const packageRowsResult = await pool.query(
+            `
+                SELECT id, name, description, duration_hours, priority_level, status, created_at, updated_at
+                FROM ad_packages
+                WHERE COALESCE(status::text, 'active') = 'active'
+                ORDER BY created_at DESC, id DESC
+            `
+        );
+
+        const packageRows = packageRowsResult.rows.map(mapAdPackageRow);
+        const monthKeys = buildAdPackageMonthKeys(monthWindow);
+
+        const monthlyUsageResult = await pool.query(
+            `
+                SELECT
+                    TO_CHAR(DATE_TRUNC('month', updated_at), 'YYYY-MM') AS month_key,
+                    ad_package_id::text AS package_id,
+                    COUNT(*)::int AS total
+                FROM ad_package_assignments
+                WHERE updated_at >= DATE_TRUNC('month', CURRENT_DATE) - (($1::int - 1) * INTERVAL '1 month')
+                GROUP BY month_key, package_id
+            `,
+            [monthWindow]
+        );
+
+        const activeUsageResult = await pool.query(
+            `
+                SELECT ad_package_id::text AS package_id, COUNT(*)::int AS total
+                FROM ad_package_assignments
+                GROUP BY ad_package_id
+            `
+        );
+
+        const monthlyUsageMap = new Map();
+        monthlyUsageResult.rows.forEach((row) => {
+            const key = `${row.package_id}::${row.month_key}`;
+            monthlyUsageMap.set(key, Number(row.total) || 0);
+        });
+
+        const activeUsageMap = new Map();
+        activeUsageResult.rows.forEach((row) => {
+            activeUsageMap.set(String(row.package_id), Number(row.total) || 0);
+        });
+
+        const datasets = packageRows.map((pkg) => {
+            const values = monthKeys.map((monthKey) => monthlyUsageMap.get(`${pkg.id}::${monthKey}`) || 0);
+            const monthlyTotal = values.reduce((total, value) => total + value, 0);
+            const activeCount = activeUsageMap.get(pkg.id) || 0;
+
+            return {
+                packageId: pkg.id,
+                packageName: pkg.name,
+                tier: pkg.tier,
+                values,
+                monthlyTotal,
+                activeCount
+            };
+        });
+
+        const ranking = datasets
+            .slice()
+            .sort((first, second) => {
+                if (second.activeCount !== first.activeCount) {
+                    return second.activeCount - first.activeCount;
+                }
+
+                if (second.monthlyTotal !== first.monthlyTotal) {
+                    return second.monthlyTotal - first.monthlyTotal;
+                }
+
+                return second.packageName.localeCompare(first.packageName);
+            });
+
+        const totalActiveAssignments = ranking.reduce((total, item) => total + item.activeCount, 0);
+
+        return res.json({
+            months: monthKeys,
+            datasets,
+            ranking,
+            topPackage: ranking[0] || null,
+            totalActiveAssignments
+        });
+    } catch (error) {
+        console.error('Get admin ad package stats error:', error);
+        return res.status(500).json({ message: 'Could not load ad package statistics right now.' });
+    }
+}
+
+async function listAdminAdPackageUsages(req, res) {
+    const packageId = Number.parseInt(req.params?.packageId, 10);
+    const monthKey = normalizeAdPackageMonthKey(req.query?.month);
+
+    if (!Number.isFinite(packageId) || packageId <= 0) {
+        return res.status(400).json({ message: 'Invalid package id.' });
+    }
+
+    if (req.query?.month && !monthKey) {
+        return res.status(400).json({ message: 'Invalid month format. Use YYYY-MM.' });
+    }
+
+    try {
+        const params = [packageId];
+        const monthWhereClause = monthKey
+            ? `AND TO_CHAR(DATE_TRUNC('month', assignments.updated_at), 'YYYY-MM') = $2`
+            : '';
+
+        if (monthKey) {
+            params.push(monthKey);
+        }
+
+        const result = await pool.query(
+            `
+                SELECT
+                    assignments.id AS assignment_id,
+                    assignments.created_at AS assigned_at,
+                    assignments.updated_at AS updated_at,
+                    users.id AS user_id,
+                    COALESCE(users.fullname, users.username, users.email, 'Unknown user') AS user_name,
+                    users.email AS user_email,
+                    venues.id AS venue_id,
+                    COALESCE(venues.title, venues.name, CONCAT('Venue #', venues.id::text)) AS venue_name,
+                    COALESCE(venues.address, '') AS venue_address
+                FROM ad_package_assignments AS assignments
+                LEFT JOIN users
+                  ON users.id = assignments.user_id
+                LEFT JOIN venues
+                  ON venues.id = assignments.venue_id
+                WHERE assignments.ad_package_id = $1
+                  ${monthWhereClause}
+                ORDER BY assignments.updated_at DESC
+            `,
+            params
+        );
+
+        return res.json({
+            packageId: String(packageId),
+            month: monthKey || null,
+            usages: result.rows.map((row) => ({
+                assignmentId: String(row.assignment_id),
+                assignedAt: row.updated_at || row.assigned_at || null,
+                user: {
+                    id: row.user_id ? String(row.user_id) : null,
+                    name: row.user_name,
+                    email: row.user_email || ''
+                },
+                venue: {
+                    id: row.venue_id ? Number(row.venue_id) : null,
+                    name: row.venue_name,
+                    address: row.venue_address || ''
+                }
+            }))
+        });
+    } catch (error) {
+        console.error('List admin ad package usages error:', error);
+        return res.status(500).json({ message: 'Could not load package usage details right now.' });
+    }
 }
 
 async function listAdminUsers(req, res) {
@@ -1254,7 +1876,10 @@ function extractVenueImageUrls(venue, externalImages = []) {
 }
 
 function resolveNumericCoordinate(value) {
-    const numeric = Number(value);
+    const normalizedValue = typeof value === 'string'
+        ? value.trim().replace(',', '.')
+        : value;
+    const numeric = Number(normalizedValue);
     return Number.isFinite(numeric) ? numeric : null;
 }
 
@@ -2019,6 +2644,67 @@ async function generateWardIdFromName(name) {
             `
         ).catch(() => {
             // Ignore if place_categories table does not exist yet.
+        });
+
+        pool.query(
+            `
+                CREATE TABLE IF NOT EXISTS ad_packages (
+                    id BIGSERIAL PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    duration_hours INTEGER NOT NULL,
+                    priority_level INTEGER NOT NULL DEFAULT 1,
+                    price NUMERIC(12, 2) NOT NULL DEFAULT 0,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                CREATE INDEX IF NOT EXISTS ad_packages_status_idx
+                ON ad_packages(status)
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                CREATE TABLE IF NOT EXISTS ad_package_assignments (
+                    id BIGSERIAL PRIMARY KEY,
+                    ad_package_id BIGINT NOT NULL REFERENCES ad_packages(id) ON DELETE CASCADE,
+                    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    venue_id INT4 NOT NULL REFERENCES venues(id) ON DELETE CASCADE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    CONSTRAINT ad_package_assignments_user_venue_unique UNIQUE (user_id, venue_id)
+                )
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                CREATE INDEX IF NOT EXISTS ad_package_assignments_package_idx
+                ON ad_package_assignments(ad_package_id, updated_at DESC)
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                CREATE INDEX IF NOT EXISTS ad_package_assignments_user_venue_idx
+                ON ad_package_assignments(user_id, venue_id)
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
         });
 
         pool.query(
@@ -3395,6 +4081,9 @@ async function generateWardIdFromName(name) {
             [/\bks\b/g, 'khach san'],
             [/\bhotel\b/g, 'khach san'],
             [/\brestaurant\b/g, 'nha hang'],
+            [/\brestaurants\b/g, 'nha hang'],
+            [/\bpubs\b/g, 'pub'],
+            [/\bbars\b/g, 'bar'],
             [/\bpet\s+friendly\b/g, 'pet friendly'],
             [/\bwi\s*fi\b/g, 'wifi']
         ];
@@ -3479,21 +4168,40 @@ async function generateWardIdFromName(name) {
             return null;
         }
 
+        function convertDistanceToKm(amountText, unitText = '') {
+            const amount = Number(String(amountText || '').replace(',', '.'));
+            if (!Number.isFinite(amount) || amount <= 0) {
+                return null;
+            }
+
+            const unit = String(unitText || '').trim().toLowerCase();
+
+            if (['m', 'meter', 'meters', 'metre', 'metres'].includes(unit)) {
+                return amount / 1000;
+            }
+
+            if (['mi', 'mile', 'miles'].includes(unit)) {
+                return amount * 1.60934;
+            }
+
+            return amount;
+        }
+
         function parseDistanceCapKmFromRefineQuery(normalizedQuery) {
             const distanceMatch = normalizedQuery.match(
-                /(?:duoi|toi da|max|within|under|gan|near|around)\s*(\d+(?:[.,]\d+)?)\s*(km|kilometer|kilomet)/
-            ) || normalizedQuery.match(/(\d+(?:[.,]\d+)?)\s*(km|kilometer|kilomet)\b/);
+                /(?:duoi|toi da|max|within|under|gan|near|around|ban kinh|radius)\s*(\d+(?:[.,]\d+)?)\s*(km|kilometer|kilometers|kilometre|kilometres|m|meter|meters|metre|metres|mi|mile|miles)\b/
+            ) || normalizedQuery.match(/(\d+(?:[.,]\d+)?)\s*(km|kilometer|kilometers|kilometre|kilometres|m|meter|meters|metre|metres|mi|mile|miles)\b/);
 
             if (!distanceMatch) {
                 return null;
             }
 
-            const parsed = Number(String(distanceMatch[1] || '').replace(',', '.'));
-            if (!Number.isFinite(parsed) || parsed <= 0) {
+            const parsedKm = convertDistanceToKm(distanceMatch[1], distanceMatch[2]);
+            if (!Number.isFinite(parsedKm) || parsedKm <= 0) {
                 return null;
             }
 
-            return Number(parsed.toFixed(2));
+            return Number(parsedKm.toFixed(2));
         }
 
         const REFINE_IMPLICIT_NEARBY_DEFAULT_DISTANCE_KM = 6;
@@ -3535,6 +4243,7 @@ async function generateWardIdFromName(name) {
             ['bbq', ['nuong', 'bbq', 'grill']],
             ['seafood', ['hai san', 'seafood']],
             ['coffee', ['ca phe', 'cafe', 'coffee']],
+            ['pub bar', ['quan nhau', 'nhau', 'bar', 'pub', 'beer', 'bia', 'cocktail', 'lounge', 'brewery', 'taproom']],
             ['banh mi', ['banh mi', 'sandwich']],
             ['street food', ['an vat', 'street food', 'snack', 'quan coc', 'tra chanh', 'xien', 'banh trang', 'tokbokki']],
             ['milk tea', ['tra sua', 'milk tea', 'tea milk', 'tra sua tran chau', 'topping']],
@@ -3561,11 +4270,11 @@ async function generateWardIdFromName(name) {
             'nearby', 'nearest', 'close', 'closer', 'aroundme', 'around_me'
         ]);
 
-        const REFINE_FOOD_INTENT_PATTERN = /(?:\bquan an\b|\bnha hang\b|\bam thuc\b|\bdo an\b|\ban uong\b|\ban toi\b|\ban trua\b|\ban sang\b|\ban\s+vat\b|\bsnack\b|\btra\s+sua\b|\bmilk\s+tea\b|\btra\s+chanh\b|\beat(?:ing)?\b|\bfood\b|\brestaurants?\b|\beatery\b|\bdining\b|\bmeals?\b|\blunch\b|\bdinner\b|\bbreakfast\b)/;
+        const REFINE_FOOD_INTENT_PATTERN = /(?:\bquan an\b|\bnha hang\b|\bam thuc\b|\bdo an\b|\ban uong\b|\bquan nhau\b|\bnhau\b|\ban toi\b|\ban trua\b|\ban sang\b|\ban\s+vat\b|\bsnack\b|\btra\s+sua\b|\bmilk\s+tea\b|\btra\s+chanh\b|\beat(?:ing)?\b|\bfood\b|\brestaurants?\b|\beatery\b|\bdining\b|\bmeals?\b|\blunch\b|\bdinner\b|\bbreakfast\b|\bpubs?\b|\bbars?\b|\bbeer\b|\bcocktail\b|\blounge\b|\bbrewery\b)/;
 
         const REFINE_FOOD_KEYWORDS = [
             'food', 'restaurant', 'dining', 'eatery', 'cuisine',
-            'quan an', 'nha hang', 'am thuc', 'do an', 'an uong', 'quan nhau',
+            'quan an', 'nha hang', 'am thuc', 'do an', 'an uong', 'quan nhau', 'nhau', 'pub', 'bar', 'beer', 'cocktail', 'lounge', 'brewery',
             'lau', 'nuong', 'hai san', 'bun', 'pho', 'com', 'mi quang', 'cao lau', 'banh mi',
             'ca phe', 'cafe', 'coffee', 'tra sua', 'milk tea', 'dessert', 'an vat', 'snack',
             'tra chanh', 'xien', 'banh trang', 'tokbokki', 'lap xuong', 'lap xuong nuong da'
@@ -14268,7 +14977,16 @@ async function generateWardIdFromName(name) {
         registerVersionedRoute('post', '/venues', authenticateOptionalLenient, createVenueSubmission);
         registerVersionedRoute('post', '/feedback', authenticateOptional, submitFeedbackReport);
 
+        registerVersionedRoute('get', '/ad-packages', listPublicAdPackages);
+        registerVersionedRoute('post', '/ad-packages/:packageId/assign', authenticateRequest, checkUserStatus, assignAdPackageToVenue);
+        registerVersionedRoute('get', '/ad-packages/assignments/venues/:venueId', authenticateRequest, checkUserStatus, getMyVenueAdPackageAssignment);
+
+        registerVersionedRoute('get', '/admin/ad-packages/stats', authenticateRequest, checkUserStatus, requireAdminRole, getAdminAdPackageStats);
+        registerVersionedRoute('get', '/admin/ad-packages/:packageId/usages', authenticateRequest, checkUserStatus, requireAdminRole, listAdminAdPackageUsages);
         registerVersionedRoute('get', '/admin/wards', authenticateRequest, requireAdminRole, listAdminWards);
+        registerVersionedRoute('post', '/admin/ad-packages', authenticateRequest, checkUserStatus, requireAdminRole, createAdminAdPackage);
+        registerVersionedRoute('patch', '/admin/ad-packages/:packageId', authenticateRequest, checkUserStatus, requireAdminRole, updateAdminAdPackage);
+        registerVersionedRoute('delete', '/admin/ad-packages/:packageId', authenticateRequest, checkUserStatus, requireAdminRole, archiveAdminAdPackage);
         registerVersionedRoute('post', '/admin/wards', authenticateRequest, requireAdminRole, upsertAdminWard);
         registerVersionedRoute('delete', '/admin/wards/:wardId', authenticateRequest, requireAdminRole, deleteAdminWard);
         registerVersionedRoute('get', '/admin/place-categories', authenticateRequest, requireAdminRole, listAdminPlaceCategories);
@@ -15124,6 +15842,14 @@ async function generateWardIdFromName(name) {
                 const useBaseScope = baseVenueIdsFilter.values.length > 0
                     && ['base', 'base_scope', 'narrow', 'seed'].includes(requestedRefineScope);
                 let refineScope = useBaseScope ? 'base_scope' : 'global_scope';
+                const prioritizeDistanceSort = Number.isFinite(refineConstraints.maxDistanceKm);
+                const prioritizeBudgetSort = Number.isFinite(refineConstraints.maxBudgetVnd)
+                    || Number.isFinite(refineConstraints.minBudgetVnd);
+                const sortBudgetDescending = Boolean(
+                    refineConstraints.strictBudgetFloor
+                    && Number.isFinite(refineConstraints.minBudgetVnd)
+                    && !Number.isFinite(refineConstraints.maxBudgetVnd)
+                );
 
                 if (useBaseScope) {
                     venueResult = await pool.query(
@@ -15143,6 +15869,50 @@ async function generateWardIdFromName(name) {
                 }
 
                 const sortScoredRefineVenues = (first, second) => {
+                    if (prioritizeDistanceSort) {
+                        const firstDistance = Number(first.distanceKm);
+                        const secondDistance = Number(second.distanceKm);
+                        const firstDistanceComparable = Number.isFinite(firstDistance) && firstDistance >= 0
+                            ? firstDistance
+                            : Number.POSITIVE_INFINITY;
+                        const secondDistanceComparable = Number.isFinite(secondDistance) && secondDistance >= 0
+                            ? secondDistance
+                            : Number.POSITIVE_INFINITY;
+
+                        if (firstDistanceComparable !== secondDistanceComparable) {
+                            return firstDistanceComparable - secondDistanceComparable;
+                        }
+                    }
+
+                    if (prioritizeBudgetSort) {
+                        const firstBudget = resolveVenueBudgetRange(first);
+                        const secondBudget = resolveVenueBudgetRange(second);
+
+                        const resolveComparableBudget = (budgetRange) => {
+                            const minPrice = Number(budgetRange?.minPrice);
+                            const maxPrice = Number(budgetRange?.maxPrice);
+
+                            if (Number.isFinite(minPrice) && minPrice > 0) {
+                                return minPrice;
+                            }
+
+                            if (Number.isFinite(maxPrice) && maxPrice > 0) {
+                                return maxPrice;
+                            }
+
+                            return Number.POSITIVE_INFINITY;
+                        };
+
+                        const firstBudgetComparable = resolveComparableBudget(firstBudget);
+                        const secondBudgetComparable = resolveComparableBudget(secondBudget);
+
+                        if (firstBudgetComparable !== secondBudgetComparable) {
+                            return sortBudgetDescending
+                                ? secondBudgetComparable - firstBudgetComparable
+                                : firstBudgetComparable - secondBudgetComparable;
+                        }
+                    }
+
                     if (second.finalScore !== first.finalScore) {
                         return second.finalScore - first.finalScore;
                     }
@@ -15261,7 +16031,16 @@ async function generateWardIdFromName(name) {
                     : requiredRefineDimensionsFromConstraints;
                 const requiresConcurrentDimensionMatch = requiredRefineDimensions.length >= 2;
                 const semanticScoreThreshold = requiresConcurrentDimensionMatch ? 0.62 : 0.48;
-                const hasDistanceConstraint = Number.isFinite(refineConstraints.maxDistanceKm);
+                const requireHeuristicPassForSemantic = Boolean(
+                    Number.isFinite(refineConstraints.maxDistanceKm)
+                    || refineConstraints.requireKeywordMatch
+                    || refineConstraints.requireFoodVenue
+                    || refineConstraints.requireNameMatch
+                    || refineConstraints.requireLocationMatch
+                    || refineConstraints.requireActivityMatch
+                    || refineConstraints.requireServiceMatch
+                    || (Array.isArray(refineConstraints.cuisineKeywords) && refineConstraints.cuisineKeywords.length > 0)
+                );
 
                 if (!semanticRefine.understood) {
                     refinedVenues = [...heuristicRefinedVenues];
@@ -15278,7 +16057,7 @@ async function generateWardIdFromName(name) {
                                 return false;
                             }
 
-                            if (hasDistanceConstraint && !venue.passesRefine) {
+                            if (requireHeuristicPassForSemantic && !venue.passesRefine) {
                                 return false;
                             }
 
@@ -17857,7 +18636,23 @@ async function generateWardIdFromName(name) {
             }
         });
 
-        const PORT = process.env.PORT || 5000;
-        app.listen(PORT, () => {
-            console.log(`🚀 Backend server is running at http://localhost:${PORT}`);
-        });
+                // ===== 2. Backend UI (Swagger) =====
+                app.get('/', (_req, res) => res.redirect('/api/docs'));
+
+            const PORT = Number(process.env.PORT) || 3000;
+
+            const server = app.listen(PORT, '0.0.0.0', () => {
+                console.log(`🚀 Server running on 0.0.0.0:${PORT}`);
+                console.log(`🌐 Local URL: http://localhost:${PORT}`);
+                console.log(`📚 Swagger UI: http://localhost:${PORT}/api/docs`);
+            });
+
+            server.on('error', (error) => {
+                if (error && error.code === 'EADDRINUSE') {
+                    console.error(`❌ Port ${PORT} is already in use.`);
+                } else {
+                    console.error('❌ Failed to start server:', error);
+                }
+
+                process.exit(1);
+            });

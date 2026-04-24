@@ -76,12 +76,22 @@ function buildDefaultWeeklyOverrideMap() {
 }
 
 function resolveApiOrigin() {
-  const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api/v1';
+  const configuredBaseUrl =
+    import.meta.env.VITE_API_BASE_URL
+    || (import.meta.env.DEV ? 'http://localhost:3000/api/v1' : '/api');
+
+  if (typeof window !== 'undefined') {
+    try {
+      return new URL(configuredBaseUrl, window.location.origin).origin;
+    } catch {
+      return window.location.origin;
+    }
+  }
 
   try {
     return new URL(configuredBaseUrl).origin;
   } catch {
-    return 'http://localhost:5000';
+    return 'http://localhost:3000';
   }
 }
 
