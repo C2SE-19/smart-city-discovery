@@ -69,7 +69,8 @@ async function runMigration() {
       '20260420_add_parent_comment_to_forum_comments.sql',
       '20260420_add_forum_post_ownership.sql',
       '20260420_add_forum_comment_ownership.sql',
-      '20260420_create_forum_comment_reports.sql'
+      '20260420_create_forum_comment_reports.sql',
+      '20260424_create_forum_banned_keywords.sql'
     ];
 
     const uniqueMigrationFiles = [...new Set(migrationFiles)];
