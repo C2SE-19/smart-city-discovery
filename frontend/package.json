@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "build": "vite build",
+    "build": "node scripts/build-production.cjs",
+    "build:raw": "vite build",
+    "build:prod": "node scripts/build-production.cjs",
     "lint": "eslint .",
     "preview": "vite preview",
     "start:lan": "node lan-server.cjs"

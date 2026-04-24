@@ -15644,8 +15644,53 @@ async function generateWardIdFromName(name) {
             }
         });
 
-                // ===== 2. Backend UI (Swagger) =====
-                app.get('/', (_req, res) => res.redirect('/api/docs'));
+                // ===== 2. Serve frontend build (production) =====
+                const shouldServeFrontendDist =
+                    String(process.env.SERVE_FRONTEND_DIST || 'true').trim().toLowerCase() !== 'false';
+
+                const frontendDistCandidates = [
+                    path.resolve(__dirname, '../frontend/dist'),
+                    path.resolve(__dirname, './frontend/dist'),
+                    path.resolve(process.cwd(), '../frontend/dist'),
+                    path.resolve(process.cwd(), 'frontend/dist')
+                ];
+
+                const frontendDistDir =
+                    frontendDistCandidates.find((dirPath) => fs.existsSync(path.join(dirPath, 'index.html')))
+                    || frontendDistCandidates[0];
+
+                const frontendIndexFile = path.join(frontendDistDir, 'index.html');
+                const hasFrontendIndex = fs.existsSync(frontendIndexFile);
+
+                if (shouldServeFrontendDist && hasFrontendIndex) {
+                    app.use(express.static(frontendDistDir));
+                } else if (shouldServeFrontendDist) {
+                    console.warn('⚠️ Frontend dist/index.html not found. Checked paths:', frontendDistCandidates);
+                } else {
+                    console.log('ℹ️ SERVE_FRONTEND_DIST=false, backend will not serve frontend files.');
+                }
+
+                app.get('/{*path}', (req, res) => {
+                    if (req.path.startsWith('/api') || req.path.startsWith('/uploads')) {
+                        return res.status(404).json({ error: 'API not found' });
+                    }
+
+                    if (shouldServeFrontendDist && hasFrontendIndex) {
+                        return res.sendFile(frontendIndexFile, (error) => {
+                            if (!error) {
+                                return;
+                            }
+
+                            console.error('Failed to serve frontend index:', error.message);
+
+                            if (!res.headersSent) {
+                                res.status(error.statusCode || 500).send('Internal Server Error');
+                            }
+                        });
+                    }
+
+                    return res.redirect('/api/docs');
+                });
 
             const PORT = Number(process.env.PORT) || 3000;
 
@@ -15653,6 +15698,9 @@ async function generateWardIdFromName(name) {
                 console.log(`🚀 Server running on 0.0.0.0:${PORT}`);
                 console.log(`🌐 Local URL: http://localhost:${PORT}`);
                 console.log(`📚 Swagger UI: http://localhost:${PORT}/api/docs`);
+                if (shouldServeFrontendDist && hasFrontendIndex) {
+                    console.log(`🖥️ Frontend UI: http://localhost:${PORT}`);
+                }
             });
 
             server.on('error', (error) => {
