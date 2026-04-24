@@ -299,6 +299,9 @@ function AdminForumManagementPage() {
         <NavLink to={APP_ROUTES.ADMIN_FORUM_VIEW} className={({ isActive }) => `admin-forum-switch-link ${isActive ? 'is-active' : ''}`}>
           Xem diễn đàn
         </NavLink>
+        <NavLink to={APP_ROUTES.ADMIN_FORUM_KEYWORDS} className={({ isActive }) => `admin-forum-switch-link ${isActive ? 'is-active' : ''}`}>
+          Cấm từ khóa
+        </NavLink>
       </nav>
 
       <section className="admin-forum-stats">
