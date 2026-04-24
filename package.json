@@ -12,6 +12,7 @@
     "pm2:logs": "pm2 logs smartcity-backend"
   },
   "dependencies": {
+    "intro.js": "^8.3.2",
     "openai": "^6.34.0"
   }
 }

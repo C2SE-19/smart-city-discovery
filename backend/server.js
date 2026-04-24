@@ -2550,14 +2550,32 @@ async function generateWardIdFromName(name) {
                 return Boolean(firstSignature) && firstSignature === secondSignature;
             }
 
+            const wardBoundaryCache = {
+                loadedAt: 0,
+                rows: null
+            };
+            const WARD_BOUNDARY_CACHE_TTL_MS = 2 * 60 * 1000;
+
+            async function getWardBoundaryRows() {
+                const now = Date.now();
+                if (Array.isArray(wardBoundaryCache.rows) && now - wardBoundaryCache.loadedAt < WARD_BOUNDARY_CACHE_TTL_MS) {
+                    return wardBoundaryCache.rows;
+                }
+
+                const wardsResult = await pool.query('SELECT ward_id, name, boundary FROM wards');
+                wardBoundaryCache.rows = Array.isArray(wardsResult.rows) ? wardsResult.rows : [];
+                wardBoundaryCache.loadedAt = now;
+                return wardBoundaryCache.rows;
+            }
+
             async function detectWardByCoordinates(latitude, longitude) {
                 const point = turf.point([longitude, latitude]);
-                const wardsResult = await pool.query('SELECT ward_id, name, boundary FROM wards');
+                const wardRows = await getWardBoundaryRows();
 
                 let detectedWardId = null;
                 let detectedWardName = 'Not detected (Outside boundary)';
 
-                for (const ward of wardsResult.rows) {
+                for (const ward of wardRows) {
                     const features = extractBoundaryFeatures(ward.boundary);
 
                     for (const feature of features) {
@@ -6046,6 +6064,43 @@ async function generateWardIdFromName(name) {
             }
         }
 
+        async function getLandingStats(req, res) {
+            try {
+                const [userResult, venueResult] = await Promise.all([
+                    pool.query(
+                        `select count(*)::int as total_users from users where role != $1 and role != $2`,
+                        ['merchant', 'admin']
+                    ),
+                    pool.query('select count(*)::int as total_venues from venues where status = $1', ['approved'])
+                ]);
+
+                const users = userResult.rows[0] || {};
+                const venues = venueResult.rows[0] || {};
+
+                // Format: thêm dấu "+" cho số lượng để trông hấp dẫn hơn
+                const formatStatNumber = (num) => {
+                    const parsed = parseInt(num, 10);
+                    if (parsed === 0) return '0';
+                    if (parsed < 20) return `${parsed}+`;
+                    if (parsed < 100) return `${Math.ceil(parsed / 10) * 10}+`;
+                    return `${Math.ceil(parsed / 100) * 100}+`;
+                };
+
+                const normalizedUsers = Math.max(Number(users.total_users || 0), 20);
+                const normalizedVenues = Math.max(Number(venues.total_venues || 0), 100);
+
+                res.json({
+                    stats: {
+                        users: formatStatNumber(normalizedUsers),
+                        venues: formatStatNumber(normalizedVenues)
+                    }
+                });
+            } catch (error) {
+                console.error('Error loading landing stats:', error);
+                res.status(500).json({ error: 'Unable to load landing stats' });
+            }
+        }
+
         async function listCitiesWithStats(req, res) {
             try {
                 // Lấy danh sách phường/thành phố kèm số lượng địa điểm
@@ -6094,6 +6149,1145 @@ async function generateWardIdFromName(name) {
             }
         }
 
+        function normalizeGeocodeText(value) {
+            return String(value || '')
+                .toLowerCase()
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .replace(/[^a-z0-9/\-\s]/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+        }
+
+        function splitGeocodeTokens(value) {
+            const stopTokens = new Set([
+                'phuong',
+                'xa',
+                'quan',
+                'huyen',
+                'thanh',
+                'pho',
+                'viet',
+                'nam'
+            ]);
+
+            return normalizeGeocodeText(value)
+                .split(' ')
+                .map((token) => token.trim())
+                .filter((token) => token.length >= 2 && !stopTokens.has(token));
+        }
+
+        function computeTokenCoverage(referenceText, searchTokens) {
+            if (!searchTokens.length) {
+                return 0;
+            }
+
+            const normalizedReferenceText = normalizeGeocodeText(referenceText);
+            if (!normalizedReferenceText) {
+                return 0;
+            }
+
+            const matchedTokens = searchTokens.filter((token) => normalizedReferenceText.includes(token));
+            return matchedTokens.length / searchTokens.length;
+        }
+
+        function extractLeadingHouseNumber(addressQuery) {
+            const normalized = String(addressQuery || '').trim();
+            const match = normalized.match(/^\s*(\d+[a-zA-Z]?(?:[\/-]\d+[a-zA-Z]?)?)/);
+            return match ? normalizeGeocodeText(match[1]) : '';
+        }
+
+        function resolveExpectedHouseNumber(addressQuery) {
+            const leadingHouseNumber = extractLeadingHouseNumber(addressQuery);
+            if (leadingHouseNumber) {
+                return leadingHouseNumber;
+            }
+
+            const normalized = normalizeGeocodeText(addressQuery);
+            const alleyHouseNumberMatch = normalized.match(/(?:kiet|hem|ngo|ngach)\s*(\d+[a-zA-Z]?(?:[\/-]\d+[a-zA-Z]?)?)/i);
+            return alleyHouseNumberMatch ? normalizeGeocodeText(alleyHouseNumberMatch[1]) : '';
+        }
+
+        function resolveStreetSearchToken(addressQuery) {
+            const firstPart = String(addressQuery || '').split(',')[0] || '';
+            const withoutNumber = firstPart.replace(/^\s*\d+[a-zA-Z]?(?:[\/-]\d+[a-zA-Z]?)?\s*/u, '');
+            return normalizeGeocodeText(withoutNumber);
+        }
+
+        function resolveStreetSearchRaw(addressQuery) {
+            const firstPart = String(addressQuery || '').split(',')[0] || '';
+            return String(firstPart)
+                .replace(/^\s*\d+[a-zA-Z]?(?:[\/-]\d+[a-zA-Z]?)?\s*/u, '')
+                .trim();
+        }
+
+        function escapeRegex(value) {
+            return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        }
+
+        function resolveCandidateRoadText(candidate) {
+            return normalizeGeocodeText(
+                candidate?.address?.road ||
+                candidate?.address?.pedestrian ||
+                candidate?.address?.residential ||
+                candidate?.address?.street ||
+                candidate?.address?.path ||
+                ''
+            );
+        }
+
+        function resolveCandidateWardText(candidate) {
+            return normalizeGeocodeText(
+                candidate?.address?.suburb ||
+                candidate?.address?.quarter ||
+                candidate?.address?.neighbourhood ||
+                candidate?.address?.city_district ||
+                ''
+            );
+        }
+
+        function parseNumericHouseNumber(value) {
+            const match = String(value || '').match(/\d+/);
+            return match ? Number(match[0]) : null;
+        }
+
+        function isAlleyLikeText(value) {
+            const normalized = normalizeGeocodeText(value);
+            if (!normalized) {
+                return false;
+            }
+
+            return /(^|\s)(kiet|hem|ngo|ngach)(\s|$)/.test(normalized) || /\bk\s*\d+/i.test(normalized);
+        }
+
+        function isExplicitAlleyQuery(addressQuery) {
+            return isAlleyLikeText(addressQuery);
+        }
+
+        function resolvePresetGeocodeQueries(addressQuery) {
+            const normalized = normalizeGeocodeText(addressQuery);
+            if (!normalized) {
+                return [];
+            }
+
+            const presetRules = [
+                {
+                    keywords: ['vincom plaza'],
+                    queries: ['Vincom Plaza Ngo Quyen, Da Nang, Viet Nam']
+                },
+                {
+                    keywords: ['lotte mart', 'lotte'],
+                    queries: ['Lotte Mart Da Nang, Da Nang, Viet Nam']
+                },
+                {
+                    keywords: ['go da nang', 'big c da nang', 'go!'],
+                    queries: ['GO! Da Nang, Da Nang, Viet Nam']
+                },
+                {
+                    keywords: ['indochina riverside'],
+                    queries: ['Indochina Riverside Mall, Da Nang, Viet Nam']
+                },
+                {
+                    keywords: ['mi quang ba mua', 'mì quảng bà mua'],
+                    queries: ['Mi Quang Ba Mua, Da Nang, Viet Nam']
+                },
+                {
+                    keywords: ['banh xeo ba duong', 'bánh xèo bà dưỡng'],
+                    queries: ['Banh Xeo Ba Duong, Da Nang, Viet Nam']
+                },
+                {
+                    keywords: ['bun cha ca ba lu', 'bún chả cá bà lữ'],
+                    queries: ['Bun Cha Ca Ba Lu, Da Nang, Viet Nam']
+                }
+            ];
+
+            const matchedQueries = [];
+            for (const rule of presetRules) {
+                const matched = rule.keywords.some((keyword) => normalized.includes(normalizeGeocodeText(keyword)));
+                if (!matched) {
+                    continue;
+                }
+
+                matchedQueries.push(...rule.queries);
+            }
+
+            return [...new Set(matchedQueries.filter(Boolean))];
+        }
+
+        function resolveCuratedPoi(addressQuery) {
+            const normalized = normalizeGeocodeText(addressQuery);
+            if (!normalized) {
+                return null;
+            }
+
+            const curatedPois = [
+                {
+                    keywords: ['vincom plaza', 'vincom ngo quyen'],
+                    displayName: 'Vincom Plaza Ngô Quyền, Đà Nẵng, Việt Nam',
+                    latitude: 16.071221,
+                    longitude: 108.232909
+                },
+                {
+                    keywords: ['lotte mart', 'lotte da nang'],
+                    displayName: 'Lotte Mart Đà Nẵng, Đà Nẵng, Việt Nam',
+                    latitude: 16.0349012,
+                    longitude: 108.2292319
+                },
+                {
+                    keywords: ['go da nang', 'big c da nang', 'go! da nang'],
+                    displayName: 'GO! Đà Nẵng, Đà Nẵng, Việt Nam',
+                    latitude: 16.060321,
+                    longitude: 108.209004
+                },
+                {
+                    keywords: ['indochina riverside'],
+                    displayName: 'Indochina Riverside Mall, Đà Nẵng, Việt Nam',
+                    latitude: 16.069028,
+                    longitude: 108.224588
+                },
+                {
+                    keywords: ['mi quang ba mua', 'mì quảng bà mua'],
+                    displayName: 'Mì Quảng Bà Mua, Đà Nẵng, Việt Nam',
+                    latitude: 16.056186,
+                    longitude: 108.212327
+                },
+                {
+                    keywords: ['banh xeo ba duong', 'bánh xèo bà dưỡng'],
+                    displayName: 'Bánh Xèo Bà Dưỡng, Đà Nẵng, Việt Nam',
+                    latitude: 16.057089,
+                    longitude: 108.210625
+                }
+            ];
+
+            return (
+                curatedPois.find((poi) =>
+                    poi.keywords.some((keyword) => normalized.includes(normalizeGeocodeText(keyword)))
+                ) || null
+            );
+        }
+
+        function resolveEffectiveStreetToken(expectedStreetToken, queryRequestsAlley) {
+            const normalizedToken = normalizeGeocodeText(expectedStreetToken);
+            if (!queryRequestsAlley || !normalizedToken) {
+                return normalizedToken;
+            }
+
+            return normalizedToken
+                .replace(/^(kiet|hem|ngo|ngach)\s*\d+[a-zA-Z]?(?:[\/-]\d+[a-zA-Z]?)?\s*/i, '')
+                .trim();
+        }
+
+        function resolveCandidateCityText(candidate) {
+            return normalizeGeocodeText(
+                candidate?.address?.city ||
+                candidate?.address?.town ||
+                candidate?.address?.municipality ||
+                candidate?.address?.state ||
+                candidate?.address?.province ||
+                ''
+            );
+        }
+
+        function extractLaneMarkerForStreet(name, expectedStreetToken) {
+            const normalizedName = normalizeGeocodeText(name);
+            if (!normalizedName) {
+                return null;
+            }
+
+            const markerMatch = normalizedName.match(/^kiet\s+(\d+)\s+(.+)$/);
+            if (!markerMatch) {
+                return null;
+            }
+
+            const laneNumber = Number(markerMatch[1]);
+            const laneStreetToken = String(markerMatch[2] || '').trim();
+
+            if (!Number.isFinite(laneNumber) || laneNumber <= 0) {
+                return null;
+            }
+
+            if (expectedStreetToken && !laneStreetToken.includes(expectedStreetToken)) {
+                return null;
+            }
+
+            return {
+                laneNumber,
+                laneStreetToken
+            };
+        }
+
+        async function resolveHouseNumberByLaneInterpolation({
+            expectedHouseNumber,
+            expectedStreetToken,
+            aroundLatitude,
+            aroundLongitude,
+            normalizedWardId
+        }) {
+            const targetHouseNumber = parseNumericHouseNumber(expectedHouseNumber);
+            if (!Number.isFinite(targetHouseNumber) || targetHouseNumber <= 0) {
+                return null;
+            }
+
+            if (!expectedStreetToken) {
+                return null;
+            }
+
+            if (!Number.isFinite(aroundLatitude) || !Number.isFinite(aroundLongitude)) {
+                return null;
+            }
+
+            const overpassQuery = [
+                '[out:json][timeout:20];',
+                `way(around:2200,${aroundLatitude},${aroundLongitude})["highway"]["name"~"^Kiệt [0-9]+",i];`,
+                'out tags center;'
+            ].join('');
+
+            const overpassResponse = await axios.post(
+                'https://overpass-api.de/api/interpreter',
+                new URLSearchParams({ data: overpassQuery }).toString(),
+                {
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
+                    timeout: 9000
+                }
+            );
+
+            const elements = Array.isArray(overpassResponse?.data?.elements)
+                ? overpassResponse.data.elements
+                : [];
+
+            const lanePointByNumber = new Map();
+
+            for (const element of elements) {
+                const marker = extractLaneMarkerForStreet(element?.tags?.name, expectedStreetToken);
+                if (!marker) {
+                    continue;
+                }
+
+                const latitude = Number(element?.center?.lat);
+                const longitude = Number(element?.center?.lon);
+
+                if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+                    continue;
+                }
+
+                if (normalizedWardId) {
+                    const detection = await detectWardByCoordinates(latitude, longitude);
+                    const detectedWardId = String(detection?.wardId || '').trim();
+                    if (detectedWardId !== normalizedWardId) {
+                        continue;
+                    }
+                }
+
+                if (!lanePointByNumber.has(marker.laneNumber)) {
+                    lanePointByNumber.set(marker.laneNumber, {
+                        laneNumber: marker.laneNumber,
+                        latitude,
+                        longitude,
+                        name: String(element?.tags?.name || '').trim()
+                    });
+                }
+            }
+
+            const lanePoints = Array.from(lanePointByNumber.values()).sort((a, b) => a.laneNumber - b.laneNumber);
+
+            if (!lanePoints.length) {
+                return null;
+            }
+
+            const lowerMarker = [...lanePoints]
+                .reverse()
+                .find((item) => item.laneNumber <= targetHouseNumber) || null;
+
+            const upperMarker = lanePoints.find((item) => item.laneNumber >= targetHouseNumber) || null;
+
+            if (lowerMarker && upperMarker && lowerMarker.laneNumber !== upperMarker.laneNumber) {
+                const range = upperMarker.laneNumber - lowerMarker.laneNumber;
+                const offset = targetHouseNumber - lowerMarker.laneNumber;
+                const ratio = Math.min(1, Math.max(0, range > 0 ? offset / range : 0));
+
+                return {
+                    latitude: lowerMarker.latitude + (upperMarker.latitude - lowerMarker.latitude) * ratio,
+                    longitude: lowerMarker.longitude + (upperMarker.longitude - lowerMarker.longitude) * ratio,
+                    lowerMarker,
+                    upperMarker,
+                    method: 'interpolated-between-lanes'
+                };
+            }
+
+            const nearestMarker = lanePoints.reduce((best, current) => {
+                const bestDistance = Math.abs(best.laneNumber - targetHouseNumber);
+                const currentDistance = Math.abs(current.laneNumber - targetHouseNumber);
+                return currentDistance < bestDistance ? current : best;
+            });
+
+            return {
+                latitude: nearestMarker.latitude,
+                longitude: nearestMarker.longitude,
+                lowerMarker: nearestMarker,
+                upperMarker: nearestMarker,
+                method: 'nearest-lane-marker'
+            };
+        }
+
+        async function resolveHouseNumberByStreetAddressInterpolation({
+            expectedHouseNumber,
+            expectedStreetToken,
+            aroundLatitude,
+            aroundLongitude,
+            normalizedWardId
+        }) {
+            const targetHouseNumber = parseNumericHouseNumber(expectedHouseNumber);
+            if (!Number.isFinite(targetHouseNumber) || targetHouseNumber <= 0) {
+                return null;
+            }
+
+            if (!expectedStreetToken) {
+                return null;
+            }
+
+            if (!Number.isFinite(aroundLatitude) || !Number.isFinite(aroundLongitude)) {
+                return null;
+            }
+
+            const overpassQuery = [
+                '[out:json][timeout:20];',
+                '(',
+                `  node(around:2200,${aroundLatitude},${aroundLongitude})["addr:street"]["addr:housenumber"];`,
+                `  way(around:2200,${aroundLatitude},${aroundLongitude})["addr:street"]["addr:housenumber"];`,
+                ');',
+                'out center tags;'
+            ].join('\n');
+
+            const overpassResponse = await axios.post(
+                'https://overpass-api.de/api/interpreter',
+                new URLSearchParams({ data: overpassQuery }).toString(),
+                {
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
+                    timeout: 9000
+                }
+            );
+
+            const elements = Array.isArray(overpassResponse?.data?.elements)
+                ? overpassResponse.data.elements
+                : [];
+
+            const addressPoints = [];
+
+            for (const element of elements) {
+                const tags = element?.tags || {};
+                const streetName = normalizeGeocodeText(tags['addr:street']);
+                const houseNumber = parseNumericHouseNumber(tags['addr:housenumber']);
+                const latitude = Number(element?.lat ?? element?.center?.lat);
+                const longitude = Number(element?.lon ?? element?.center?.lon);
+
+                if (!streetName || !streetName.includes(expectedStreetToken)) {
+                    continue;
+                }
+
+                if (isAlleyLikeText(streetName)) {
+                    continue;
+                }
+
+                if (!Number.isFinite(houseNumber) || !Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+                    continue;
+                }
+
+                if (normalizedWardId) {
+                    const detection = await detectWardByCoordinates(latitude, longitude);
+                    const detectedWardId = String(detection?.wardId || '').trim();
+                    if (detectedWardId !== normalizedWardId) {
+                        continue;
+                    }
+                }
+
+                addressPoints.push({
+                    houseNumber,
+                    latitude,
+                    longitude,
+                    streetName
+                });
+            }
+
+            if (!addressPoints.length) {
+                return null;
+            }
+
+            addressPoints.sort((a, b) => a.houseNumber - b.houseNumber);
+
+            const lowerPoint = [...addressPoints].reverse().find((item) => item.houseNumber <= targetHouseNumber) || null;
+            const upperPoint = addressPoints.find((item) => item.houseNumber >= targetHouseNumber) || null;
+
+            if (lowerPoint && upperPoint && lowerPoint.houseNumber !== upperPoint.houseNumber) {
+                const range = upperPoint.houseNumber - lowerPoint.houseNumber;
+                const offset = targetHouseNumber - lowerPoint.houseNumber;
+                const ratio = Math.min(1, Math.max(0, range > 0 ? offset / range : 0));
+
+                return {
+                    latitude: lowerPoint.latitude + (upperPoint.latitude - lowerPoint.latitude) * ratio,
+                    longitude: lowerPoint.longitude + (upperPoint.longitude - lowerPoint.longitude) * ratio,
+                    lowerPoint,
+                    upperPoint,
+                    method: 'interpolated-between-housenumbers'
+                };
+            }
+
+            const nearestPoint = addressPoints.reduce((best, current) => {
+                const bestDistance = Math.abs(best.houseNumber - targetHouseNumber);
+                const currentDistance = Math.abs(current.houseNumber - targetHouseNumber);
+                return currentDistance < bestDistance ? current : best;
+            });
+
+            return {
+                latitude: nearestPoint.latitude,
+                longitude: nearestPoint.longitude,
+                lowerPoint: nearestPoint,
+                upperPoint: nearestPoint,
+                method: 'nearest-known-housenumber'
+            };
+        }
+
+        const geocodeResultCache = new Map();
+        const GEOCODE_RESULT_CACHE_TTL_MS = 5 * 60 * 1000;
+
+        function buildGeocodeCacheKey(addressQuery, wardId) {
+            return `${normalizeGeocodeText(addressQuery)}::${String(wardId || '').trim()}`;
+        }
+
+        function getCachedGeocodeResult(addressQuery, wardId) {
+            const cacheKey = buildGeocodeCacheKey(addressQuery, wardId);
+            const cacheEntry = geocodeResultCache.get(cacheKey);
+
+            if (!cacheEntry) {
+                return null;
+            }
+
+            if (Date.now() - cacheEntry.createdAt > GEOCODE_RESULT_CACHE_TTL_MS) {
+                geocodeResultCache.delete(cacheKey);
+                return null;
+            }
+
+            return cacheEntry.payload;
+        }
+
+        function setCachedGeocodeResult(addressQuery, wardId, payload) {
+            const cacheKey = buildGeocodeCacheKey(addressQuery, wardId);
+            geocodeResultCache.set(cacheKey, {
+                createdAt: Date.now(),
+                payload
+            });
+        }
+
+        function visitCoordinatePairs(coordinates, onPair) {
+            if (!Array.isArray(coordinates)) {
+                return;
+            }
+
+            if (
+                coordinates.length >= 2 &&
+                typeof coordinates[0] === 'number' &&
+                typeof coordinates[1] === 'number'
+            ) {
+                onPair(coordinates);
+                return;
+            }
+
+            coordinates.forEach((nested) => visitCoordinatePairs(nested, onPair));
+        }
+
+        function resolveBoundaryCenter(boundary) {
+            const features = extractBoundaryFeatures(boundary);
+            let minLatitude = Infinity;
+            let maxLatitude = -Infinity;
+            let minLongitude = Infinity;
+            let maxLongitude = -Infinity;
+            let hasPoint = false;
+
+            features.forEach((feature) => {
+                const geometry = feature?.geometry;
+                visitCoordinatePairs(geometry?.coordinates, (pair) => {
+                    const longitude = Number(pair[0]);
+                    const latitude = Number(pair[1]);
+
+                    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+                        return;
+                    }
+
+                    hasPoint = true;
+                    minLatitude = Math.min(minLatitude, latitude);
+                    maxLatitude = Math.max(maxLatitude, latitude);
+                    minLongitude = Math.min(minLongitude, longitude);
+                    maxLongitude = Math.max(maxLongitude, longitude);
+                });
+            });
+
+            if (!hasPoint) {
+                return null;
+            }
+
+            return {
+                latitude: (minLatitude + maxLatitude) / 2,
+                longitude: (minLongitude + maxLongitude) / 2
+            };
+        }
+
+        async function resolveWardCenterById(wardId) {
+            const normalizedWardId = String(wardId || '').trim();
+            if (!normalizedWardId) {
+                return null;
+            }
+
+            const wardRows = await getWardBoundaryRows();
+            const matchedWard = wardRows.find((ward) => String(ward.ward_id || '').trim() === normalizedWardId) || null;
+            if (!matchedWard) {
+                return null;
+            }
+
+            return resolveBoundaryCenter(matchedWard.boundary);
+        }
+
+        async function geocodePublicAddress(req, res) {
+            const addressQuery = String(req.body?.addressQuery || '').trim();
+            const normalizedWardId = String(req.body?.wardId || '').trim();
+            const normalizedAddressQuery = normalizeGeocodeText(addressQuery);
+
+            if (addressQuery.length < 3) {
+                return res.status(400).json({ message: 'addressQuery must be at least 3 characters long.' });
+            }
+
+            const cachedResult = getCachedGeocodeResult(addressQuery, normalizedWardId);
+            if (cachedResult) {
+                return res.json(cachedResult);
+            }
+
+            try {
+                let selectedWardName = '';
+                if (normalizedWardId) {
+                    const wardLookup = await pool.query(
+                        'SELECT name FROM wards WHERE ward_id::text = $1 LIMIT 1',
+                        [normalizedWardId]
+                    );
+
+                    selectedWardName = String(wardLookup.rows?.[0]?.name || '').trim();
+                }
+
+                const expectedHouseNumber = resolveExpectedHouseNumber(addressQuery);
+                const expectedStreetToken = resolveStreetSearchToken(addressQuery);
+                const expectedStreetRaw = resolveStreetSearchRaw(addressQuery);
+                const expectedWardToken = normalizeGeocodeText(selectedWardName);
+                const queryRequestsAlley = isExplicitAlleyQuery(addressQuery);
+                const effectiveStreetToken = resolveEffectiveStreetToken(expectedStreetToken, queryRequestsAlley);
+                const searchTokens = splitGeocodeTokens(effectiveStreetToken || addressQuery);
+                const presetQueries = resolvePresetGeocodeQueries(addressQuery);
+                const curatedPoi = !expectedHouseNumber ? resolveCuratedPoi(addressQuery) : null;
+                const houseRegex = expectedHouseNumber
+                    ? new RegExp(`(^|\\D)${escapeRegex(expectedHouseNumber)}(\\D|$)`, 'i')
+                    : null;
+
+                if (curatedPoi) {
+                    const poiDetection = await detectWardByCoordinates(curatedPoi.latitude, curatedPoi.longitude);
+                    const poiWardId = String(poiDetection?.wardId || '').trim();
+                    const resultPayload = {
+                        latitude: curatedPoi.latitude,
+                        longitude: curatedPoi.longitude,
+                        wardId: poiDetection?.wardId || null,
+                        wardName: poiDetection?.wardName || null,
+                        displayName: curatedPoi.displayName,
+                        exactHouseNumberMatched: true,
+                        source: 'preset-poi',
+                        isFallbackLocation: Boolean(normalizedWardId && poiWardId && poiWardId !== normalizedWardId)
+                    };
+
+                    setCachedGeocodeResult(addressQuery, normalizedWardId, resultPayload);
+                    return res.json(resultPayload);
+                }
+
+                const nominatimHeaders = {
+                    'Accept-Language': 'vi,en',
+                    'User-Agent': 'smart-city-discovery/1.0 (merchant geocode)'
+                };
+
+                const requestVariants = [];
+
+                if (expectedHouseNumber && expectedStreetRaw) {
+                    requestVariants.push({
+                        street: `${expectedHouseNumber} ${expectedStreetRaw}`,
+                        city: 'Đà Nẵng',
+                        country: 'Việt Nam',
+                        format: 'jsonv2',
+                        limit: 10,
+                        addressdetails: 1,
+                        countrycodes: 'vn'
+                    });
+                }
+
+                if (queryRequestsAlley && expectedHouseNumber && effectiveStreetToken) {
+                    requestVariants.push({
+                        street: `${expectedHouseNumber} ${effectiveStreetToken}`,
+                        city: 'Đà Nẵng',
+                        country: 'Việt Nam',
+                        format: 'jsonv2',
+                        limit: 10,
+                        addressdetails: 1,
+                        countrycodes: 'vn'
+                    });
+
+                    requestVariants.push({
+                        q: [`${expectedHouseNumber} ${effectiveStreetToken}`, selectedWardName, 'Đà Nẵng', 'Việt Nam']
+                            .filter(Boolean)
+                            .join(', '),
+                        format: 'jsonv2',
+                        limit: 10,
+                        addressdetails: 1,
+                        countrycodes: 'vn'
+                    });
+                }
+
+                requestVariants.push({
+                    q: [addressQuery, selectedWardName, 'Đà Nẵng', 'Việt Nam'].filter(Boolean).join(', '),
+                    format: 'jsonv2',
+                    limit: 10,
+                    addressdetails: 1,
+                    countrycodes: 'vn'
+                });
+
+                presetQueries.forEach((presetQuery) => {
+                    requestVariants.push({
+                        q: [presetQuery, selectedWardName, 'Đà Nẵng', 'Việt Nam'].filter(Boolean).join(', '),
+                        format: 'jsonv2',
+                        limit: 10,
+                        addressdetails: 1,
+                        countrycodes: 'vn'
+                    });
+                });
+
+                requestVariants.push({
+                    q: [addressQuery, 'Đà Nẵng', 'Việt Nam'].filter(Boolean).join(', '),
+                    format: 'jsonv2',
+                    limit: 10,
+                    addressdetails: 1,
+                    countrycodes: 'vn'
+                });
+
+                requestVariants.push({
+                    q: addressQuery,
+                    format: 'jsonv2',
+                    limit: 10,
+                    addressdetails: 1,
+                    countrycodes: 'vn'
+                });
+
+                const candidatesByKey = new Map();
+                let hasRateLimitFromNominatim = false;
+                let lastProviderError = null;
+
+                const dedupedRequestVariants = requestVariants.filter((variant, index, source) => {
+                    const key = JSON.stringify(variant);
+                    return source.findIndex((item) => JSON.stringify(item) === key) === index;
+                });
+
+                const nominatimResults = await Promise.allSettled(
+                    dedupedRequestVariants.map((params) =>
+                        axios.get('https://nominatim.openstreetmap.org/search', {
+                            params,
+                            headers: nominatimHeaders,
+                            timeout: 4500
+                        })
+                    )
+                );
+
+                nominatimResults.forEach((result) => {
+                    if (result.status === 'fulfilled') {
+                        const nextCandidates = Array.isArray(result.value?.data) ? result.value.data : [];
+                        nextCandidates.forEach((candidate) => {
+                            const uniqueKey =
+                                String(candidate?.place_id || '').trim() ||
+                                `${String(candidate?.osm_type || '').trim()}:${String(candidate?.osm_id || '').trim()}` ||
+                                `${String(candidate?.lat || '').trim()},${String(candidate?.lon || '').trim()}`;
+
+                            if (!uniqueKey || candidatesByKey.has(uniqueKey)) {
+                                return;
+                            }
+
+                            candidatesByKey.set(uniqueKey, candidate);
+                        });
+                        return;
+                    }
+
+                    const providerError = result.reason;
+                    const providerStatus = Number(providerError?.response?.status) || 0;
+                    if (providerStatus === 429) {
+                        hasRateLimitFromNominatim = true;
+                        return;
+                    }
+
+                    if (!lastProviderError) {
+                        lastProviderError = providerError;
+                    }
+                });
+
+                if (!candidatesByKey.size && hasRateLimitFromNominatim) {
+                    const photonQueries = [
+                        [addressQuery, selectedWardName, 'Đà Nẵng', 'Việt Nam'].filter(Boolean).join(', '),
+                        [addressQuery, 'Đà Nẵng', 'Việt Nam'].filter(Boolean).join(', ')
+                    ];
+
+                    for (const photonQuery of photonQueries) {
+                        if (!photonQuery) {
+                            continue;
+                        }
+
+                        try {
+                            const photonResponse = await axios.get('https://photon.komoot.io/api', {
+                                params: {
+                                    q: photonQuery,
+                                    lang: 'en',
+                                    limit: 10
+                                },
+                                timeout: 8000
+                            });
+
+                            const photonFeatures = Array.isArray(photonResponse?.data?.features)
+                                ? photonResponse.data.features
+                                : [];
+
+                            photonFeatures.forEach((feature, index) => {
+                                const latitude = Number(feature?.geometry?.coordinates?.[1]);
+                                const longitude = Number(feature?.geometry?.coordinates?.[0]);
+                                if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+                                    return;
+                                }
+
+                                const properties = feature?.properties || {};
+                                const photonCandidate = {
+                                    place_id: `${String(properties?.osm_type || 'photon').trim()}:${String(properties?.osm_id || index).trim()}`,
+                                    lat: String(latitude),
+                                    lon: String(longitude),
+                                    display_name: [
+                                        properties?.name,
+                                        properties?.street,
+                                        properties?.district,
+                                        properties?.city,
+                                        properties?.country
+                                    ]
+                                        .filter(Boolean)
+                                        .join(', '),
+                                    address: {
+                                        road: properties?.street || properties?.name || '',
+                                        suburb: properties?.district || properties?.state_district || '',
+                                        city_district: properties?.district || properties?.state_district || '',
+                                        city: properties?.city || '',
+                                        country: properties?.country || ''
+                                    }
+                                };
+
+                                const uniqueKey =
+                                    String(photonCandidate?.place_id || '').trim() ||
+                                    `${String(photonCandidate?.lat || '').trim()},${String(photonCandidate?.lon || '').trim()}`;
+
+                                if (!uniqueKey || candidatesByKey.has(uniqueKey)) {
+                                    return;
+                                }
+
+                                candidatesByKey.set(uniqueKey, photonCandidate);
+                            });
+                        } catch (photonError) {
+                            lastProviderError = photonError;
+                        }
+                    }
+                }
+
+                const candidates = Array.from(candidatesByKey.values());
+                if (!candidates.length) {
+                    if (lastProviderError) {
+                        throw lastProviderError;
+                    }
+                    return res.status(404).json({ message: 'No matching location found for this address.' });
+                }
+
+                const rankedCandidates = [];
+
+                const fallbackCandidates = [];
+
+                for (let index = 0; index < candidates.length; index += 1) {
+                    const candidate = candidates[index];
+                    const latitude = Number(candidate?.lat);
+                    const longitude = Number(candidate?.lon);
+
+                    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+                        continue;
+                    }
+
+                    const detection = await detectWardByCoordinates(latitude, longitude);
+                    const detectedWardId = String(detection?.wardId || '').trim();
+
+                    const displayText = normalizeGeocodeText(candidate?.display_name || '');
+                    const roadText = resolveCandidateRoadText(candidate);
+                    const wardText = resolveCandidateWardText(candidate);
+                    const cityText = resolveCandidateCityText(candidate);
+                    const candidateHouseNumber = normalizeGeocodeText(candidate?.address?.house_number || '');
+
+                    const cityMatched =
+                        cityText.includes('da nang') ||
+                        displayText.includes('da nang') ||
+                        displayText.includes('danang');
+
+                    const queryTargetsOutsideDaNang =
+                        normalizedAddressQuery.includes('hoi an') ||
+                        normalizedAddressQuery.includes('quang nam') ||
+                        normalizedAddressQuery.includes('thang binh') ||
+                        normalizedAddressQuery.includes('dien ban');
+
+                    if (!cityMatched && !normalizedWardId && !queryTargetsOutsideDaNang) {
+                        continue;
+                    }
+
+                    const displayTokenCoverage = computeTokenCoverage(displayText, searchTokens);
+                    const roadTokenCoverage = computeTokenCoverage(roadText, searchTokens);
+                    const relaxedPoiMatch =
+                        !expectedHouseNumber &&
+                        searchTokens.length >= 2 &&
+                        Math.max(displayTokenCoverage, roadTokenCoverage) >= 0.5;
+
+                    const streetMatched =
+                        !effectiveStreetToken ||
+                        roadText.includes(effectiveStreetToken) ||
+                        displayText.includes(effectiveStreetToken) ||
+                        relaxedPoiMatch;
+
+                    if (!streetMatched) {
+                        continue;
+                    }
+
+                    const candidateLooksLikeAlley = isAlleyLikeText(`${roadText} ${displayText}`);
+                    if (!queryRequestsAlley && candidateLooksLikeAlley) {
+                        continue;
+                    }
+
+                    const houseMatched =
+                        !expectedHouseNumber ||
+                        candidateHouseNumber === expectedHouseNumber ||
+                        (houseRegex ? houseRegex.test(displayText) : false);
+                    const hasHouseSignal =
+                        Boolean(candidateHouseNumber) || Boolean(houseRegex ? houseRegex.test(displayText) : false);
+
+                    const wardNameMatched =
+                        !expectedWardToken ||
+                        wardText.includes(expectedWardToken) ||
+                        displayText.includes(expectedWardToken);
+
+                    let score = 0;
+                    score += 120;
+                    score += cityMatched ? 35 : -10;
+                    if (roadText.includes(effectiveStreetToken) && effectiveStreetToken) {
+                        score += 80;
+                    }
+                    if (relaxedPoiMatch) {
+                        score += Math.round(Math.max(displayTokenCoverage, roadTokenCoverage) * 60);
+                    }
+                    if (wardNameMatched) {
+                        score += 45;
+                    }
+                    if (expectedHouseNumber) {
+                        if (houseMatched) {
+                            score += 260;
+                        } else if (hasHouseSignal) {
+                            score -= 260;
+                        } else {
+                            score -= 40;
+                        }
+                    }
+                    score += Math.max(0, 10 - index);
+
+                    const candidateData = {
+                        candidate,
+                        latitude,
+                        longitude,
+                        detection,
+                        detectedWardId,
+                        houseMatched,
+                        hasHouseSignal,
+                        score
+                    };
+
+                    if (normalizedWardId && detectedWardId !== normalizedWardId) {
+                        fallbackCandidates.push(candidateData);
+                    } else {
+                        rankedCandidates.push(candidateData);
+                    }
+                }
+
+                if (!rankedCandidates.length) {
+                    const fallbackAroundPoint = candidates.find((candidate) => {
+                        const latitude = Number(candidate?.lat);
+                        const longitude = Number(candidate?.lon);
+                        return Number.isFinite(latitude) && Number.isFinite(longitude);
+                    }) || null;
+
+                    const wardCenter = await resolveWardCenterById(normalizedWardId);
+
+                    const emergencyAroundLatitude = Number.isFinite(Number(wardCenter?.latitude))
+                        ? Number(wardCenter.latitude)
+                        : Number(fallbackAroundPoint?.lat);
+                    const emergencyAroundLongitude = Number.isFinite(Number(wardCenter?.longitude))
+                        ? Number(wardCenter.longitude)
+                        : Number(fallbackAroundPoint?.lon);
+
+                    if (Number.isFinite(emergencyAroundLatitude) && Number.isFinite(emergencyAroundLongitude) && expectedHouseNumber && effectiveStreetToken) {
+                        let emergencyInterpolationPoint = null;
+
+                        try {
+                            if (queryRequestsAlley) {
+                                emergencyInterpolationPoint = await resolveHouseNumberByLaneInterpolation({
+                                    expectedHouseNumber,
+                                    expectedStreetToken: effectiveStreetToken,
+                                    aroundLatitude: emergencyAroundLatitude,
+                                    aroundLongitude: emergencyAroundLongitude,
+                                    normalizedWardId
+                                });
+
+                                if (!emergencyInterpolationPoint) {
+                                    emergencyInterpolationPoint = await resolveHouseNumberByStreetAddressInterpolation({
+                                        expectedHouseNumber,
+                                        expectedStreetToken: effectiveStreetToken,
+                                        aroundLatitude: emergencyAroundLatitude,
+                                        aroundLongitude: emergencyAroundLongitude,
+                                        normalizedWardId
+                                    });
+                                }
+                            } else {
+                                emergencyInterpolationPoint = await resolveHouseNumberByStreetAddressInterpolation({
+                                    expectedHouseNumber,
+                                    expectedStreetToken: effectiveStreetToken,
+                                    aroundLatitude: emergencyAroundLatitude,
+                                    aroundLongitude: emergencyAroundLongitude,
+                                    normalizedWardId
+                                });
+                            }
+                        } catch {
+                            emergencyInterpolationPoint = null;
+                        }
+
+                        if (emergencyInterpolationPoint) {
+                            const emergencyLatitude = Number(emergencyInterpolationPoint.latitude);
+                            const emergencyLongitude = Number(emergencyInterpolationPoint.longitude);
+                            const emergencyDetection = await detectWardByCoordinates(emergencyLatitude, emergencyLongitude);
+                            const emergencyWardId = String(emergencyDetection?.wardId || '').trim();
+                            const emergencySourcePrefix = String(emergencyInterpolationPoint.method || '').includes('housenumber')
+                                ? 'house-interpolation'
+                                : 'lane-interpolation';
+                            const emergencyPayload = {
+                                latitude: emergencyLatitude,
+                                longitude: emergencyLongitude,
+                                wardId: emergencyDetection?.wardId || null,
+                                wardName: emergencyDetection?.wardName || null,
+                                displayName: String(fallbackAroundPoint?.display_name || addressQuery).trim(),
+                                exactHouseNumberMatched: true,
+                                source: `${emergencySourcePrefix}:${emergencyInterpolationPoint.method}`,
+                                isFallbackLocation: Boolean(normalizedWardId && emergencyWardId && emergencyWardId !== normalizedWardId)
+                            };
+
+                            setCachedGeocodeResult(addressQuery, normalizedWardId, emergencyPayload);
+                            return res.json(emergencyPayload);
+                        }
+                    }
+
+                    if (fallbackCandidates.length && normalizedWardId) {
+                        rankedCandidates.push(...fallbackCandidates);
+                    } else {
+                        if (!normalizedWardId) {
+                            return res.status(404).json({
+                                message: 'No matching location found for this address. Please refine address or pick on map.'
+                            });
+                        }
+
+                        return res.status(409).json({
+                            message:
+                                'Could not find a result matching this street within the selected ward. Please refine address or pick on map.'
+                        });
+                    }
+                }
+
+                rankedCandidates.sort((first, second) => second.score - first.score);
+                const bestMatch = rankedCandidates[0];
+                const isFallbackCandidate = normalizedWardId && String(bestMatch.detectedWardId || '').trim() !== normalizedWardId;
+                const hasConflictingHouseEvidence =
+                    expectedHouseNumber &&
+                    rankedCandidates.some((item) => item.hasHouseSignal) &&
+                    !rankedCandidates.some((item) => item.houseMatched);
+
+                let laneInterpolatedPoint = null;
+                if (expectedHouseNumber && !bestMatch.houseMatched) {
+                    try {
+                        if (queryRequestsAlley) {
+                            laneInterpolatedPoint = await resolveHouseNumberByLaneInterpolation({
+                                expectedHouseNumber,
+                                expectedStreetToken: effectiveStreetToken,
+                                aroundLatitude: bestMatch.latitude,
+                                aroundLongitude: bestMatch.longitude,
+                                normalizedWardId
+                            });
+                        } else {
+                            laneInterpolatedPoint = await resolveHouseNumberByStreetAddressInterpolation({
+                                expectedHouseNumber,
+                                expectedStreetToken: effectiveStreetToken,
+                                aroundLatitude: bestMatch.latitude,
+                                aroundLongitude: bestMatch.longitude,
+                                normalizedWardId
+                            });
+                        }
+                    } catch {
+                        laneInterpolatedPoint = null;
+                    }
+                }
+
+                if (hasConflictingHouseEvidence && !laneInterpolatedPoint && !isFallbackCandidate) {
+                    return res.status(409).json({
+                        message:
+                            'Could not find exact house number on this street in the selected ward. Please enter more detail or pick exactly on map.'
+                    });
+                }
+
+                const resolvedLatitude = Number.isFinite(laneInterpolatedPoint?.latitude)
+                    ? Number(laneInterpolatedPoint.latitude)
+                    : bestMatch.latitude;
+                const resolvedLongitude = Number.isFinite(laneInterpolatedPoint?.longitude)
+                    ? Number(laneInterpolatedPoint.longitude)
+                    : bestMatch.longitude;
+                const resolvedDetection = laneInterpolatedPoint
+                    ? await detectWardByCoordinates(resolvedLatitude, resolvedLongitude)
+                    : bestMatch.detection;
+                const resolvedWardId = String(resolvedDetection?.wardId || '').trim();
+                const isFallbackLocation = Boolean(normalizedWardId && resolvedWardId && resolvedWardId !== normalizedWardId);
+                const interpolationSourcePrefix =
+                    laneInterpolatedPoint && String(laneInterpolatedPoint.method || '').includes('housenumber')
+                        ? 'house-interpolation'
+                        : 'lane-interpolation';
+
+                const resultPayload = {
+                    latitude: resolvedLatitude,
+                    longitude: resolvedLongitude,
+                    wardId: resolvedDetection?.wardId || null,
+                    wardName: resolvedDetection?.wardName || null,
+                    displayName: String(bestMatch.candidate?.display_name || '').trim(),
+                    exactHouseNumberMatched: Boolean(bestMatch.houseMatched || laneInterpolatedPoint),
+                    source: laneInterpolatedPoint ? `${interpolationSourcePrefix}:${laneInterpolatedPoint.method}` : 'nominatim',
+                    isFallbackLocation
+                };
+
+                setCachedGeocodeResult(addressQuery, normalizedWardId, resultPayload);
+                return res.json(resultPayload);
+            } catch (error) {
+                const statusCode = Number(error?.response?.status) || 502;
+                return res.status(statusCode >= 400 && statusCode < 500 ? statusCode : 502).json({
+                    message: error?.response?.data?.message || 'Unable to geocode address at the moment.'
+                });
+            }
+        }
+
         async function listPublicVenues(req, res) {
             try {
                 const venueHasOwnerUserColumn = await hasVenueOwnerUserColumn();
@@ -6116,6 +7310,11 @@ async function generateWardIdFromName(name) {
                 const wardIdsFilter = parseTextList(req.query.wardIds);
                 const singleWardId = normalizeNullableText(req.query.wardId);
                 const requestedVenueId = normalizeNullableNumber(req.query.venueId);
+                const excludeVenueIdsFilter = parsePositiveIntegerList(req.query.excludeIds ?? req.query.exclude);
+                const requestedLimitRaw = Number(req.query.limit);
+                const requestedLimit = Number.isFinite(requestedLimitRaw)
+                    ? Math.max(1, Math.min(50, Math.floor(requestedLimitRaw)))
+                    : null;
                 const searchKeyword = String(req.query.q ?? req.query.search ?? '').trim().toLowerCase();
 
                 if (isMineRequest && !requesterId) {
@@ -6136,6 +7335,12 @@ async function generateWardIdFromName(name) {
                     return res
                         .status(400)
                         .json({ message: 'serviceIds must be a comma-separated list of positive integers' });
+                }
+
+                if (excludeVenueIdsFilter.invalid) {
+                    return res
+                        .status(400)
+                        .json({ message: 'excludeIds must be a comma-separated list of positive integers' });
                 }
 
                 if (Number.isNaN(requestedVenueId)) {
@@ -6175,6 +7380,11 @@ async function generateWardIdFromName(name) {
                 if (requestedVenueId !== null) {
                     values.push(requestedVenueId);
                     whereConditions.push(`venues.id = $${values.length}`);
+                }
+
+                if (excludeVenueIdsFilter.values.length) {
+                    values.push(excludeVenueIdsFilter.values);
+                    whereConditions.push(`NOT (venues.id = ANY($${values.length}::int[]))`);
                 }
 
                 if (serviceIdsFilter.values.length) {
@@ -6218,8 +7428,16 @@ async function generateWardIdFromName(name) {
                     effectiveCategoryIds.length === 0 &&
                     effectiveWardIds.length === 0 &&
                     requestedVenueId === null &&
+                    excludeVenueIdsFilter.values.length === 0 &&
                     serviceIdsFilter.values.length === 0 &&
+                    requestedLimit === null &&
                     !searchKeyword;
+
+                const limitSql = requestedLimit !== null ? `LIMIT $${values.length + 1}` : '';
+
+                if (requestedLimit !== null) {
+                    values.push(requestedLimit);
+                }
 
                 if (useCompactApprovedCache) {
                     const now = Date.now();
@@ -6313,6 +7531,7 @@ async function generateWardIdFromName(name) {
                 ) AS venue_primary_image ON true
                 WHERE ${whereConditions.join(' AND ')}
                 ORDER BY COALESCE(venues.approved_at, venues.created_at) DESC, venues.id DESC
+                ${limitSql}
             `,
                     values
                 );
@@ -6736,10 +7955,14 @@ async function generateWardIdFromName(name) {
 
                 const venueImages = extractVenueImageUrls(venue, venue?.venue_images);
                 const venueImageSet = new Set(venueImages);
+                const replyImages = reviewRows.flatMap((review) =>
+                    Array.isArray(review.replies)
+                        ? review.replies.flatMap((reply) => normalizeStringArray(reply.imageUrls))
+                        : []
+                );
                 const reviewImages = [
                     ...new Set(
-                        reviewRows
-                            .flatMap((review) => review.imageUrls || [])
+                        [...reviewRows.flatMap((review) => review.imageUrls || []), ...replyImages]
                             .filter((imageUrl) => !venueImageSet.has(imageUrl))
                     )
                 ];
@@ -6826,6 +8049,57 @@ async function generateWardIdFromName(name) {
                 return res.json({
                     venueId,
                     ...realtimePayload
+                });
+            } catch (error) {
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
+        async function getVenueServices(req, res) {
+            const venueId = Number(req.params.venueId);
+
+            if (!Number.isFinite(venueId)) {
+                return res.status(400).json({ message: 'Invalid venue id' });
+            }
+
+            try {
+                const isAdmin = normalizeRole(req.authUser?.role) === 'admin';
+                const venue = await getPublicVenueForDetail(venueId, isAdmin);
+
+                if (!venue) {
+                    return res.status(404).json({ message: 'Venue not found' });
+                }
+
+                const metadata = normalizeVenueMetadataObject(venue.metadata);
+
+                // Extract services from metadata
+                const servicesFromMetadata = [
+                    ...(Array.isArray(metadata.selectedServiceNames) ? metadata.selectedServiceNames : []),
+                    ...(Array.isArray(metadata.servicesOffered) ? metadata.servicesOffered : []),
+                    ...(Array.isArray(metadata.services) ? metadata.services : [])
+                ];
+
+                // Get merchant_services definitions
+                const servicesQuery = `
+                    SELECT id, name, slug, icon, description
+                    FROM merchant_services
+                    WHERE is_active = true
+                    ORDER BY sort_order ASC, name ASC
+                `;
+
+                const { rows: allServices } = await pool.query(servicesQuery);
+
+                // Filter only services that this venue offers
+                const venueServices = allServices.filter(service =>
+                    servicesFromMetadata.some(venueSvc =>
+                        String(venueSvc).toLowerCase().includes(String(service.name).toLowerCase()) ||
+                        String(venueSvc).toLowerCase().includes(String(service.slug).toLowerCase())
+                    )
+                );
+
+                return res.json({
+                    venueId,
+                    services: venueServices.length > 0 ? venueServices : []
                 });
             } catch (error) {
                 return res.status(500).json({ message: error.message });
@@ -10707,6 +11981,13 @@ async function generateWardIdFromName(name) {
                         [venueId]
                     );
 
+                    // Clear all caches related to this venue
+                    publicVenueDetailCache.delete(`public:${venueId}`);
+                    publicVenueDetailCache.delete(`admin:${venueId}`);
+                    publicVenueForDetailCache.delete(`public:${venueId}`);
+                    publicVenueForDetailCache.delete(`admin:${venueId}`);
+                    invalidateVenueCommunityBundleCacheByVenueId(venueId);
+
                     return res.json({
                         message: 'Venue rejected successfully',
                         venue: details.rows[0]
@@ -10767,6 +12048,13 @@ async function generateWardIdFromName(name) {
             `,
                     [venueId]
                 );
+
+                // Clear all caches related to this venue
+                publicVenueDetailCache.delete(`public:${venueId}`);
+                publicVenueDetailCache.delete(`admin:${venueId}`);
+                publicVenueForDetailCache.delete(`public:${venueId}`);
+                publicVenueForDetailCache.delete(`admin:${venueId}`);
+                invalidateVenueCommunityBundleCacheByVenueId(venueId);
 
                 return res.json({
                     message: 'Venue approved successfully',
@@ -12627,9 +13915,1040 @@ async function generateWardIdFromName(name) {
         registerVersionedRoute('post', '/chat/threads/:threadId/read', authenticateRequest, checkUserStatus, markChatThreadRead);
         registerVersionedRoute('delete', '/chat/threads/:threadId', authenticateRequest, checkUserStatus, deleteChatThread);
 
+        const FORUM_PROFANITY_PATTERNS = [
+            'dit me', 'ditme', 'dit bo', 'ditba', 'dit', 'dm ', 'vcl', 'vl', 'cc', 'cmm', 'dmm',
+            'địt', 'đụ', 'đéo', 'deo', 'lon', 'cac', 'cặc', 'lồn', 'ngu', 'oc cho', 'occho',
+            'do ngu', 'mat day', 'hon lao', 'vo hoc', 'cho chet', 'chó chết'
+        ];
+
+        function normalizeForumText(value) {
+            return String(value || '')
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .toLowerCase()
+                .replace(/[^a-z0-9\s]/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+        }
+
+        function forumContainsProfanity(text) {
+            const normalized = normalizeForumText(text);
+            return FORUM_PROFANITY_PATTERNS.some((pattern) => normalized.includes(pattern));
+        }
+
+        function sanitizeForumImageList(input, maxImages = 3) {
+            if (!Array.isArray(input)) {
+                return [];
+            }
+
+            const images = input
+                .map((item) => String(item || '').trim())
+                .filter(Boolean)
+                .filter((item) => /^data:image\//i.test(item) || /^https?:\/\//i.test(item));
+
+            const uniqueImages = [...new Set(images)];
+            return uniqueImages.slice(0, maxImages);
+        }
+
+        function normalizeActorKey(value) {
+            return String(value || '')
+                .trim()
+                .replace(/[^a-zA-Z0-9_-]/g, '')
+                .slice(0, 80);
+        }
+
+        function isGenericForumAuthorName(value) {
+            const normalized = normalizeForumText(value);
+            return normalized === 'nguoi dung' || normalized === 'user';
+        }
+
+        async function resolveForumAuthorName(req, requestedAuthorName) {
+            const trimmedRequestedName = String(requestedAuthorName || '').trim();
+            if (trimmedRequestedName && !isGenericForumAuthorName(trimmedRequestedName)) {
+                return trimmedRequestedName;
+            }
+
+            const authUserId = String(req.authUser?.id || '').trim();
+            if (authUserId) {
+                try {
+                    const userResult = await pool.query(
+                        'SELECT fullname, username, email FROM users WHERE id = $1 LIMIT 1',
+                        [authUserId]
+                    );
+
+                    if (userResult.rows.length) {
+                        const userRow = userResult.rows[0];
+                        const candidates = [
+                            String(userRow.fullname || '').trim(),
+                            String(userRow.username || '').trim(),
+                            String(userRow.email || '').trim()
+                        ];
+
+                        for (const candidate of candidates) {
+                            if (!candidate) {
+                                continue;
+                            }
+
+                            const derived = candidate.includes('@')
+                                ? String(candidate).split('@')[0].trim()
+                                : candidate;
+
+                            if (derived && !isGenericForumAuthorName(derived)) {
+                                return derived;
+                            }
+                        }
+                    }
+                } catch (error) {
+                    console.warn('resolveForumAuthorName lookup error:', error.message);
+                }
+            }
+
+            const authEmail = String(req.authUser?.email || '').trim();
+            if (authEmail) {
+                const emailName = authEmail.split('@')[0].trim();
+                if (emailName && !isGenericForumAuthorName(emailName)) {
+                    return emailName;
+                }
+            }
+
+            return 'Người dùng';
+        }
+
+        function mapForumComment(row) {
+            const isAnonymous = Boolean(row.is_anonymous);
+            const alias = String(row.anonymous_alias || '').trim();
+            const author = isAnonymous
+                ? alias || 'Người dùng ẩn danh'
+                : String(row.author_name || '').trim() || 'Người dùng';
+            const rawParentId = row.parent_comment_id;
+            const parentCommentId = rawParentId === null || rawParentId === undefined
+                ? null
+                : Number(rawParentId) || null;
+            const creatorUserId = row.creator_user_id ? String(row.creator_user_id) : null;
+            const authorActorKey = row.author_actor_key ? String(row.author_actor_key) : null;
+            const reportCount = Number(row.report_count || row.comment_report_count || 0);
+            const lastReportedAt = row.last_reported_at || null;
+            const reportReasons = Array.isArray(row.comment_report_reasons)
+                ? row.comment_report_reasons
+                : (Array.isArray(row.report_reasons) ? row.report_reasons : []);
+
+            return {
+                id: row.id,
+                postId: row.post_id,
+                parentCommentId,
+                content: row.content,
+                author,
+                isAnonymous,
+                anonymousAlias: alias || null,
+                images: Array.isArray(row.comment_images) ? row.comment_images : [],
+                creatorUserId,
+                authorActorKey,
+                reportCount,
+                isReported: reportCount > 0,
+                lastReportedAt,
+                reportReasons,
+                createdAt: row.created_at,
+                time: row.created_at
+            };
+        }
+
+        function mapForumPost(row) {
+            const isAnonymous = Boolean(row.is_anonymous);
+            const alias = String(row.anonymous_alias || '').trim();
+            const author = isAnonymous
+                ? alias || 'Người dùng ẩn danh'
+                : String(row.author_name || '').trim() || 'Người dùng';
+            const creatorUserId = row.creator_user_id ? String(row.creator_user_id) : null;
+            const authorActorKey = row.author_actor_key ? String(row.author_actor_key) : null;
+            const reportCount = Number(row.post_report_count || row.report_count || 0);
+            const commentReportCount = Number(row.comment_report_count || 0);
+            const hasReportedContent = Boolean(reportCount > 0 || commentReportCount > 0);
+            const postReportReasons = Array.isArray(row.post_report_reasons) ? row.post_report_reasons : [];
+
+            return {
+                id: row.id,
+                title: row.title,
+                category: row.category,
+                content: row.content,
+                excerpt: row.content,
+                author,
+                comments: Number(row.comments_count || 0),
+                likesCount: Number(row.likes_count || 0),
+                images: Array.isArray(row.post_images) ? row.post_images : [],
+                createdAt: row.created_at,
+                time: row.created_at,
+                isAnonymous,
+                anonymousAlias: alias || null,
+                creatorUserId,
+                authorActorKey,
+                reportCount,
+                commentReportCount,
+                hasReportedContent,
+                lastReportedAt: row.last_reported_at || null,
+                postReportReasons,
+                commentsList: Array.isArray(row.comments_list) ? row.comments_list.map(mapForumComment) : []
+            };
+        }
+
+        async function listAdminForumPosts(req, res) {
+            try {
+                const search = String(req.query?.search || '').trim();
+                const queryParams = [];
+                let whereClause = '';
+
+                if (search) {
+                    queryParams.push(`%${search}%`);
+                    whereClause = `
+                        WHERE (
+                            p.title ILIKE $${queryParams.length}
+                            OR p.content ILIKE $${queryParams.length}
+                            OR p.category ILIKE $${queryParams.length}
+                            OR COALESCE(p.author_name, '') ILIKE $${queryParams.length}
+                            OR EXISTS (
+                                SELECT 1
+                                FROM forum_comments fc_search
+                                WHERE fc_search.post_id = p.id
+                                  AND (
+                                      fc_search.content ILIKE $${queryParams.length}
+                                      OR COALESCE(fc_search.author_name, '') ILIKE $${queryParams.length}
+                                      OR COALESCE(fc_search.anonymous_alias, '') ILIKE $${queryParams.length}
+                                  )
+                            )
+                        )
+                    `;
+                }
+
+                const result = await pool.query(
+                    `
+                        SELECT
+                            p.id,
+                            p.title,
+                            p.category,
+                            p.content,
+                            p.author_name,
+                            p.creator_user_id,
+                            p.author_actor_key,
+                            p.is_anonymous,
+                            p.anonymous_alias,
+                            p.comments_count,
+                            p.likes_count,
+                            p.post_images,
+                            p.created_at,
+                            COALESCE(post_reports.report_count, 0) AS post_report_count,
+                            COALESCE(comment_reports.report_count, 0) AS comment_report_count,
+                            COALESCE(
+                                (
+                                    SELECT json_agg(report_item ORDER BY report_item.created_at DESC)
+                                    FROM (
+                                        SELECT
+                                            fpr.id,
+                                            fpr.actor_key,
+                                            fpr.reason,
+                                            fpr.created_at
+                                        FROM forum_post_reports fpr
+                                        WHERE fpr.post_id = p.id
+                                        ORDER BY fpr.created_at DESC
+                                        LIMIT 20
+                                    ) report_item
+                                ),
+                                '[]'::json
+                            ) AS post_report_reasons,
+                            GREATEST(
+                                COALESCE(post_reports.last_reported_at, 'epoch'::timestamptz),
+                                COALESCE(comment_reports.last_reported_at, 'epoch'::timestamptz)
+                            ) AS last_reported_at,
+                            COALESCE(
+                                (
+                                    SELECT json_agg(c ORDER BY c.is_reported DESC, c.last_reported_at DESC NULLS LAST, c.created_at DESC)
+                                    FROM (
+                                        SELECT
+                                            fc.id,
+                                            fc.post_id,
+                                            fc.parent_comment_id,
+                                            fc.content,
+                                            fc.author_name,
+                                            fc.creator_user_id,
+                                            fc.author_actor_key,
+                                            fc.is_anonymous,
+                                            fc.anonymous_alias,
+                                            fc.comment_images,
+                                            fc.created_at,
+                                            COALESCE(fcr.report_count, 0) AS report_count,
+                                            COALESCE(
+                                                (
+                                                    SELECT json_agg(comment_report_item ORDER BY comment_report_item.created_at DESC)
+                                                    FROM (
+                                                        SELECT
+                                                            report.id,
+                                                            report.actor_key,
+                                                            report.reason,
+                                                            report.created_at
+                                                        FROM forum_comment_reports report
+                                                        WHERE report.comment_id = fc.id
+                                                        ORDER BY report.created_at DESC
+                                                        LIMIT 20
+                                                    ) comment_report_item
+                                                ),
+                                                '[]'::json
+                                            ) AS comment_report_reasons,
+                                            fcr.last_reported_at,
+                                            (COALESCE(fcr.report_count, 0) > 0) AS is_reported
+                                        FROM forum_comments fc
+                                        LEFT JOIN (
+                                            SELECT
+                                                comment_id,
+                                                COUNT(*)::int AS report_count,
+                                                MAX(created_at) AS last_reported_at
+                                            FROM forum_comment_reports
+                                            GROUP BY comment_id
+                                        ) fcr ON fcr.comment_id = fc.id
+                                        WHERE fc.post_id = p.id
+                                        ORDER BY fc.created_at DESC
+                                        LIMIT 200
+                                    ) c
+                                ),
+                                '[]'::json
+                            ) AS comments_list
+                        FROM forum_posts p
+                        LEFT JOIN (
+                            SELECT
+                                post_id,
+                                COUNT(*)::int AS report_count,
+                                MAX(created_at) AS last_reported_at
+                            FROM forum_post_reports
+                            GROUP BY post_id
+                        ) post_reports ON post_reports.post_id = p.id
+                        LEFT JOIN (
+                            SELECT
+                                fc.post_id,
+                                COUNT(*)::int AS report_count,
+                                MAX(fcr.created_at) AS last_reported_at
+                            FROM forum_comment_reports fcr
+                            INNER JOIN forum_comments fc ON fc.id = fcr.comment_id
+                            GROUP BY fc.post_id
+                        ) comment_reports ON comment_reports.post_id = p.id
+                        ${whereClause}
+                        ORDER BY
+                            (COALESCE(post_reports.report_count, 0) > 0 OR COALESCE(comment_reports.report_count, 0) > 0) DESC,
+                            GREATEST(
+                                COALESCE(post_reports.last_reported_at, 'epoch'::timestamptz),
+                                COALESCE(comment_reports.last_reported_at, 'epoch'::timestamptz)
+                            ) DESC,
+                            p.created_at DESC
+                        LIMIT 200
+                    `,
+                    queryParams
+                );
+
+                return res.json({ data: result.rows.map(mapForumPost) });
+            } catch (error) {
+                console.error('listAdminForumPosts error:', error);
+                return res.status(500).json({ message: 'Không thể tải dữ liệu diễn đàn cho quản trị viên.' });
+            }
+        }
+
+        async function listForumPosts(req, res) {
+            try {
+                const result = await pool.query(
+                    `
+                        SELECT
+                            p.id,
+                            p.title,
+                            p.category,
+                            p.content,
+                            p.author_name,
+                            p.creator_user_id,
+                            p.author_actor_key,
+                            p.is_anonymous,
+                            p.anonymous_alias,
+                            p.comments_count,
+                            p.likes_count,
+                            p.post_images,
+                            p.created_at,
+                            COALESCE(
+                                (
+                                    SELECT json_agg(c ORDER BY c.created_at DESC)
+                                    FROM (
+                                        SELECT
+                                            fc.id,
+                                            fc.post_id,
+                                            fc.parent_comment_id,
+                                            fc.content,
+                                            fc.author_name,
+                                            fc.creator_user_id,
+                                            fc.author_actor_key,
+                                            fc.is_anonymous,
+                                            fc.anonymous_alias,
+                                            fc.comment_images,
+                                            fc.created_at
+                                        FROM forum_comments fc
+                                        WHERE fc.post_id = p.id
+                                        ORDER BY fc.created_at DESC
+                                        LIMIT 100
+                                    ) c
+                                ),
+                                '[]'::json
+                            ) AS comments_list
+                        FROM forum_posts p
+                        ORDER BY p.created_at DESC
+                        LIMIT 100
+                    `
+                );
+
+                return res.json({ data: result.rows.map(mapForumPost) });
+            } catch (error) {
+                console.error('listForumPosts error:', error);
+                return res.status(500).json({ message: 'Không thể tải bài viết diễn đàn.' });
+            }
+        }
+
+        async function createForumPost(req, res) {
+            try {
+                const title = String(req.body?.title || '').trim();
+                const category = String(req.body?.category || '').trim();
+                const content = String(req.body?.content || '').trim();
+                const isAnonymous = Boolean(req.body?.isAnonymous);
+                const anonymousAlias = String(req.body?.anonymousAlias || '').trim();
+                const authorName = await resolveForumAuthorName(req, req.body?.authorName);
+                const actorKey = normalizeActorKey(req.body?.actorKey);
+                const creatorUserId = req.authUser?.id || null;
+                const postImages = sanitizeForumImageList(req.body?.images, 3);
+
+                if (!title || !category || !content) {
+                    return res.status(400).json({ message: 'Vui lòng nhập đầy đủ tiêu đề, chủ đề và nội dung.' });
+                }
+
+                if (content.length > 499) {
+                    return res.status(400).json({ message: 'Nội dung dài tối đa 499 ký tự.' });
+                }
+
+                if (isAnonymous && anonymousAlias.length < 2) {
+                    return res.status(400).json({ message: 'Vui lòng nhập biệt danh tối thiểu 2 ký tự khi đăng ẩn danh.' });
+                }
+
+                if (forumContainsProfanity(`${title} ${category} ${content} ${anonymousAlias}`)) {
+                    return res.status(400).json({ message: 'Nội dung chứa từ ngữ không phù hợp. Vui lòng chỉnh sửa trước khi đăng.' });
+                }
+
+                const insertResult = await pool.query(
+                    `
+                        INSERT INTO forum_posts (
+                            title, category, content, author_name, creator_user_id, author_actor_key, is_anonymous, anonymous_alias, post_images
+                        )
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+                        RETURNING id, title, category, content, author_name, creator_user_id, author_actor_key, is_anonymous, anonymous_alias, comments_count, likes_count, post_images, created_at
+                    `,
+                    [
+                        title,
+                        category,
+                        content,
+                        isAnonymous ? null : authorName,
+                        creatorUserId,
+                        actorKey || null,
+                        isAnonymous,
+                        isAnonymous ? anonymousAlias : null,
+                        JSON.stringify(postImages)
+                    ]
+                );
+
+                return res.status(201).json({ data: mapForumPost(insertResult.rows[0]) });
+            } catch (error) {
+                console.error('createForumPost error:', error);
+                return res.status(500).json({ message: 'Không thể đăng bài lúc này. Vui lòng thử lại.' });
+            }
+        }
+
+        async function createForumComment(req, res) {
+            try {
+                const postId = Number(req.params?.postId);
+                const authUserId = String(req.authUser?.id || '').trim();
+                const rawParentCommentId = req.body?.parentCommentId;
+                const parentCommentId =
+                    rawParentCommentId === null || rawParentCommentId === undefined || rawParentCommentId === ''
+                        ? null
+                        : Number(rawParentCommentId);
+                const content = String(req.body?.content || '').trim();
+                const isAnonymous = Boolean(req.body?.isAnonymous);
+                const anonymousAlias = String(req.body?.anonymousAlias || '').trim();
+                const authorName = await resolveForumAuthorName(req, req.body?.authorName);
+                const actorKey = normalizeActorKey(req.body?.actorKey);
+                const creatorUserId = authUserId || null;
+                const commentImages = sanitizeForumImageList(req.body?.images, 3);
+
+                if (!authUserId) {
+                    return res.status(401).json({ message: 'Bạn cần đăng nhập để bình luận.' });
+                }
+
+                if (!Number.isFinite(postId) || postId <= 0) {
+                    return res.status(400).json({ message: 'Bài viết không hợp lệ.' });
+                }
+
+                if (!content) {
+                    return res.status(400).json({ message: 'Vui lòng nhập nội dung bình luận.' });
+                }
+
+                if (parentCommentId !== null && (!Number.isFinite(parentCommentId) || parentCommentId <= 0)) {
+                    return res.status(400).json({ message: 'Phản hồi bình luận không hợp lệ.' });
+                }
+
+                if (content.length > 499) {
+                    return res.status(400).json({ message: 'Nội dung bình luận tối đa 499 ký tự.' });
+                }
+
+                if (isAnonymous && anonymousAlias.length < 2) {
+                    return res.status(400).json({ message: 'Vui lòng nhập biệt danh tối thiểu 2 ký tự khi bình luận ẩn danh.' });
+                }
+
+                if (forumContainsProfanity(`${content} ${anonymousAlias}`)) {
+                    return res.status(400).json({ message: 'Bình luận chứa từ ngữ không phù hợp. Vui lòng chỉnh sửa trước khi đăng.' });
+                }
+
+                const postCheck = await pool.query('SELECT id FROM forum_posts WHERE id = $1 LIMIT 1', [postId]);
+                if (!postCheck.rows.length) {
+                    return res.status(404).json({ message: 'Không tìm thấy bài viết.' });
+                }
+
+                if (parentCommentId !== null) {
+                    const parentCheck = await pool.query(
+                        'SELECT id FROM forum_comments WHERE id = $1 AND post_id = $2 LIMIT 1',
+                        [parentCommentId, postId]
+                    );
+
+                    if (!parentCheck.rows.length) {
+                        return res.status(404).json({ message: 'Không tìm thấy bình luận gốc để phản hồi.' });
+                    }
+                }
+
+                const insertResult = await pool.query(
+                    `
+                        INSERT INTO forum_comments (
+                            post_id, parent_comment_id, content, author_name, creator_user_id, author_actor_key, is_anonymous, anonymous_alias, comment_images
+                        )
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+                        RETURNING id, post_id, parent_comment_id, content, author_name, creator_user_id, author_actor_key, is_anonymous, anonymous_alias, comment_images, created_at
+                    `,
+                    [
+                        postId,
+                        parentCommentId,
+                        content,
+                        isAnonymous ? null : authorName,
+                        creatorUserId,
+                        actorKey || null,
+                        isAnonymous,
+                        isAnonymous ? anonymousAlias : null,
+                        JSON.stringify(commentImages)
+                    ]
+                );
+
+                await pool.query(
+                    'UPDATE forum_posts SET comments_count = comments_count + 1, updated_at = NOW() WHERE id = $1',
+                    [postId]
+                );
+
+                return res.status(201).json({ data: mapForumComment(insertResult.rows[0]) });
+            } catch (error) {
+                console.error('createForumComment error:', error);
+                return res.status(500).json({ message: 'Không thể đăng bình luận lúc này. Vui lòng thử lại.' });
+            }
+        }
+
+        async function toggleForumPostLike(req, res) {
+            try {
+                const postId = Number(req.params?.postId);
+                const actorKey = normalizeActorKey(req.body?.actorKey);
+
+                if (!Number.isFinite(postId) || postId <= 0) {
+                    return res.status(400).json({ message: 'Bài viết không hợp lệ.' });
+                }
+
+                if (!actorKey) {
+                    return res.status(400).json({ message: 'Thiếu thông tin người dùng để thực hiện thao tác thích.' });
+                }
+
+                const postCheck = await pool.query('SELECT id FROM forum_posts WHERE id = $1 LIMIT 1', [postId]);
+                if (!postCheck.rows.length) {
+                    return res.status(404).json({ message: 'Không tìm thấy bài viết.' });
+                }
+
+                const existing = await pool.query(
+                    'SELECT id FROM forum_post_likes WHERE post_id = $1 AND actor_key = $2 LIMIT 1',
+                    [postId, actorKey]
+                );
+
+                let liked = false;
+                if (existing.rows.length) {
+                    await pool.query('DELETE FROM forum_post_likes WHERE post_id = $1 AND actor_key = $2', [postId, actorKey]);
+                    await pool.query(
+                        'UPDATE forum_posts SET likes_count = GREATEST(likes_count - 1, 0), updated_at = NOW() WHERE id = $1',
+                        [postId]
+                    );
+                } else {
+                    await pool.query(
+                        'INSERT INTO forum_post_likes (post_id, actor_key) VALUES ($1, $2) ON CONFLICT (post_id, actor_key) DO NOTHING',
+                        [postId, actorKey]
+                    );
+                    await pool.query(
+                        'UPDATE forum_posts SET likes_count = likes_count + 1, updated_at = NOW() WHERE id = $1',
+                        [postId]
+                    );
+                    liked = true;
+                }
+
+                const likesResult = await pool.query('SELECT likes_count FROM forum_posts WHERE id = $1', [postId]);
+                const likesCount = Number(likesResult.rows?.[0]?.likes_count || 0);
+
+                return res.json({ data: { postId, liked, likesCount } });
+            } catch (error) {
+                console.error('toggleForumPostLike error:', error);
+                return res.status(500).json({ message: 'Không thể cập nhật lượt thích lúc này. Vui lòng thử lại.' });
+            }
+        }
+
+        async function reportForumPost(req, res) {
+            try {
+                const postId = Number(req.params?.postId);
+                const actorKey = normalizeActorKey(req.body?.actorKey);
+                const reason = String(req.body?.reason || '').trim();
+
+                if (!Number.isFinite(postId) || postId <= 0) {
+                    return res.status(400).json({ message: 'Bài viết không hợp lệ.' });
+                }
+
+                if (!actorKey) {
+                    return res.status(400).json({ message: 'Thiếu thông tin người dùng để báo cáo.' });
+                }
+
+                if (reason.length < 3) {
+                    return res.status(400).json({ message: 'Lý do báo cáo cần ít nhất 3 ký tự.' });
+                }
+
+                if (forumContainsProfanity(reason)) {
+                    return res.status(400).json({ message: 'Lý do báo cáo chứa từ ngữ không phù hợp.' });
+                }
+
+                const postCheck = await pool.query('SELECT id FROM forum_posts WHERE id = $1 LIMIT 1', [postId]);
+                if (!postCheck.rows.length) {
+                    return res.status(404).json({ message: 'Không tìm thấy bài viết.' });
+                }
+
+                await pool.query(
+                    `
+                        INSERT INTO forum_post_reports (post_id, actor_key, reason)
+                        VALUES ($1, $2, $3)
+                    `,
+                    [postId, actorKey, reason]
+                );
+
+                return res.status(201).json({ data: { postId, actorKey } });
+            } catch (error) {
+                console.error('reportForumPost error:', error);
+                return res.status(500).json({ message: 'Không thể gửi báo cáo lúc này. Vui lòng thử lại.' });
+            }
+        }
+
+        async function reportForumComment(req, res) {
+            try {
+                const postId = Number(req.params?.postId);
+                const commentId = Number(req.params?.commentId);
+                const actorKey = normalizeActorKey(req.body?.actorKey);
+                const reason = String(req.body?.reason || '').trim();
+
+                if (!Number.isFinite(postId) || postId <= 0) {
+                    return res.status(400).json({ message: 'Bài viết không hợp lệ.' });
+                }
+
+                if (!Number.isFinite(commentId) || commentId <= 0) {
+                    return res.status(400).json({ message: 'Bình luận không hợp lệ.' });
+                }
+
+                if (!actorKey) {
+                    return res.status(400).json({ message: 'Thiếu thông tin người dùng để báo cáo.' });
+                }
+
+                if (reason.length < 3) {
+                    return res.status(400).json({ message: 'Lý do báo cáo cần ít nhất 3 ký tự.' });
+                }
+
+                if (forumContainsProfanity(reason)) {
+                    return res.status(400).json({ message: 'Lý do báo cáo chứa từ ngữ không phù hợp.' });
+                }
+
+                const commentCheck = await pool.query(
+                    'SELECT id FROM forum_comments WHERE id = $1 AND post_id = $2 LIMIT 1',
+                    [commentId, postId]
+                );
+
+                if (!commentCheck.rows.length) {
+                    return res.status(404).json({ message: 'Không tìm thấy bình luận.' });
+                }
+
+                await pool.query(
+                    `
+                        INSERT INTO forum_comment_reports (comment_id, actor_key, reason)
+                        VALUES ($1, $2, $3)
+                    `,
+                    [commentId, actorKey, reason]
+                );
+
+                return res.status(201).json({ data: { postId, commentId, actorKey } });
+            } catch (error) {
+                console.error('reportForumComment error:', error);
+                return res.status(500).json({ message: 'Không thể gửi báo cáo bình luận lúc này. Vui lòng thử lại.' });
+            }
+        }
+
+        async function deleteForumPost(req, res) {
+            try {
+                const postId = Number(req.params?.postId);
+                const actorKey = normalizeActorKey(req.body?.actorKey);
+                const requestAuthorName = String(req.body?.authorName || '').trim();
+                const authUserId = String(req.authUser?.id || '').trim();
+
+                if (!Number.isFinite(postId) || postId <= 0) {
+                    return res.status(400).json({ message: 'Bài viết không hợp lệ.' });
+                }
+
+                const postResult = await pool.query(
+                    `
+                        SELECT id, author_name, creator_user_id, author_actor_key, is_anonymous
+                        FROM forum_posts
+                        WHERE id = $1
+                        LIMIT 1
+                    `,
+                    [postId]
+                );
+
+                if (!postResult.rows.length) {
+                    return res.status(404).json({ message: 'Không tìm thấy bài viết.' });
+                }
+
+                const post = postResult.rows[0];
+                const postCreatorUserId = post.creator_user_id ? String(post.creator_user_id) : '';
+                const postActorKey = post.author_actor_key ? String(post.author_actor_key) : '';
+                const postAuthorName = String(post.author_name || '').trim();
+                const isAnonymous = Boolean(post.is_anonymous);
+
+                const allowByUserId = Boolean(authUserId && postCreatorUserId && authUserId === postCreatorUserId);
+                const allowByActorKey = Boolean(actorKey && postActorKey && actorKey === postActorKey);
+                const allowLegacyByAuthorName = Boolean(
+                    !isAnonymous &&
+                    requestAuthorName &&
+                    postAuthorName &&
+                    requestAuthorName === postAuthorName
+                );
+
+                if (!allowByUserId && !allowByActorKey && !allowLegacyByAuthorName) {
+                    return res.status(403).json({ message: 'Bạn chỉ có thể xóa bài viết do chính bạn đăng.' });
+                }
+
+                await pool.query('DELETE FROM forum_posts WHERE id = $1', [postId]);
+                return res.json({ data: { postId } });
+            } catch (error) {
+                console.error('deleteForumPost error:', error);
+                return res.status(500).json({ message: 'Không thể xóa bài viết lúc này. Vui lòng thử lại.' });
+            }
+        }
+
+        async function deleteForumComment(req, res) {
+            const postId = Number(req.params?.postId);
+            const commentId = Number(req.params?.commentId);
+            const actorKey = normalizeActorKey(req.body?.actorKey);
+            const requestAuthorName = String(req.body?.authorName || '').trim();
+            const authUserId = String(req.authUser?.id || '').trim();
+
+            if (!Number.isFinite(postId) || postId <= 0) {
+                return res.status(400).json({ message: 'Bài viết không hợp lệ.' });
+            }
+
+            if (!Number.isFinite(commentId) || commentId <= 0) {
+                return res.status(400).json({ message: 'Bình luận không hợp lệ.' });
+            }
+
+            let client;
+
+            try {
+                const identityResult = await pool.query(
+                    `
+                        SELECT
+                            p.id AS post_id,
+                            p.author_name AS post_author_name,
+                            p.creator_user_id AS post_creator_user_id,
+                            p.author_actor_key AS post_actor_key,
+                            p.is_anonymous AS post_is_anonymous,
+                            c.id AS comment_id,
+                            c.author_name AS comment_author_name,
+                            c.creator_user_id AS comment_creator_user_id,
+                            c.author_actor_key AS comment_actor_key,
+                            c.is_anonymous AS comment_is_anonymous
+                        FROM forum_posts p
+                        INNER JOIN forum_comments c ON c.post_id = p.id
+                        WHERE p.id = $1 AND c.id = $2
+                        LIMIT 1
+                    `,
+                    [postId, commentId]
+                );
+
+                if (!identityResult.rows.length) {
+                    return res.status(404).json({ message: 'Không tìm thấy bình luận cần xóa.' });
+                }
+
+                const identity = identityResult.rows[0];
+                const postCreatorUserId = identity.post_creator_user_id ? String(identity.post_creator_user_id) : '';
+                const postActorKey = identity.post_actor_key ? String(identity.post_actor_key) : '';
+                const postAuthorName = String(identity.post_author_name || '').trim();
+                const postIsAnonymous = Boolean(identity.post_is_anonymous);
+
+                const commentCreatorUserId = identity.comment_creator_user_id ? String(identity.comment_creator_user_id) : '';
+                const commentActorKey = identity.comment_actor_key ? String(identity.comment_actor_key) : '';
+                const commentAuthorName = String(identity.comment_author_name || '').trim();
+                const commentIsAnonymous = Boolean(identity.comment_is_anonymous);
+
+                const allowByPostOwner = Boolean(
+                    (authUserId && postCreatorUserId && authUserId === postCreatorUserId)
+                    || (actorKey && postActorKey && actorKey === postActorKey)
+                    || (!postIsAnonymous && requestAuthorName && postAuthorName && requestAuthorName === postAuthorName)
+                );
+
+                const allowByCommentOwner = Boolean(
+                    (authUserId && commentCreatorUserId && authUserId === commentCreatorUserId)
+                    || (actorKey && commentActorKey && actorKey === commentActorKey)
+                    || (!commentIsAnonymous && requestAuthorName && commentAuthorName && requestAuthorName === commentAuthorName)
+                );
+
+                if (!allowByPostOwner && !allowByCommentOwner) {
+                    return res.status(403).json({ message: 'Bạn chỉ có thể xóa bình luận của bạn hoặc bình luận trong bài viết của bạn.' });
+                }
+
+                client = await pool.connect();
+                await client.query('BEGIN');
+
+                const treeResult = await client.query(
+                    `
+                        WITH RECURSIVE comment_tree AS (
+                            SELECT id
+                            FROM forum_comments
+                            WHERE id = $1 AND post_id = $2
+                            UNION ALL
+                            SELECT child.id
+                            FROM forum_comments child
+                            INNER JOIN comment_tree parent_tree ON child.parent_comment_id = parent_tree.id
+                            WHERE child.post_id = $2
+                        )
+                        SELECT id
+                        FROM comment_tree
+                    `,
+                    [commentId, postId]
+                );
+
+                if (!treeResult.rows.length) {
+                    await client.query('ROLLBACK');
+                    return res.status(404).json({ message: 'Không tìm thấy bình luận cần xóa.' });
+                }
+
+                const deletedCount = treeResult.rows.length;
+
+                await client.query(
+                    'DELETE FROM forum_comments WHERE id = $1 AND post_id = $2',
+                    [commentId, postId]
+                );
+
+                await client.query(
+                    'UPDATE forum_posts SET comments_count = GREATEST(comments_count - $2, 0), updated_at = NOW() WHERE id = $1',
+                    [postId, deletedCount]
+                );
+
+                await client.query('COMMIT');
+                return res.json({ data: { postId, commentId, deletedCount } });
+            } catch (error) {
+                if (client) {
+                    try {
+                        await client.query('ROLLBACK');
+                    } catch (_rollbackError) {
+                        // ignore rollback error
+                    }
+                }
+
+                console.error('deleteForumComment error:', error);
+                return res.status(500).json({ message: 'Không thể xóa bình luận lúc này. Vui lòng thử lại.' });
+            } finally {
+                if (client) {
+                    client.release();
+                }
+            }
+        }
+
+        async function deleteAdminForumPost(req, res) {
+            try {
+                const postId = Number(req.params?.postId);
+
+                if (!Number.isFinite(postId) || postId <= 0) {
+                    return res.status(400).json({ message: 'Bài viết không hợp lệ.' });
+                }
+
+                const postCheck = await pool.query('SELECT id FROM forum_posts WHERE id = $1 LIMIT 1', [postId]);
+                if (!postCheck.rows.length) {
+                    return res.status(404).json({ message: 'Không tìm thấy bài viết.' });
+                }
+
+                await pool.query('DELETE FROM forum_posts WHERE id = $1', [postId]);
+                return res.json({ data: { postId } });
+            } catch (error) {
+                console.error('deleteAdminForumPost error:', error);
+                return res.status(500).json({ message: 'Không thể xóa bài viết lúc này. Vui lòng thử lại.' });
+            }
+        }
+
+        async function deleteAdminForumComment(req, res) {
+            const postId = Number(req.params?.postId);
+            const commentId = Number(req.params?.commentId);
+            let client;
+
+            if (!Number.isFinite(postId) || postId <= 0) {
+                return res.status(400).json({ message: 'Bài viết không hợp lệ.' });
+            }
+
+            if (!Number.isFinite(commentId) || commentId <= 0) {
+                return res.status(400).json({ message: 'Bình luận không hợp lệ.' });
+            }
+
+            try {
+                const identityResult = await pool.query(
+                    `
+                        SELECT c.id
+                        FROM forum_comments c
+                        WHERE c.post_id = $1 AND c.id = $2
+                        LIMIT 1
+                    `,
+                    [postId, commentId]
+                );
+
+                if (!identityResult.rows.length) {
+                    return res.status(404).json({ message: 'Không tìm thấy bình luận cần xóa.' });
+                }
+
+                client = await pool.connect();
+                await client.query('BEGIN');
+
+                const treeResult = await client.query(
+                    `
+                        WITH RECURSIVE comment_tree AS (
+                            SELECT id
+                            FROM forum_comments
+                            WHERE id = $1 AND post_id = $2
+                            UNION ALL
+                            SELECT child.id
+                            FROM forum_comments child
+                            INNER JOIN comment_tree parent_tree ON child.parent_comment_id = parent_tree.id
+                            WHERE child.post_id = $2
+                        )
+                        SELECT id
+                        FROM comment_tree
+                    `,
+                    [commentId, postId]
+                );
+
+                if (!treeResult.rows.length) {
+                    await client.query('ROLLBACK');
+                    return res.status(404).json({ message: 'Không tìm thấy bình luận cần xóa.' });
+                }
+
+                const deletedCount = treeResult.rows.length;
+
+                await client.query(
+                    'DELETE FROM forum_comments WHERE id = $1 AND post_id = $2',
+                    [commentId, postId]
+                );
+
+                await client.query(
+                    'UPDATE forum_posts SET comments_count = GREATEST(comments_count - $2, 0), updated_at = NOW() WHERE id = $1',
+                    [postId, deletedCount]
+                );
+
+                await client.query('COMMIT');
+                return res.json({ data: { postId, commentId, deletedCount } });
+            } catch (error) {
+                if (client) {
+                    try {
+                        await client.query('ROLLBACK');
+                    } catch (_rollbackError) {
+                        // ignore rollback error
+                    }
+                }
+
+                console.error('deleteAdminForumComment error:', error);
+                return res.status(500).json({ message: 'Không thể xóa bình luận lúc này. Vui lòng thử lại.' });
+            } finally {
+                if (client) {
+                    client.release();
+                }
+            }
+        }
+
+        async function dismissAdminForumPostReports(req, res) {
+            try {
+                const postId = Number(req.params?.postId);
+
+                if (!Number.isFinite(postId) || postId <= 0) {
+                    return res.status(400).json({ message: 'Bài viết không hợp lệ.' });
+                }
+
+                const postCheck = await pool.query('SELECT id FROM forum_posts WHERE id = $1 LIMIT 1', [postId]);
+                if (!postCheck.rows.length) {
+                    return res.status(404).json({ message: 'Không tìm thấy bài viết.' });
+                }
+
+                const deletedResult = await pool.query('DELETE FROM forum_post_reports WHERE post_id = $1', [postId]);
+                return res.json({ data: { postId, dismissedCount: Number(deletedResult.rowCount || 0) } });
+            } catch (error) {
+                console.error('dismissAdminForumPostReports error:', error);
+                return res.status(500).json({ message: 'Không thể hủy báo cáo bài viết lúc này. Vui lòng thử lại.' });
+            }
+        }
+
+        async function dismissAdminForumCommentReports(req, res) {
+            try {
+                const postId = Number(req.params?.postId);
+                const commentId = Number(req.params?.commentId);
+
+                if (!Number.isFinite(postId) || postId <= 0) {
+                    return res.status(400).json({ message: 'Bài viết không hợp lệ.' });
+                }
+
+                if (!Number.isFinite(commentId) || commentId <= 0) {
+                    return res.status(400).json({ message: 'Bình luận không hợp lệ.' });
+                }
+
+                const commentCheck = await pool.query(
+                    'SELECT id FROM forum_comments WHERE id = $1 AND post_id = $2 LIMIT 1',
+                    [commentId, postId]
+                );
+
+                if (!commentCheck.rows.length) {
+                    return res.status(404).json({ message: 'Không tìm thấy bình luận.' });
+                }
+
+                const deletedResult = await pool.query('DELETE FROM forum_comment_reports WHERE comment_id = $1', [commentId]);
+                return res.json({ data: { postId, commentId, dismissedCount: Number(deletedResult.rowCount || 0) } });
+            } catch (error) {
+                console.error('dismissAdminForumCommentReports error:', error);
+                return res.status(500).json({ message: 'Không thể hủy báo cáo bình luận lúc này. Vui lòng thử lại.' });
+            }
+        }
+
+        registerVersionedRoute('get', '/forum/posts', listForumPosts);
+        registerVersionedRoute('post', '/forum/posts', authenticateOptionalLenient, createForumPost);
+        registerVersionedRoute('post', '/forum/posts/:postId/comments', authenticateOptionalLenient, createForumComment);
+        registerVersionedRoute('delete', '/forum/posts/:postId/comments/:commentId', authenticateOptionalLenient, deleteForumComment);
+        registerVersionedRoute('post', '/forum/posts/:postId/likes/toggle', toggleForumPostLike);
+        registerVersionedRoute('post', '/forum/posts/:postId/report', reportForumPost);
+        registerVersionedRoute('post', '/forum/posts/:postId/comments/:commentId/report', reportForumComment);
+        registerVersionedRoute('delete', '/forum/posts/:postId', authenticateOptionalLenient, deleteForumPost);
+
         registerVersionedRoute('get', '/wards', listPublicWards);
+        registerVersionedRoute('get', '/landing/stats', getLandingStats);
         registerVersionedRoute('get', '/cities/stats', listCitiesWithStats);
         registerVersionedRoute('post', '/gis/detect-ward', detectPublicWard);
+    registerVersionedRoute('post', '/gis/geocode-address', geocodePublicAddress);
         registerVersionedRoute('get', '/place-categories', listPublicPlaceCategories);
         registerVersionedRoute('get', '/merchant-services', listPublicMerchantServices);
         registerVersionedRoute('get', '/feedback/types', listPublicFeedbackTypes);
@@ -12642,6 +14961,7 @@ async function generateWardIdFromName(name) {
         registerVersionedRoute('get', '/venues/:venueId/reviews', listPublicVenueReviews);
         registerVersionedRoute('get', '/venues/:venueId/community', authenticateOptional, getVenueCommunityBundle);
         registerVersionedRoute('get', '/venues/:venueId/opening-hours', getVenueOpeningHoursRealtime);
+        registerVersionedRoute('get', '/venues/:venueId/services', getVenueServices);
         registerVersionedRoute('post', '/venues/:venueId/reviews', authenticateOptional, requireAuth, submitVenueReview);
     registerVersionedRoute('patch', '/venues/:venueId/reviews/:reviewId', authenticateOptional, requireAuth, updateVenueReview);
         registerVersionedRoute('post', '/venues/:venueId/reviews/:reviewId/like', authenticateOptional, requireAuth, toggleVenueReviewLike);
@@ -12678,6 +14998,11 @@ async function generateWardIdFromName(name) {
         registerVersionedRoute('patch', '/admin/merchant-services/:serviceId', authenticateRequest, requireAdminRole, updateAdminMerchantService);
         registerVersionedRoute('delete', '/admin/merchant-services/:serviceId', authenticateRequest, requireAdminRole, deleteAdminMerchantService);
         registerVersionedRoute('get', '/admin/venues', authenticateRequest, requireAdminRole, listAdminVenues);
+        registerVersionedRoute('get', '/admin/forum/posts', authenticateRequest, requireAdminRole, listAdminForumPosts);
+        registerVersionedRoute('delete', '/admin/forum/posts/:postId', authenticateRequest, requireAdminRole, deleteAdminForumPost);
+        registerVersionedRoute('delete', '/admin/forum/posts/:postId/comments/:commentId', authenticateRequest, requireAdminRole, deleteAdminForumComment);
+        registerVersionedRoute('delete', '/admin/forum/posts/:postId/reports', authenticateRequest, requireAdminRole, dismissAdminForumPostReports);
+        registerVersionedRoute('delete', '/admin/forum/posts/:postId/comments/:commentId/reports', authenticateRequest, requireAdminRole, dismissAdminForumCommentReports);
         registerVersionedRoute('get', '/admin/venues/:venueId/reviews', authenticateRequest, requireAdminRole, listAdminVenueReviews);
         registerVersionedRoute('get', '/admin/venues/update-requests', authenticateRequest, requireAdminRole, listAdminVenueUpdateRequests);
         registerVersionedRoute('patch', '/admin/venues/update-requests/:requestId/moderation', authenticateRequest, requireAdminRole, moderateVenueUpdateRequest);
@@ -14242,6 +16567,26 @@ async function generateWardIdFromName(name) {
             return String(value || '').trim().toLowerCase();
         }
 
+        function normalizeVisionLanguage(value) {
+            const normalized = normalizeVisionText(value);
+            return normalized === 'vi' ? 'vi' : 'en';
+        }
+
+        const VISION_TAXONOMY_PATH = path.join(__dirname, 'data', 'vision-taxonomy.json');
+        const VISION_TAXONOMY_CACHE_TTL_MS = 60_000;
+        const VISION_TAXONOMY_MIN_CONFIDENCE = Math.max(
+            0,
+            Math.min(1, Number(process.env.VISION_TAXONOMY_MIN_CONFIDENCE || 0.55))
+        );
+        const VISION_TAXONOMY_LOG_ENABLED = String(process.env.VISION_TAXONOMY_LOG_ENABLED || 'true').trim().toLowerCase() !== 'false';
+        const VISION_TAXONOMY_LOG_PATH = String(process.env.VISION_TAXONOMY_LOG_PATH || '').trim()
+            || path.join(__dirname, 'logs', 'vision-taxonomy-eval.log');
+        const visionTaxonomyState = {
+            loadedAt: 0,
+            taxonomy: null,
+            aliasIndex: new Map()
+        };
+
         function safeParseJsonObject(rawValue) {
             try {
                 const parsed = JSON.parse(rawValue);
@@ -14308,6 +16653,361 @@ async function generateWardIdFromName(name) {
                 .normalize('NFD')
                 .replace(/[\u0300-\u036f]/g, '')
                 .replace(/đ/g, 'd');
+        }
+
+        function loadVisionTaxonomyFromDisk() {
+            try {
+                const raw = fs.readFileSync(VISION_TAXONOMY_PATH, 'utf8');
+                const parsed = safeParseJsonObject(raw);
+                const labels = parsed?.labels && typeof parsed.labels === 'object' ? parsed.labels : {};
+
+                return {
+                    version: String(parsed?.version || 'unknown'),
+                    labels
+                };
+            } catch (error) {
+                console.error('Vision taxonomy load error:', error?.message || error);
+                return {
+                    version: 'missing',
+                    labels: {}
+                };
+            }
+        }
+
+        function buildVisionTaxonomyAliasIndex(taxonomy) {
+            const aliasIndex = new Map();
+            const labels = taxonomy?.labels && typeof taxonomy.labels === 'object' ? taxonomy.labels : {};
+
+            Object.entries(labels).forEach(([labelId, meta]) => {
+                const kind = normalizeVisionText(meta?.kind);
+                const aliases = Array.isArray(meta?.aliases) ? meta.aliases : [];
+                const mustHaveCues = Array.isArray(meta?.must_have_cues) ? meta.must_have_cues : [];
+
+                const normalizedAliases = [
+                    labelId,
+                    ...aliases
+                ]
+                    .map((value) => normalizeVisionNoAccent(value))
+                    .filter(Boolean);
+
+                normalizedAliases.forEach((alias) => {
+                    if (!aliasIndex.has(alias)) {
+                        aliasIndex.set(alias, []);
+                    }
+
+                    aliasIndex.get(alias).push({
+                        labelId,
+                        kind: kind || 'unknown',
+                        aliases,
+                        mustHaveCues,
+                        allowUnknown: meta?.allow_unknown !== false
+                    });
+                });
+            });
+
+            return aliasIndex;
+        }
+
+        function getVisionTaxonomy() {
+            const now = Date.now();
+            if (
+                visionTaxonomyState.taxonomy
+                && now - visionTaxonomyState.loadedAt < VISION_TAXONOMY_CACHE_TTL_MS
+            ) {
+                return visionTaxonomyState;
+            }
+
+            const taxonomy = loadVisionTaxonomyFromDisk();
+            visionTaxonomyState.taxonomy = taxonomy;
+            visionTaxonomyState.aliasIndex = buildVisionTaxonomyAliasIndex(taxonomy);
+            visionTaxonomyState.loadedAt = now;
+
+            return visionTaxonomyState;
+        }
+
+        function clampVisionConfidence(value) {
+            const n = Number(value);
+            if (!Number.isFinite(n)) {
+                return 0;
+            }
+
+            return Math.max(0, Math.min(1, n));
+        }
+
+        function writeVisionTaxonomyEvalLog(payload = {}) {
+            if (!VISION_TAXONOMY_LOG_ENABLED) {
+                return;
+            }
+
+            try {
+                fs.mkdirSync(path.dirname(VISION_TAXONOMY_LOG_PATH), { recursive: true });
+                const line = JSON.stringify({
+                    timestamp: new Date().toISOString(),
+                    ...payload
+                });
+
+                fs.appendFile(VISION_TAXONOMY_LOG_PATH, `${line}\n`, (error) => {
+                    if (error) {
+                        console.error('Vision taxonomy log append error:', error?.message || error);
+                    }
+                });
+            } catch (error) {
+                console.error('Vision taxonomy log write error:', error?.message || error);
+            }
+        }
+
+        function scoreTaxonomyCandidateFromEvidence(candidate, evidenceText) {
+            if (!candidate || !evidenceText) {
+                return 0;
+            }
+
+            const aliasValues = [candidate.labelId, ...(candidate.aliases || [])]
+                .map((value) => normalizeVisionNoAccent(value))
+                .filter(Boolean);
+
+            const cueValues = Array.isArray(candidate.mustHaveCues)
+                ? candidate.mustHaveCues.map((value) => normalizeVisionNoAccent(value)).filter(Boolean)
+                : [];
+
+            let score = 0;
+
+            aliasValues.forEach((alias) => {
+                if (evidenceText === alias) {
+                    score += 8;
+                } else if (evidenceText.includes(alias)) {
+                    score += alias.includes(' ') ? 5 : 2;
+                }
+            });
+
+            cueValues.forEach((cue) => {
+                if (evidenceText.includes(cue)) {
+                    score += cue.includes(' ') ? 4 : 2;
+                }
+            });
+
+            return score;
+        }
+
+        function resolveTaxonomyDisplayLabel(meta = {}, labelId = '', language = 'en') {
+            const normalizedLanguage = normalizeVisionLanguage(language);
+            const displayNames = meta?.display_names && typeof meta.display_names === 'object'
+                ? meta.display_names
+                : {};
+
+            const preferredDisplay = String(displayNames[normalizedLanguage] || '').trim();
+            if (preferredDisplay) {
+                return preferredDisplay;
+            }
+
+            const aliases = Array.isArray(meta?.aliases) ? meta.aliases : [];
+            const accentRegex = /[^\x00-\x7F]/;
+            const asciiAlias = aliases.find((alias) => {
+                const text = String(alias || '').trim();
+                return text && !accentRegex.test(text);
+            });
+            const accentedAlias = aliases.find((alias) => {
+                const text = String(alias || '').trim();
+                return text && accentRegex.test(text);
+            });
+
+            if (normalizedLanguage === 'vi' && accentedAlias) {
+                return accentedAlias;
+            }
+
+            if (normalizedLanguage === 'en' && asciiAlias) {
+                return asciiAlias;
+            }
+
+            if (aliases.length) {
+                return String(aliases[0] || '').trim();
+            }
+
+            return String(labelId || '').replace(/_/g, ' ').trim();
+        }
+
+        function resolveCanonicalRuleDisplay(rule, language = 'en') {
+            if (!rule || typeof rule !== 'object') {
+                return '';
+            }
+
+            const normalizedLanguage = normalizeVisionLanguage(language);
+            const variants = Array.isArray(rule.variants) ? rule.variants : [];
+            if (!variants.length) {
+                return String(rule.canonical || '').trim();
+            }
+
+            const accentRegex = /[^\x00-\x7F]/;
+            if (normalizedLanguage === 'vi') {
+                const viVariant = variants.find((item) => {
+                    const text = String(item || '').trim();
+                    return text && accentRegex.test(text);
+                });
+                if (viVariant) {
+                    return String(viVariant).trim();
+                }
+            }
+
+            if (normalizedLanguage === 'en') {
+                const enVariant = variants.find((item) => {
+                    const text = String(item || '').trim();
+                    return text && !accentRegex.test(text);
+                });
+                if (enVariant) {
+                    return String(enVariant).trim();
+                }
+            }
+
+            return String(rule.canonical || variants[0] || '').trim();
+        }
+
+        function normalizeVisionPayloadWithTaxonomy(visionPayload = {}, target = 'any', language = 'en') {
+            const { taxonomy, aliasIndex } = getVisionTaxonomy();
+            const labels = taxonomy?.labels && typeof taxonomy.labels === 'object' ? taxonomy.labels : {};
+
+            if (!Object.keys(labels).length || !aliasIndex?.size) {
+                return {
+                    applied: false,
+                    reason: 'taxonomy_unavailable'
+                };
+            }
+
+            const normalizedTarget = normalizeVisionText(target);
+            const isStrictTargetMode = normalizedTarget === 'food' || normalizedTarget === 'place';
+            const evidenceValues = uniqueVisionValues([
+                visionPayload?.label,
+                ...(visionPayload?.alternativeLabels || []),
+                ...(visionPayload?.keywords || []),
+                ...(visionPayload?.visualClues || [])
+            ]);
+
+            const normalizedEvidence = evidenceValues
+                .map((value) => normalizeVisionNoAccent(value))
+                .filter(Boolean);
+
+            if (!normalizedEvidence.length) {
+                return {
+                    applied: true,
+                    matched: false,
+                    label: 'unknown',
+                    kind: 'unknown',
+                    confidence: 0
+                };
+            }
+
+            const scoreByLabel = new Map();
+
+            normalizedEvidence.forEach((evidenceText) => {
+                aliasIndex.forEach((candidateList, aliasKey) => {
+                    if (evidenceText !== aliasKey && !evidenceText.includes(aliasKey) && !aliasKey.includes(evidenceText)) {
+                        return;
+                    }
+
+                    candidateList.forEach((candidate) => {
+                        if (isStrictTargetMode && candidate?.kind !== normalizedTarget) {
+                            return;
+                        }
+
+                        const labelId = candidate.labelId;
+                        const current = scoreByLabel.get(labelId) || 0;
+                        const delta = scoreTaxonomyCandidateFromEvidence(candidate, evidenceText);
+                        scoreByLabel.set(labelId, current + delta);
+                    });
+                });
+            });
+
+            if (!scoreByLabel.size) {
+                return {
+                    applied: true,
+                    matched: false,
+                    label: 'unknown',
+                    kind: 'unknown',
+                    confidence: 0
+                };
+            }
+
+            const ranked = [...scoreByLabel.entries()]
+                .map(([labelId, score]) => {
+                    const meta = labels[labelId] || {};
+                    const kind = normalizeVisionText(meta.kind || 'unknown');
+                    const mustHaveCues = Array.isArray(meta.must_have_cues) ? meta.must_have_cues : [];
+                    const cueMatchedCount = mustHaveCues
+                        .map((cue) => normalizeVisionNoAccent(cue))
+                        .filter((cue) => cue && normalizedEvidence.some((evidence) => evidence.includes(cue))).length;
+
+                    const hasMustHaveEvidence = mustHaveCues.length ? cueMatchedCount > 0 : score >= 6;
+                    const preferredAlias = resolveTaxonomyDisplayLabel(meta, labelId, language);
+
+                    return {
+                        labelId,
+                        score,
+                        kind: ['food', 'place'].includes(kind) ? kind : 'unknown',
+                        hasMustHaveEvidence,
+                        cueMatchedCount,
+                        preferredAlias,
+                        aliases: Array.isArray(meta.aliases) ? meta.aliases.filter(Boolean) : []
+                    };
+                })
+                .filter((item) => {
+                    if (!isStrictTargetMode) {
+                        return true;
+                    }
+
+                    return item.kind === normalizedTarget;
+                })
+                .sort((a, b) => b.score - a.score);
+
+            if (!ranked.length) {
+                return {
+                    applied: true,
+                    matched: false,
+                    label: 'unknown',
+                    kind: 'unknown',
+                    confidence: 0,
+                    topCandidates: []
+                };
+            }
+
+            const best = ranked[0];
+            const second = ranked[1];
+            const modelConfidence = clampVisionConfidence(visionPayload?.confidence);
+            const evidenceConfidence = Math.max(0, Math.min(1, best.score / 20));
+            let blendedConfidence = (evidenceConfidence * 0.65) + (modelConfidence * 0.35);
+
+            if (second && best.score <= second.score + 1) {
+                blendedConfidence -= 0.1;
+            }
+
+            blendedConfidence = clampVisionConfidence(blendedConfidence);
+
+            if (!best.hasMustHaveEvidence || blendedConfidence < VISION_TAXONOMY_MIN_CONFIDENCE) {
+                return {
+                    applied: true,
+                    matched: false,
+                    label: 'unknown',
+                    kind: 'unknown',
+                    confidence: blendedConfidence,
+                    topCandidates: ranked.slice(0, 3).map((item) => ({
+                        labelId: item.labelId,
+                        kind: item.kind,
+                        score: item.score
+                    }))
+                };
+            }
+
+            return {
+                applied: true,
+                matched: true,
+                labelId: best.labelId,
+                label: best.preferredAlias,
+                kind: best.kind,
+                confidence: blendedConfidence,
+                aliases: best.aliases,
+                topCandidates: ranked.slice(0, 3).map((item) => ({
+                    labelId: item.labelId,
+                    kind: item.kind,
+                    score: item.score
+                }))
+            };
         }
 
         function isGenericVisionLabel(value) {
@@ -14572,6 +17272,21 @@ async function generateWardIdFromName(name) {
                 pattern: /\b(cau\s*di\s*bo\s*nguyen\s*tat\s*thanh|nguyen\s*tat\s*thanh\s*walking\s*bridge)\b/
             },
             {
+                canonical: 'cầu liên chiểu',
+                variants: ['cầu liên chiểu', 'cau lien chieu', 'lien chieu bridge'],
+                pattern: /\bcau\s*lien\s*chieu\b/
+            },
+            {
+                canonical: 'cầu cổ cò',
+                variants: ['cầu cổ cò', 'cau co co', 'co co bridge'],
+                pattern: /\bcau\s*co\s*co\b/
+            },
+            {
+                canonical: 'cầu bãi dài',
+                variants: ['cầu bãi dài', 'cau bai dai', 'bai dai bridge'],
+                pattern: /\bcau\s*bai\s*dai\b/
+            },
+            {
                 canonical: 'bà nà hills',
                 variants: ['bà nà hills', 'ba na hills', 'banahills'],
                 pattern: /\bba\s*na\s*hills\b/
@@ -14600,26 +17315,35 @@ async function generateWardIdFromName(name) {
                 return null;
             }
 
-            const matched = CANONICAL_PLACE_RULES.find((rule) => rule.pattern.test(haystack));
+            const matched = CANONICAL_PLACE_RULES.find((rule) => {
+                if (rule.pattern.test(haystack)) {
+                    return true;
+                }
+
+                return (rule.variants || []).some((variant) => {
+                    const normalizedVariant = normalizeVisionNoAccent(variant);
+                    return normalizedVariant && normalizedVariant.length >= 5 && haystack.includes(normalizedVariant);
+                });
+            });
             return matched || null;
         }
 
         const DANANG_BRIDGE_CATALOG = [
             {
                 canonical: 'cầu thuận phước',
-                notes: 'cầu treo dây võng dài, gần cửa biển'
+                notes: 'cầu treo dây võng rất dài, nằm ở cửa biển nơi sông Hàn đổ ra vịnh Đà Nẵng'
             },
             {
                 canonical: 'cầu sông hàn',
-                notes: 'cầu quay, biểu tượng trung tâm sông hàn'
+                notes: 'cầu quay đầu tiên do kỹ sư Việt Nam thiết kế, phần giữa cầu có thể xoay 90 độ'
             },
             {
                 canonical: 'cầu rồng',
-                notes: 'hình rồng, có phun lửa hoặc nước cuối tuần'
+                notes: 'hình dáng rồng vươn ra biển, có phun lửa và phun nước vào 21:00 tối thứ 7 và chủ nhật'
             },
             {
                 canonical: 'cầu nguyễn văn trỗi',
-                notes: 'cầu lâu đời, hiện nổi bật như cầu đi bộ'
+                notes: 'cầu có tuổi đời lâu, hiện giữ lại làm cầu đi bộ chụp ảnh và tham quan'
             },
             {
                 canonical: 'cầu trần thị lý',
@@ -14627,19 +17351,19 @@ async function generateWardIdFromName(name) {
             },
             {
                 canonical: 'cầu tiên sơn',
-                notes: 'còn gọi tuyên sơn, thiên về giao thông vận tải'
+                notes: 'còn gọi cầu tuyên sơn, nối Hải Châu và Ngũ Hành Sơn, trục giao thông quan trọng'
             },
             {
                 canonical: 'cầu cẩm lệ',
-                notes: 'kết nối khu trung tâm với quận cẩm lệ'
+                notes: 'bắc qua sông Cẩm Lệ, kết nối trục vào phía nam thành phố'
             },
             {
                 canonical: 'cầu nguyễn tri phương',
-                notes: 'kết nối khu hòa xuân và trung tâm'
+                notes: 'bắc qua sông Cẩm Lệ, kết nối các khu đô thị mới về trung tâm'
             },
             {
                 canonical: 'cầu hòa xuân',
-                notes: 'phục vụ khu đô thị sinh thái hòa xuân'
+                notes: 'bắc qua sông Cẩm Lệ, phục vụ khu đô thị Hòa Xuân'
             },
             {
                 canonical: 'cầu đỏ',
@@ -14647,11 +17371,23 @@ async function generateWardIdFromName(name) {
             },
             {
                 canonical: 'cầu nam ô',
-                notes: 'bắc qua sông cu đê, dáng vòm'
+                notes: 'bắc qua sông Cu Đê, kết nối quốc lộ 1 và đường sắt khu Nam Ô'
             },
             {
                 canonical: 'cầu phò nam',
                 notes: 'cầu treo khu thượng nguồn sông cu đê'
+            },
+            {
+                canonical: 'cầu liên chiểu',
+                notes: 'bắc qua khu vực sông Cu Đê, kết nối hướng Liên Chiểu'
+            },
+            {
+                canonical: 'cầu cổ cò',
+                notes: 'bắc qua sông Cổ Cò, tuyến kết nối du lịch ven biển'
+            },
+            {
+                canonical: 'cầu bãi dài',
+                notes: 'khu vực sông Cổ Cò, phục vụ kết nối ven biển và du lịch'
             },
             {
                 canonical: 'cầu vàng',
@@ -14666,6 +17402,125 @@ async function generateWardIdFromName(name) {
                 notes: 'cầu đi bộ vươn ra biển khu nguyễn tất thành'
             }
         ];
+
+        const BRIDGE_VISUAL_CUE_RULES = [
+            {
+                canonical: 'cầu rồng',
+                cues: [
+                    'cau rong',
+                    'dragon bridge',
+                    'rong',
+                    'dau rong',
+                    'phun lua',
+                    'phun nuoc',
+                    'fire breathing bridge'
+                ]
+            },
+            {
+                canonical: 'cầu thuận phước',
+                cues: [
+                    'cau thuan phuoc',
+                    'thuan phuoc bridge',
+                    'cau treo',
+                    'day vong',
+                    'cua bien'
+                ]
+            },
+            {
+                canonical: 'cầu sông hàn',
+                cues: ['cau song han', 'song han bridge', 'cau quay', 'han river bridge', 'xoay 90 do']
+            },
+            {
+                canonical: 'cầu trần thị lý',
+                cues: ['cau tran thi ly', 'tran thi ly bridge', 'day vang', 'tru nghieng', 'canh buom']
+            },
+            {
+                canonical: 'cầu nguyễn văn trỗi',
+                cues: ['cau nguyen van troi', 'nguyen van troi bridge', 'cau di bo cu', 'cau cu']
+            },
+            {
+                canonical: 'cầu tiên sơn',
+                cues: ['cau tien son', 'cau tuyen son', 'tien son bridge', 'tuyen son bridge']
+            },
+            {
+                canonical: 'cầu cẩm lệ',
+                cues: ['cau cam le', 'cam le bridge']
+            },
+            {
+                canonical: 'cầu nguyễn tri phương',
+                cues: ['cau nguyen tri phuong', 'nguyen tri phuong bridge']
+            },
+            {
+                canonical: 'cầu hòa xuân',
+                cues: ['cau hoa xuan', 'hoa xuan bridge']
+            },
+            {
+                canonical: 'cầu nam ô',
+                cues: ['cau nam o', 'nam o bridge', 'song cu de']
+            },
+            {
+                canonical: 'cầu liên chiểu',
+                cues: ['cau lien chieu', 'lien chieu bridge']
+            },
+            {
+                canonical: 'cầu cổ cò',
+                cues: ['cau co co', 'co co bridge', 'song co co']
+            },
+            {
+                canonical: 'cầu bãi dài',
+                cues: ['cau bai dai', 'bai dai bridge']
+            },
+            {
+                canonical: 'cầu vàng',
+                cues: ['cau vang', 'golden bridge', 'ban tay', 'giant hands bridge']
+            },
+            {
+                canonical: 'cầu tình yêu',
+                cues: ['cau tinh yeu', 'love bridge', 'moc khoa tinh yeu', 'lock bridge']
+            },
+            {
+                canonical: 'cầu đi bộ nguyễn tất thành',
+                cues: ['cau di bo nguyen tat thanh', 'nguyen tat thanh walking bridge', 'cau di bo moi']
+            }
+        ];
+
+        function resolveBridgeVisualCueRule(values = []) {
+            const normalizedHaystack = normalizeVisionNoAccent(values.join(' '));
+
+            if (!normalizedHaystack || !hasBridgeSignal(values)) {
+                return null;
+            }
+
+            const ranked = BRIDGE_VISUAL_CUE_RULES
+                .map((rule) => {
+                    const score = (rule.cues || []).reduce((total, cue) => {
+                        const normalizedCue = normalizeVisionNoAccent(cue);
+                        if (!normalizedCue || !normalizedHaystack.includes(normalizedCue)) {
+                            return total;
+                        }
+
+                        return total + (normalizedCue.includes(' ') ? 3 : 1);
+                    }, 0);
+
+                    return { canonical: rule.canonical, score };
+                })
+                .sort((a, b) => b.score - a.score);
+
+            const best = ranked[0];
+            const second = ranked[1];
+
+            if (!best || best.score < 3) {
+                return null;
+            }
+
+            if (second && best.score <= second.score) {
+                return null;
+            }
+
+            return CANONICAL_PLACE_RULES.find(
+                (rule) => normalizeVisionNoAccent(rule.canonical) === normalizeVisionNoAccent(best.canonical)
+            ) || null;
+        }
 
         function hasBridgeSignal(values = []) {
             const normalized = normalizeVisionNoAccent(values.join(' '));
@@ -14731,9 +17586,15 @@ async function generateWardIdFromName(name) {
                 .join('\n');
 
             const systemPrompt = [
-                'Bạn là AI xác minh cầu tại Đà Nẵng từ ảnh.',
+                'Bạn là mô-đun PHỤ chuyên gia xác minh CẦU trong pipeline AI xác minh món ăn/địa điểm từ ảnh.',
+                'Chỉ chạy suy luận trong ngữ cảnh cầu khi đã có tín hiệu cầu từ bước phân tích tổng quát.',
                 'Nhiệm vụ: chọn ĐÚNG 1 cầu trong catalog nếu đủ bằng chứng.',
-                'Nếu không chắc chắn thì trả về unknown, không được đoán bừa sang cầu nổi tiếng.',
+                'Nếu không chắc chắn thì trả về unknown, không được đoán bừa.',
+                'Không được mặc định Cầu Thuận Phước khi ảnh có dấu hiệu Cầu Rồng (hình rồng, đầu rồng, phun lửa/phun nước).',
+                'Nếu thấy dấu hiệu rồng rõ thì phải ưu tiên Cầu Rồng.',
+                'Nhóm cầu biểu tượng bắc qua sông Hàn: Cầu Rồng, Cầu Sông Hàn, Cầu Thuận Phước, Cầu Trần Thị Lý, Cầu Nguyễn Văn Trỗi, Cầu Tiên Sơn.',
+                'Nhóm cầu du lịch/đi bộ đặc biệt: Cầu Vàng, Cầu Tình Yêu, Cầu đi bộ Nguyễn Tất Thành.',
+                'Nhóm cầu khác nội thành: Cầu Cẩm Lệ, Cầu Nguyễn Tri Phương, Cầu Hòa Xuân, Cầu Nam Ô, Cầu Liên Chiểu, Cầu Cổ Cò, Cầu Bãi Dài, Cầu Đỏ.',
                 'Chỉ trả JSON object hợp lệ.',
                 'Schema JSON:',
                 '{"selectedCanonical":"string","confidence":0,"reason":"string","alternatives":["string"]}',
@@ -14822,11 +17683,29 @@ async function generateWardIdFromName(name) {
             return matched || null;
         }
 
+        function extractVisionServiceNames(metadata) {
+            if (!metadata || typeof metadata !== 'object') {
+                return [];
+            }
+
+            const selectedServiceNames = Array.isArray(metadata.selectedServiceNames)
+                ? metadata.selectedServiceNames
+                : [];
+
+            return selectedServiceNames
+                .map((item) => String(item || '').trim())
+                .filter(Boolean);
+        }
+
         function scoreVisionVenueCandidate(venue, terms = [], primaryLabel = '', target = 'any') {
             const normalizedLabel = normalizeVisionNoAccent(primaryLabel);
             const normalizedTerms = Array.isArray(terms)
                 ? terms.map((item) => normalizeVisionNoAccent(item)).filter(Boolean)
                 : [];
+
+            const descriptionText = normalizeVisionNoAccent(venue?.description || '');
+            const serviceNames = extractVisionServiceNames(venue?.metadata);
+            const serviceText = normalizeVisionNoAccent(serviceNames.join(' '));
 
             const nameText = normalizeVisionNoAccent(venue?.name || venue?.title || '');
             const searchable = normalizeVisionNoAccent([
@@ -14834,6 +17713,7 @@ async function generateWardIdFromName(name) {
                 venue?.title,
                 venue?.address,
                 venue?.description,
+                ...serviceNames,
                 venue?.ward_name,
                 venue?.category_name
             ].filter(Boolean).join(' '));
@@ -14853,6 +17733,11 @@ async function generateWardIdFromName(name) {
             normalizedTerms.forEach((term) => {
                 if (nameText.includes(term)) {
                     score += 20;
+                } else if (descriptionText.includes(term)) {
+                    // Description often contains detailed activity/food signals not present in title.
+                    score += 15;
+                } else if (serviceText.includes(term)) {
+                    score += 14;
                 } else if (searchable.includes(term)) {
                     score += 12;
                 }
@@ -14875,6 +17760,17 @@ async function generateWardIdFromName(name) {
             if (hasSpecificPrimaryLabel && overlapCount === 0) {
                 // Penalize popularity-only matches when the image label is specific.
                 score -= 26;
+            }
+
+            if (descriptionText && normalizedTerms.length) {
+                const descriptionTokenSet = new Set(tokenizeVisionValue(descriptionText));
+                const descriptionOverlap = normalizedTerms
+                    .flatMap((value) => tokenizeVisionValue(value))
+                    .reduce((total, token) => total + (descriptionTokenSet.has(token) ? 1 : 0), 0);
+
+                if (descriptionOverlap > 0) {
+                    score += Math.min(20, descriptionOverlap * 4.5);
+                }
             }
 
             const normalizedTarget = normalizeVisionText(target);
@@ -15055,7 +17951,8 @@ async function generateWardIdFromName(name) {
                 category: String(venue.category_name || '').trim(),
                 ward: String(venue.ward_name || '').trim(),
                 address: String(venue.address || '').trim(),
-                description: String(venue.description || '').slice(0, 220).trim(),
+                description: String(venue.description || '').slice(0, 360).trim(),
+                serviceNames: extractVisionServiceNames(venue.metadata),
                 averageRating: Number(venue.average_rating || 0),
                 totalReviews: Number(venue.total_reviews || 0)
             }));
@@ -15064,6 +17961,8 @@ async function generateWardIdFromName(name) {
                 'Bạn là AI rerank kết quả tìm kiếm địa điểm từ ảnh.',
                 'Nhiệm vụ: xếp hạng các venue theo độ khớp với ảnh và hint.',
                 'Ưu tiên độ liên quan ngữ nghĩa + từ khóa cụ thể hơn độ nổi tiếng.',
+                'Bắt buộc đọc kỹ description và serviceNames của từng venue để so khớp nội dung ảnh.',
+                'Nếu mô tả venue thể hiện đúng hoạt động/món ăn trong ảnh thì phải ưu tiên venue đó.',
                 'Không đoán bừa: nếu venue không đủ liên quan thì score thấp.',
                 'Chỉ trả JSON object hợp lệ.',
                 'Schema JSON:',
@@ -15183,7 +18082,9 @@ async function generateWardIdFromName(name) {
             const preferredKind = normalizedTarget === 'food' ? 'food' : normalizedTarget === 'place' ? 'place' : 'unknown';
 
             const systemPrompt = [
-                'Bạn là AI nhận diện ảnh cho ứng dụng khám phá địa điểm.',
+                'Bạn là AI CHÍNH chuyên gia xác minh món ăn/địa điểm từ hình ảnh người dùng gửi lên.',
+                'Mô-đun này là phân tích tổng quát; chuyên gia cầu chỉ là bước phụ khi có tín hiệu cầu.',
+                'Mục tiêu là trả nhãn đúng nhất theo nội dung thật của ảnh người dùng gửi lên.',
                 'Chỉ trả về JSON object hợp lệ, không thêm markdown.',
                 'Schema JSON:',
                 '{"label":"string","alternativeLabels":["string"],"keywords":["string"],"visualClues":["string"],"kind":"food|place|unknown","confidence":0}',
@@ -15196,9 +18097,12 @@ async function generateWardIdFromName(name) {
                 'Nếu ảnh là món nướng, món cuốn, món bún, món phở, hãy ưu tiên đúng kiểu món đó thay vì suy đoán sang món khác.',
                 'Nếu không chắc thì kind=unknown và confidence thấp.',
                 `Ưu tiên kind=${preferredKind} nếu ảnh phù hợp.`,
-                'Nếu kind=place và ảnh là cầu hoặc địa danh ở Đà Nẵng, hãy cố gắng trả về tên đúng trong catalog thay vì mặc định Cầu Rồng.',
-                'Catalog địa danh ưu tiên: Cầu Thuận Phước, Cầu Rồng, Cầu Sông Hàn, Cầu Trần Thị Lý, Cầu Nguyễn Văn Trỗi, Bà Nà Hills, Ngũ Hành Sơn, Chùa Linh Ứng, Asia Park.',
-                'Chỉ dùng Cầu Rồng khi có đặc trưng cầu rồng rõ ràng; nếu không chắc, hãy trả kind=unknown hoặc một tên địa danh khác phù hợp hơn.'
+                'Ràng buộc bắt buộc theo target tìm kiếm:',
+                'Nếu target=place thì không được trả label là món ăn; chỉ trả place hoặc unknown.',
+                'Nếu target=food thì không được trả label là địa điểm; chỉ trả food hoặc unknown.',
+                'Nếu kind=place và ảnh là cầu ở Đà Nẵng, hãy nêu đúng tên cầu nếu có đặc trưng rõ; nếu chưa rõ thì giữ ở mức trung lập và để bước xác minh cầu xử lý tiếp.',
+                'Không mặc định về bất kỳ cây cầu nổi tiếng nào khi chưa đủ bằng chứng.',
+                'Ví dụ địa danh thường gặp để tham chiếu ngữ cảnh: Cầu Rồng, Cầu Sông Hàn, Cầu Thuận Phước, Cầu Trần Thị Lý, Cầu Nguyễn Văn Trỗi, Bà Nà Hills, Ngũ Hành Sơn, Chùa Linh Ứng, Asia Park.'
             ].join(' ');
 
             const response = await axios.post(
@@ -15267,6 +18171,7 @@ async function generateWardIdFromName(name) {
         const searchVenuesByImageVisionHandler = async (req, res) => {
             try {
                 const target = normalizeVisionText(req.body?.target || 'any');
+                const requestLanguage = normalizeVisionLanguage(req.body?.language || 'en');
                 const imageDataUrl = String(req.body?.imageDataUrl || '').trim();
 
                 if (!/^data:image\//i.test(imageDataUrl)) {
@@ -15277,7 +18182,26 @@ async function generateWardIdFromName(name) {
                     return res.status(413).json({ message: 'Image is too large. Please choose a smaller image.' });
                 }
 
-                const vision = await detectImageSearchPayload(imageDataUrl, target);
+                let vision = await detectImageSearchPayload(imageDataUrl, target);
+                const taxonomyNormalized = normalizeVisionPayloadWithTaxonomy(vision, target, requestLanguage);
+
+                if (taxonomyNormalized?.applied) {
+                    const normalizedLabel = String(taxonomyNormalized.label || 'unknown').trim();
+                    const normalizedAliases = Array.isArray(taxonomyNormalized.aliases)
+                        ? taxonomyNormalized.aliases
+                        : [];
+
+                    vision = {
+                        ...vision,
+                        label: normalizedLabel,
+                        kind: taxonomyNormalized.kind || 'unknown',
+                        confidence: clampVisionConfidence(taxonomyNormalized.confidence),
+                        alternativeLabels: taxonomyNormalized.matched
+                            ? uniqueVisionValues([...normalizedAliases, ...(vision.alternativeLabels || [])]).slice(0, 4)
+                            : uniqueVisionValues(vision.alternativeLabels || []).slice(0, 4)
+                    };
+                }
+
                 const visionHints = [
                     vision.label,
                     ...(vision.alternativeLabels || []),
@@ -15300,6 +18224,21 @@ async function generateWardIdFromName(name) {
                     target === 'place'
                         ? await verifyDanangBridgeFromImage(imageDataUrl, vision)
                         : null;
+
+                const bridgeVisualCueRule =
+                    target === 'place'
+                        ? resolveBridgeVisualCueRule([
+                            vision.label,
+                            ...(vision.alternativeLabels || []),
+                            ...(vision.keywords || []),
+                            ...(vision.visualClues || []),
+                            ...terms
+                        ])
+                        : null;
+
+                if (bridgeVisualCueRule) {
+                    canonicalPlaceRule = bridgeVisualCueRule;
+                }
 
                 const bridgeVerificationEvidenceValues = [
                     vision.label,
@@ -15349,8 +18288,51 @@ async function generateWardIdFromName(name) {
                     ...(vision.alternativeLabels || [])
                 ]).find((item) => !isGenericVisionLabel(item)) || String(vision.label || '').trim();
                 const specificLabel = hasGenericLabel ? '' : String(vision.label || '').trim();
-                const canonicalText = canonicalRule?.canonical || '';
-                const searchText = canonicalText || specificLabel || bestGuessLabel || effectiveTerms[0] || '';
+                const canonicalText = resolveCanonicalRuleDisplay(canonicalRule, requestLanguage);
+                const rawSearchText = canonicalText || specificLabel || bestGuessLabel || effectiveTerms[0] || '';
+                const fallbackReadableTerm = uniqueVisionValues(effectiveTerms || [])
+                    .find((term) => {
+                        const normalized = normalizeVisionNoAccent(term);
+                        if (!normalized || normalized === 'unknown') {
+                            return false;
+                        }
+
+                        if (isGenericVisionLabel(term)) {
+                            return false;
+                        }
+
+                        return !['place', 'food', 'dia diem', 'mon an', 'landmark'].includes(normalized);
+                    }) || '';
+                const searchText = normalizeVisionNoAccent(rawSearchText) === 'unknown'
+                    ? (
+                        fallbackReadableTerm
+                        || (target === 'food'
+                            ? (requestLanguage === 'en' ? 'food from image' : 'món ăn từ ảnh')
+                            : (requestLanguage === 'en' ? 'place from image' : 'địa điểm từ ảnh'))
+                    )
+                    : rawSearchText;
+
+                writeVisionTaxonomyEvalLog({
+                    target,
+                    taxonomyApplied: Boolean(taxonomyNormalized?.applied),
+                    taxonomyMatched: Boolean(taxonomyNormalized?.matched),
+                    taxonomyLabelId: taxonomyNormalized?.labelId || null,
+                    taxonomyConfidence: clampVisionConfidence(taxonomyNormalized?.confidence),
+                    modelDetectedLabel: String(vision.label || '').trim(),
+                    modelDetectedKind: String(vision.kind || '').trim(),
+                    modelConfidence: clampVisionConfidence(vision.confidence),
+                    canonicalFood: canonicalFoodRule?.canonical || null,
+                    canonicalPlace: canonicalPlaceRule?.canonical || null,
+                    searchTerms: Array.isArray(effectiveTerms) ? effectiveTerms.slice(0, 10) : [],
+                    topTaxonomyCandidates: Array.isArray(taxonomyNormalized?.topCandidates)
+                        ? taxonomyNormalized.topCandidates.slice(0, 3)
+                        : [],
+                    venueResultCount: Array.isArray(venueResults) ? venueResults.length : 0,
+                    firstVenueId: venueResults?.[0]?.id || null,
+                    firstVenueName: venueResults?.[0]?.name || venueResults?.[0]?.title || null,
+                    aiRerankApplied: Boolean(rerankResult?.applied),
+                    aiRerankModel: rerankResult?.model || null
+                });
 
                 return res.json({
                     success: true,
@@ -15361,6 +18343,16 @@ async function generateWardIdFromName(name) {
                     visualClues: vision.visualClues || [],
                     detectedKind: vision.kind,
                     confidence: vision.confidence,
+                    taxonomyNormalization: taxonomyNormalized?.applied
+                        ? {
+                            matched: Boolean(taxonomyNormalized.matched),
+                            labelId: taxonomyNormalized.labelId || '',
+                            confidence: clampVisionConfidence(taxonomyNormalized.confidence),
+                            topCandidates: Array.isArray(taxonomyNormalized.topCandidates)
+                                ? taxonomyNormalized.topCandidates
+                                : []
+                        }
+                        : null,
                     canonicalFood: canonicalFoodRule?.canonical || '',
                     canonicalPlace: canonicalPlaceRule?.canonical || '',
                     bridgeVerification: bridgeVerification

@@ -30,6 +30,13 @@ function NavGlyph({ type }) {
         <path d="M15 6.5V20" />
       </svg>
     ),
+    forum: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v7A2.5 2.5 0 0 1 17.5 16H10l-4 4v-4H6.5A2.5 2.5 0 0 1 4 13.5Z" />
+        <path d="M8 8h8" />
+        <path d="M8 11h6" />
+      </svg>
+    ),
     payments: (
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <rect x="3" y="5" width="18" height="14" rx="3" />
@@ -81,6 +88,7 @@ function AdminLayout() {
       dashboard: 'Bảng điều khiển',
       users: 'Quản lý người dùng',
       map: 'Quản lý bản đồ',
+      forum: 'Quản lý diễn đàn',
       reports: 'Báo cáo & doanh thu',
       packages: 'Gói quảng cáo',
       feedback: 'Phản hồi & hỗ trợ',
@@ -95,6 +103,7 @@ function AdminLayout() {
       dashboard: 'Dashboard',
       users: 'User Management',
       map: 'Map Management',
+      forum: 'Forum Management',
       reports: 'Reports & Revenue',
       packages: 'Ad Packages',
       feedback: 'Feedback & Support',
@@ -111,6 +120,7 @@ function AdminLayout() {
     { label: t.dashboard, path: APP_ROUTES.ADMIN_DASHBOARD, icon: 'dashboard' },
     { label: t.users, path: APP_ROUTES.ADMIN_USERS, icon: 'users' },
     { label: t.map, path: APP_ROUTES.ADMIN_BOUNDARIES, icon: 'map' },
+    { label: t.forum, path: APP_ROUTES.ADMIN_FORUM, icon: 'forum' },
     { label: t.reports, path: APP_ROUTES.ADMIN_REPORTS, icon: 'payments' },
     { label: t.packages, path: APP_ROUTES.ADMIN_PACKAGES, icon: 'packages' },
     { label: t.feedback, path: APP_ROUTES.ADMIN_FEEDBACK, icon: 'feedback' },
@@ -139,7 +149,7 @@ function AdminLayout() {
             </div>
           </div>
 
-          <nav className="admin-nav">
+          <nav className="admin-nav" data-onboarding="admin-nav">
             {adminNavigation.map((item) => (
               <NavLink
                 key={item.path}
@@ -166,7 +176,7 @@ function AdminLayout() {
       </aside>
 
       <main className="admin-main">
-        <header className="admin-topbar">
+        <header className="admin-topbar" data-onboarding="admin-topbar">
           <div className="admin-topbar-actions">
             <label className="admin-lang-wrap">
               <span>{t.language}</span>

@@ -72,7 +72,7 @@ function MerchantDashboardPage() {
     <div className="merchant-dashboard-container">
       <div className="merchant-shell">
         {/* Sidebar */}
-        <aside className="merchant-sidebar">
+        <aside className="merchant-sidebar" data-onboarding="merchant-sidebar">
           <div className="merchant-sidebar-header">
             <div className="merchant-user-info">
               <div className="merchant-user-avatar">{getUserInitial()}</div>
@@ -87,12 +87,13 @@ function MerchantDashboardPage() {
           <button 
             className="merchant-publish-btn"
             onClick={handlePublishClick}
+            data-onboarding="merchant-publish-button"
           >
             {t.merchant.publish}
           </button>
 
           {/* Menu Items */}
-          <nav className="merchant-menu">
+          <nav className="merchant-menu" data-onboarding="merchant-menu">
             {MenuItems.map(item => (
               <button
                 key={item.id}
