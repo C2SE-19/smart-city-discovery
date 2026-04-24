@@ -193,6 +193,13 @@
   font-size: 0.8rem;
 }
 
+.map-geocode-note {
+  margin: 10px 0 0;
+  font-size: 0.82rem;
+  color: #1f5a2f;
+  font-weight: 600;
+}
+
 .selected-ward-note {
   margin: 0 0 10px;
   font-size: 0.82rem;

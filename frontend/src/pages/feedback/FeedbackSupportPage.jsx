@@ -177,7 +177,7 @@ function FeedbackSupportPage() {
   return (
     <div className={`feedback-shell theme-${theme}`}>
       <div className="feedback-card">
-        <div className="feedback-header">
+        <div className="feedback-header" data-onboarding="feedback-header">
           <button type="button" className="feedback-back-btn" onClick={() => navigate(-1)}>
             ← Quay lại
           </button>
@@ -188,7 +188,7 @@ function FeedbackSupportPage() {
           <p className="feedback-contact">{t.hotline}</p>
         </div>
 
-        <form className="feedback-form" onSubmit={handleSubmit}>
+        <form className="feedback-form" onSubmit={handleSubmit} data-onboarding="feedback-form">
           <label className="feedback-label" htmlFor="feedback-category">
             {t.categoryLabel} <span className="required">*</span>
           </label>

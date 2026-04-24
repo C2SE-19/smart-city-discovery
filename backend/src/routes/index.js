@@ -1,8 +1,80 @@
 const express = require('express');
+const { query } = require('../config/database');
 const authRoutes = require('../modules/auth/auth.routes');
 const usersRoutes = require('../modules/users/users.routes');
+const { query } = require('../config/database');
 
 const router = express.Router();
+
+const PROFANITY_PATTERNS = [
+  'dit me',
+  'ditme',
+  'dit bo',
+  'ditba',
+  'dit',
+  'dm ',
+  'vcl',
+  'vl',
+  'cc',
+  'cmm',
+  'dmm',
+  'địt',
+  'đụ',
+  'đéo',
+  'deo',
+  'lon',
+  'cac',
+  'cặc',
+  'lồn',
+  'ngu',
+  'oc cho',
+  'occho',
+  'do ngu',
+  'mat day',
+  'hon lao',
+  'vo hoc',
+  'chó chết',
+  'cho chet'
+];
+
+function normalizeText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function containsProfanity(text) {
+  const normalized = normalizeText(text);
+  return PROFANITY_PATTERNS.some((pattern) => normalized.includes(pattern));
+}
+
+function mapForumPostRow(row) {
+  const isAnonymous = Boolean(row.is_anonymous);
+  const alias = String(row.anonymous_alias || '').trim();
+  const authorName = isAnonymous
+    ? alias
+      ? `Ẩn danh (${alias})`
+      : 'Ẩn danh'
+    : String(row.author_name || '').trim() || 'Người dùng';
+
+  return {
+    id: row.id,
+    title: row.title,
+    category: row.category,
+    content: row.content,
+    excerpt: row.content,
+    author: authorName,
+    comments: Number(row.comments_count || 0),
+    createdAt: row.created_at,
+    time: row.created_at,
+    isAnonymous,
+    anonymousAlias: alias || null
+  };
+}
 
 const normalizeCategoryLabel = (category) =>
   String(category || '')
@@ -53,80 +125,49 @@ router.get('/health', (req, res) => {
   res.json({ status: 'OK', message: 'API is running' });
 });
 
-router.get('/landing/da-nang-places', (req, res) => {
-  const places = [
-      {
-        id: 'dragon-bridge',
-        name: 'Cầu Rồng',
-        category: 'Phố Biển',
-        description: 'Check-in biểu tượng',
-        imageUrl: '/api/static/dragon-bridge.jpg',
-        lat: 16.0609,
-        lng: 108.2332
-      },
-      {
-        id: 'ba-na-hills',
-        name: 'Bà Nà Hills',
-        category: 'Thiên Nhiên',
-        description: 'Trải nghiệm thiên nhiên',
-        lat: 15.9954,
-        lng: 107.9967
-      },
-      {
-        id: 'son-tra',
-        name: 'Sơn Trà',
-        category: 'Thiên Nhiên',
-        description: 'Không gian sinh thái',
-        lat: 16.1149,
-        lng: 108.3079
-      },
-      {
-        id: 'ngu-hanh-son',
-        name: 'Ngũ Hành Sơn',
-        category: 'Phổ Biến',
-        description: 'Di tích văn hoá',
-        lat: 16.0039,
-        lng: 108.2626
-      },
-      {
-        id: 'my-khe-beach',
-        name: 'Bãi biển Mỹ Khê',
-        category: 'Phố Biển',
-        description: 'Bãi biển đẹp nổi tiếng',
-        lat: 16.0566,
-        lng: 108.2475
-      },
-      {
-        id: 'han-market',
-        name: 'Chợ Hàn',
-        category: 'Ẩm Thực',
-        description: 'Thiên đường ẩm thực & mua sắm',
-        lat: 16.0741,
-        lng: 108.2241
-      },
-      {
-        id: 'cham-museum',
-        name: 'Bảo tàng Chăm',
-        category: 'Phổ Biến',
-        description: 'Không gian văn hoá',
-        lat: 16.0606,
-        lng: 108.2231
-      },
-      {
-        id: 'hai-van-pass',
-        name: 'Đèo Hải Vân',
-        category: 'Thiên Nhiên',
-        description: 'Cung đường săn mây',
-        lat: 16.1896,
-        lng: 108.0987
-      }
-    ];
+router.get('/landing/da-nang-places', async (req, res) => {
+  try {
+    const result = await query(
+      `
+        SELECT 
+          id,
+          name,
+          COALESCE(title, name) as title,
+          description,
+          latitude as lat,
+          longitude as lng,
+          cover_image_url as imageUrl,
+          COALESCE(metadata->>'category', 'Phổ Biến') as category,
+          status
+        FROM venues
+        WHERE status = $1
+        ORDER BY updated_at DESC
+        LIMIT 50
+      `,
+      ['approved']
+    );
 
-  const normalizedPlaces = normalizePlaces(places);
-  const pagination = getPagination(req);
-  const { data, meta } = paginate(normalizedPlaces, pagination);
+    const places = result.rows.map(row => ({
+      id: row.id,
+      name: row.name,
+      title: row.title,
+      description: row.description,
+      lat: Number(row.lat),
+      lng: Number(row.lng),
+      imageUrl: row.imageUrl,
+      category: row.category,
+      image: row.imageUrl
+    }));
 
-  res.json(meta ? { data, meta } : { data });
+    const normalizedPlaces = normalizePlaces(places);
+    const pagination = getPagination(req);
+    const { data, meta } = paginate(normalizedPlaces, pagination);
+
+    res.json(meta ? { data, meta } : { data });
+  } catch (error) {
+    console.error('Error loading da-nang-places:', error);
+    res.status(500).json({ error: 'Unable to load places' });
+  }
 });
 
 router.get('/landing/places-list', (req, res) => {
@@ -211,6 +252,42 @@ router.get('/landing/places-list', (req, res) => {
   const { data, meta } = paginate(normalizedPlaces, pagination);
 
   res.json(meta ? { data, meta } : { data });
+});
+
+router.get('/landing/stats', async (req, res) => {
+  try {
+    const [userResult, venueResult] = await Promise.all([
+      query(
+        `select count(*)::int as total_users from users where role != $1 and role != $2`,
+        ['merchant', 'admin']
+      ),
+      query('select count(*)::int as total_venues from venues where status = $1', ['approved'])
+    ]);
+
+    const users = userResult.rows[0] || {};
+    const venues = venueResult.rows[0] || {};
+
+    const formatStatNumber = (value) => {
+      const parsed = Number(value) || 0;
+      if (parsed === 0) return '0';
+      if (parsed < 20) return `${parsed}+`;
+      if (parsed < 100) return `${Math.ceil(parsed / 10) * 10}+`;
+      return `${Math.ceil(parsed / 100) * 100}+`;
+    };
+
+    const normalizedUsers = Math.max(Number(users.total_users || 0), 20);
+    const normalizedVenues = Math.max(Number(venues.total_venues || 0), 100);
+
+    res.json({
+      stats: {
+        users: formatStatNumber(normalizedUsers),
+        venues: formatStatNumber(normalizedVenues)
+      }
+    });
+  } catch (error) {
+    console.error('Error loading landing stats:', error);
+    res.status(500).json({ error: 'Unable to load landing stats' });
+  }
 });
 
 const landingDetails = {
@@ -443,6 +520,67 @@ router.get('/landing/services/:slug', (req, res) => {
   }
 
   res.json({ data: detail });
+});
+
+router.get('/forum/posts', async (req, res) => {
+  try {
+    const { rows } = await query(
+      `SELECT id, title, category, content, author_name, is_anonymous, anonymous_alias, comments_count, created_at
+       FROM public.forum_posts
+       ORDER BY created_at DESC
+       LIMIT 100`
+    );
+
+    res.json({ data: rows.map(mapForumPostRow) });
+  } catch (error) {
+    console.error('Error loading forum posts:', error);
+    res.status(500).json({ message: 'Không thể tải bài viết diễn đàn.' });
+  }
+});
+
+router.post('/forum/posts', async (req, res) => {
+  try {
+    const title = String(req.body?.title || '').trim();
+    const category = String(req.body?.category || '').trim();
+    const content = String(req.body?.content || '').trim();
+    const isAnonymous = Boolean(req.body?.isAnonymous);
+    const anonymousAlias = String(req.body?.anonymousAlias || '').trim();
+    const authorName = String(req.body?.authorName || '').trim() || 'Người dùng';
+
+    if (!title || !category || !content) {
+      res.status(400).json({ message: 'Vui lòng nhập đầy đủ tiêu đề, chủ đề và nội dung.' });
+      return;
+    }
+
+    if (content.length > 499) {
+      res.status(400).json({ message: 'Nội dung dài tối đa 499 ký tự.' });
+      return;
+    }
+
+    if (isAnonymous && anonymousAlias.length < 2) {
+      res.status(400).json({ message: 'Vui lòng nhập biệt danh tối thiểu 2 ký tự khi đăng ẩn danh.' });
+      return;
+    }
+
+    if (containsProfanity(`${title} ${content} ${category} ${anonymousAlias}`)) {
+      res.status(400).json({ message: 'Nội dung chứa từ ngữ không phù hợp. Vui lòng chỉnh sửa trước khi đăng.' });
+      return;
+    }
+
+    const { rows } = await query(
+      `INSERT INTO public.forum_posts (
+        title, category, content, author_name, is_anonymous, anonymous_alias
+      )
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING id, title, category, content, author_name, is_anonymous, anonymous_alias, comments_count, created_at`,
+      [title, category, content, isAnonymous ? null : authorName, isAnonymous, isAnonymous ? anonymousAlias : null]
+    );
+
+    res.status(201).json({ data: mapForumPostRow(rows[0]) });
+  } catch (error) {
+    console.error('Error creating forum post:', error);
+    res.status(500).json({ message: 'Không thể đăng bài lúc này. Vui lòng thử lại.' });
+  }
 });
 
 module.exports = router;

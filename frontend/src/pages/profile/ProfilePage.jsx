@@ -6,6 +6,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { APP_ROUTES } from '../../constants/routes';
 import axios from 'axios';
+import { FiGrid, FiHeart, FiMessageSquare, FiStar, FiUser } from 'react-icons/fi';
 import UserPreferenceWizard from '../../components/preferences/UserPreferenceWizard';
 import { fetchUserPreferences } from '../../services/api/userPreferencesApi';
 import './ProfilePage.css';
@@ -13,38 +14,39 @@ import './ProfilePage.css';
 const COPY = {
   vi: {
     menu: {
-      overview: 'Tá»•ng Quan',
-      account: 'ThÃ´ng tin tÃ i khoáº£n',
-      favorites: 'YÃªu ThÃ­ch',
-      ratings: 'ÄÃ¡nh giÃ¡',
-      posts: 'BÃ i viáº¿t cá»§a tÃ´i',
-      support: 'GÃ³p Ã½ & há»— trá»£'
+      overview: 'Tổng quan',
+      account: 'Thông tin tài khoản',
+      favorites: 'Yêu thích',
+      ratings: 'Đánh giá',
+      posts: 'Bài viết của tôi',
+      support: 'Góp ý & hỗ trợ'
     },
     headings: {
-      personal: 'ThÃ´ng tin cÃ¡ nhÃ¢n',
-      favorites: 'YÃªu ThÃ­ch',
-      ratings: 'ÄÃ¡nh giÃ¡ cá»§a tÃ´i',
-      posts: 'BÃ i viáº¿t cá»§a tÃ´i',
-      support: 'GÃ³p Ã½ & Há»— trá»£'
+      personal: 'Thông tin cá nhân',
+      favorites: 'Yêu Thích',
+      ratings: 'Đánh giá của tôi',
+      posts: 'Bài viết của tôi',
+      support: 'Góp ý & Hỗ trợ'
     },
     placeholder: {
-      favorites: 'CÃ¡c Ä‘á»‹a Ä‘iá»ƒm yÃªu thÃ­ch cá»§a báº¡n sáº½ hiá»ƒn thá»‹ á»Ÿ Ä‘Ã¢y',
-      ratings: 'CÃ¡c Ä‘Ã¡nh giÃ¡ báº¡n Ä‘Ã£ gá»­i sáº½ hiá»ƒn thá»‹ á»Ÿ Ä‘Ã¢y',
-      posts: 'CÃ¡c bÃ i viáº¿t cá»§a báº¡n sáº½ hiá»ƒn thá»‹ á»Ÿ Ä‘Ã¢y',
-      support: 'LiÃªn há»‡ vá»›i chÃºng tÃ´i Ä‘á»ƒ Ä‘Æ°á»£c há»— trá»£ tá»‘t nháº¥t'
+      favorites: 'Các địa điểm yêu thích của bạn sẽ hiển thị ở đây',
+      ratings: 'Các đánh giá bạn đã gửi sẽ hiển thị ở đây',
+      posts: 'Các bài viết của bạn sẽ hiển thị ở đây',
+      support: 'Liên hệ với chúng tôi để được hỗ trợ tốt nhất'
     },
     labels: {
-      name: 'Há» vÃ  tÃªn',
+      name: 'Họ và tên',
       email: 'Email',
-      phone: 'Sá»‘ Ä‘iá»‡n thoáº¡i',
-      address: 'Äá»‹a chá»‰'
+      phone: 'Số điện thoại',
+      address: 'Địa chỉ'
     },
-    loading: 'Äang táº£i thÃ´ng tin...',
-    edit: 'âœŽ Chá»‰nh sá»­a',
-    save: 'LÆ°u',
-    cancel: 'Há»§y',
-    ratingTitle: 'ÄÃ¡nh giÃ¡',
-    ratingCount: '4.7 (0 Ä‘Ã¡nh giÃ¡)'
+    loading: 'Đang tải thông tin...',
+    edit: '✎ Chỉnh sửa',
+    edit: 'Chỉnh sửa',
+    save: 'Lưu',
+    cancel: 'Hủy',
+    ratingTitle: 'Đánh giá',
+    ratingCount: '4.7 (0 đánh giá)'
   },
   en: {
     menu: {
@@ -75,13 +77,155 @@ const COPY = {
       address: 'Address'
     },
     loading: 'Loading profile...',
-    edit: 'âœŽ Edit',
+  edit: '✎ Edit',
     save: 'Save',
     cancel: 'Cancel',
     ratingTitle: 'Ratings',
     ratingCount: '4.7 (0 reviews)'
   }
 };
+
+const VI_COPY_OVERRIDE = {
+  menu: {
+    overview: 'Tổng Quan',
+    account: 'Thông tin tài khoản',
+    favorites: 'Yêu Thích',
+    ratings: 'Đánh giá',
+    posts: 'Bài viết của tôi',
+    support: 'Góp ý & hỗ trợ'
+  },
+  headings: {
+    personal: 'Thông tin cá nhân',
+    favorites: 'Yêu Thích',
+    ratings: 'Đánh giá của tôi',
+    posts: 'Bài viết của tôi',
+    support: 'Góp ý & hỗ trợ'
+  },
+  placeholder: {
+    favorites: 'Các địa điểm yêu thích của bạn sẽ hiển thị ở đây',
+    ratings: 'Các đánh giá bạn đã gửi sẽ hiển thị ở đây',
+    posts: 'Các bài viết của bạn sẽ hiển thị ở đây',
+    support: 'Liên hệ với chúng tôi để được hỗ trợ tốt nhất'
+  },
+  labels: {
+    name: 'Họ và tên',
+    email: 'Email',
+    phone: 'Số điện thoại',
+    address: 'Địa chỉ'
+  },
+  loading: 'Đang tải thông tin...',
+  edit: '✎ Chỉnh sửa',
+  save: 'Lưu',
+  cancel: 'Hủy',
+  ratingTitle: 'Đánh giá',
+  ratingCount: '4.7 (0 đánh giá)'
+};
+
+const VI_UI_OVERRIDE = {
+  labels: {
+    currentPassword: 'Mật khẩu hiện tại',
+    newPassword: 'Mật khẩu mới',
+    confirmPassword: 'Xác nhận mật khẩu mới'
+  },
+  helpers: {
+    emailLocked: 'Email đã khóa, không thể thay đổi.',
+    passwordRule: '(Mật khẩu phải từ 8 ký tự, có 1 chữ viết hoa và ký tự đặc biệt.)'
+  },
+  placeholders: {
+    phone: 'Nhập số điện thoại',
+    currentPassword: 'Nhập mật khẩu hiện tại',
+    newPassword: 'Ít nhất 8 ký tự',
+    confirmPassword: 'Nhập lại mật khẩu mới'
+  },
+  actions: {
+    show: 'Hiện',
+    hide: 'Ẩn',
+    showPasswordForm: 'Thay đổi mật khẩu',
+    hidePasswordForm: 'Ẩn đổi mật khẩu',
+    editInterests: 'Sửa sở thích',
+    removeFavorite: 'Bỏ yêu thích',
+    confirm: 'Có',
+    decline: 'Không'
+  },
+  favorites: {
+    removeTitle: 'Bỏ yêu thích',
+    removeMessage: 'Bạn có muốn bỏ yêu thích mục "{name}" không?',
+    unnamed: 'Không có tên'
+  },
+  messages: {
+    nameRequired: 'Vui lòng nhập họ tên.',
+    emailInvalid: 'Email không đúng định dạng.',
+    phoneInvalid: 'Số điện thoại không đúng định dạng.',
+    passwordRequired: 'Vui lòng nhập đầy đủ mật khẩu hiện tại, mật khẩu mới và xác nhận.',
+    passwordLength: 'Mật khẩu mới phải có ít nhất 8 ký tự.',
+    passwordUpper: 'Mật khẩu mới phải có ít nhất 1 chữ in hoa (A-Z).',
+    passwordSpecial: 'Mật khẩu mới phải có ít nhất 1 ký tự đặc biệt.',
+    passwordMismatch: 'Xác nhận mật khẩu không khớp.',
+    saveSuccess: 'Lưu thành công.',
+    saveFailed: 'Cập nhật thất bại. Vui lòng thử lại.',
+    favoriteRemoved: 'Đã bỏ yêu thích.',
+    favoriteRemoveFailed: 'Không thể bỏ yêu thích. Vui lòng thử lại.'
+  }
+};
+
+function shouldRepairMojibake(value) {
+  const text = String(value || '');
+  return /Ã|Ä|á»|â|ðŸ|�/.test(text);
+}
+
+function repairMojibakeText(value) {
+  if (typeof value !== 'string') {
+    return value;
+  }
+
+  if (!shouldRepairMojibake(value)) {
+    return value;
+  }
+
+  try {
+    const bytes = Uint8Array.from(value, (char) => char.charCodeAt(0));
+    const decoded = new TextDecoder('utf-8').decode(bytes);
+    return decoded || value;
+  } catch {
+    return value;
+  }
+}
+
+function repairMojibakeDeep(input) {
+  if (Array.isArray(input)) {
+    return input.map((item) => repairMojibakeDeep(item));
+  }
+
+  if (input && typeof input === 'object') {
+    return Object.keys(input).reduce((accumulator, key) => {
+      accumulator[key] = repairMojibakeDeep(input[key]);
+      return accumulator;
+    }, {});
+  }
+
+  return repairMojibakeText(input);
+}
+
+function mergeDeep(baseValue, overrideValue) {
+  if (Array.isArray(baseValue) || Array.isArray(overrideValue)) {
+    return overrideValue ?? baseValue;
+  }
+
+  if (
+    baseValue &&
+    typeof baseValue === 'object' &&
+    overrideValue &&
+    typeof overrideValue === 'object'
+  ) {
+    const keys = new Set([...Object.keys(baseValue), ...Object.keys(overrideValue)]);
+    return [...keys].reduce((accumulator, key) => {
+      accumulator[key] = mergeDeep(baseValue[key], overrideValue[key]);
+      return accumulator;
+    }, {});
+  }
+
+  return overrideValue ?? baseValue;
+}
 
 
 function ProfilePage() {
@@ -90,7 +234,14 @@ function ProfilePage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { theme } = useTheme();
-  const copy = COPY[language] || COPY.vi;
+  const copy = useMemo(() => {
+    const source = COPY[language] || COPY.vi;
+    if (language !== 'vi') {
+      return source;
+    }
+
+    return mergeDeep(repairMojibakeDeep(source), VI_COPY_OVERRIDE);
+  }, [language]);
 
   const handleFavoriteCardClick = (item) => {
     if (String(item?.itemType || '').toLowerCase() !== 'place' || !item?.itemId) {
@@ -104,54 +255,54 @@ function ProfilePage() {
     setConfirmFavorite(item);
   };
 
-  const ui =
+  const uiRaw =
     language === 'vi'
       ? {
           labels: {
-            currentPassword: 'Máº­t kháº©u hiá»‡n táº¡i',
-            newPassword: 'Máº­t kháº©u má»›i',
-            confirmPassword: 'XÃ¡c nháº­n máº­t kháº©u má»›i'
+            currentPassword: 'Mật khẩu hiện tại',
+            newPassword: 'Mật khẩu mới',
+            confirmPassword: 'Xác nhận mật khẩu mới'
           },
           helpers: {
-            emailLocked: 'Email Ä‘Ã£ khÃ³a, khÃ´ng thá»ƒ thay Ä‘á»•i.',
+            emailLocked: 'Email đã khóa, không thể thay đổi.',
             passwordRule:
-              '(Máº­t kháº©u pháº£i tá»« 8 kÃ½ tá»±, cÃ³ 1 chá»¯ viáº¿t hoa vÃ  kÃ½ tá»± Ä‘áº·c biá»‡t.)'
+              '(Mật khẩu phải từ 8 ký tự, có 1 chữ viết hoa và ký tự đặc biệt.)'
           },
           placeholders: {
-            phone: 'Nháº­p sá»‘ Ä‘iá»‡n thoáº¡i',
-            currentPassword: 'Nháº­p máº­t kháº©u hiá»‡n táº¡i',
-            newPassword: 'Ãt nháº¥t 8 kÃ½ tá»±',
-            confirmPassword: 'Nháº­p láº¡i máº­t kháº©u má»›i'
+            phone: 'Nhập số điện thoại',
+            currentPassword: 'Nhập mật khẩu hiện tại',
+            newPassword: 'Ít nhất 8 ký tự',
+            confirmPassword: 'Nhập lại mật khẩu mới'
           },
           actions: {
-            show: 'Hiá»‡n',
-            hide: 'áº¨n',
-            showPasswordForm: 'Thay Ä‘á»•i máº­t kháº©u',
-            hidePasswordForm: 'áº¨n Ä‘á»•i máº­t kháº©u',
-            editInterests: 'Edit interests',
-            removeFavorite: 'Bá» yÃªu thÃ­ch',
-            confirm: 'CÃ³',
-            decline: 'KhÃ´ng'
+            show: 'Hiện',
+            hide: 'Ẩn',
+            showPasswordForm: 'Thay đổi mật khẩu',
+            hidePasswordForm: 'Ẩn đổi mật khẩu',
+            editInterests: 'Chỉnh sửa sở thích',
+            removeFavorite: 'Bỏ yêu thích',
+            confirm: 'Có',
+            decline: 'Không'
           },
           favorites: {
-            removeTitle: 'Bá» yÃªu thÃ­ch',
-            removeMessage: 'Báº¡n cÃ³ muá»‘n bá» yÃªu thÃ­ch má»¥c "{name}" khÃ´ng?',
-            unnamed: 'KhÃ´ng cÃ³ tÃªn'
+            removeTitle: 'Bỏ yêu thích',
+            removeMessage: 'Bạn có muốn bỏ yêu thích mục "{name}" không?',
+            unnamed: 'Không có tên'
           },
           messages: {
-            nameRequired: 'Vui lÃ²ng nháº­p há» tÃªn.',
-            emailInvalid: 'Email khÃ´ng Ä‘Ãºng Ä‘á»‹nh dáº¡ng.',
-            phoneInvalid: 'Sá»‘ Ä‘iá»‡n thoáº¡i khÃ´ng Ä‘Ãºng Ä‘á»‹nh dáº¡ng.',
+            nameRequired: 'Vui lòng nhập họ tên.',
+            emailInvalid: 'Email không đúng định dạng.',
+            phoneInvalid: 'Số điện thoại không đúng định dạng.',
             passwordRequired:
-              'Vui lÃ²ng nháº­p Ä‘áº§y Ä‘á»§ máº­t kháº©u hiá»‡n táº¡i, máº­t kháº©u má»›i vÃ  xÃ¡c nháº­n.',
-            passwordLength: 'Máº­t kháº©u má»›i pháº£i cÃ³ Ã­t nháº¥t 8 kÃ½ tá»±.',
-            passwordUpper: 'Máº­t kháº©u má»›i pháº£i cÃ³ Ã­t nháº¥t 1 chá»¯ in hoa (A-Z).',
-            passwordSpecial: 'Máº­t kháº©u má»›i pháº£i cÃ³ Ã­t nháº¥t 1 kÃ½ tá»± Ä‘áº·c biá»‡t.',
-            passwordMismatch: 'XÃ¡c nháº­n máº­t kháº©u khÃ´ng khá»›p.',
-            saveSuccess: 'LÆ°u thÃ nh cÃ´ng.',
-            saveFailed: 'Cáº­p nháº­t tháº¥t báº¡i. Vui lÃ²ng thá»­ láº¡i.',
-            favoriteRemoved: 'ÄÃ£ bá» yÃªu thÃ­ch.',
-            favoriteRemoveFailed: 'KhÃ´ng thá»ƒ bá» yÃªu thÃ­ch. Vui lÃ²ng thá»­ láº¡i.'
+              'Vui lòng nhập đầy đủ mật khẩu hiện tại, mật khẩu mới và xác nhận.',
+            passwordLength: 'Mật khẩu mới phải có ít nhất 8 ký tự.',
+            passwordUpper: 'Mật khẩu mới phải có ít nhất 1 chữ in hoa (A-Z).',
+            passwordSpecial: 'Mật khẩu mới phải có ít nhất 1 ký tự đặc biệt.',
+            passwordMismatch: 'Xác nhận mật khẩu không khớp.',
+            saveSuccess: 'Lưu thành công.',
+            saveFailed: 'Cập nhật thất bại. Vui lòng thử lại.',
+            favoriteRemoved: 'Đã bỏ yêu thích.',
+            favoriteRemoveFailed: 'Không thể bỏ yêu thích. Vui lòng thử lại.'
           }
         }
       : {
@@ -201,12 +352,21 @@ function ProfilePage() {
             favoriteRemoveFailed: 'Unable to remove favorite. Please try again.'
           }
         };
+
+  const ui = useMemo(() => {
+    if (language !== 'vi') {
+      return uiRaw;
+    }
+
+    return mergeDeep(repairMojibakeDeep(uiRaw), VI_UI_OVERRIDE);
+  }, [language, uiRaw]);
+
   const MenuItems = [
-    { id: 'overview', label: copy.menu.overview, icon: 'ðŸ ' },
-    { id: 'account-info', label: copy.menu.account, icon: 'ðŸ‘¤' },
-    { id: 'favorites', label: copy.menu.favorites, icon: 'â¤ï¸' },
-    { id: 'ratings', label: copy.menu.ratings, icon: 'â­' },
-    { id: 'support', label: copy.menu.support, icon: 'ðŸ’¬' }
+    { id: 'overview', label: copy.menu.overview, icon: FiGrid },
+    { id: 'account-info', label: copy.menu.account, icon: FiUser },
+    { id: 'favorites', label: copy.menu.favorites, icon: FiHeart },
+    { id: 'ratings', label: copy.menu.ratings, icon: FiStar },
+    { id: 'support', label: copy.menu.support, icon: FiMessageSquare }
   ];
   const [activeMenu, setActiveMenu] = useState('account-info');
   const [isEditing, setIsEditing] = useState(false);
@@ -554,7 +714,7 @@ function ProfilePage() {
 
   const handlePreferenceSaved = (savedPreference) => {
     setUserPreference(savedPreference || null);
-    setSuccessMessage('Preferences updated successfully.');
+    setSuccessMessage(language === 'vi' ? 'Cập nhật sở thích thành công.' : 'Preferences updated successfully.');
     setError('');
     setTimeout(() => setSuccessMessage(''), 1200);
   };
@@ -668,7 +828,7 @@ function ProfilePage() {
 
   const handleUploadCroppedAvatar = async () => {
     if (!token) {
-      setError('Báº¡n cáº§n Ä‘Äƒng nháº­p Ä‘á»ƒ cáº­p nháº­t áº£nh Ä‘áº¡i diá»‡n.');
+      setError('Bạn cần đăng nhập để cập nhật ảnh đại diện.');
       setSuccessMessage('');
       setTimeout(() => setError(''), 1500);
       return;
@@ -681,7 +841,7 @@ function ProfilePage() {
 
       const blob = await getCroppedAvatarBlob();
       if (!blob) {
-        setError('KhÃ´ng thá»ƒ cáº¯t áº£nh. Vui lÃ²ng thá»­ láº¡i.');
+        setError('Không thể cắt ảnh. Vui lòng thử lại.');
         setTimeout(() => setError(''), 1500);
         return;
       }
@@ -706,12 +866,12 @@ function ProfilePage() {
         updateUser({ avatarUrl: nextAvatar });
       }
       setAvatarCropOpen(false);
-      setSuccessMessage('Cáº­p nháº­t áº£nh Ä‘áº¡i diá»‡n thÃ nh cÃ´ng.');
+      setSuccessMessage('Cập nhật ảnh đại diện thành công.');
       setTimeout(() => setSuccessMessage(''), 1200);
     } catch (err) {
       console.error('Avatar upload error:', err);
       const apiMessage = err.response?.data?.message;
-      setError(apiMessage || 'Táº£i áº£nh tháº¥t báº¡i. Vui lÃ²ng thá»­ láº¡i.');
+      setError(apiMessage || 'Tải ảnh thất bại. Vui lòng thử lại.');
       setTimeout(() => setError(''), 1500);
     } finally {
       setAvatarUploading(false);
@@ -726,7 +886,7 @@ function ProfilePage() {
   const handleEditAvatar = async () => {
     setAvatarMenuOpen(false);
     if (!displayAvatarUrl) {
-      setError('ChÆ°a cÃ³ avatar Ä‘á»ƒ chá»‰nh sá»­a.');
+      setError('Chưa có avatar để chỉnh sửa.');
       setTimeout(() => setError(''), 1500);
       return;
     }
@@ -745,7 +905,7 @@ function ProfilePage() {
       reader.readAsDataURL(blob);
     } catch (err) {
       console.error('Avatar load error:', err);
-      setError('KhÃ´ng thá»ƒ táº£i áº£nh Ä‘á»ƒ chá»‰nh sá»­a.');
+      setError('Không thể tải ảnh để chỉnh sửa.');
       setTimeout(() => setError(''), 1500);
     }
   };
@@ -762,8 +922,8 @@ function ProfilePage() {
     switch (activeMenu) {
       case 'account-info':
         return (
-          <div className="profile-content">
-            <div className="profile-content-header">
+            <div className="profile-content">
+            <div className="profile-content-header" data-onboarding="profile-main-header">
               <h2>{copy.headings.personal}</h2>
               {!isEditing && (
                 <div className="profile-content-actions">
@@ -1090,7 +1250,7 @@ function ProfilePage() {
   return (
     <div className={`profile-page theme-${theme}`}>
       {/* Header Section */}
-      <div className="profile-header">
+      <div className="profile-header" data-onboarding="profile-header">
         <div className="user-card">
           <div className="user-avatar">
             <div className={`avatar-button ${avatarUploading ? 'is-uploading' : ''}`} aria-label="Avatar">
@@ -1114,7 +1274,7 @@ function ProfilePage() {
           <div className="user-info">
             <h1 className="user-name">
               {user?.fullname || 'User'}
-              <span className="verify-badge">âœ“</span>
+              <span className="verify-badge">✓</span>
             </h1>
           </div>
           <div className="avatar-menu">
@@ -1130,10 +1290,10 @@ function ProfilePage() {
             {avatarMenuOpen && (
               <div className="avatar-menu-dropdown">
                 <button type="button" onClick={handleOpenAvatarPicker}>
-                  Add avatar
+                  {language === 'vi' ? 'Thêm avatar' : 'Add avatar'}
                 </button>
                 <button type="button" onClick={handleEditAvatar}>
-                  Edit avatar
+                  {language === 'vi' ? 'Chỉnh sửa avatar' : 'Edit avatar'}
                 </button>
               </div>
             )}
@@ -1145,9 +1305,9 @@ function ProfilePage() {
         <div className="avatar-crop-overlay" role="dialog" aria-modal="true">
           <div className="avatar-crop-modal">
             <div className="avatar-crop-header">
-              <h3>Crop avatar</h3>
+              <h3>{language === 'vi' ? 'Cắt avatar' : 'Crop avatar'}</h3>
               <button type="button" className="avatar-crop-close" onClick={() => setAvatarCropOpen(false)}>
-                Ã—
+                ×
               </button>
             </div>
             <div className="avatar-cropper">
@@ -1173,10 +1333,10 @@ function ProfilePage() {
               />
               <div className="avatar-crop-actions">
                 <button type="button" className="btn-cancel" onClick={() => setAvatarCropOpen(false)}>
-                  Cancel
+                  {language === 'vi' ? 'Hủy' : 'Cancel'}
                 </button>
                 <button type="button" className="btn-save" onClick={handleUploadCroppedAvatar} disabled={avatarUploading}>
-                  Save avatar
+                  {language === 'vi' ? 'Lưu avatar' : 'Save avatar'}
                 </button>
               </div>
             </div>
@@ -1186,13 +1346,17 @@ function ProfilePage() {
 
       <div className="profile-container">
         {/* Sidebar */}
-        <aside className="profile-sidebar">
+        <aside className="profile-sidebar" data-onboarding="profile-sidebar">
           <nav className="sidebar-menu">
             {MenuItems.map((item) => {
+              const MenuIcon = item.icon;
+
               if (item.id === 'overview') {
                 return (
                   <div key={item.id} className="menu-item menu-item-heading">
-                    <span className="menu-icon">{item.icon}</span>
+                    <span className="menu-icon" aria-hidden="true">
+                      <MenuIcon />
+                    </span>
                     <span className="menu-label">{item.label}</span>
                   </div>
                 );
@@ -1210,7 +1374,9 @@ function ProfilePage() {
                     }
                   }}
                 >
-                  <span className="menu-icon">{item.icon}</span>
+                  <span className="menu-icon" aria-hidden="true">
+                    <MenuIcon />
+                  </span>
                   <span className="menu-label">{item.label}</span>
                 </button>
               );
@@ -1219,7 +1385,7 @@ function ProfilePage() {
         </aside>
 
         {/* Main Content */}
-        <main className="profile-main">
+        <main className="profile-main" data-onboarding="profile-main">
           {renderContent()}
         </main>
       </div>
@@ -1229,7 +1395,7 @@ function ProfilePage() {
         onClose={() => setPreferenceWizardOpen(false)}
         onSaved={handlePreferenceSaved}
         initialPreference={userPreference}
-        title="Update your interests"
+        title={language === 'vi' ? 'Cập nhật sở thích của bạn' : 'Update your interests'}
       />
     </div>
   );

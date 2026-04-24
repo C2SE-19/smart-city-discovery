@@ -566,6 +566,7 @@ function OverviewPage() {
   const [previewUrl, setPreviewUrl] = useState('');
   const [imageError, setImageError] = useState('');
   const [imageSearchLoading, setImageSearchLoading] = useState(false);
+  const [imageSearchVenues, setImageSearchVenues] = useState([]);
   const [searchPage, setSearchPage] = useState(1);
   const [searchTriggered, setSearchTriggered] = useState(false);
   const [userPreference, setUserPreference] = useState(null);
@@ -656,6 +657,10 @@ function OverviewPage() {
   );
 
   const displayedVenues = useMemo(() => {
+    if (searchTriggered && imageSearchVenues.length > 0) {
+      return imageSearchVenues;
+    }
+
     if (!normalizedSubmittedSearch) {
       return venues;
     }
@@ -680,6 +685,8 @@ function OverviewPage() {
       );
     });
   }, [
+    searchTriggered,
+    imageSearchVenues,
     venues,
     normalizedSubmittedSearch,
     submittedSearchHasTone,
@@ -1128,6 +1135,7 @@ function OverviewPage() {
     setAiRefineInput('');
     setAiRefineError('');
     setAiRefineMeta(null);
+    setImageSearchVenues([]);
     setShowFilterPanel(false);
     setSearchPage(1);
   }, [location.state?.resetOverview]);
@@ -1202,6 +1210,7 @@ function OverviewPage() {
     setAiRefineInput('');
     setAiRefineError('');
     setAiRefineMeta(null);
+    setImageSearchVenues([]);
     setSubmittedSearch(searchInput.trim());
     setAppliedCategoryIds(selectedCategoryIds);
     setAppliedWardIds(selectedWardIds);
@@ -1217,6 +1226,7 @@ function OverviewPage() {
     setAiRefineInput('');
     setAiRefineError('');
     setAiRefineMeta(null);
+    setImageSearchVenues([]);
     setSelectedCategoryIds([]);
     setSelectedWardIds([]);
     setSelectedServiceIds([]);
@@ -1237,6 +1247,7 @@ function OverviewPage() {
     setAiRefineInput('');
     setAiRefineError('');
     setAiRefineMeta(null);
+    setImageSearchVenues([]);
     setSubmittedSearch('');
     setSearchTriggered(false);
     setSearchPage(1);
@@ -1498,12 +1509,29 @@ function OverviewPage() {
       const imageDataUrl = await readFileAsDataUrl(file);
       const response = await searchVenuesByImage({
         imageDataUrl,
-        target
+        target,
+        language
       });
 
+      const directVenueResults = Array.isArray(response?.venueResults)
+        ? response.venueResults
+        : [];
       const nextSearchText = String(response?.searchText || response?.detectedLabel || '').trim();
+      const isUnknownLabel = nextSearchText.toLowerCase() === 'unknown';
+      const readableHint = [
+        response?.bestGuessLabel,
+        ...(Array.isArray(response?.searchTerms) ? response.searchTerms : [])
+      ]
+        .map((item) => String(item || '').trim())
+        .find((item) => item && item.toLowerCase() !== 'unknown' && item.toLowerCase() !== 'place' && item.toLowerCase() !== 'food');
+      const fallbackSearchText = target === 'food'
+        ? (language === 'en' ? 'Detected food from image' : 'Món ăn nhận diện từ ảnh')
+        : (language === 'en' ? 'Detected place from image' : 'Địa điểm nhận diện từ ảnh');
+      const resolvedSearchText = (!nextSearchText || isUnknownLabel)
+        ? (readableHint || fallbackSearchText)
+        : nextSearchText;
 
-      if (!nextSearchText) {
+      if (!directVenueResults.length && (!nextSearchText || isUnknownLabel)) {
         setImageError(language === 'en'
           ? 'AI could not detect a reliable dish or place from this image.'
           : 'AI chưa nhận diện được món ăn hoặc địa điểm phù hợp từ ảnh này.');
@@ -1525,8 +1553,10 @@ function OverviewPage() {
       setAppliedWardIds([]);
       setAppliedServiceIds([]);
 
-      setSearchInput(nextSearchText);
-      setSubmittedSearch(nextSearchText);
+      setImageSearchVenues(directVenueResults);
+
+      setSearchInput(resolvedSearchText);
+      setSubmittedSearch(resolvedSearchText);
       setSearchTriggered(true);
       setSearchPage(1);
       setShowFilterPanel(false);
@@ -1768,7 +1798,7 @@ function OverviewPage() {
               {t.hero.description}
             </p>
 
-            <div className="overview-hero-actions">
+            <div className="overview-hero-actions" data-onboarding="overview-hero-actions">
               <button 
                 type="button" 
                 className="overview-hero-button overview-hero-button-primary"
@@ -1891,7 +1921,10 @@ function OverviewPage() {
         </div>
       )}
 
-      <section className={`overview-search ${isCondensedMode ? 'is-searching' : ''}`.trim()}>
+      <section
+        className={`overview-search ${isCondensedMode ? 'is-searching' : ''}`.trim()}
+        data-onboarding="overview-search"
+      >
         <div className="overview-search-top">
           <div className="overview-search-headline">
             <h2>Explore with live filters</h2>
@@ -1940,6 +1973,7 @@ function OverviewPage() {
             type="button"
             className={`overview-search-filter ${showFilterPanel ? 'is-active' : ''}`}
             onClick={() => setShowFilterPanel((current) => !current)}
+            data-onboarding="overview-filter-button"
           >
             Filter
           </button>
@@ -1951,6 +1985,7 @@ function OverviewPage() {
             aria-label={t.search.aiSuggest}
             onClick={handleAiSuggest}
             disabled={aiSuggestLoading || preferencesLoading}
+            data-onboarding="overview-ai-button"
           >
             {aiSuggestLoading ? 'Thinking...' : t.search.aiSuggest}
           </button>
@@ -2397,7 +2432,8 @@ function OverviewPage() {
       )}
 
       {!isCondensedMode && (
-        <section className="overview-section overview-map-section">
+        <section className="overview-section overview-map-section" data-onboarding="overview-map">
+          <div className="overview-map-guide-anchor" data-onboarding="overview-map-anchor" aria-hidden="true" />
           <div className="overview-section-heading">
             <h2>City map</h2>
             <span />

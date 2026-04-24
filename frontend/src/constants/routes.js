@@ -5,6 +5,7 @@ export const APP_ROUTES = {
   ABOUT: '/about',
   ALL_CITY: '/all-city',
   SERVICE: '/service',
+  FORUM: '/forum',
   DISCOVERY: '/discovery',
   LANDING_DETAIL: '/landing/:slug',
   PLACE_LIST: '/places',
@@ -15,6 +16,9 @@ export const APP_ROUTES = {
   FEEDBACK: '/feedback', // Restored FEEDBACK route constant
   ADMIN_DASHBOARD: '/admin',
   ADMIN_BOUNDARIES: '/admin/boundaries',
+  ADMIN_FORUM: '/admin/forum',
+  ADMIN_FORUM_REPORTS: '/admin/forum/reports',
+  ADMIN_FORUM_VIEW: '/admin/forum/view',
   ADMIN_USERS: '/admin/users',
   ADMIN_REPORTS: '/admin/reports',
   ADMIN_PACKAGES: '/admin/packages',
