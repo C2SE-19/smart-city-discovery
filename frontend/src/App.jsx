@@ -7,6 +7,7 @@ import LandingLayout from './components/layouts/LandingLayout';
 import WorkspaceLayout from './components/layouts/WorkspaceLayout';
 import MerchantLayout from './components/layouts/MerchantLayout';
 import AdminLayout from './components/layouts/AdminLayout';
+import ErrorBoundary from './components/shared/ErrorBoundary';
 import RoleGuard from './components/auth/RoleGuard';
 import ErrorBoundary from './components/shared/ErrorBoundary';
 import ChatWidget from './components/chat/ChatWidget';
@@ -42,12 +43,30 @@ import TermsPage from './pages/terms/TermsPage';
 import ForumPage from './pages/forum/ForumPage';
 import { APP_ROUTES } from './constants/routes';
 import { ROLES } from './constants/roles';
+import { fetchLandingStats } from './services/api/landingStatsApi';
+
+const formatCount = (value) => {
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (!Number.isFinite(value)) {
+    return '0';
+  }
+
+  return value.toLocaleString('vi-VN');
+};
+
+function AppRoutes({ landingStats }) {
 
 function AppRoutes() {
   return (
     <Routes>
       <Route element={<LandingLayout />}>
         <Route path={APP_ROUTES.HOME} element={<OverviewPage />} />
+        <Route path={APP_ROUTES.ABOUT} element={<LandingInfoPage stats={landingStats} />} />
+        <Route path={APP_ROUTES.ALL_CITY} element={<LandingInfoPage stats={landingStats} />} />
+        <Route path={APP_ROUTES.SERVICE} element={<LandingInfoPage stats={landingStats} />} />
         <Route
           path={APP_ROUTES.ABOUT}
           element={
@@ -129,6 +148,46 @@ function AppRoutes() {
 
 function App() {
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+  const [landingStats, setLandingStats] = useState(null);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadLandingStats = async () => {
+      try {
+        const stats = await fetchLandingStats();
+        if (!stats || !isMounted) {
+          return;
+        }
+
+        const users =
+          typeof stats.users === 'string' ? stats.users : Number(stats.users) || 0;
+        const venues =
+          typeof stats.venues === 'string' ? stats.venues : Number(stats.venues) || 0;
+
+        const formattedStats = [
+          { number: formatCount(users), label: 'Nguoi dung' },
+          { number: formatCount(venues), label: 'Dia diem' },
+        ];
+
+        setLandingStats(formattedStats);
+
+        try {
+          localStorage.setItem('landingStats', JSON.stringify(formattedStats));
+        } catch (storageError) {
+          console.warn('Could not save stats to localStorage:', storageError);
+        }
+      } catch (error) {
+        console.error('Error loading landing stats:', error);
+      }
+    };
+
+    loadLandingStats();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const appContent = (
     <ErrorBoundary>
@@ -136,7 +195,7 @@ function App() {
         <ThemeProvider>
           <LanguageProvider>
             <BrowserRouter>
-              <AppRoutes />
+              <AppRoutes landingStats={landingStats} />
               <ChatWidget />
               <AppOnboarding />
             </BrowserRouter>
