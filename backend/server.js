@@ -13920,6 +13920,11 @@ async function generateWardIdFromName(name) {
             'địt', 'đụ', 'đéo', 'deo', 'lon', 'cac', 'cặc', 'lồn', 'ngu', 'oc cho', 'occho',
             'do ngu', 'mat day', 'hon lao', 'vo hoc', 'cho chet', 'chó chết'
         ];
+        const FORUM_BANNED_KEYWORD_CACHE_TTL_MS = 30000;
+        const forumBannedKeywordCache = {
+            loadedAt: 0,
+            patterns: []
+        };
 
         function normalizeForumText(value) {
             return String(value || '')
@@ -13931,9 +13936,114 @@ async function generateWardIdFromName(name) {
                 .trim();
         }
 
-        function forumContainsProfanity(text) {
+        async function getForumBannedKeywordPatterns() {
+            const now = Date.now();
+            if (
+                Array.isArray(forumBannedKeywordCache.patterns)
+                && now - Number(forumBannedKeywordCache.loadedAt || 0) < FORUM_BANNED_KEYWORD_CACHE_TTL_MS
+            ) {
+                return forumBannedKeywordCache.patterns;
+            }
+
+            const result = await pool.query(
+                'SELECT normalized_keyword FROM forum_banned_keywords ORDER BY created_at DESC'
+            );
+
+            forumBannedKeywordCache.patterns = result.rows
+                .map((row) => String(row.normalized_keyword || '').trim())
+                .filter(Boolean);
+            forumBannedKeywordCache.loadedAt = now;
+
+            return forumBannedKeywordCache.patterns;
+        }
+
+        function resetForumBannedKeywordCache() {
+            forumBannedKeywordCache.loadedAt = 0;
+            forumBannedKeywordCache.patterns = [];
+        }
+
+        async function forumContainsProfanity(text) {
             const normalized = normalizeForumText(text);
-            return FORUM_PROFANITY_PATTERNS.some((pattern) => normalized.includes(pattern));
+            if (!normalized) {
+                return false;
+            }
+
+            if (FORUM_PROFANITY_PATTERNS.some((pattern) => normalized.includes(pattern))) {
+                return true;
+            }
+
+            const dynamicPatterns = await getForumBannedKeywordPatterns();
+            return dynamicPatterns.some((pattern) => normalized.includes(pattern));
+        }
+
+        async function listAdminForumBannedKeywords(_req, res) {
+            try {
+                const result = await pool.query(
+                    `
+                        SELECT id, keyword, normalized_keyword, created_at
+                        FROM forum_banned_keywords
+                        ORDER BY created_at DESC
+                    `
+                );
+
+                return res.json({ data: result.rows });
+            } catch (error) {
+                console.error('listAdminForumBannedKeywords error:', error);
+                return res.status(500).json({ message: 'Không thể tải danh sách từ khóa cấm.' });
+            }
+        }
+
+        async function createAdminForumBannedKeyword(req, res) {
+            try {
+                const keyword = String(req.body?.keyword || '').trim();
+                const normalizedKeyword = normalizeForumText(keyword);
+
+                if (!normalizedKeyword || normalizedKeyword.length < 2) {
+                    return res.status(400).json({ message: 'Từ khóa cấm cần ít nhất 2 ký tự.' });
+                }
+
+                const result = await pool.query(
+                    `
+                        INSERT INTO forum_banned_keywords (keyword, normalized_keyword)
+                        VALUES ($1, $2)
+                        ON CONFLICT (normalized_keyword)
+                        DO UPDATE SET keyword = EXCLUDED.keyword, updated_at = NOW()
+                        RETURNING id, keyword, normalized_keyword, created_at
+                    `,
+                    [keyword, normalizedKeyword]
+                );
+
+                resetForumBannedKeywordCache();
+                return res.status(201).json({ data: result.rows[0] });
+            } catch (error) {
+                console.error('createAdminForumBannedKeyword error:', error);
+                return res.status(500).json({ message: 'Không thể thêm từ khóa cấm lúc này.' });
+            }
+        }
+
+        async function deleteAdminForumBannedKeyword(req, res) {
+            try {
+                const keywordId = Number(req.params?.keywordId);
+
+                if (!Number.isFinite(keywordId) || keywordId <= 0) {
+                    return res.status(400).json({ message: 'Từ khóa cấm không hợp lệ.' });
+                }
+
+                const deleteResult = await pool.query(
+                    'DELETE FROM forum_banned_keywords WHERE id = $1',
+                    [keywordId]
+                );
+
+                if (!deleteResult.rowCount) {
+                    return res.status(404).json({ message: 'Không tìm thấy từ khóa cấm.' });
+                }
+
+                resetForumBannedKeywordCache();
+                return res.json({ data: { keywordId } });
+            } catch (error) {
+                console.error('deleteAdminForumBannedKeyword error:', error);
+                return res.status(500).json({ message: 'Không thể gỡ từ khóa cấm lúc này.' });
+            }
         }
 
         function sanitizeForumImageList(input, maxImages = 3) {
@@ -14326,7 +14436,7 @@ async function generateWardIdFromName(name) {
                     return res.status(400).json({ message: 'Vui lòng nhập biệt danh tối thiểu 2 ký tự khi đăng ẩn danh.' });
                 }
 
-                if (forumContainsProfanity(`${title} ${category} ${content} ${anonymousAlias}`)) {
+                if (await forumContainsProfanity(`${title} ${category} ${content} ${anonymousAlias}`)) {
                     return res.status(400).json({ message: 'Nội dung chứa từ ngữ không phù hợp. Vui lòng chỉnh sửa trước khi đăng.' });
                 }
 
@@ -14399,7 +14509,7 @@ async function generateWardIdFromName(name) {
                     return res.status(400).json({ message: 'Vui lòng nhập biệt danh tối thiểu 2 ký tự khi bình luận ẩn danh.' });
                 }
 
-                if (forumContainsProfanity(`${content} ${anonymousAlias}`)) {
+                if (await forumContainsProfanity(`${content} ${anonymousAlias}`)) {
                     return res.status(400).json({ message: 'Bình luận chứa từ ngữ không phù hợp. Vui lòng chỉnh sửa trước khi đăng.' });
                 }
 
@@ -14522,7 +14632,7 @@ async function generateWardIdFromName(name) {
                     return res.status(400).json({ message: 'Lý do báo cáo cần ít nhất 3 ký tự.' });
                 }
 
-                if (forumContainsProfanity(reason)) {
+                if (await forumContainsProfanity(reason)) {
                     return res.status(400).json({ message: 'Lý do báo cáo chứa từ ngữ không phù hợp.' });
                 }
 
@@ -14569,7 +14679,7 @@ async function generateWardIdFromName(name) {
                     return res.status(400).json({ message: 'Lý do báo cáo cần ít nhất 3 ký tự.' });
                 }
 
-                if (forumContainsProfanity(reason)) {
+                if (await forumContainsProfanity(reason)) {
                     return res.status(400).json({ message: 'Lý do báo cáo chứa từ ngữ không phù hợp.' });
                 }
 
@@ -14999,6 +15109,9 @@ async function generateWardIdFromName(name) {
         registerVersionedRoute('delete', '/admin/merchant-services/:serviceId', authenticateRequest, requireAdminRole, deleteAdminMerchantService);
         registerVersionedRoute('get', '/admin/venues', authenticateRequest, requireAdminRole, listAdminVenues);
         registerVersionedRoute('get', '/admin/forum/posts', authenticateRequest, requireAdminRole, listAdminForumPosts);
+        registerVersionedRoute('get', '/admin/forum/banned-keywords', authenticateRequest, requireAdminRole, listAdminForumBannedKeywords);
+        registerVersionedRoute('post', '/admin/forum/banned-keywords', authenticateRequest, requireAdminRole, createAdminForumBannedKeyword);
+        registerVersionedRoute('delete', '/admin/forum/banned-keywords/:keywordId', authenticateRequest, requireAdminRole, deleteAdminForumBannedKeyword);
         registerVersionedRoute('delete', '/admin/forum/posts/:postId', authenticateRequest, requireAdminRole, deleteAdminForumPost);
         registerVersionedRoute('delete', '/admin/forum/posts/:postId/comments/:commentId', authenticateRequest, requireAdminRole, deleteAdminForumComment);
         registerVersionedRoute('delete', '/admin/forum/posts/:postId/reports', authenticateRequest, requireAdminRole, dismissAdminForumPostReports);
