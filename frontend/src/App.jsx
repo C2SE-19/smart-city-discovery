@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { GoogleOAuthProvider } from '@react-oauth/google';
 import { LanguageProvider } from './contexts/LanguageContext';
@@ -10,6 +9,7 @@ import MerchantLayout from './components/layouts/MerchantLayout';
 import AdminLayout from './components/layouts/AdminLayout';
 import ErrorBoundary from './components/shared/ErrorBoundary';
 import RoleGuard from './components/auth/RoleGuard';
+import ErrorBoundary from './components/shared/ErrorBoundary';
 import ChatWidget from './components/chat/ChatWidget';
 import AppOnboarding from './components/onboarding/AppOnboarding';
 import OverviewPage from './pages/overview/OverviewPage';
@@ -28,6 +28,7 @@ import AdminVenueApprovalPage from './pages/admin/AdminVenueApprovalPage';
 import AdminFeedbackManagementPage from './pages/admin/AdminFeedbackManagementPage';
 import AdminForumManagementPage from './pages/admin/AdminForumManagementPage';
 import AdminForumOverviewPage from './pages/admin/AdminForumOverviewPage';
+import AdminForumKeywordBanPage from './pages/admin/AdminForumKeywordBanPage';
 import AdminAdPackagesPage from './pages/admin/AdminAdPackagesPage';
 import MerchantWorkbenchPage from './pages/merchant/MerchantWorkbenchPage';
 import MerchantWorkbenchEditPage from './pages/merchant/MerchantWorkbenchEditPage';
@@ -57,6 +58,8 @@ const formatCount = (value) => {
 };
 
 function AppRoutes({ landingStats }) {
+
+function AppRoutes() {
   return (
     <Routes>
       <Route element={<LandingLayout />}>
@@ -64,6 +67,33 @@ function AppRoutes({ landingStats }) {
         <Route path={APP_ROUTES.ABOUT} element={<LandingInfoPage stats={landingStats} />} />
         <Route path={APP_ROUTES.ALL_CITY} element={<LandingInfoPage stats={landingStats} />} />
         <Route path={APP_ROUTES.SERVICE} element={<LandingInfoPage stats={landingStats} />} />
+        <Route
+          path={APP_ROUTES.ABOUT}
+          element={
+            <LandingInfoPage
+              title="About Smart City Discovery"
+              description="Explore local places and smart city content in one platform."
+            />
+          }
+        />
+        <Route
+          path={APP_ROUTES.ALL_CITY}
+          element={
+            <LandingInfoPage
+              title="All City Highlights"
+              description="Browse city highlights and discover places near you."
+            />
+          }
+        />
+        <Route
+          path={APP_ROUTES.SERVICE}
+          element={
+            <LandingInfoPage
+              title="Our Services"
+              description="Smart services connecting users, merchants, and map data."
+            />
+          }
+        />
         <Route path={APP_ROUTES.TERMS} element={<TermsPage />} />
         <Route path={APP_ROUTES.FORUM} element={<ForumPage />} />
         <Route path={APP_ROUTES.FEEDBACK} element={<FeedbackSupportPage />} />
@@ -103,6 +133,7 @@ function AppRoutes({ landingStats }) {
         <Route path="forum" element={<Navigate replace to={APP_ROUTES.ADMIN_FORUM_REPORTS} />} />
         <Route path="forum/reports" element={<AdminForumManagementPage />} />
         <Route path="forum/view" element={<AdminForumOverviewPage />} />
+        <Route path="forum/keywords" element={<AdminForumKeywordBanPage />} />
         <Route path="users" element={<AdminUserManagementPage />} />
         <Route path="reports" element={<AdminReportsPage />} />
         <Route path="packages" element={<AdminAdPackagesPage />} />
