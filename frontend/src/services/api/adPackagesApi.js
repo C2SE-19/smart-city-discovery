@@ -97,6 +97,16 @@ export async function fetchAdminRevenueReport(months = 6) {
   return response.data;
 }
 
+export async function fetchAdminDashboardOverview(months = 6) {
+  const response = await apiClient.get('/admin/dashboard/overview', {
+    params: {
+      months,
+    },
+  });
+
+  return response.data;
+}
+
 export async function fetchTrendingVenues(limit = 10) {
   const response = await apiClient.get('/ad-packages/trending/venues', {
     params: { limit },

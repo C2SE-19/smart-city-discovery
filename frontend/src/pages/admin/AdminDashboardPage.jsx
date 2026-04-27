@@ -1,143 +1,303 @@
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { fetchAdminDashboardOverview } from '../../services/api/adPackagesApi';
+import { formatCurrencyVnd } from '../../services/adPackageStorage';
 import './AdminDashboardPage.css';
 
-const metricCards = [
-  { label: 'Approved venues', value: '750K', delta: '+12.4%' },
-  { label: 'Pending reviews', value: '7,500', delta: '+08.2%' },
-  { label: 'Ad revenue', value: '7,500', delta: '+18.1%' },
-  { label: 'District coverage', value: '94%', delta: '+03.8%' },
-];
+const MONTH_OPTIONS = [3, 6, 12];
+const PIE_COLORS = ['#2f66dc', '#23a27b', '#f28c28', '#d94a5a', '#7c5de2', '#18a3b7'];
 
-const donutLegend = [
-  { label: 'Venues Approved', value: '251K' },
-  { label: 'Pending Review', value: '176K' },
-  { label: 'Ad Revenue', value: '176K' },
-];
-
-const barData = [56, 102, 80, 116, 82, 128, 81, 58, 88, 79];
-const chartDays = ['S', 'M', 'T', 'W', 'T', 'F', 'S', 'M', 'T', 'W'];
-
-function DonutLegend() {
-  return (
-    <div className="admin-donut-legend">
-      {donutLegend.map((item, index) => (
-        <div key={item.label} className="admin-donut-legend-item">
-          <span className={`admin-donut-dot color-${index + 1}`} />
-          <div>
-            <p>{item.label}</p>
-            <strong>{item.value}</strong>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
+function formatCompactNumber(value) {
+  return Number(value || 0).toLocaleString('en-US');
 }
 
-function ChartBars({ compact = false }) {
-  return (
-    <>
-      <div className="admin-chart-scale">
-        <span>160</span>
-        <span>120</span>
-        <span>80</span>
-        <span>40</span>
-        <span>0</span>
-      </div>
+function formatMonthLabel(monthKey) {
+  const [yearRaw, monthRaw] = String(monthKey || '').split('-');
+  const year = Number.parseInt(yearRaw, 10);
+  const month = Number.parseInt(monthRaw, 10);
 
-      <div className="admin-bars">
-        {barData.map((value, index) => (
-          <div key={`${compact ? 'compact' : 'regular'}-${value}-${index}`} className="admin-bar-column">
-            <div className="admin-bar-track">
-              <div
-                className="admin-bar-base"
-                style={{ height: `${Math.max(value - (compact ? 30 : 38), 26)}px` }}
-              />
-              <div
-                className="admin-bar-top"
-                style={{ height: `${Math.min(value, compact ? 62 : 64)}px` }}
-              />
-            </div>
-            <span>{chartDays[index]}</span>
-          </div>
-        ))}
-      </div>
-    </>
-  );
+  if (!Number.isFinite(year) || !Number.isFinite(month)) {
+    return monthKey || 'N/A';
+  }
+
+  const parsed = new Date(Date.UTC(year, month - 1, 1));
+  return parsed.toLocaleDateString('en-US', { month: 'short' });
+}
+
+function formatDelta(deltaValue) {
+  const value = Number(deltaValue || 0);
+  if (value > 0) {
+    return `+${value.toFixed(1)}%`;
+  }
+  if (value < 0) {
+    return `${value.toFixed(1)}%`;
+  }
+  return '0.0%';
+}
+
+function getDeltaTone(deltaValue) {
+  const value = Number(deltaValue || 0);
+  if (value > 0) {
+    return 'positive';
+  }
+  if (value < 0) {
+    return 'negative';
+  }
+  return 'neutral';
+}
+
+function buildPieGradient(series) {
+  const rows = Array.isArray(series) ? series : [];
+  const total = rows.reduce((sum, row) => sum + (Number(row.total) || 0), 0);
+
+  if (!total) {
+    return 'conic-gradient(#d9dfef 0deg 360deg)';
+  }
+
+  let currentDegree = 0;
+  const segments = rows.map((row, index) => {
+    const share = (Number(row.total) || 0) / total;
+    const start = currentDegree;
+    const end = currentDegree + (share * 360);
+    currentDegree = end;
+    return `${PIE_COLORS[index % PIE_COLORS.length]} ${start}deg ${end}deg`;
+  });
+
+  return `conic-gradient(${segments.join(', ')})`;
 }
 
 function AdminDashboardPage() {
+  const [monthWindow, setMonthWindow] = useState(6);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [dashboardPayload, setDashboardPayload] = useState(null);
+
+  const loadDashboard = useCallback(async () => {
+    setLoading(true);
+    setError('');
+
+    try {
+      const payload = await fetchAdminDashboardOverview(monthWindow);
+      setDashboardPayload(payload || null);
+    } catch (requestError) {
+      setError(requestError?.response?.data?.message || 'Could not load dashboard metrics right now.');
+      setDashboardPayload(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [monthWindow]);
+
+  useEffect(() => {
+    loadDashboard();
+  }, [loadDashboard]);
+
+  const overview = dashboardPayload?.overview || {};
+  const deltas = overview?.deltas || {};
+  const revenueSeries = useMemo(
+    () => (Array.isArray(dashboardPayload?.revenueSeries) ? dashboardPayload.revenueSeries : []),
+    [dashboardPayload]
+  );
+  const venueStatusBreakdown = useMemo(
+    () => (Array.isArray(dashboardPayload?.venueStatusBreakdown) ? dashboardPayload.venueStatusBreakdown : []),
+    [dashboardPayload]
+  );
+
+  const maxRevenue = useMemo(
+    () => Math.max(...revenueSeries.map((row) => Number(row.revenue) || 0), 1),
+    [revenueSeries]
+  );
+
+  const totalPieCount = useMemo(
+    () => venueStatusBreakdown.reduce((sum, row) => sum + (Number(row.total) || 0), 0),
+    [venueStatusBreakdown]
+  );
+
+  const strongestMonth = useMemo(
+    () => revenueSeries.slice().sort((first, second) => (second.revenue || 0) - (first.revenue || 0))[0] || null,
+    [revenueSeries]
+  );
+
+  const metricCards = [
+    {
+      label: 'Total users',
+      value: formatCompactNumber(overview.totalUsers),
+      delta: deltas.usersPercent,
+    },
+    {
+      label: 'Total packages',
+      value: formatCompactNumber(overview.totalPackages),
+      delta: deltas.packagesPercent,
+    },
+    {
+      label: 'Total venues',
+      value: formatCompactNumber(overview.totalVenues),
+      delta: deltas.venuesPercent,
+    },
+    {
+      label: 'Revenue this month',
+      value: formatCurrencyVnd(overview.monthlyRevenue || 0),
+      delta: deltas.revenuePercent,
+    },
+  ];
+
   return (
     <div className="admin-dashboard-page">
       <section className="admin-dashboard-hero" data-onboarding="admin-hero">
         <div>
-          <p className="admin-dashboard-kicker">Administrative overview</p>
-          <h1>Monitor wards, merchant submissions and promotion activity in one place.</h1>
+          <p className="admin-dashboard-kicker">Administrative Overview</p>
+          <h1>City growth and monetization at a glance</h1>
           <p className="admin-dashboard-description">
-            This workspace is shaped for your project: GIS boundary management, merchant approval,
-            content moderation and advertising package control.
+            Track user growth, package inventory, venue volume, and monthly ad revenue in one operational dashboard.
           </p>
         </div>
 
-        <div className="admin-dashboard-badge">
-          <span>Live status</span>
-          <strong>City map synchronized</strong>
+        <div className="admin-dashboard-hero-side">
+          <div className="admin-dashboard-range-switch" role="tablist" aria-label="Dashboard month window">
+            {MONTH_OPTIONS.map((option) => (
+              <button
+                key={option}
+                type="button"
+                className={`admin-dashboard-range-btn ${monthWindow === option ? 'is-active' : ''}`.trim()}
+                onClick={() => setMonthWindow(option)}
+              >
+                {option}m
+              </button>
+            ))}
+          </div>
+
+          <div className="admin-dashboard-badge">
+            <span>Data sync</span>
+            <strong>
+              {dashboardPayload?.generatedAt
+                ? new Date(dashboardPayload.generatedAt).toLocaleString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })
+                : 'Live'}
+            </strong>
+          </div>
         </div>
       </section>
 
-      <section className="admin-metrics-strip" data-onboarding="admin-metrics">
-        {metricCards.map((card) => (
-          <article key={card.label} className="admin-metric-card">
-            <strong>{card.value}</strong>
-            <span>{card.label}</span>
-            <em>{card.delta}</em>
-          </article>
-        ))}
-      </section>
+      {loading ? (
+        <section className="admin-dashboard-empty">
+          <h3>Loading dashboard...</h3>
+          <p>Fetching latest admin metrics and trends.</p>
+        </section>
+      ) : null}
 
-      <section className="admin-dashboard-grid admin-dashboard-grid-top">
-        <article className="admin-panel admin-panel-donut">
-          <div className="admin-panel-head">
-            <span>This Week</span>
-            <span className="admin-panel-caret">v</span>
-          </div>
+      {!loading && error ? (
+        <section className="admin-dashboard-empty">
+          <h3>Unable to load dashboard</h3>
+          <p>{error}</p>
+          <button type="button" className="admin-dashboard-retry" onClick={loadDashboard}>
+            Retry
+          </button>
+        </section>
+      ) : null}
 
-          <div className="admin-donut-layout">
-            <div className="admin-donut-visual">
-              <div className="admin-donut-ring ring-outer" />
-              <div className="admin-donut-ring ring-inner" />
-              <div className="admin-donut-core" />
-            </div>
+      {!loading && !error ? (
+        <>
+          <section className="admin-metrics-strip" data-onboarding="admin-metrics">
+            {metricCards.map((card) => (
+              <article key={card.label} className="admin-metric-card">
+                <strong>{card.value}</strong>
+                <span>{card.label}</span>
+                <em className={`delta-${getDeltaTone(card.delta)}`.trim()}>
+                  {formatDelta(card.delta)} vs previous month
+                </em>
+              </article>
+            ))}
+          </section>
 
-            <DonutLegend />
-          </div>
-        </article>
+          <section className="admin-dashboard-grid">
+            <article className="admin-panel admin-panel-bars">
+              <div className="admin-panel-head">
+                <h3>Revenue by month</h3>
+                <p>Paid package transactions in the selected window.</p>
+              </div>
 
-        <article className="admin-panel admin-panel-bars">
-          <ChartBars />
-        </article>
-      </section>
+              {revenueSeries.length ? (
+                <div className="admin-bars">
+                  {revenueSeries.map((row) => {
+                    const value = Number(row.revenue) || 0;
+                    const heightPercent = Math.max(8, Math.round((value / maxRevenue) * 100));
 
-      <section className="admin-dashboard-grid admin-dashboard-grid-bottom">
-        <article className="admin-panel admin-panel-bars wide">
-          <div className="admin-panel-head">
-            <span>This Week</span>
-            <span className="admin-panel-caret">v</span>
-          </div>
+                    return (
+                      <div key={row.month} className="admin-bar-column">
+                        <div className="admin-bar-value">{Math.round(value / 1000).toLocaleString('en-US')}k</div>
+                        <div className="admin-bar-track">
+                          <div className="admin-bar-fill" style={{ height: `${heightPercent}%` }} />
+                        </div>
+                        <span>{formatMonthLabel(row.month)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="admin-inline-empty">No paid transactions yet.</p>
+              )}
+            </article>
 
-          <ChartBars compact />
-        </article>
+            <article className="admin-panel admin-panel-donut">
+              <div className="admin-panel-head">
+                <h3>Venue status distribution</h3>
+                <p>Current moderation distribution across active venue statuses.</p>
+              </div>
 
-        <article className="admin-panel admin-panel-donut compact">
-          <div className="admin-donut-layout compact">
-            <div className="admin-donut-visual small">
-              <div className="admin-donut-ring ring-outer" />
-              <div className="admin-donut-ring ring-inner" />
-              <div className="admin-donut-core" />
-            </div>
+              {venueStatusBreakdown.length ? (
+                <div className="admin-donut-layout">
+                  <div className="admin-donut-visual" style={{ '--pie-gradient': buildPieGradient(venueStatusBreakdown) }}>
+                    <div className="admin-donut-core">
+                      <strong>{formatCompactNumber(totalPieCount)}</strong>
+                      <span>venues</span>
+                    </div>
+                  </div>
 
-            <DonutLegend />
-          </div>
-        </article>
-      </section>
+                  <div className="admin-donut-legend">
+                    {venueStatusBreakdown.map((item, index) => {
+                      const share = totalPieCount ? ((Number(item.total) || 0) / totalPieCount) * 100 : 0;
+
+                      return (
+                        <div key={item.status} className="admin-donut-legend-item">
+                          <span
+                            className="admin-donut-dot"
+                            style={{ backgroundColor: PIE_COLORS[index % PIE_COLORS.length] }}
+                          />
+                          <div>
+                            <p>{item.label}</p>
+                            <strong>{formatCompactNumber(item.total)} ({share.toFixed(1)}%)</strong>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <p className="admin-inline-empty">No venue status data available.</p>
+              )}
+            </article>
+          </section>
+
+          <section className="admin-dashboard-insights">
+            <article className="admin-panel">
+              <div className="admin-panel-head">
+                <h3>Peak revenue month</h3>
+                <p>Highest monthly collection from successful package payments.</p>
+              </div>
+              <strong className="admin-insight-value">
+                {strongestMonth ? formatMonthLabel(strongestMonth.month) : 'N/A'}
+              </strong>
+              <p className="admin-insight-subtext">
+                {strongestMonth
+                  ? `${formatCurrencyVnd(strongestMonth.revenue || 0)} with ${Number(strongestMonth.transactions || 0).toLocaleString('en-US')} paid transaction(s)`
+                  : 'No revenue has been recorded in the selected period.'}
+              </p>
+            </article>
+          </section>
+        </>
+      ) : null}
     </div>
   );
 }

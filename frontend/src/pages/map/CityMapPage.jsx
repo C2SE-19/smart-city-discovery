@@ -16,6 +16,7 @@ import {
   deleteVenueReviewReply,
   fetchVenueCommunityBundle,
   fetchVenueDetails,
+  fetchVenueServices,
   fetchVenueReviews,
   fetchVenues,
   toggleVenueReviewLike,
@@ -26,7 +27,6 @@ import {
   DEFAULT_CITY_CENTER,
   extractVenueEmail,
   extractVenueImages,
-  extractVenueServiceNames,
   extractVenueWeeklySchedule,
   formatPriceRange,
   mapCenterFromWards,
@@ -179,7 +179,7 @@ function StarRatingDisplay({ rating, className = '' }) {
   const starItems = resolveStarDisplayItems(rating);
 
   return (
-    <span className={`city-map-star-display ${className}`.trim()} aria-label={`${normalizeHalfStarRating(rating)} trên 5 sao`}>
+    <span className={`city-map-star-display ${className}`.trim()} aria-label={`${normalizeHalfStarRating(rating)} out of 5 stars`}>
       {starItems.map((starType, index) => (
         <span key={`city-map-star-${index + 1}`} className={`city-map-star-display-item is-${starType}`} aria-hidden="true">
           ★
@@ -190,24 +190,24 @@ function StarRatingDisplay({ rating, className = '' }) {
 }
 
 const VENUE_REPORT_REASON_OPTIONS = [
-  { value: 'incorrect_info', label: 'Thông tin sai' },
-  { value: 'spam_ads', label: 'Spam / quảng cáo' },
-  { value: 'inappropriate_content', label: 'Nội dung không phù hợp' },
-  { value: 'duplicate', label: 'Trùng lặp' },
-  { value: 'other', label: 'Khác' },
+  { value: 'incorrect_info', label: 'Incorrect information' },
+  { value: 'spam_ads', label: 'Spam / advertising' },
+  { value: 'inappropriate_content', label: 'Inappropriate content' },
+  { value: 'duplicate', label: 'Duplicate entry' },
+  { value: 'other', label: 'Other' },
 ];
 
 const REVIEW_REPORT_REASON_OPTIONS = [
-  { value: 'inappropriate_language', label: 'Ngôn từ không phù hợp' },
-  { value: 'spam_ads', label: 'Spam / quảng cáo' },
-  { value: 'incorrect_info', label: 'Thông tin không đúng' },
-  { value: 'other', label: 'Khác' },
+  { value: 'inappropriate_language', label: 'Inappropriate language' },
+  { value: 'spam_ads', label: 'Spam / advertising' },
+  { value: 'incorrect_info', label: 'Incorrect information' },
+  { value: 'other', label: 'Other' },
 ];
 
 const REPORT_SEVERITY_OPTIONS = [
-  { value: 'low', label: 'Thấp', stars: '★' },
-  { value: 'medium', label: 'Trung bình', stars: '★★' },
-  { value: 'high', label: 'Nghiêm trọng', stars: '★★★' },
+  { value: 'low', label: 'Low', stars: '★' },
+  { value: 'medium', label: 'Medium', stars: '★★' },
+  { value: 'high', label: 'High', stars: '★★★' },
 ];
 
 function formatReviewDateTime(value) {
@@ -466,6 +466,7 @@ function CityMapPage() {
 
   const [selectedVenueId, setSelectedVenueId] = useState(null);
   const [selectedVenueDetail, setSelectedVenueDetail] = useState(null);
+  const [selectedVenueServices, setSelectedVenueServices] = useState([]);
   const [detailTab, setDetailTab] = useState('overview');
   const [loadingVenueDetail, setLoadingVenueDetail] = useState(false);
   const [venueDetailError, setVenueDetailError] = useState('');
@@ -536,16 +537,6 @@ function CityMapPage() {
     [categories]
   );
 
-  const serviceNameById = useMemo(
-    () =>
-      new Map(
-        services
-          .map((service) => [Number(service.id), service.name])
-          .filter(([serviceId, serviceName]) => Number.isInteger(serviceId) && Boolean(serviceName))
-      ),
-    [services]
-  );
-
   const selectedVenueFromList = useMemo(
     () => venues.find((venue) => Number(venue.id) === Number(selectedVenueId)) || null,
     [venues, selectedVenueId]
@@ -580,11 +571,6 @@ function CityMapPage() {
 
     return [resolveVenuePopupImage(selectedVenue, apiBase) || FALLBACK_VENUE_IMAGE];
   }, [apiBase, selectedVenue]);
-
-  const selectedVenueServices = useMemo(
-    () => (selectedVenue ? extractVenueServiceNames(selectedVenue, serviceNameById) : []),
-    [selectedVenue, serviceNameById]
-  );
 
   const selectedVenueSchedule = useMemo(
     () => (selectedVenue ? extractVenueWeeklySchedule(selectedVenue) : []),
@@ -963,6 +949,7 @@ function CityMapPage() {
     if (selectedVenueId && !venues.some((venue) => Number(venue.id) === Number(selectedVenueId))) {
       setSelectedVenueId(null);
       setSelectedVenueDetail(null);
+      setSelectedVenueServices([]);
       setVenueDetailError('');
     }
   }, [selectedVenueId, venues]);
@@ -970,6 +957,7 @@ function CityMapPage() {
   useEffect(() => {
     if (!selectedVenueId) {
       setSelectedVenueDetail(null);
+      setSelectedVenueServices([]);
       setVenueDetailError('');
       setLoadingVenueDetail(false);
       return;
@@ -1009,6 +997,43 @@ function CityMapPage() {
     }
 
     loadVenueDetail();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedVenueId]);
+
+  useEffect(() => {
+    if (!selectedVenueId) {
+      setSelectedVenueServices([]);
+      return;
+    }
+
+    let isMounted = true;
+
+    async function loadVenueServices() {
+      try {
+        const servicePayload = await fetchVenueServices(selectedVenueId);
+
+        if (!isMounted) {
+          return;
+        }
+
+        const normalizedServices = Array.isArray(servicePayload?.services)
+          ? servicePayload.services
+              .map((service) => String(service?.name || '').trim())
+              .filter(Boolean)
+          : [];
+
+        setSelectedVenueServices([...new Set(normalizedServices)]);
+      } catch {
+        if (isMounted) {
+          setSelectedVenueServices([]);
+        }
+      }
+    }
+
+    loadVenueServices();
 
     return () => {
       isMounted = false;
@@ -1130,6 +1155,7 @@ function CityMapPage() {
 
     setSelectedVenueId(venueId);
     setSelectedVenueDetail(null);
+    setSelectedVenueServices([]);
     setVenueReviews([]);
     setVenueReviewsError('');
     setVenueReviewSort('newest');
@@ -1195,6 +1221,7 @@ function CityMapPage() {
   const closeDetailPanel = () => {
     setSelectedVenueId(null);
     setSelectedVenueDetail(null);
+    setSelectedVenueServices([]);
     setVenueDetailError('');
     setVenueReviews([]);
     setVenueReviewsError('');
@@ -1264,7 +1291,7 @@ function CityMapPage() {
 
     const normalizedComment = String(venueReviewForm.comment || '').trim();
     if (!normalizedComment) {
-      setReviewFormError('Vui lòng nhập nội dung bình luận.');
+      setReviewFormError('Please enter a review comment.');
       return;
     }
 
@@ -1289,7 +1316,7 @@ function CityMapPage() {
   setVenueReviewForm({ title: '', comment: '', mediaFiles: [] });
       setVenueReviewsRefreshKey((value) => value + 1);
     } catch (submitError) {
-      setReviewFormError(submitError?.response?.data?.message || 'Không thể gửi bình luận lúc này.');
+      setReviewFormError(submitError?.response?.data?.message || 'Unable to submit review right now.');
     } finally {
       setSubmittingVenueReview(false);
     }
@@ -1320,7 +1347,7 @@ function CityMapPage() {
         )
       );
     } catch (requestError) {
-      setReviewActionError(requestError?.response?.data?.message || 'Không thể cập nhật lượt thích.');
+      setReviewActionError(requestError?.response?.data?.message || 'Unable to update like right now.');
     }
   };
 
@@ -1361,7 +1388,7 @@ function CityMapPage() {
         })
       );
     } catch (requestError) {
-      setReviewActionError(requestError?.response?.data?.message || 'Không thể cập nhật lượt thích bình luận nhỏ.');
+      setReviewActionError(requestError?.response?.data?.message || 'Unable to update reply like right now.');
     }
   };
 
@@ -1414,7 +1441,7 @@ function CityMapPage() {
 
     const normalizedContent = String(venueReplyForm.content || '').trim();
     if (!normalizedContent) {
-      setReviewActionError('Vui lòng nhập nội dung thảo luận.');
+      setReviewActionError('Please enter a reply message.');
       return;
     }
 
@@ -1435,7 +1462,7 @@ function CityMapPage() {
       setActiveReplyTarget(null);
       setVenueReviewsRefreshKey((value) => value + 1);
     } catch (requestError) {
-      setReviewActionError(requestError?.response?.data?.message || 'Không thể gửi thảo luận lúc này.');
+      setReviewActionError(requestError?.response?.data?.message || 'Unable to submit reply right now.');
     } finally {
       setSubmittingVenueReply(false);
     }
@@ -1447,19 +1474,19 @@ function CityMapPage() {
 
       <input
         type="text"
-        placeholder="Tiêu đề"
+        placeholder="Title"
         value={venueReplyForm.title}
         onChange={(event) => setVenueReplyForm((prev) => ({ ...prev, title: event.target.value }))}
       />
       <textarea
         rows="2"
-        placeholder="Viết thảo luận..."
+        placeholder="Write a reply..."
         value={venueReplyForm.content}
         onChange={(event) => setVenueReplyForm((prev) => ({ ...prev, content: event.target.value }))}
       />
 
       <label className="city-map-review-media-upload">
-        📷 Ảnh đính kèm
+        📷 Attach images
         <input
           type="file"
           accept="image/*"
@@ -1475,8 +1502,8 @@ function CityMapPage() {
         />
         <small>
           {(Array.isArray(venueReplyForm.mediaFiles) && venueReplyForm.mediaFiles.length)
-            ? `Đã chọn ${venueReplyForm.mediaFiles.length}/3 ảnh`
-            : 'Tối đa 3 ảnh'}
+            ? `Selected ${venueReplyForm.mediaFiles.length}/3 images`
+            : 'Up to 3 images'}
         </small>
       </label>
 
@@ -1499,7 +1526,7 @@ function CityMapPage() {
                   }));
                 }}
               >
-                Xóa ảnh
+                Remove image
               </button>
             </div>
           ))}
@@ -1515,7 +1542,7 @@ function CityMapPage() {
             setVenueReplyForm({ title: '', content: '', mediaFiles: [] });
           }}
         >
-          Hủy
+          Cancel
         </button>
         <button
           type="button"
@@ -1523,7 +1550,7 @@ function CityMapPage() {
           disabled={submittingVenueReply}
           onClick={() => handleSubmitVenueReply(review)}
         >
-          {submittingVenueReply ? 'Đang gửi...' : 'Gửi thảo luận'}
+          {submittingVenueReply ? 'Submitting...' : 'Post reply'}
         </button>
       </div>
     </div>
@@ -1538,7 +1565,7 @@ function CityMapPage() {
       return;
     }
 
-    const shouldDelete = window.confirm('Bạn có chắc muốn xóa bình luận này?');
+    const shouldDelete = window.confirm('Are you sure you want to delete this review?');
     if (!shouldDelete) {
       return;
     }
@@ -1549,7 +1576,7 @@ function CityMapPage() {
       await deleteVenueReview(selectedVenueId, review.id);
       setVenueReviewsRefreshKey((value) => value + 1);
     } catch (requestError) {
-      setReviewActionError(requestError?.response?.data?.message || 'Không thể xóa bình luận lúc này.');
+      setReviewActionError(requestError?.response?.data?.message || 'Unable to delete review right now.');
     }
   };
 
@@ -1562,7 +1589,7 @@ function CityMapPage() {
       return;
     }
 
-    const shouldDelete = window.confirm('Bạn có chắc muốn xóa bình luận nhỏ này?');
+    const shouldDelete = window.confirm('Are you sure you want to delete this reply?');
     if (!shouldDelete) {
       return;
     }
@@ -1573,7 +1600,7 @@ function CityMapPage() {
       await deleteVenueReviewReply(selectedVenueId, review.id, reply.id);
       setVenueReviewsRefreshKey((value) => value + 1);
     } catch (requestError) {
-      setReviewActionError(requestError?.response?.data?.message || 'Không thể xóa bình luận nhỏ lúc này.');
+      setReviewActionError(requestError?.response?.data?.message || 'Unable to delete reply right now.');
     }
   };
 
@@ -1608,7 +1635,7 @@ function CityMapPage() {
     }
 
     if (!canReportReviewItem(targetComment)) {
-      setReviewActionError('Bạn không thể báo lỗi bình luận của chính mình.');
+      setReviewActionError('You cannot report your own comment.');
       return;
     }
 
@@ -1641,7 +1668,7 @@ function CityMapPage() {
     }
 
     if (!venueReportForm.reason) {
-      setVenueReportStatus({ type: 'error', message: 'Vui lòng chọn lý do báo cáo.' });
+      setVenueReportStatus({ type: 'error', message: 'Please select a report reason.' });
       return;
     }
 
@@ -1649,17 +1676,17 @@ function CityMapPage() {
     setVenueReportStatus({ type: '', message: '' });
 
     const selectedReasonLabel =
-      VENUE_REPORT_REASON_OPTIONS.find((item) => item.value === venueReportForm.reason)?.label || 'Khác';
+      VENUE_REPORT_REASON_OPTIONS.find((item) => item.value === venueReportForm.reason)?.label || 'Other';
     const selectedSeverityLabel =
-      REPORT_SEVERITY_OPTIONS.find((item) => item.value === venueReportForm.severity)?.label || 'Thấp';
+      REPORT_SEVERITY_OPTIONS.find((item) => item.value === venueReportForm.severity)?.label || 'Low';
 
     const descriptionText = String(venueReportForm.description || '').trim();
     const reportMessage = [
-      `Báo cáo địa điểm: ${resolveVenueName(selectedVenue)}`,
-      `Lý do: ${selectedReasonLabel}`,
-      `Mức độ: ${selectedSeverityLabel}`,
-      `Địa chỉ: ${selectedVenue.address || 'Không có'}`,
-      descriptionText ? `Mô tả chi tiết: ${descriptionText}` : '',
+      `Venue report: ${resolveVenueName(selectedVenue)}`,
+      `Reason: ${selectedReasonLabel}`,
+      `Severity: ${selectedSeverityLabel}`,
+      `Address: ${selectedVenue.address || 'Not available'}`,
+      descriptionText ? `Details: ${descriptionText}` : '',
     ]
       .filter(Boolean)
       .join('\n');
@@ -1679,14 +1706,14 @@ function CityMapPage() {
         },
       });
 
-      setVenueReportStatus({ type: 'success', message: 'Đã gửi báo cáo địa điểm thành công.' });
+      setVenueReportStatus({ type: 'success', message: 'Venue report submitted successfully.' });
       window.setTimeout(() => {
         setShowVenueReportModal(false);
       }, 700);
     } catch (error) {
       setVenueReportStatus({
         type: 'error',
-        message: error?.response?.data?.message || 'Không thể gửi báo cáo địa điểm lúc này.',
+        message: error?.response?.data?.message || 'Unable to submit venue report right now.',
       });
     } finally {
       setSubmittingVenueReport(false);
@@ -1701,7 +1728,7 @@ function CityMapPage() {
     }
 
     if (!reviewReportForm.reason) {
-      setReviewReportStatus({ type: 'error', message: 'Vui lòng chọn lý do báo lỗi.' });
+      setReviewReportStatus({ type: 'error', message: 'Please select a report reason.' });
       return;
     }
 
@@ -1709,19 +1736,19 @@ function CityMapPage() {
     setReviewReportStatus({ type: '', message: '' });
 
     const selectedReasonLabel =
-      REVIEW_REPORT_REASON_OPTIONS.find((item) => item.value === reviewReportForm.reason)?.label || 'Khác';
+      REVIEW_REPORT_REASON_OPTIONS.find((item) => item.value === reviewReportForm.reason)?.label || 'Other';
     const detail = String(reviewReportForm.description || '').trim();
     const reportType = activeReviewToReport?.reportType === 'reply' ? 'reply' : 'review';
     const targetContent = String(activeReviewToReport.comment || activeReviewToReport.content || '').trim();
 
     const message = [
       reportType === 'reply'
-        ? `Báo lỗi bình luận nhỏ #${activeReviewToReport.id || 'N/A'}`
-        : `Báo lỗi bình luận #${activeReviewToReport.id || 'N/A'}`,
-      `Lý do: ${selectedReasonLabel}`,
-      `Người bình luận: ${activeReviewToReport.authorName || 'Ẩn danh'}`,
-      `Nội dung: ${targetContent}`,
-      detail ? `Mô tả chi tiết: ${detail}` : '',
+        ? `Reply report #${activeReviewToReport.id || 'N/A'}`
+        : `Review report #${activeReviewToReport.id || 'N/A'}`,
+      `Reason: ${selectedReasonLabel}`,
+      `Author: ${activeReviewToReport.authorName || 'Anonymous'}`,
+      `Content: ${targetContent}`,
+      detail ? `Details: ${detail}` : '',
     ]
       .filter(Boolean)
       .join('\n');
@@ -1741,14 +1768,14 @@ function CityMapPage() {
         },
       });
 
-      setReviewReportStatus({ type: 'success', message: 'Đã gửi báo lỗi bình luận thành công.' });
+      setReviewReportStatus({ type: 'success', message: 'Review report submitted successfully.' });
       window.setTimeout(() => {
         setShowReviewReportModal(false);
       }, 700);
     } catch (error) {
       setReviewReportStatus({
         type: 'error',
-        message: error?.response?.data?.message || 'Không thể gửi báo lỗi bình luận lúc này.',
+        message: error?.response?.data?.message || 'Unable to submit review report right now.',
       });
     } finally {
       setSubmittingReviewReport(false);
@@ -2012,7 +2039,7 @@ function CityMapPage() {
                     <span className="city-map-popup-rating">
                       <StarRatingDisplay rating={popupRatingValue} />
                       <span className="city-map-popup-rating-text">
-                        {popupRatingValue.toFixed(1)}/5 ({popupReviewCount} đánh giá)
+                          {popupRatingValue.toFixed(1)}/5 ({popupReviewCount} reviews)
                       </span>
                     </span>
                     {venue.phone ? <span>Phone: {venue.phone}</span> : null}
@@ -2039,10 +2066,10 @@ function CityMapPage() {
 
         <header className="city-map-top-bar" data-onboarding="city-map-header">
           <button type="button" className="city-map-back-btn" onClick={() => navigate(APP_ROUTES.HOME)}>
-            {t.mapPage?.backToHome || 'Về trang chủ'}
+            {t.mapPage?.backToHome || 'Back to Home'}
           </button>
-          <h1>{t.mapPage?.title || 'Bản đồ thành phố'}</h1>
-          <p>{t.mapPage?.subtitle || 'Khám phá phường và địa điểm đã duyệt với bộ lọc thời gian thực.'}</p>
+          <h1>{t.mapPage?.title || 'City Map Explorer'}</h1>
+          <p>{t.mapPage?.subtitle || 'Explore wards and approved places with live filtering.'}</p>
         </header>
 
         <div className="city-map-controls-left">
@@ -2182,14 +2209,14 @@ function CityMapPage() {
                     type="button"
                     className="city-map-rating-link-btn"
                     onClick={() => setDetailTab('reviews')}
-                    title="Bấm để mở tab Reviews"
+                    title="Open the Reviews tab"
                   >
                     <StarRatingDisplay rating={selectedVenueRatingValue} />
                   </button>
                   <span className="city-map-detail-rating-text">
                     {Number(selectedVenueRatingValue || 0).toFixed(1)}/5
                     {' '}
-                    ({Number(selectedVenueReviewCount || 0)} đánh giá)
+                    ({Number(selectedVenueReviewCount || 0)} reviews)
                   </span>
                 </p>
               </div>
@@ -2258,7 +2285,7 @@ function CityMapPage() {
                         type="button"
                         className="city-map-address-link"
                         onClick={focusOnVenueLocation}
-                        title="Bấm để nhảy tới vị trí quán trên bản đồ"
+                        title="Jump to this venue on the map"
                       >
                         {selectedVenue.address}
                       </button>
@@ -2283,7 +2310,7 @@ function CityMapPage() {
             {detailTab === 'photos' ? (
               <div className="city-map-detail-block">
                 <div className="city-map-photo-section">
-                  <strong className="city-map-photo-section-title">Hình ảnh từ quán</strong>
+                  <strong className="city-map-photo-section-title">Venue photos</strong>
                   {selectedVenueImages.length ? (
                     <div className="city-map-photo-grid">
                       {selectedVenueImages.map((imageUrl, index) => (
@@ -2307,13 +2334,13 @@ function CityMapPage() {
                       ))}
                     </div>
                   ) : (
-                    <p className="city-map-detail-note">Quán chưa đăng hình ảnh.</p>
+                    <p className="city-map-detail-note">No venue photos uploaded yet.</p>
                   )}
                 </div>
 
                 <div className="city-map-photo-section">
-                  <strong className="city-map-photo-section-title">Hình ảnh từ đánh giá</strong>
-                  {loadingVenueReviewImages ? <p className="city-map-detail-note">Đang tải ảnh đánh giá...</p> : null}
+                  <strong className="city-map-photo-section-title">Review photos</strong>
+                  {loadingVenueReviewImages ? <p className="city-map-detail-note">Loading review photos...</p> : null}
                   {venueReviewImagesError ? <p className="city-map-detail-note is-warning">{venueReviewImagesError}</p> : null}
                   {!loadingVenueReviewImages && !venueReviewImagesError ? (
                     venueReviewImages.length ? (
@@ -2331,7 +2358,7 @@ function CityMapPage() {
                         ))}
                       </div>
                     ) : (
-                      <p className="city-map-detail-note">Chưa có hình ảnh từ đánh giá.</p>
+                      <p className="city-map-detail-note">No review photos yet.</p>
                     )
                   ) : null}
                 </div>
@@ -2382,33 +2409,33 @@ function CityMapPage() {
                       <StarRatingDisplay rating={selectedVenueRatingValue} />
                     </span>
                     {' '}
-                    {Number(selectedVenueRatingValue || 0).toFixed(1)}/5 ({Number(selectedVenueReviewCount || 0)} đánh giá)
+                    {Number(selectedVenueRatingValue || 0).toFixed(1)}/5 ({Number(selectedVenueReviewCount || 0)} reviews)
                   </strong>
                   <button
                     type="button"
                     className="city-map-review-report-btn"
                     onClick={openVenueReportModal}
                   >
-                    ⚠ Báo lỗi
+                    ⚠ Report
                   </button>
                 </div>
 
                 <form className="city-map-review-form" onSubmit={handleSubmitVenueReview}>
                   <input
                     type="text"
-                    placeholder="Tiêu đề"
+                    placeholder="Title"
                     value={venueReviewForm.title}
                     onChange={(event) => setVenueReviewForm((prev) => ({ ...prev, title: event.target.value }))}
                   />
                   <textarea
                     rows="3"
-                    placeholder="Viết bình luận của bạn..."
+                    placeholder="Write your review..."
                     value={venueReviewForm.comment}
                     onChange={(event) => setVenueReviewForm((prev) => ({ ...prev, comment: event.target.value }))}
                   />
 
                   <label className="city-map-review-media-upload">
-                    📷/🎬 Ảnh & Video
+                    📷/🎬 Photos & Videos
                     <input
                       type="file"
                       accept="image/*,video/*"
@@ -2424,8 +2451,8 @@ function CityMapPage() {
                     />
                     <small>
                       {(Array.isArray(venueReviewForm.mediaFiles) && venueReviewForm.mediaFiles.length)
-                        ? `Đã chọn ${venueReviewForm.mediaFiles.length}/6 tệp`
-                        : 'Tối đa 6 tệp'}
+                        ? `Selected ${venueReviewForm.mediaFiles.length}/6 files`
+                        : 'Up to 6 files'}
                     </small>
                   </label>
 
@@ -2452,7 +2479,7 @@ function CityMapPage() {
                               }));
                             }}
                           >
-                            Xóa ảnh
+                            Remove file
                           </button>
                         </div>
                       ))}
@@ -2462,7 +2489,7 @@ function CityMapPage() {
                   {reviewFormError ? <p className="city-map-review-error">{reviewFormError}</p> : null}
 
                   <button type="submit" disabled={submittingVenueReview}>
-                    {submittingVenueReview ? 'Đang gửi...' : 'Đăng bình luận'}
+                    {submittingVenueReview ? 'Submitting...' : 'Post review'}
                   </button>
                 </form>
 
@@ -2508,7 +2535,7 @@ function CityMapPage() {
                               className={`city-map-review-action-btn ${review.likedByMe ? 'is-active' : ''}`}
                               onClick={() => handleToggleMapReviewLike(review)}
                             >
-                              ♥ Thích {Number(review.likeCount || 0)}
+                                      ♥ Like {Number(review.likeCount || 0)}
                             </button>
                             <button
                               type="button"
@@ -2523,7 +2550,7 @@ function CityMapPage() {
                                 className="city-map-review-action-btn"
                                 onClick={() => openReviewReportModal(review)}
                               >
-                                ⚠ Báo lỗi
+                                ⚠ Report
                               </button>
                             ) : null}
                             {review.canDelete ? (
@@ -2532,13 +2559,13 @@ function CityMapPage() {
                                 className="city-map-review-action-btn is-danger"
                                 onClick={() => handleDeleteReview(review)}
                               >
-                                🗑 Xóa bình luận
+                                🗑 Delete review
                               </button>
                             ) : null}
                           </div>
 
                           {Number(activeReplyTarget?.reviewId) === Number(review.id) && activeReplyTarget?.replyId == null
-                            ? renderInlineReplyComposer(review, 'Đang trả lời trong luồng bình luận chính')
+                            ? renderInlineReplyComposer(review, 'Replying in main thread')
                             : null}
 
                           {Array.isArray(review.imageUrls) && review.imageUrls.length ? (
@@ -2600,7 +2627,7 @@ function CityMapPage() {
                                       className={`city-map-review-action-btn ${reply.likedByMe ? 'is-active' : ''}`}
                                       onClick={() => handleToggleMapReplyLike(review, reply)}
                                     >
-                                      ♥ Thích {Number(reply.likeCount || 0)}
+                                      ♥ Like {Number(reply.likeCount || 0)}
                                     </button>
                                     <button
                                       type="button"
@@ -2615,7 +2642,7 @@ function CityMapPage() {
                                         className="city-map-review-action-btn"
                                         onClick={() => openReviewReportModal(reply, { reportType: 'reply', parentReviewId: review.id })}
                                       >
-                                        ⚠ Báo lỗi
+                                        ⚠ Report
                                       </button>
                                     ) : null}
                                     {reply.canDelete ? (
@@ -2624,7 +2651,7 @@ function CityMapPage() {
                                         className="city-map-review-action-btn is-danger"
                                         onClick={() => handleDeleteReply(review, reply)}
                                       >
-                                        🗑 Xóa bình luận
+                                        🗑 Delete reply
                                       </button>
                                     ) : null}
                                   </div>
@@ -2633,7 +2660,7 @@ function CityMapPage() {
                                     && Number(activeReplyTarget?.replyId) === Number(reply.id)
                                     ? renderInlineReplyComposer(
                                       review,
-                                      `Đang trả lời ${reply.authorName || 'Anonymous'} trong bình luận con`
+                                      `Replying to ${reply.authorName || 'Anonymous'} in sub-thread`
                                     )
                                     : null}
 
@@ -2720,17 +2747,17 @@ function CityMapPage() {
               className="city-map-report-modal-card"
               role="dialog"
               aria-modal="true"
-              aria-label="Báo cáo địa điểm"
+              aria-label="Venue report"
               onClick={(event) => event.stopPropagation()}
             >
               <header className="city-map-report-modal-head">
-                <h3>⚠ Báo cáo địa điểm</h3>
-                <button type="button" onClick={() => setShowVenueReportModal(false)} aria-label="Đóng">×</button>
+                <h3>⚠ Report venue</h3>
+                <button type="button" onClick={() => setShowVenueReportModal(false)} aria-label="Close">×</button>
               </header>
 
               <form className="city-map-report-modal-form" onSubmit={handleSubmitVenueReport}>
                 <label>
-                  Lý do báo cáo
+                  Report reason
                   <select
                     value={venueReportForm.reason}
                     onChange={(event) =>
@@ -2738,7 +2765,7 @@ function CityMapPage() {
                     }
                     required
                   >
-                    <option value="">— Chọn lý do —</option>
+                    <option value="">- Select reason -</option>
                     {VENUE_REPORT_REASON_OPTIONS.map((item) => (
                       <option key={item.value} value={item.value}>{item.label}</option>
                     ))}
@@ -2746,10 +2773,10 @@ function CityMapPage() {
                 </label>
 
                 <label>
-                  Mô tả chi tiết
+                  Details
                   <textarea
                     rows="4"
-                    placeholder="Mô tả chi tiết vấn đề bạn gặp..."
+                    placeholder="Describe the issue in detail..."
                     value={venueReportForm.description}
                     onChange={(event) =>
                       setVenueReportForm((prev) => ({ ...prev, description: event.target.value }))
@@ -2759,7 +2786,7 @@ function CityMapPage() {
 
                 <div className="city-map-report-upload-row">
                   <label className="city-map-report-upload-btn">
-                    📷 Tải ảnh lên
+                    📷 Upload image
                     <input
                       type="file"
                       accept="image/*"
@@ -2772,11 +2799,11 @@ function CityMapPage() {
 
                   {venueReportAttachmentPreview ? (
                     <div className="city-map-report-upload-preview">
-                      <img src={venueReportAttachmentPreview} alt="Ảnh minh họa báo cáo" />
+                      <img src={venueReportAttachmentPreview} alt="Report preview image" />
                       <button
                         type="button"
                         onClick={() => setVenueReportForm((prev) => ({ ...prev, attachment: null }))}
-                        aria-label="Xóa ảnh minh họa"
+                        aria-label="Remove report image"
                       >
                         ×
                       </button>
@@ -2785,7 +2812,7 @@ function CityMapPage() {
                 </div>
 
                 <div className="city-map-report-severity-row">
-                  <span>Hoặc chọn nhanh:</span>
+                  <span>Or quick severity:</span>
                   <div>
                     {REPORT_SEVERITY_OPTIONS.map((item) => (
                       <button
@@ -2800,16 +2827,16 @@ function CityMapPage() {
                   </div>
                 </div>
 
-                <p className="city-map-report-warning">⚠️ Báo cáo sai có thể bị hạn chế tài khoản</p>
+                <p className="city-map-report-warning">⚠️ False reports may lead to account restrictions</p>
 
                 {venueReportStatus.message ? (
                   <p className={`city-map-report-status ${venueReportStatus.type}`}>{venueReportStatus.message}</p>
                 ) : null}
 
                 <div className="city-map-report-actions">
-                  <button type="button" onClick={() => setShowVenueReportModal(false)}>Hủy</button>
+                  <button type="button" onClick={() => setShowVenueReportModal(false)}>Cancel</button>
                   <button type="submit" className="is-danger" disabled={submittingVenueReport}>
-                    {submittingVenueReport ? 'Đang gửi...' : 'Gửi báo cáo'}
+                    {submittingVenueReport ? 'Submitting...' : 'Submit report'}
                   </button>
                 </div>
               </form>
@@ -2823,24 +2850,24 @@ function CityMapPage() {
               className="city-map-report-modal-card city-map-comment-report-modal"
               role="dialog"
               aria-modal="true"
-              aria-label="Báo lỗi bình luận"
+              aria-label="Review report"
               onClick={(event) => event.stopPropagation()}
             >
               <header className="city-map-report-modal-head">
-                <h3>⚠ Báo lỗi bình luận</h3>
-                <button type="button" onClick={() => setShowReviewReportModal(false)} aria-label="Đóng">×</button>
+                <h3>⚠ Report review</h3>
+                <button type="button" onClick={() => setShowReviewReportModal(false)} aria-label="Close">×</button>
               </header>
 
-              <p className="city-map-report-intro">Vui lòng chọn lý do và mô tả chi tiết khi báo lỗi bình luận này.</p>
+              <p className="city-map-report-intro">Please choose a reason and provide details for this report.</p>
 
               <div className="city-map-comment-report-preview">
-                <strong>{activeReviewToReport.authorName || 'Ẩn danh'}</strong>
-                <p>{activeReviewToReport.comment || 'Không có nội dung bình luận.'}</p>
+                <strong>{activeReviewToReport.authorName || 'Anonymous'}</strong>
+                <p>{activeReviewToReport.comment || 'No review content provided.'}</p>
               </div>
 
               <form className="city-map-report-modal-form" onSubmit={handleSubmitReviewReport}>
                 <fieldset className="city-map-report-radio-grid">
-                  <legend>Lý do báo lỗi:</legend>
+                  <legend>Report reason:</legend>
                   {REVIEW_REPORT_REASON_OPTIONS.map((item) => (
                     <label key={item.value}>
                       <input
@@ -2859,7 +2886,7 @@ function CityMapPage() {
 
                 <input
                   type="text"
-                  placeholder="Mô tả chi tiết vấn đề bạn gặp phải..."
+                  placeholder="Describe the issue in detail..."
                   value={reviewReportForm.description}
                   onChange={(event) =>
                     setReviewReportForm((prev) => ({ ...prev, description: event.target.value }))
@@ -2868,7 +2895,7 @@ function CityMapPage() {
 
                 <div className="city-map-report-upload-row">
                   <label className="city-map-report-upload-btn">
-                    📷 Tải ảnh lên
+                    📷 Upload image
                     <input
                       type="file"
                       accept="image/*"
@@ -2881,11 +2908,11 @@ function CityMapPage() {
 
                   {reviewReportAttachmentPreview ? (
                     <div className="city-map-report-upload-preview">
-                      <img src={reviewReportAttachmentPreview} alt="Ảnh minh họa báo lỗi bình luận" />
+                      <img src={reviewReportAttachmentPreview} alt="Review report preview image" />
                       <button
                         type="button"
                         onClick={() => setReviewReportForm((prev) => ({ ...prev, attachment: null }))}
-                        aria-label="Xóa ảnh báo lỗi bình luận"
+                        aria-label="Remove review report image"
                       >
                         ×
                       </button>
@@ -2893,16 +2920,16 @@ function CityMapPage() {
                   ) : null}
                 </div>
 
-                <p className="city-map-report-warning">⚠️ Việc gửi báo cáo sai sự thật có thể dẫn đến hạn chế tài khoản</p>
+                <p className="city-map-report-warning">⚠️ False reports may lead to account restrictions</p>
 
                 {reviewReportStatus.message ? (
                   <p className={`city-map-report-status ${reviewReportStatus.type}`}>{reviewReportStatus.message}</p>
                 ) : null}
 
                 <div className="city-map-report-actions">
-                  <button type="button" onClick={() => setShowReviewReportModal(false)}>Hủy</button>
+                  <button type="button" onClick={() => setShowReviewReportModal(false)}>Cancel</button>
                   <button type="submit" className="is-danger" disabled={submittingReviewReport}>
-                    {submittingReviewReport ? 'Đang gửi...' : 'Gửi báo lỗi'}
+                    {submittingReviewReport ? 'Submitting...' : 'Submit report'}
                   </button>
                 </div>
               </form>

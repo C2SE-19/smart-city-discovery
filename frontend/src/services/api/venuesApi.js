@@ -190,6 +190,11 @@ export async function fetchVenueOpeningHoursRealtime(venueId) {
   return response.data;
 }
 
+export async function fetchVenueServices(venueId) {
+  const response = await apiClient.get(`/venues/${venueId}/services`);
+  return response.data;
+}
+
 export async function createVenueReview(venueId, payload) {
   const response = await apiClient.post(`/venues/${venueId}/reviews`, payload, {
     headers: {
