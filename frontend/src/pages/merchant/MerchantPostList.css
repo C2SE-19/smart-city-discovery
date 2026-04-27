@@ -475,6 +475,39 @@
   box-shadow: 0 4px 12px rgba(244, 119, 69, 0.3);
 }
 
+.merchant-primary-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 25px;
+}
+
+.merchant-primary-action-btn {
+  margin-bottom: 0;
+}
+
+.merchant-advertise-btn {
+  width: 100%;
+  padding: 12px;
+  background: linear-gradient(135deg, #d3b507, #d3b507);
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.3s ease;
+}
+
+.theme-dark .merchant-advertise-btn {
+  color: #f8fbff;
+}
+
+.merchant-advertise-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(44, 96, 220, 0.28);
+}
+
 .merchant-menu {
   display: flex;
   flex-direction: column;
@@ -622,6 +655,16 @@
   color: #e2e8f0;
 }
 
+.merchant-profile-role {
+  margin: 0;
+  font-size: 14px;
+  color: #666;
+}
+
+.theme-dark .merchant-profile-role {
+  color: #cbd5e1;
+}
+
 .merchant-followers-info {
   display: flex;
   gap: 20px;
@@ -657,7 +700,7 @@
 
 .merchant-post-publish-btn-header {
   padding: 12px 30px;
-  background: #1c1c1c;
+  background: #d3b507;
   color: white;
   border: none;
   border-radius: 6px;
@@ -671,6 +714,33 @@
   background: #333;
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.merchant-post-advertise-btn-header {
+  padding: 12px 24px;
+  background: linear-gradient(135deg, #f47745, #ff8a52);
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.3s ease;
+}
+
+.merchant-post-advertise-btn-header:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(244, 119, 69, 0.28);
+}
+
+.merchant-post-header-note {
+  margin: 16px 0 0;
+  color: #7c6a58;
+  font-size: 14px;
+}
+
+.theme-dark .merchant-post-header-note {
+  color: #cbd5e1;
 }
 
 /* Responsive for Sidebar Layout */
@@ -699,5 +769,9 @@
     flex-direction: column;
     gap: 20px;
     align-items: flex-start;
+  }
+
+  .merchant-primary-actions {
+    min-width: 220px;
   }
 }

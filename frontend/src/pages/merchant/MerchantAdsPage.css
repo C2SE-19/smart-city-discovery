@@ -1,0 +1,382 @@
+.merchant-transactions-shell .merchant-main-content {
+  background:
+    radial-gradient(circle at top right, rgba(255, 190, 102, 0.16), transparent 32%),
+    linear-gradient(180deg, #f7f2e7 0%, #f4ecdf 100%);
+}
+
+.merchant-transactions-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(260px, 0.9fr);
+  gap: 18px;
+  align-items: stretch;
+  margin-bottom: 20px;
+}
+
+.merchant-transactions-kicker {
+  margin: 0 0 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.78rem;
+  color: #92662d;
+  font-weight: 700;
+}
+
+.merchant-transactions-hero h1 {
+  margin: 0 0 10px;
+  font-size: clamp(2rem, 3vw, 2.7rem);
+  line-height: 1.02;
+  letter-spacing: -0.04em;
+  color: #1c243f;
+}
+
+.merchant-transactions-subtitle {
+  margin: 0;
+  max-width: 720px;
+  color: #5e6783;
+  font-size: 1rem;
+  line-height: 1.65;
+}
+
+.merchant-transactions-hero-card,
+.merchant-transactions-summary-card,
+.merchant-transaction-card,
+.merchant-transactions-empty,
+.merchant-transactions-modal {
+  border-radius: 24px;
+  border: 1px solid rgba(82, 60, 30, 0.12);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 18px 40px rgba(72, 52, 26, 0.08);
+}
+
+.merchant-transactions-hero-card {
+  padding: 20px 22px;
+  display: grid;
+  align-content: center;
+  gap: 8px;
+  background:
+    radial-gradient(circle at top right, rgba(255, 128, 71, 0.2), transparent 34%),
+    linear-gradient(140deg, rgba(255, 248, 238, 0.96), rgba(255, 239, 222, 0.96));
+}
+
+.merchant-transactions-hero-label,
+.merchant-transactions-summary-card span,
+.merchant-transaction-meta span {
+  color: #8a6e4d;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 700;
+}
+
+.merchant-transactions-hero-card strong,
+.merchant-transactions-summary-card strong,
+.merchant-transaction-meta strong {
+  color: #1d233c;
+}
+
+.merchant-transactions-hero-card strong {
+  font-size: 1.4rem;
+}
+
+.merchant-transactions-hero-card p {
+  margin: 0;
+  color: #59647c;
+}
+
+.merchant-transactions-feedback {
+  margin: 0 0 18px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(54, 157, 97, 0.28);
+  background: rgba(219, 245, 228, 0.9);
+  color: #14633d;
+  font-weight: 600;
+}
+
+.merchant-transactions-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.merchant-transactions-summary-card {
+  padding: 18px 20px;
+  display: grid;
+  gap: 8px;
+}
+
+.merchant-transactions-summary-card strong {
+  font-size: 1.8rem;
+  letter-spacing: -0.04em;
+}
+
+.merchant-transactions-list {
+  display: grid;
+  gap: 16px;
+}
+
+.merchant-transaction-card {
+  padding: 22px;
+  display: grid;
+  gap: 18px;
+}
+
+.merchant-transaction-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.merchant-transaction-topline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.merchant-transaction-topline h2 {
+  margin: 0;
+  font-size: 1.3rem;
+  color: #1f2742;
+}
+
+.merchant-transaction-card-head p {
+  margin: 8px 0 0;
+  color: #62708c;
+}
+
+.merchant-transaction-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.merchant-transaction-badge.is-active {
+  background: rgba(38, 155, 91, 0.14);
+  color: #14824a;
+}
+
+.merchant-transaction-badge.is-pending {
+  background: rgba(255, 148, 44, 0.14);
+  color: #cf6a08;
+}
+
+.merchant-transaction-badge.is-cancelled {
+  background: rgba(105, 120, 149, 0.14);
+  color: #516179;
+}
+
+.merchant-transaction-badge.is-failed {
+  background: rgba(214, 54, 82, 0.14);
+  color: #bb2942;
+}
+
+.merchant-transaction-badge.is-expired {
+  background: rgba(138, 149, 170, 0.16);
+  color: #5d687e;
+}
+
+.merchant-transaction-delete,
+.merchant-transaction-check,
+.merchant-transaction-activate,
+.merchant-transaction-stop,
+.merchant-transactions-primary,
+.merchant-transactions-secondary,
+.merchant-transactions-danger {
+  border: none;
+  border-radius: 999px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+
+.merchant-transaction-delete {
+  padding: 11px 18px;
+  background: rgba(234, 78, 88, 0.1);
+  color: #c93a4b;
+}
+
+.merchant-transaction-activate {
+  padding: 11px 18px;
+  background: linear-gradient(90deg, #ff7a24, #ff9554);
+  color: #ffffff;
+  box-shadow: 0 14px 24px rgba(255, 122, 36, 0.2);
+}
+
+.merchant-transaction-check {
+  padding: 11px 18px;
+  background: rgba(228, 233, 245, 0.9);
+  color: #314056;
+}
+
+.merchant-transaction-stop {
+  padding: 11px 18px;
+  background: rgba(255, 186, 73, 0.14);
+  color: #a86009;
+}
+
+.merchant-transaction-activate:disabled {
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+  filter: none;
+  background: rgba(227, 232, 241, 0.96);
+  color: #6b768c;
+}
+
+.merchant-transactions-primary,
+.merchant-transactions-danger {
+  padding: 12px 18px;
+  color: #ffffff;
+  background: linear-gradient(90deg, #ff6c15, #ff7f3a);
+  box-shadow: 0 14px 24px rgba(255, 112, 26, 0.22);
+}
+
+.merchant-transactions-danger {
+  background: linear-gradient(90deg, #de4355, #f45f6b);
+  box-shadow: 0 14px 24px rgba(222, 67, 85, 0.2);
+}
+
+.merchant-transactions-secondary {
+  padding: 12px 18px;
+  background: rgba(228, 233, 245, 0.9);
+  color: #314056;
+}
+
+.merchant-transaction-delete:hover,
+.merchant-transaction-check:hover,
+.merchant-transaction-activate:hover,
+.merchant-transaction-stop:hover,
+.merchant-transactions-primary:hover,
+.merchant-transactions-secondary:hover,
+.merchant-transactions-danger:hover {
+  transform: translateY(-2px);
+  filter: saturate(1.05);
+}
+
+.merchant-transaction-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.merchant-transaction-meta {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.merchant-transaction-meta > div {
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(255, 249, 241, 0.98), rgba(250, 243, 233, 0.98));
+  border: 1px solid rgba(162, 124, 77, 0.12);
+  display: grid;
+  gap: 6px;
+}
+
+.merchant-transaction-features {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 10px;
+  color: #4c5971;
+}
+
+.merchant-transaction-features li::marker {
+  color: #ff7a24;
+}
+
+.merchant-transaction-note {
+  margin: 0;
+  color: #5f6f89;
+  line-height: 1.6;
+}
+
+.merchant-transactions-empty {
+  padding: 28px;
+  display: grid;
+  gap: 12px;
+  justify-items: start;
+}
+
+.merchant-transactions-empty h2,
+.merchant-transactions-empty p {
+  margin: 0;
+}
+
+.merchant-transactions-empty h2 {
+  color: #202843;
+}
+
+.merchant-transactions-empty p {
+  color: #617088;
+}
+
+.merchant-transactions-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(18, 24, 38, 0.48);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 60;
+}
+
+.merchant-transactions-modal {
+  width: min(520px, 100%);
+  padding: 24px;
+  display: grid;
+  gap: 14px;
+}
+
+.merchant-transactions-modal h2,
+.merchant-transactions-modal p {
+  margin: 0;
+}
+
+.merchant-transactions-modal h2 {
+  color: #1f2742;
+}
+
+.merchant-transactions-modal p {
+  color: #5f6b84;
+  line-height: 1.6;
+}
+
+.merchant-transactions-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+@media (max-width: 1080px) {
+  .merchant-transactions-hero,
+  .merchant-transactions-summary-grid,
+  .merchant-transaction-meta {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .merchant-transactions-shell .merchant-main-content {
+    padding: 22px 16px;
+  }
+
+  .merchant-transaction-card-head,
+  .merchant-transaction-actions,
+  .merchant-transactions-modal-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

@@ -7,6 +7,7 @@ const { Pool } = require('pg');
 const cors = require('cors');
 const bcryptjs = require('bcryptjs');
 const axios = require('axios');
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const turf = require('@turf/turf');
 const multer = require('multer');
@@ -421,6 +422,57 @@ const AD_PACKAGE_PRIORITY_TIER = {
     2: 'boosted',
     3: 'premium'
 };
+const AD_TREND_DEFAULT_PUSH_LIMIT = 1;
+const AD_TREND_DEFAULT_DISPLAY_HOURS = 2;
+const AD_TREND_PUSH_COOLDOWN_HOURS = 2;
+const AD_TREND_MAX_PUSH_LIMIT = 1000;
+const AD_TREND_MAX_DISPLAY_HOURS = 168;
+const AD_TREND_DEFAULT_CHART_DAYS = 7;
+const AD_PACKAGE_PAYMENT_STATUS = {
+    pending: 'pending_payment',
+    paid: 'paid',
+    cancelled: 'cancelled',
+    failed: 'failed'
+};
+const AD_PACKAGE_PENDING_PAYMENT_MINUTES = 15;
+const PAYOS_API_BASE_URL = 'https://api-merchant.payos.vn';
+const PAYOS_SUCCESS_CODE = '00';
+
+function clampAdTrendChartDays(rawDays) {
+    const parsed = Number.parseInt(rawDays, 10);
+    if (!Number.isFinite(parsed)) {
+        return AD_TREND_DEFAULT_CHART_DAYS;
+    }
+
+    return Math.min(30, Math.max(7, parsed));
+}
+
+function toDateOnlyKey(value) {
+    if (!value) {
+        return '';
+    }
+
+    const parsed = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+        return '';
+    }
+
+    return parsed.toISOString().slice(0, 10);
+}
+
+function buildRecentDateOnlyKeys(days) {
+    const normalizedDays = Math.max(1, Math.trunc(Number(days) || AD_TREND_DEFAULT_CHART_DAYS));
+    const result = [];
+
+    for (let index = normalizedDays - 1; index >= 0; index -= 1) {
+        const date = new Date();
+        date.setHours(0, 0, 0, 0);
+        date.setDate(date.getDate() - index);
+        result.push(toDateOnlyKey(date));
+    }
+
+    return result;
+}
 
 function parseAdPackageDescription(rawDescription) {
     if (typeof rawDescription !== 'string') {
@@ -444,21 +496,285 @@ function parseAdPackageDescription(rawDescription) {
     return {};
 }
 
+function normalizeAdPackagePrice(rawPrice) {
+    const parsed = Number.parseInt(rawPrice, 10);
+    if (!Number.isFinite(parsed)) {
+        return null;
+    }
+
+    return Math.max(0, Math.trunc(parsed));
+}
+
+function normalizeAdPackageDiscountPercent(rawDiscountPercent) {
+    const parsed = Number.parseInt(rawDiscountPercent, 10);
+    if (!Number.isFinite(parsed)) {
+        return 0;
+    }
+
+    return Math.min(99, Math.max(0, Math.trunc(parsed)));
+}
+
+function calculateDiscountedAdPackagePrice(price, discountPercent = 0) {
+    const normalizedPrice = normalizeAdPackagePrice(price);
+    const normalizedDiscountPercent = normalizeAdPackageDiscountPercent(discountPercent);
+
+    if (!Number.isFinite(normalizedPrice) || normalizedPrice <= 0) {
+        return 0;
+    }
+
+    if (normalizedDiscountPercent <= 0) {
+        return normalizedPrice;
+    }
+
+    return Math.max(
+        0,
+        Math.trunc(normalizedPrice - ((normalizedPrice * normalizedDiscountPercent) / 100))
+    );
+}
+
 function normalizeAdPackageFeatures(rawFeatures) {
     const source = rawFeatures && typeof rawFeatures === 'object' ? rawFeatures : {};
     const postLimitEnabled = Boolean(source.postLimitEnabled);
     const parsedPostLimit = Number(source.postLimit);
+    const showInTrending = Boolean(source.showInTrending);
+    const parsedTrendPushLimit = Number(
+        source.trendPushLimit
+        ?? source.trendingPushLimit
+        ?? source.trendBoostCount
+    );
+    const parsedTrendDisplayHours = Number(
+        source.trendDisplayHours
+        ?? source.trendingDisplayHours
+        ?? source.trendVisibleHours
+    );
 
     return {
-        showInTrending: Boolean(source.showInTrending),
+        showInTrending,
         showOnHomepageBanner: Boolean(source.showOnHomepageBanner),
         priorityReview: Boolean(source.priorityReview),
         postLimitEnabled,
         postLimit:
             postLimitEnabled && Number.isFinite(parsedPostLimit) && parsedPostLimit > 0
                 ? Math.trunc(parsedPostLimit)
+                : null,
+        trendPushLimit:
+            showInTrending
+                ? (
+                    Number.isFinite(parsedTrendPushLimit) && parsedTrendPushLimit > 0
+                        ? Math.trunc(parsedTrendPushLimit)
+                        : AD_TREND_DEFAULT_PUSH_LIMIT
+                )
+                : null,
+        trendDisplayHours:
+            showInTrending
+                ? (
+                    Number.isFinite(parsedTrendDisplayHours) && parsedTrendDisplayHours > 0
+                        ? Math.trunc(parsedTrendDisplayHours)
+                        : AD_TREND_DEFAULT_DISPLAY_HOURS
+                )
                 : null
     };
+}
+
+function resolveTrendingFeatureConfig(features = {}) {
+    const normalizedFeatures = normalizeAdPackageFeatures(features);
+
+    if (!normalizedFeatures.showInTrending) {
+        return null;
+    }
+
+    const pushLimitRaw = Number(normalizedFeatures.trendPushLimit);
+    const displayHoursRaw = Number(normalizedFeatures.trendDisplayHours);
+    const pushLimit = Number.isFinite(pushLimitRaw) && pushLimitRaw > 0
+        ? pushLimitRaw
+        : AD_TREND_DEFAULT_PUSH_LIMIT;
+    const displayHours = Number.isFinite(displayHoursRaw) && displayHoursRaw > 0
+        ? displayHoursRaw
+        : AD_TREND_DEFAULT_DISPLAY_HOURS;
+
+    return {
+        pushLimit: Math.trunc(pushLimit),
+        displayHours: Math.trunc(displayHours)
+    };
+}
+
+function validateTrendingFeatureConfig(features = {}) {
+    if (!features.showInTrending) {
+        return null;
+    }
+
+    const pushLimit = Number(features.trendPushLimit);
+    if (!Number.isFinite(pushLimit) || pushLimit < 1 || pushLimit > AD_TREND_MAX_PUSH_LIMIT) {
+        return `Trending push count must be between 1 and ${AD_TREND_MAX_PUSH_LIMIT}.`;
+    }
+
+    const displayHours = Number(features.trendDisplayHours);
+    if (!Number.isFinite(displayHours) || displayHours < 1 || displayHours > AD_TREND_MAX_DISPLAY_HOURS) {
+        return `Trending display hours must be between 1 and ${AD_TREND_MAX_DISPLAY_HOURS}.`;
+    }
+
+    return null;
+}
+
+function normalizeAdPackagePaymentStatus(rawStatus) {
+    const normalizedStatus = String(rawStatus || '').trim().toLowerCase();
+    if (Object.values(AD_PACKAGE_PAYMENT_STATUS).includes(normalizedStatus)) {
+        return normalizedStatus;
+    }
+
+    return AD_PACKAGE_PAYMENT_STATUS.pending;
+}
+
+function sortObjectByKey(source = {}) {
+    return Object.keys(source)
+        .sort((first, second) => first.localeCompare(second))
+        .reduce((result, key) => {
+            result[key] = source[key];
+            return result;
+        }, {});
+}
+
+function createHmacSha256Signature(value, secret) {
+    return crypto.createHmac('sha256', String(secret || '')).update(String(value || ''), 'utf8').digest('hex');
+}
+
+function buildPayOsPaymentRequestSignature({ amount, cancelUrl, description, orderCode, returnUrl }) {
+    const signaturePayload = [
+        `amount=${Number(amount) || 0}`,
+        `cancelUrl=${String(cancelUrl || '')}`,
+        `description=${String(description || '')}`,
+        `orderCode=${Number(orderCode) || 0}`,
+        `returnUrl=${String(returnUrl || '')}`
+    ].join('&');
+
+    return createHmacSha256Signature(signaturePayload, process.env.PAYOS_CHECKSUM_KEY);
+}
+
+function verifyPayOsWebhookSignature(data, signature) {
+    const sortedData = sortObjectByKey(data && typeof data === 'object' ? data : {});
+    const payload = Object.keys(sortedData)
+        .map((key) => {
+            let value = sortedData[key];
+            if (Array.isArray(value)) {
+                value = JSON.stringify(value.map((entry) => sortObjectByKey(entry)));
+            }
+
+            if ([null, undefined, 'undefined', 'null'].includes(value)) {
+                value = '';
+            }
+
+            return `${key}=${value}`;
+        })
+        .join('&');
+
+    const expectedSignature = createHmacSha256Signature(payload, process.env.PAYOS_CHECKSUM_KEY);
+    return expectedSignature === String(signature || '').trim();
+}
+
+function normalizeUrlOrigin(value) {
+    const normalizedValue = String(value || '').trim();
+    if (!normalizedValue) {
+        return '';
+    }
+
+    try {
+        const parsedUrl = new URL(normalizedValue);
+        return parsedUrl.origin;
+    } catch {
+        return '';
+    }
+}
+
+function resolveAppOrigin(req) {
+    const configuredOrigin = normalizeUrlOrigin(
+        process.env.PAYOS_APP_ORIGIN
+        || process.env.PUBLIC_APP_URL
+        || process.env.FRONTEND_PUBLIC_URL
+    );
+
+    if (configuredOrigin) {
+        return configuredOrigin;
+    }
+
+    const originHeader = normalizeUrlOrigin(req.headers?.origin);
+    if (originHeader) {
+        return originHeader;
+    }
+
+    const protocol = String(req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim() || 'http';
+    const host = String(req.headers['x-forwarded-host'] || req.get('host') || '').split(',')[0].trim();
+    return host ? `${protocol}://${host}` : 'http://localhost:3000';
+}
+
+function buildMerchantCheckoutReturnUrl(req, transactionId) {
+    const checkoutResultUrl = new URL(`${resolveAppOrigin(req)}/merchant/checkout-result`);
+    if (Number.isFinite(Number(transactionId)) && Number(transactionId) > 0) {
+        checkoutResultUrl.searchParams.set('transactionId', String(transactionId));
+    }
+
+    return checkoutResultUrl.toString();
+}
+
+function generatePayOsOrderCode(purchaseId) {
+    const nowPart = Date.now();
+    const purchasePart = Math.abs(Number.parseInt(purchaseId, 10) || 0) % 100;
+    return Number(`${nowPart}${String(purchasePart).padStart(2, '0')}`);
+}
+
+function buildPayOsShortDescription(orderCode) {
+    const compactOrderCode = String(orderCode || '').replace(/\D+/g, '').slice(-6);
+    return `SCD${compactOrderCode}`.slice(0, 9);
+}
+
+async function createPayOsPaymentLink(payload) {
+    const response = await axios.post(
+        `${PAYOS_API_BASE_URL}/v2/payment-requests`,
+        payload,
+        {
+            headers: {
+                'x-client-id': process.env.PAYOS_CLIENT_ID,
+                'x-api-key': process.env.PAYOS_API_KEY,
+                'Content-Type': 'application/json'
+            },
+            timeout: 15000
+        }
+    );
+
+    return response.data;
+}
+
+async function fetchPayOsPaymentLink(paymentIdentifier) {
+    const response = await axios.get(
+        `${PAYOS_API_BASE_URL}/v2/payment-requests/${encodeURIComponent(paymentIdentifier)}`,
+        {
+            headers: {
+                'x-client-id': process.env.PAYOS_CLIENT_ID,
+                'x-api-key': process.env.PAYOS_API_KEY
+            },
+            timeout: 15000
+        }
+    );
+
+    return response.data;
+}
+
+async function cancelPayOsPaymentLink(paymentIdentifier, cancellationReason) {
+    const response = await axios.post(
+        `${PAYOS_API_BASE_URL}/v2/payment-requests/${encodeURIComponent(paymentIdentifier)}/cancel`,
+        {
+            cancellationReason: String(cancellationReason || 'Cancelled by merchant').slice(0, 255)
+        },
+        {
+            headers: {
+                'x-client-id': process.env.PAYOS_CLIENT_ID,
+                'x-api-key': process.env.PAYOS_API_KEY,
+                'Content-Type': 'application/json'
+            },
+            timeout: 15000
+        }
+    );
+
+    return response.data;
 }
 
 function resolveAdPackageTier(row, descriptionPayload) {
@@ -480,11 +796,18 @@ function mapAdPackageRow(row) {
     const durationHours = Number(row?.duration_hours);
     const durationDays = Number.isFinite(durationHours) && durationHours > 0 ? Math.max(30, Math.round(durationHours / 24)) : 30;
     const durationMonths = Math.max(1, Math.round(durationDays / 30));
+    const price = normalizeAdPackagePrice(row?.price) ?? 0;
+    const discountPercent = normalizeAdPackageDiscountPercent(descriptionPayload?.discountPercent);
+    const discountedPrice = calculateDiscountedAdPackagePrice(price, discountPercent);
 
     return {
         id: String(row?.id || ''),
         name: String(row?.name || 'Untitled package').trim() || 'Untitled package',
         tier,
+        price,
+        discountPercent,
+        discountedPrice,
+        currency: 'VND',
         durationMonths,
         durationDays: durationMonths * 30,
         features: normalizedFeatures,
@@ -493,11 +816,575 @@ function mapAdPackageRow(row) {
     };
 }
 
+function buildFeaturedVenuePromotionPayload(packageRow) {
+    const mappedPackage = mapAdPackageRow(packageRow);
+    if (!mappedPackage.features?.showOnHomepageBanner) {
+        return null;
+    }
+
+    return {
+        isHot: true,
+        label: 'HOT',
+        packageId: mappedPackage.id,
+        packageName: mappedPackage.name,
+        packageTier: mappedPackage.tier
+    };
+}
+
+async function resolveCurrentVenuePromotionMapByVenueIds(venueIds = []) {
+    const normalizedVenueIds = [...new Set(
+        (Array.isArray(venueIds) ? venueIds : [])
+            .map((value) => Number.parseInt(value, 10))
+            .filter((value) => Number.isFinite(value) && value > 0)
+    )];
+
+    if (!normalizedVenueIds.length) {
+        return new Map();
+    }
+
+    const result = await pool.query(
+        `
+            SELECT
+                assignments.id AS assignment_id,
+                assignments.user_id,
+                assignments.venue_id,
+                assignments.updated_at AS assignment_updated_at,
+                packages.id,
+                packages.name,
+                packages.description,
+                packages.duration_hours,
+                packages.priority_level,
+                packages.price,
+                packages.status,
+                packages.created_at,
+                packages.updated_at
+            FROM ad_package_assignments AS assignments
+            JOIN ad_packages AS packages
+              ON packages.id = assignments.ad_package_id
+            JOIN venues
+              ON venues.id = assignments.venue_id
+            JOIN LATERAL (
+                ${buildCurrentActiveAdPackagePurchaseSubquery('assignments.user_id')}
+            ) AS active_purchase
+              ON active_purchase.ad_package_id = assignments.ad_package_id
+            WHERE assignments.venue_id = ANY($1::bigint[])
+              AND COALESCE(packages.status::text, 'active') = 'active'
+              AND LOWER(COALESCE(venues.status::text, '')) = 'approved'
+            ORDER BY assignments.updated_at DESC, assignments.id DESC
+        `,
+        [normalizedVenueIds]
+    );
+
+    const promotionMap = new Map();
+
+    result.rows.forEach((row) => {
+        const venueKey = String(row.venue_id || '').trim();
+        if (!venueKey || promotionMap.has(venueKey)) {
+            return;
+        }
+
+        const mappedPackage = mapAdPackageRow(row);
+        promotionMap.set(venueKey, {
+            assignmentId: String(row.assignment_id || ''),
+            userId: String(row.user_id || '').trim(),
+            package: mappedPackage,
+            packageRow: row
+        });
+    });
+
+    return promotionMap;
+}
+
+async function resolveFeaturedVenuePromotionMapByVenueIds(venueIds = []) {
+    const promotionMap = await resolveCurrentVenuePromotionMapByVenueIds(venueIds);
+    const featuredPromotionMap = new Map();
+
+    promotionMap.forEach((promotionEntry, venueKey) => {
+        const featuredPromotion = buildFeaturedVenuePromotionPayload(promotionEntry?.packageRow);
+        if (featuredPromotion) {
+            featuredPromotionMap.set(venueKey, featuredPromotion);
+        }
+    });
+
+    return featuredPromotionMap;
+}
+
+function attachFeaturedVenuePromotion(venue, featuredPromotionMap, promotionAssignmentMap = null) {
+    const venueKey = String(venue?.id || venue?.venue_id || '').trim();
+    const featuredPromotion = venueKey ? featuredPromotionMap.get(venueKey) || null : null;
+    const promotionAssignment = venueKey
+        ? promotionAssignmentMap?.get(venueKey) || null
+        : null;
+
+    return {
+        ...venue,
+        featuredPromotion,
+        promotionAssignment: promotionAssignment
+            ? {
+                assignmentId: String(promotionAssignment.assignmentId || ''),
+                packageId: String(promotionAssignment.package?.id || ''),
+                packageName: String(promotionAssignment.package?.name || '').trim(),
+                packageTier: String(promotionAssignment.package?.tier || '').trim(),
+                supportsTrending: Boolean(resolveTrendingFeatureConfig(promotionAssignment.package?.features || {}))
+            }
+            : null
+    };
+}
+
+function invalidatePublicVenueCachesByVenueId(venueId) {
+    const normalizedVenueId = Number.parseInt(venueId, 10);
+    if (!Number.isFinite(normalizedVenueId) || normalizedVenueId <= 0) {
+        return;
+    }
+
+    publicCompactApprovedVenuesCache = { timestamp: 0, data: null };
+    publicVenueDetailCache.delete(`public:${normalizedVenueId}`);
+    publicVenueDetailCache.delete(`admin:${normalizedVenueId}`);
+    publicVenueForDetailCache.delete(`public:${normalizedVenueId}`);
+    publicVenueForDetailCache.delete(`admin:${normalizedVenueId}`);
+    invalidateVenueCommunityBundleCacheByVenueId(normalizedVenueId);
+}
+
+function invalidatePublicVenueCachesByVenueIds(venueIds = []) {
+    [...new Set(
+        (Array.isArray(venueIds) ? venueIds : [])
+            .map((value) => Number.parseInt(value, 10))
+            .filter((value) => Number.isFinite(value) && value > 0)
+    )].forEach((venueId) => {
+        invalidatePublicVenueCachesByVenueId(venueId);
+    });
+}
+
+async function listOwnedVenueIdsByUserId(userId, db = pool, options = {}) {
+    const normalizedUserId = String(userId || '').trim();
+    if (!normalizedUserId) {
+        return [];
+    }
+
+    const specificVenueIds = [...new Set(
+        (Array.isArray(options?.specificVenueIds) ? options.specificVenueIds : [])
+            .map((value) => Number.parseInt(value, 10))
+            .filter((value) => Number.isFinite(value) && value > 0)
+    )];
+    const values = [normalizedUserId];
+    const scopedVenueSql = specificVenueIds.length
+        ? `AND venues.id = ANY($${values.push(specificVenueIds)}::int[])`
+        : '';
+
+    const result = await db.query(
+        `
+            SELECT venues.id
+            FROM venues
+            WHERE ${buildResolvedVenueOwnerUserSql('venues')} = $1
+              ${scopedVenueSql}
+            ORDER BY COALESCE(venues.submitted_at, venues.created_at) DESC, venues.id DESC
+        `,
+        values
+    );
+
+    return result.rows
+        .map((row) => Number.parseInt(row?.id, 10))
+        .filter((value) => Number.isFinite(value) && value > 0);
+}
+
+function mapAdPackageHistoryRow(row) {
+    if (!row) {
+        return null;
+    }
+
+    return {
+        purchaseId: String(row.purchase_id || ''),
+        userId: String(row.purchase_user_id || row.user_id || '').trim(),
+        packageId: Number.parseInt(row.purchase_package_id || row.ad_package_id || row.id, 10) || null,
+        paymentStatus: normalizeAdPackagePaymentStatus(row.payment_status),
+        paymentProvider: String(row.payment_provider || 'payos').trim().toLowerCase() || 'payos',
+        paymentAmount: normalizeAdPackagePrice(row.payment_amount) ?? 0,
+        paymentExpiresAt: row.payment_expires_at || null,
+        paymentConfirmedAt: row.payment_confirmed_at || null,
+        paidAt: row.paid_at || null,
+        paymentCancelledAt: row.payment_cancelled_at || null,
+        paymentReference: row.payment_reference || null,
+        paymentPayload: row.payment_payload || null,
+        payosOrderCode: row.payos_order_code ? String(row.payos_order_code) : '',
+        payosPaymentLinkId: row.payos_payment_link_id ? String(row.payos_payment_link_id) : '',
+        payosCheckoutUrl: row.payos_checkout_url || '',
+        payosStatus: row.payos_status || null,
+        purchasedAt: row.purchased_at || null,
+        activatedAt: row.activated_at || null,
+        selectedAt: row.selected_at || null,
+        expiresAt: row.expires_at || null,
+        deletedAt: row.deleted_at || null,
+        package: mapAdPackageRow({
+            id: row.package_id || row.id,
+            name: row.package_name || row.name,
+            description: row.package_description || row.description,
+            duration_hours: row.package_duration_hours || row.duration_hours,
+            priority_level: row.package_priority_level || row.priority_level,
+            price: row.package_price || row.price,
+            status: row.package_status || row.status,
+            created_at: row.package_created_at || row.created_at,
+            updated_at: row.package_updated_at || row.updated_at
+        })
+    };
+}
+
+function buildAdPackagePurchaseOrderSql(alias = 'purchases') {
+    return `
+        COALESCE(${alias}.selected_at, ${alias}.activated_at, ${alias}.purchased_at) DESC,
+        COALESCE(${alias}.activated_at, ${alias}.purchased_at) DESC,
+        ${alias}.purchased_at DESC,
+        ${alias}.id DESC
+    `;
+}
+
+function calculateAdPackageExpiryTimestamp(baseValue, durationHours) {
+    const baseDate = baseValue instanceof Date ? baseValue : new Date(baseValue || Date.now());
+    const normalizedHours = Math.max(1, Math.trunc(Number(durationHours) || 0));
+
+    if (Number.isNaN(baseDate.getTime())) {
+        return null;
+    }
+
+    return new Date(baseDate.getTime() + (normalizedHours * 60 * 60 * 1000));
+}
+
+function isAdPackagePurchaseExpired(expiresAt) {
+    if (!expiresAt) {
+        return true;
+    }
+
+    const expiryDate = expiresAt instanceof Date ? expiresAt : new Date(expiresAt);
+    if (Number.isNaN(expiryDate.getTime())) {
+        return true;
+    }
+
+    return expiryDate.getTime() <= Date.now();
+}
+
+function buildCurrentActiveAdPackagePurchaseSubquery(userIdSql) {
+    return `
+        SELECT
+            purchases.id,
+            purchases.ad_package_id,
+            purchases.activated_at,
+            purchases.selected_at,
+            purchases.expires_at
+        FROM ad_package_purchase_history AS purchases
+        JOIN ad_packages AS selected_packages
+          ON selected_packages.id = purchases.ad_package_id
+        WHERE purchases.user_id = ${userIdSql}
+          AND purchases.deleted_at IS NULL
+          AND COALESCE(purchases.payment_status, '${AD_PACKAGE_PAYMENT_STATUS.paid}') = '${AD_PACKAGE_PAYMENT_STATUS.paid}'
+          AND purchases.activated_at IS NOT NULL
+          AND purchases.selected_at IS NOT NULL
+          AND purchases.expires_at IS NOT NULL
+          AND purchases.expires_at > NOW()
+          AND COALESCE(selected_packages.status::text, 'active') = 'active'
+        ORDER BY ${buildAdPackagePurchaseOrderSql('purchases')}
+        LIMIT 1
+    `;
+}
+
+async function getLatestActiveUserAdPackagePurchase(userId, db = pool) {
+    const normalizedUserId = String(userId || '').trim();
+    if (!normalizedUserId) {
+        return null;
+    }
+
+    const result = await db.query(
+        `
+            SELECT
+                purchases.id AS purchase_id,
+                purchases.user_id AS purchase_user_id,
+                purchases.ad_package_id AS purchase_package_id,
+                purchases.purchased_at,
+                purchases.activated_at,
+                purchases.selected_at,
+                purchases.expires_at,
+                purchases.deleted_at,
+                purchases.payment_status,
+                purchases.payment_provider,
+                purchases.payment_amount,
+                purchases.payment_expires_at,
+                purchases.payment_confirmed_at,
+                purchases.paid_at,
+                purchases.payment_cancelled_at,
+                purchases.payment_reference,
+                purchases.payment_payload,
+                purchases.payos_order_code,
+                purchases.payos_payment_link_id,
+                purchases.payos_checkout_url,
+                purchases.payos_status,
+                packages.id AS package_id,
+                packages.name AS package_name,
+                packages.description AS package_description,
+                packages.duration_hours AS package_duration_hours,
+                packages.priority_level AS package_priority_level,
+                packages.price AS package_price,
+                packages.status AS package_status,
+                packages.created_at AS package_created_at,
+                packages.updated_at AS package_updated_at
+            FROM ad_package_purchase_history AS purchases
+            JOIN ad_packages AS packages
+              ON packages.id = purchases.ad_package_id
+            WHERE purchases.user_id = $1
+              AND purchases.deleted_at IS NULL
+              AND COALESCE(purchases.payment_status, '${AD_PACKAGE_PAYMENT_STATUS.paid}') = '${AD_PACKAGE_PAYMENT_STATUS.paid}'
+              AND purchases.activated_at IS NOT NULL
+              AND purchases.selected_at IS NOT NULL
+              AND purchases.expires_at IS NOT NULL
+              AND purchases.expires_at > NOW()
+              AND COALESCE(packages.status::text, 'active') = 'active'
+            ORDER BY ${buildAdPackagePurchaseOrderSql('purchases')}
+            LIMIT 1
+        `,
+        [normalizedUserId]
+    );
+
+    return result.rows.length ? mapAdPackageHistoryRow(result.rows[0]) : null;
+}
+
+async function syncUserAdPackageAssignments(userId, nextPackageId, db = pool, options = {}) {
+    const normalizedUserId = String(userId || '').trim();
+    if (!normalizedUserId) {
+        return [];
+    }
+
+    const ownedVenueIds = await listOwnedVenueIdsByUserId(normalizedUserId, db, {
+        specificVenueIds: options?.specificVenueIds
+    });
+
+    if (!ownedVenueIds.length) {
+        return [];
+    }
+
+    if (Number.isFinite(Number(nextPackageId)) && Number(nextPackageId) > 0) {
+        await db.query(
+            `
+                INSERT INTO ad_package_assignments (
+                    ad_package_id,
+                    user_id,
+                    venue_id,
+                    trend_push_count_used,
+                    trend_active_from,
+                    trend_active_until,
+                    trend_cooldown_until,
+                    created_at,
+                    updated_at
+                )
+                SELECT
+                    $1::bigint,
+                    $2::uuid,
+                    venue_scope.venue_id,
+                    0,
+                    NULL,
+                    NULL,
+                    NULL,
+                    NOW(),
+                    NOW()
+                FROM UNNEST($3::int[]) AS venue_scope(venue_id)
+                ON CONFLICT (user_id, venue_id)
+                DO UPDATE
+                SET ad_package_id = EXCLUDED.ad_package_id,
+                    trend_push_count_used = 0,
+                    trend_active_from = NULL,
+                    trend_active_until = NULL,
+                    trend_cooldown_until = NULL,
+                    updated_at = NOW()
+            `,
+            [Number(nextPackageId), normalizedUserId, ownedVenueIds]
+        );
+    } else {
+        await db.query(
+            `
+                DELETE FROM ad_package_assignments
+                WHERE user_id = $1::uuid
+                  AND venue_id = ANY($2::int[])
+            `,
+            [normalizedUserId, ownedVenueIds]
+        );
+    }
+
+    return ownedVenueIds;
+}
+
+async function markAdPackagePurchaseAsPaid(purchaseId, paymentData = {}, db = pool) {
+    const purchaseResult = await db.query(
+        `
+            SELECT
+                purchases.id AS purchase_id,
+                purchases.user_id AS purchase_user_id,
+                purchases.ad_package_id AS purchase_package_id,
+                purchases.purchased_at,
+                purchases.activated_at,
+                purchases.selected_at,
+                purchases.expires_at,
+                purchases.deleted_at,
+                purchases.payment_status,
+                purchases.payment_provider,
+                purchases.payment_amount,
+                purchases.payment_expires_at,
+                purchases.payment_confirmed_at,
+                purchases.paid_at,
+                purchases.payment_cancelled_at,
+                purchases.payment_reference,
+                purchases.payment_payload,
+                purchases.payos_order_code,
+                purchases.payos_payment_link_id,
+                purchases.payos_checkout_url,
+                purchases.payos_status,
+                packages.id AS package_id,
+                packages.name AS package_name,
+                packages.description AS package_description,
+                packages.duration_hours AS package_duration_hours,
+                packages.priority_level AS package_priority_level,
+                packages.price AS package_price,
+                packages.status AS package_status,
+                packages.created_at AS package_created_at,
+                packages.updated_at AS package_updated_at
+            FROM ad_package_purchase_history AS purchases
+            JOIN ad_packages AS packages
+              ON packages.id = purchases.ad_package_id
+            WHERE purchases.id = $1
+              AND purchases.deleted_at IS NULL
+            LIMIT 1
+        `,
+        [purchaseId]
+    );
+
+    if (!purchaseResult.rows.length) {
+        return null;
+    }
+
+    const purchaseRow = purchaseResult.rows[0];
+    const mappedPurchase = mapAdPackageHistoryRow(purchaseRow);
+    const paymentStatus = normalizeAdPackagePaymentStatus(purchaseRow.payment_status);
+    const expectedAmount = normalizeAdPackagePrice(purchaseRow.payment_amount) ?? 0;
+    const receivedAmount = normalizeAdPackagePrice(paymentData?.amount);
+
+    if (Number.isFinite(receivedAmount) && expectedAmount > 0 && receivedAmount !== expectedAmount) {
+        throw new Error('Payment amount mismatch.');
+    }
+
+    if (paymentStatus === AD_PACKAGE_PAYMENT_STATUS.paid && mappedPurchase?.activatedAt) {
+        return {
+            alreadyPaid: true,
+            purchase: mappedPurchase,
+            affectedVenueIds: []
+        };
+    }
+
+    const confirmedAt = paymentData?.transactionDateTime
+        ? new Date(paymentData.transactionDateTime)
+        : new Date();
+    const resolvedConfirmedAt = Number.isNaN(confirmedAt.getTime()) ? new Date() : confirmedAt;
+    const activatedAt = mappedPurchase?.activatedAt || resolvedConfirmedAt.toISOString();
+    const expiresAt = mappedPurchase?.expiresAt
+        || calculateAdPackageExpiryTimestamp(
+            activatedAt,
+            purchaseRow?.package_duration_hours
+        )?.toISOString()
+        || null;
+
+    const payloadJson = paymentData && Object.keys(paymentData).length
+        ? JSON.stringify(paymentData)
+        : null;
+
+    const updateResult = await db.query(
+        `
+            UPDATE ad_package_purchase_history
+            SET payment_status = $2,
+                payment_provider = COALESCE(payment_provider, 'payos'),
+                payment_confirmed_at = COALESCE(payment_confirmed_at, $3::timestamptz),
+                paid_at = COALESCE(paid_at, $3::timestamptz),
+                activated_at = COALESCE(activated_at, $4::timestamptz),
+                selected_at = COALESCE(selected_at, $4::timestamptz),
+                expires_at = COALESCE(expires_at, $5::timestamptz),
+                payment_reference = COALESCE($6, payment_reference),
+                payment_payload = COALESCE($7::jsonb, payment_payload),
+                payos_payment_link_id = COALESCE($8, payos_payment_link_id),
+                payos_status = COALESCE($9, payos_status, 'PAID'),
+                updated_at = NOW()
+            WHERE id = $1
+            RETURNING id
+        `,
+        [
+            purchaseId,
+            AD_PACKAGE_PAYMENT_STATUS.paid,
+            resolvedConfirmedAt.toISOString(),
+            activatedAt,
+            expiresAt,
+            paymentData?.reference || null,
+            payloadJson,
+            paymentData?.paymentLinkId || paymentData?.id || null,
+            paymentData?.status || 'PAID'
+        ]
+    );
+
+    if (!updateResult.rows.length) {
+        return null;
+    }
+
+    const affectedVenueIds = await syncUserAdPackageAssignments(
+        purchaseRow.purchase_user_id,
+        purchaseRow.purchase_package_id,
+        db
+    );
+
+    const refreshedResult = await db.query(
+        `
+            SELECT
+                purchases.id AS purchase_id,
+                purchases.user_id AS purchase_user_id,
+                purchases.ad_package_id AS purchase_package_id,
+                purchases.purchased_at,
+                purchases.activated_at,
+                purchases.selected_at,
+                purchases.expires_at,
+                purchases.deleted_at,
+                purchases.payment_status,
+                purchases.payment_provider,
+                purchases.payment_amount,
+                purchases.payment_expires_at,
+                purchases.payment_confirmed_at,
+                purchases.paid_at,
+                purchases.payment_cancelled_at,
+                purchases.payment_reference,
+                purchases.payment_payload,
+                purchases.payos_order_code,
+                purchases.payos_payment_link_id,
+                purchases.payos_checkout_url,
+                purchases.payos_status,
+                packages.id AS package_id,
+                packages.name AS package_name,
+                packages.description AS package_description,
+                packages.duration_hours AS package_duration_hours,
+                packages.priority_level AS package_priority_level,
+                packages.price AS package_price,
+                packages.status AS package_status,
+                packages.created_at AS package_created_at,
+                packages.updated_at AS package_updated_at
+            FROM ad_package_purchase_history AS purchases
+            JOIN ad_packages AS packages
+              ON packages.id = purchases.ad_package_id
+            WHERE purchases.id = $1
+            LIMIT 1
+        `,
+        [purchaseId]
+    );
+
+    return {
+        alreadyPaid: false,
+        purchase: mapAdPackageHistoryRow(refreshedResult.rows[0]),
+        affectedVenueIds
+    };
+}
+
 async function listPublicAdPackages(req, res) {
     try {
         const result = await pool.query(
             `
-                SELECT id, name, description, duration_hours, priority_level, status, created_at, updated_at
+                SELECT id, name, description, duration_hours, priority_level, price, status, created_at, updated_at
                 FROM ad_packages
                 WHERE COALESCE(status::text, 'active') = 'active'
                 ORDER BY created_at DESC, id DESC
@@ -517,6 +1404,8 @@ async function createAdminAdPackage(req, res) {
         .trim()
         .toLowerCase();
     const durationMonths = Number.parseInt(req.body?.durationMonths, 10);
+    const normalizedPrice = normalizeAdPackagePrice(req.body?.price);
+    const normalizedDiscountPercent = normalizeAdPackageDiscountPercent(req.body?.discountPercent);
     const normalizedFeatures = normalizeAdPackageFeatures(req.body?.features || {});
 
     if (normalizedName.length < 3) {
@@ -531,12 +1420,30 @@ async function createAdminAdPackage(req, res) {
         return res.status(400).json({ message: 'Invalid package duration. Allowed values are 1, 3, or 6 months.' });
     }
 
+    if (!Number.isFinite(normalizedPrice) || normalizedPrice < 1000) {
+        return res.status(400).json({ message: 'Package price must be at least 1,000 VND.' });
+    }
+
+    if (normalizedDiscountPercent < 0 || normalizedDiscountPercent > 99) {
+        return res.status(400).json({ message: 'Discount percent must be between 0 and 99.' });
+    }
+
+    if (calculateDiscountedAdPackagePrice(normalizedPrice, normalizedDiscountPercent) <= 0) {
+        return res.status(400).json({ message: 'Discounted package price must stay above 0 VND.' });
+    }
+
     if (normalizedFeatures.postLimitEnabled && (!normalizedFeatures.postLimit || normalizedFeatures.postLimit < 1)) {
         return res.status(400).json({ message: 'Post quantity limit must be greater than 0 when enabled.' });
     }
 
+    const trendingConfigError = validateTrendingFeatureConfig(normalizedFeatures);
+    if (trendingConfigError) {
+        return res.status(400).json({ message: trendingConfigError });
+    }
+
     const descriptionPayload = {
         tier: normalizedTier,
+        discountPercent: normalizedDiscountPercent,
         features: normalizedFeatures,
         createdBy: req.authUser?.id || null
     };
@@ -549,9 +1456,9 @@ async function createAdminAdPackage(req, res) {
             `
                 INSERT INTO ad_packages (name, description, duration_hours, priority_level, price, status, created_at, updated_at)
                 VALUES ($1, $2, $3, $4, $5, 'active', NOW(), NOW())
-                RETURNING id, name, description, duration_hours, priority_level, status, created_at, updated_at
+                RETURNING id, name, description, duration_hours, priority_level, price, status, created_at, updated_at
             `,
-            [normalizedName, JSON.stringify(descriptionPayload), durationHours, priorityLevel, 0]
+            [normalizedName, JSON.stringify(descriptionPayload), durationHours, priorityLevel, normalizedPrice]
         );
 
         return res.status(201).json(mapAdPackageRow(result.rows[0]));
@@ -630,7 +1537,7 @@ async function updateAdminAdPackage(req, res) {
     try {
         const existingResult = await pool.query(
             `
-                SELECT id, name, description, duration_hours, priority_level, status, created_at, updated_at
+                SELECT id, name, description, duration_hours, priority_level, price, status, created_at, updated_at
                 FROM ad_packages
                 WHERE id = $1
                 LIMIT 1
@@ -655,6 +1562,12 @@ async function updateAdminAdPackage(req, res) {
         const nextDurationMonths = Object.prototype.hasOwnProperty.call(req.body || {}, 'durationMonths')
             ? Number.parseInt(req.body?.durationMonths, 10)
             : Number(existingMappedPackage.durationMonths);
+        const nextPrice = Object.prototype.hasOwnProperty.call(req.body || {}, 'price')
+            ? normalizeAdPackagePrice(req.body?.price)
+            : existingMappedPackage.price;
+        const nextDiscountPercent = Object.prototype.hasOwnProperty.call(req.body || {}, 'discountPercent')
+            ? normalizeAdPackageDiscountPercent(req.body?.discountPercent)
+            : normalizeAdPackageDiscountPercent(existingDescription?.discountPercent);
         const nextFeatures = Object.prototype.hasOwnProperty.call(req.body || {}, 'features')
             ? normalizeAdPackageFeatures(req.body?.features || {})
             : normalizeAdPackageFeatures(existingMappedPackage.features || existingDescription.features || {});
@@ -671,13 +1584,31 @@ async function updateAdminAdPackage(req, res) {
             return res.status(400).json({ message: 'Invalid package duration. Allowed values are 1, 3, or 6 months.' });
         }
 
+        if (!Number.isFinite(nextPrice) || nextPrice < 1000) {
+            return res.status(400).json({ message: 'Package price must be at least 1,000 VND.' });
+        }
+
+        if (nextDiscountPercent < 0 || nextDiscountPercent > 99) {
+            return res.status(400).json({ message: 'Discount percent must be between 0 and 99.' });
+        }
+
+        if (calculateDiscountedAdPackagePrice(nextPrice, nextDiscountPercent) <= 0) {
+            return res.status(400).json({ message: 'Discounted package price must stay above 0 VND.' });
+        }
+
         if (nextFeatures.postLimitEnabled && (!nextFeatures.postLimit || nextFeatures.postLimit < 1)) {
             return res.status(400).json({ message: 'Post quantity limit must be greater than 0 when enabled.' });
+        }
+
+        const trendingConfigError = validateTrendingFeatureConfig(nextFeatures);
+        if (trendingConfigError) {
+            return res.status(400).json({ message: trendingConfigError });
         }
 
         const nextDescription = {
             ...existingDescription,
             tier: nextTierRaw,
+            discountPercent: nextDiscountPercent,
             features: nextFeatures,
             updatedBy: req.authUser?.id || null,
             updatedAt: new Date().toISOString()
@@ -693,11 +1624,12 @@ async function updateAdminAdPackage(req, res) {
                     description = $3,
                     duration_hours = $4,
                     priority_level = $5,
+                    price = $6,
                     updated_at = NOW()
                 WHERE id = $1
-                RETURNING id, name, description, duration_hours, priority_level, status, created_at, updated_at
+                RETURNING id, name, description, duration_hours, priority_level, price, status, created_at, updated_at
             `,
-            [packageId, nextNameRaw, JSON.stringify(nextDescription), durationHours, priorityLevel]
+            [packageId, nextNameRaw, JSON.stringify(nextDescription), durationHours, priorityLevel, nextPrice]
         );
 
         return res.json(mapAdPackageRow(updatedResult.rows[0]));
@@ -710,6 +1642,7 @@ async function updateAdminAdPackage(req, res) {
 async function assignAdPackageToVenue(req, res) {
     const packageId = Number.parseInt(req.params?.packageId, 10);
     const venueId = Number.parseInt(req.body?.venueId, 10);
+    const hasEntryVenueId = Number.isFinite(venueId) && venueId > 0;
     const requesterUserId = String(req.authUser?.id || '').trim();
     const requesterRole = normalizeRole(req.authUser?.role);
 
@@ -717,18 +1650,19 @@ async function assignAdPackageToVenue(req, res) {
         return res.status(400).json({ message: 'Invalid package id.' });
     }
 
-    if (!Number.isFinite(venueId) || venueId <= 0) {
-        return res.status(400).json({ message: 'Invalid venue id.' });
-    }
-
     if (!requesterUserId) {
         return res.status(401).json({ message: 'Missing authentication context.' });
     }
 
+    let client;
+
     try {
-        const packageResult = await pool.query(
+        client = await pool.connect();
+        await client.query('BEGIN');
+
+        const packageResult = await client.query(
             `
-                SELECT id, name, description, duration_hours, priority_level, status, created_at, updated_at
+                SELECT id, name, description, duration_hours, priority_level, price, status, created_at, updated_at
                 FROM ad_packages
                 WHERE id = $1
                   AND COALESCE(status::text, 'active') = 'active'
@@ -738,52 +1672,242 @@ async function assignAdPackageToVenue(req, res) {
         );
 
         if (!packageResult.rows.length) {
+            await client.query('ROLLBACK');
             return res.status(404).json({ message: 'Package not found or inactive.' });
         }
 
-        const venueResult = await pool.query(
+        let purchaseUserId = requesterUserId;
+
+        if (hasEntryVenueId) {
+            const venueResult = await client.query(
+                `
+                    SELECT
+                        venues.id,
+                        COALESCE(venues.title, venues.name, CONCAT('Venue #', venues.id::text)) AS venue_name,
+                        ${buildResolvedVenueOwnerUserSql('venues')} AS owner_user_id
+                    FROM venues
+                    WHERE venues.id = $1
+                    LIMIT 1
+                `,
+                [venueId]
+            );
+
+            if (!venueResult.rows.length) {
+                await client.query('ROLLBACK');
+                return res.status(404).json({ message: 'Venue not found.' });
+            }
+
+            const ownerUserId = String(venueResult.rows[0]?.owner_user_id || '').trim();
+            if (requesterRole !== 'admin' && ownerUserId && ownerUserId !== requesterUserId) {
+                await client.query('ROLLBACK');
+                return res.status(403).json({ message: 'You can only assign packages to your own venues.' });
+            }
+
+            purchaseUserId = requesterRole === 'admin' && ownerUserId
+                ? ownerUserId
+                : requesterUserId;
+        } else if (requesterRole === 'admin') {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ message: 'Admin purchases require a target venue to identify the merchant account.' });
+        }
+
+        if (!purchaseUserId) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ message: 'Could not resolve the package owner for this account.' });
+        }
+
+        const mappedPackage = mapAdPackageRow(packageResult.rows[0]);
+        const packagePrice = normalizeAdPackagePrice(mappedPackage?.discountedPrice ?? mappedPackage?.price);
+        if (!Number.isFinite(packagePrice) || packagePrice <= 0) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({ message: 'This package cannot be purchased because its price is not configured.' });
+        }
+
+        if (!process.env.PAYOS_CLIENT_ID || !process.env.PAYOS_API_KEY || !process.env.PAYOS_CHECKSUM_KEY) {
+            await client.query('ROLLBACK');
+            return res.status(503).json({ message: 'PayOS is not configured on the server yet.' });
+        }
+
+        const duplicatePurchaseResult = await client.query(
             `
-                SELECT
-                    venues.id,
-                    COALESCE(venues.title, venues.name, CONCAT('Venue #', venues.id::text)) AS venue_name,
-                    ${buildResolvedVenueOwnerUserSql('venues')} AS owner_user_id
-                FROM venues
-                WHERE venues.id = $1
+                SELECT purchases.id
+                FROM ad_package_purchase_history AS purchases
+                WHERE purchases.user_id = $1::uuid
+                  AND purchases.ad_package_id = $2::bigint
+                  AND purchases.deleted_at IS NULL
+                  AND COALESCE(purchases.payment_status, '${AD_PACKAGE_PAYMENT_STATUS.paid}') = '${AD_PACKAGE_PAYMENT_STATUS.paid}'
+                  AND purchases.expires_at IS NOT NULL
+                  AND purchases.expires_at > NOW()
+                ORDER BY ${buildAdPackagePurchaseOrderSql('purchases')}
                 LIMIT 1
             `,
-            [venueId]
+            [purchaseUserId, packageId]
         );
 
-        if (!venueResult.rows.length) {
-            return res.status(404).json({ message: 'Venue not found.' });
+        if (duplicatePurchaseResult.rows.length) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({
+                message: 'This package is already available in your account. Wait until it expires or switch to it from Transaction History.'
+            });
         }
 
-        const ownerUserId = String(venueResult.rows[0]?.owner_user_id || '').trim();
-        if (requesterRole !== 'admin' && ownerUserId && ownerUserId !== requesterUserId) {
-            return res.status(403).json({ message: 'You can only assign packages to your own venues.' });
-        }
-
-        const assignmentResult = await pool.query(
+        const pendingPurchaseResult = await client.query(
             `
-                INSERT INTO ad_package_assignments (ad_package_id, user_id, venue_id, created_at, updated_at)
-                VALUES ($1, $2, $3, NOW(), NOW())
-                ON CONFLICT (user_id, venue_id)
-                DO UPDATE
-                SET ad_package_id = EXCLUDED.ad_package_id,
-                    updated_at = NOW()
-                RETURNING id, ad_package_id, user_id, venue_id, created_at, updated_at
+                SELECT
+                    purchases.id AS purchase_id,
+                    purchases.payment_expires_at,
+                    purchases.payos_checkout_url,
+                    purchases.payos_payment_link_id,
+                    purchases.payos_order_code,
+                    purchases.payment_amount,
+                    purchases.purchased_at
+                FROM ad_package_purchase_history AS purchases
+                WHERE purchases.user_id = $1::uuid
+                  AND purchases.ad_package_id = $2::bigint
+                  AND purchases.deleted_at IS NULL
+                  AND COALESCE(purchases.payment_status, '${AD_PACKAGE_PAYMENT_STATUS.pending}') = '${AD_PACKAGE_PAYMENT_STATUS.pending}'
+                  AND purchases.payment_expires_at IS NOT NULL
+                  AND purchases.payment_expires_at > NOW()
+                ORDER BY purchases.created_at DESC, purchases.id DESC
+                LIMIT 1
             `,
-            [packageId, requesterUserId, venueId]
+            [purchaseUserId, packageId]
         );
+
+        if (pendingPurchaseResult.rows.length) {
+            await client.query('COMMIT');
+            return res.json({
+                success: true,
+                scope: 'account',
+                appliesToAllVenues: true,
+                paymentStatus: AD_PACKAGE_PAYMENT_STATUS.pending,
+                existingPending: true,
+                purchaseId: String(pendingPurchaseResult.rows[0].purchase_id),
+                checkoutUrl: pendingPurchaseResult.rows[0].payos_checkout_url || '',
+                paymentLinkId: pendingPurchaseResult.rows[0].payos_payment_link_id || '',
+                orderCode: pendingPurchaseResult.rows[0].payos_order_code ? String(pendingPurchaseResult.rows[0].payos_order_code) : '',
+                amount: normalizeAdPackagePrice(pendingPurchaseResult.rows[0].payment_amount) ?? packagePrice,
+                paymentExpiresAt: pendingPurchaseResult.rows[0].payment_expires_at || null,
+                entryVenueId: hasEntryVenueId ? String(venueId) : null,
+                package: mappedPackage
+            });
+        }
+
+        const purchasedAt = new Date();
+        const paymentExpiresAt = new Date(purchasedAt.getTime() + (AD_PACKAGE_PENDING_PAYMENT_MINUTES * 60 * 1000));
+
+        const purchaseResult = await client.query(
+            `
+                INSERT INTO ad_package_purchase_history (
+                    user_id,
+                    ad_package_id,
+                    purchased_at,
+                    payment_status,
+                    payment_provider,
+                    payment_amount,
+                    payment_expires_at,
+                    created_at,
+                    updated_at
+                )
+                VALUES ($1::uuid, $2::bigint, $3, $4, 'payos', $5, $6, NOW(), NOW())
+                RETURNING id, purchased_at, payment_expires_at
+            `,
+            [
+                purchaseUserId,
+                packageId,
+                purchasedAt.toISOString(),
+                AD_PACKAGE_PAYMENT_STATUS.pending,
+                packagePrice,
+                paymentExpiresAt.toISOString()
+            ]
+        );
+        const purchaseId = purchaseResult.rows[0]?.id;
+        const orderCode = generatePayOsOrderCode(purchaseId);
+        const paymentDescription = buildPayOsShortDescription(orderCode);
+        const returnUrl = buildMerchantCheckoutReturnUrl(req, purchaseId);
+        const cancelUrl = buildMerchantCheckoutReturnUrl(req, purchaseId);
+        const paymentRequestPayload = {
+            orderCode,
+            amount: packagePrice,
+            description: paymentDescription,
+            buyerName: String(req.authUser?.email || 'Merchant').slice(0, 50),
+            buyerEmail: String(req.authUser?.email || '').trim() || undefined,
+            items: [
+                {
+                    name: String(packageResult.rows[0]?.name || 'Advertising Package').slice(0, 120),
+                    quantity: 1,
+                    price: packagePrice
+                }
+            ],
+            cancelUrl,
+            returnUrl,
+            expiredAt: Math.floor(paymentExpiresAt.getTime() / 1000)
+        };
+        paymentRequestPayload.signature = buildPayOsPaymentRequestSignature(paymentRequestPayload);
+
+        let payOsResponse;
+        try {
+            payOsResponse = await createPayOsPaymentLink(paymentRequestPayload);
+        } catch (paymentError) {
+            await client.query('ROLLBACK');
+            console.error('Create PayOS payment link error:', paymentError?.response?.data || paymentError?.message || paymentError);
+            return res.status(502).json({
+                message: paymentError?.response?.data?.desc || 'Could not create a payment link right now.'
+            });
+        }
+
+        const paymentData = payOsResponse?.data || {};
+        await client.query(
+            `
+                UPDATE ad_package_purchase_history
+                SET payos_order_code = $2,
+                    payos_payment_link_id = $3,
+                    payos_checkout_url = $4,
+                    payos_status = $5,
+                    payment_payload = COALESCE($6::jsonb, payment_payload),
+                    updated_at = NOW()
+                WHERE id = $1
+            `,
+            [
+                purchaseId,
+                orderCode,
+                paymentData.paymentLinkId || null,
+                paymentData.checkoutUrl || null,
+                paymentData.status || 'PENDING',
+                JSON.stringify(paymentData)
+            ]
+        );
+
+        await client.query('COMMIT');
 
         return res.json({
             success: true,
-            package: mapAdPackageRow(packageResult.rows[0]),
-            assignment: assignmentResult.rows[0]
+            scope: 'account',
+            appliesToAllVenues: true,
+            paymentStatus: AD_PACKAGE_PAYMENT_STATUS.pending,
+            affectedVenueCount: 0,
+            entryVenueId: hasEntryVenueId ? String(venueId) : null,
+            purchasedAt: purchaseResult.rows[0]?.purchased_at || null,
+            paymentExpiresAt: purchaseResult.rows[0]?.payment_expires_at || null,
+            purchaseId: String(purchaseId),
+            checkoutUrl: paymentData.checkoutUrl || '',
+            paymentLinkId: paymentData.paymentLinkId || '',
+            orderCode: String(orderCode),
+            amount: packagePrice,
+            package: mappedPackage
         });
     } catch (error) {
+        if (client) {
+            try {
+                await client.query('ROLLBACK');
+            } catch {
+                // Ignore rollback failures during ad package assignment.
+            }
+        }
         console.error('Assign ad package to venue error:', error);
         return res.status(500).json({ message: 'Could not assign package right now.' });
+    } finally {
+        client?.release();
     }
 }
 
@@ -800,43 +1924,63 @@ async function getMyVenueAdPackageAssignment(req, res) {
     }
 
     try {
-        const result = await pool.query(
+        const venueResult = await pool.query(
             `
                 SELECT
-                    assignments.id AS assignment_id,
-                    assignments.created_at AS assigned_at,
-                    assignments.updated_at AS updated_at,
-                    packages.id,
-                    packages.name,
-                    packages.description,
-                    packages.duration_hours,
-                    packages.priority_level,
-                    packages.status,
-                    packages.created_at,
-                    packages.updated_at AS package_updated_at
-                FROM ad_package_assignments AS assignments
-                JOIN ad_packages AS packages
-                  ON packages.id = assignments.ad_package_id
-                WHERE assignments.user_id = $1
-                  AND assignments.venue_id = $2
-                  AND COALESCE(packages.status::text, 'active') = 'active'
+                    venues.id,
+                    ${buildResolvedVenueOwnerUserSql('venues')} AS owner_user_id
+                FROM venues
+                WHERE venues.id = $1
+                LIMIT 1
+            `,
+            [venueId]
+        );
+
+        if (!venueResult.rows.length) {
+            return res.status(404).json({ message: 'Venue not found.' });
+        }
+
+        const ownerUserId = String(venueResult.rows[0]?.owner_user_id || '').trim();
+        if (ownerUserId && ownerUserId !== requesterUserId) {
+            return res.status(403).json({ message: 'You can only view packages assigned to your own venues.' });
+        }
+
+        const activePurchase = await getLatestActiveUserAdPackagePurchase(requesterUserId);
+        if (!activePurchase) {
+            return res.json({ assignment: null });
+        }
+
+        const ownedVenueIds = await listOwnedVenueIdsByUserId(requesterUserId);
+        const assignmentResult = await pool.query(
+            `
+                SELECT
+                    id,
+                    updated_at,
+                    trend_push_count_used,
+                    trend_active_from,
+                    trend_active_until,
+                    trend_cooldown_until
+                FROM ad_package_assignments
+                WHERE user_id = $1::uuid
+                  AND venue_id = $2
                 LIMIT 1
             `,
             [requesterUserId, venueId]
         );
-
-        if (!result.rows.length) {
-            return res.json({ assignment: null });
-        }
-
-        const row = result.rows[0];
-        const mappedPackage = mapAdPackageRow(row);
+        const assignmentRow = assignmentResult.rows[0] || null;
 
         return res.json({
             assignment: {
-                assignmentId: String(row.assignment_id),
-                assignedAt: row.updated_at || row.assigned_at || null,
-                package: mappedPackage
+                assignmentId: assignmentRow?.id ? String(assignmentRow.id) : '',
+                assignedAt: activePurchase.purchasedAt,
+                scope: 'account',
+                appliesToAllVenues: true,
+                totalVenueCount: ownedVenueIds.length,
+                trendPushCountUsed: Number(assignmentRow?.trend_push_count_used) || 0,
+                trendActiveFrom: assignmentRow?.trend_active_from || null,
+                trendActiveUntil: assignmentRow?.trend_active_until || null,
+                trendCooldownUntil: assignmentRow?.trend_cooldown_until || null,
+                package: activePurchase.package
             }
         });
     } catch (error) {
@@ -845,13 +1989,1647 @@ async function getMyVenueAdPackageAssignment(req, res) {
     }
 }
 
+async function listMerchantAdPackageTransactions(req, res) {
+    const requesterUserId = String(req.authUser?.id || '').trim();
+
+    if (!requesterUserId) {
+        return res.status(401).json({ message: 'Missing authentication context.' });
+    }
+
+    try {
+        const [activePurchase, ownedVenueIds, historyResult] = await Promise.all([
+            getLatestActiveUserAdPackagePurchase(requesterUserId),
+            listOwnedVenueIdsByUserId(requesterUserId),
+            pool.query(
+                `
+                    SELECT
+                        purchases.id AS purchase_id,
+                        purchases.user_id AS purchase_user_id,
+                        purchases.ad_package_id AS purchase_package_id,
+                        purchases.purchased_at,
+                        purchases.activated_at,
+                        purchases.selected_at,
+                        purchases.expires_at,
+                        purchases.deleted_at,
+                        purchases.merchant_hidden_at,
+                        purchases.payment_status,
+                        purchases.payment_provider,
+                        purchases.payment_amount,
+                        purchases.payment_expires_at,
+                        purchases.payment_confirmed_at,
+                        purchases.paid_at,
+                        purchases.payment_cancelled_at,
+                        purchases.payment_reference,
+                        purchases.payment_payload,
+                        purchases.payos_order_code,
+                        purchases.payos_payment_link_id,
+                        purchases.payos_checkout_url,
+                        purchases.payos_status,
+                        packages.id AS package_id,
+                        packages.name AS package_name,
+                        packages.description AS package_description,
+                        packages.duration_hours AS package_duration_hours,
+                        packages.priority_level AS package_priority_level,
+                        packages.price AS package_price,
+                        packages.status AS package_status,
+                        packages.created_at AS package_created_at,
+                        packages.updated_at AS package_updated_at
+                    FROM ad_package_purchase_history AS purchases
+                    LEFT JOIN ad_packages AS packages
+                      ON packages.id = purchases.ad_package_id
+                    WHERE purchases.user_id = $1::uuid
+                      AND purchases.deleted_at IS NULL
+                      AND purchases.merchant_hidden_at IS NULL
+                    ORDER BY purchases.purchased_at DESC, purchases.id DESC
+                `,
+                [requesterUserId]
+            )
+        ]);
+
+        const transactions = historyResult.rows.map((row) => {
+            const mappedHistory = mapAdPackageHistoryRow(row);
+            const isPaid = mappedHistory?.paymentStatus === AD_PACKAGE_PAYMENT_STATUS.paid;
+            const isPending = mappedHistory?.paymentStatus === AD_PACKAGE_PAYMENT_STATUS.pending;
+            const isCancelled = mappedHistory?.paymentStatus === AD_PACKAGE_PAYMENT_STATUS.cancelled;
+            const isFailed = mappedHistory?.paymentStatus === AD_PACKAGE_PAYMENT_STATUS.failed;
+            const isExpired = isPaid ? isAdPackagePurchaseExpired(mappedHistory?.expiresAt) : false;
+            const isCheckoutExpired = isPending && mappedHistory?.paymentExpiresAt
+                ? new Date(mappedHistory.paymentExpiresAt).getTime() <= Date.now()
+                : false;
+            const isActive = Boolean(activePurchase?.purchaseId && activePurchase.purchaseId === mappedHistory?.purchaseId);
+            const isPackageActive = String(row?.package_status || '').trim().toLowerCase() === 'active';
+
+            return {
+                id: mappedHistory?.purchaseId || '',
+                purchasedAt: mappedHistory?.purchasedAt || null,
+                paidAt: mappedHistory?.paidAt || null,
+                activatedAt: mappedHistory?.activatedAt || null,
+                selectedAt: mappedHistory?.selectedAt || null,
+                expiresAt: mappedHistory?.expiresAt || null,
+                deletedAt: mappedHistory?.deletedAt || null,
+                paymentStatus: mappedHistory?.paymentStatus || AD_PACKAGE_PAYMENT_STATUS.pending,
+                paymentAmount: mappedHistory?.paymentAmount || 0,
+                paymentExpiresAt: mappedHistory?.paymentExpiresAt || null,
+                paymentReference: mappedHistory?.paymentReference || null,
+                payosCheckoutUrl: mappedHistory?.payosCheckoutUrl || '',
+                payosOrderCode: mappedHistory?.payosOrderCode || '',
+                payosPaymentLinkId: mappedHistory?.payosPaymentLinkId || '',
+                payosStatus: mappedHistory?.payosStatus || null,
+                appliesToAllVenues: true,
+                affectedVenueCount: isActive ? ownedVenueIds.length : 0,
+                isActive,
+                isPaid,
+                isPending,
+                isCancelled,
+                isFailed,
+                isExpired,
+                isCheckoutExpired,
+                canStop: Boolean(isActive),
+                canActivate: Boolean(isPaid && !isActive && !isExpired && isPackageActive && mappedHistory?.package?.id),
+                canContinueCheckout: Boolean(isPending && !isCheckoutExpired && mappedHistory?.payosCheckoutUrl),
+                canDelete: !isActive,
+                package: mappedHistory?.package || null
+            };
+        });
+
+        return res.json({
+            summary: {
+                totalTransactions: transactions.length,
+                totalPaidTransactions: transactions.filter((transaction) => transaction.isPaid).length,
+                totalPendingTransactions: transactions.filter((transaction) => transaction.isPending && !transaction.isCheckoutExpired).length,
+                activePackage: activePurchase?.package || null,
+                activePurchaseId: activePurchase?.purchaseId || null,
+                activeExpiresAt: activePurchase?.expiresAt || null,
+                coveredVenueCount: activePurchase ? ownedVenueIds.length : 0,
+                appliesToAllVenues: true
+            },
+            transactions
+        });
+    } catch (error) {
+        console.error('List merchant ad package transactions error:', error);
+        return res.status(500).json({ message: 'Could not load payment history right now.' });
+    }
+}
+
+async function activateMerchantAdPackageTransaction(req, res) {
+    const transactionId = Number.parseInt(req.params?.transactionId, 10);
+    const requesterUserId = String(req.authUser?.id || '').trim();
+
+    if (!Number.isFinite(transactionId) || transactionId <= 0) {
+        return res.status(400).json({ message: 'Invalid transaction id.' });
+    }
+
+    if (!requesterUserId) {
+        return res.status(401).json({ message: 'Missing authentication context.' });
+    }
+
+    let client;
+
+    try {
+        client = await pool.connect();
+        await client.query('BEGIN');
+
+        const purchaseResult = await client.query(
+            `
+                SELECT
+                    purchases.id AS purchase_id,
+                    purchases.user_id AS purchase_user_id,
+                    purchases.ad_package_id AS purchase_package_id,
+                    purchases.purchased_at,
+                    purchases.activated_at,
+                    purchases.selected_at,
+                    purchases.expires_at,
+                    purchases.deleted_at,
+                    purchases.payment_status,
+                    purchases.payment_provider,
+                    purchases.payment_amount,
+                    purchases.payment_expires_at,
+                    purchases.payment_confirmed_at,
+                    purchases.paid_at,
+                    purchases.payment_cancelled_at,
+                    purchases.payment_reference,
+                    purchases.payment_payload,
+                    purchases.payos_order_code,
+                    purchases.payos_payment_link_id,
+                    purchases.payos_checkout_url,
+                    purchases.payos_status,
+                    packages.id AS package_id,
+                    packages.name AS package_name,
+                    packages.description AS package_description,
+                    packages.duration_hours AS package_duration_hours,
+                    packages.priority_level AS package_priority_level,
+                    packages.price AS package_price,
+                    packages.status AS package_status,
+                    packages.created_at AS package_created_at,
+                    packages.updated_at AS package_updated_at
+                FROM ad_package_purchase_history AS purchases
+                JOIN ad_packages AS packages
+                  ON packages.id = purchases.ad_package_id
+                WHERE purchases.id = $1
+                  AND purchases.user_id = $2::uuid
+                  AND purchases.deleted_at IS NULL
+                LIMIT 1
+            `,
+            [transactionId, requesterUserId]
+        );
+
+        if (!purchaseResult.rows.length) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ message: 'Transaction not found.' });
+        }
+
+        const mappedPurchase = mapAdPackageHistoryRow(purchaseResult.rows[0]);
+        if (mappedPurchase?.paymentStatus !== AD_PACKAGE_PAYMENT_STATUS.paid) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({ message: 'This transaction has not been paid yet.' });
+        }
+
+        if (String(purchaseResult.rows[0]?.package_status || '').trim().toLowerCase() !== 'active') {
+            await client.query('ROLLBACK');
+            return res.status(409).json({ message: 'This package is no longer available for activation.' });
+        }
+
+        if (isAdPackagePurchaseExpired(mappedPurchase?.expiresAt)) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({ message: 'This package has already expired and cannot be activated again.' });
+        }
+
+        const activatedAt = mappedPurchase?.activatedAt || new Date().toISOString();
+        const expiresAt = mappedPurchase?.expiresAt
+            || calculateAdPackageExpiryTimestamp(
+                activatedAt,
+                purchaseResult.rows[0]?.package_duration_hours
+            )?.toISOString()
+            || null;
+
+        await client.query(
+            `
+                UPDATE ad_package_purchase_history
+                SET activated_at = COALESCE(activated_at, $2::timestamptz),
+                    expires_at = COALESCE(expires_at, $3::timestamptz),
+                    selected_at = NOW(),
+                    updated_at = NOW()
+                WHERE id = $1
+            `,
+            [transactionId, activatedAt, expiresAt]
+        );
+
+        const affectedVenueIds = await syncUserAdPackageAssignments(
+            requesterUserId,
+            mappedPurchase?.packageId || null,
+            client
+        );
+
+        await client.query('COMMIT');
+
+        invalidatePublicVenueCachesByVenueIds(affectedVenueIds);
+
+        return res.json({
+            success: true,
+            transactionId: String(transactionId),
+            activePackage: mappedPurchase?.package || null,
+            expiresAt,
+            coveredVenueCount: affectedVenueIds.length
+        });
+    } catch (error) {
+        if (client) {
+            try {
+                await client.query('ROLLBACK');
+            } catch {
+                // Ignore rollback failures during transaction activation.
+            }
+        }
+        console.error('Activate merchant ad package transaction error:', error);
+        return res.status(500).json({ message: 'Could not activate this package right now.' });
+    } finally {
+        client?.release();
+    }
+}
+
+async function deleteMerchantAdPackageTransaction(req, res) {
+    const transactionId = Number.parseInt(req.params?.transactionId, 10);
+    const requesterUserId = String(req.authUser?.id || '').trim();
+
+    if (!Number.isFinite(transactionId) || transactionId <= 0) {
+        return res.status(400).json({ message: 'Invalid transaction id.' });
+    }
+
+    if (!requesterUserId) {
+        return res.status(401).json({ message: 'Missing authentication context.' });
+    }
+
+    let client;
+
+    try {
+        client = await pool.connect();
+        await client.query('BEGIN');
+
+        const activePurchaseBeforeDelete = await getLatestActiveUserAdPackagePurchase(requesterUserId, client);
+        const historyResult = await client.query(
+            `
+                SELECT id, ad_package_id, purchased_at, payment_status, payos_order_code, payos_payment_link_id
+                FROM ad_package_purchase_history
+                WHERE id = $1
+                  AND user_id = $2::uuid
+                  AND deleted_at IS NULL
+                  AND merchant_hidden_at IS NULL
+                LIMIT 1
+            `,
+            [transactionId, requesterUserId]
+        );
+
+        if (!historyResult.rows.length) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ message: 'Transaction not found.' });
+        }
+
+        const paymentStatus = normalizeAdPackagePaymentStatus(historyResult.rows[0]?.payment_status);
+        if (activePurchaseBeforeDelete?.purchaseId && Number(activePurchaseBeforeDelete.purchaseId) === transactionId) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({ message: 'Stop the active package first before removing it from history.' });
+        }
+
+        if (paymentStatus === AD_PACKAGE_PAYMENT_STATUS.paid) {
+            await client.query(
+                `
+                    UPDATE ad_package_purchase_history
+                    SET merchant_hidden_at = NOW(),
+                        selected_at = NULL,
+                        expires_at = CASE
+                            WHEN expires_at IS NULL OR expires_at > NOW() THEN NOW()
+                            ELSE expires_at
+                        END,
+                        updated_at = NOW()
+                    WHERE id = $1
+                `,
+                [transactionId]
+            );
+
+            await client.query('COMMIT');
+
+            return res.json({
+                success: true,
+                deletedTransactionId: String(transactionId),
+                hiddenFromHistory: true,
+                activePackage: activePurchaseBeforeDelete?.package || null,
+                coveredVenueCount: activePurchaseBeforeDelete
+                    ? (await listOwnedVenueIdsByUserId(requesterUserId)).length
+                    : 0
+            });
+        }
+
+        const payosPaymentIdentifier = historyResult.rows[0]?.payos_payment_link_id || historyResult.rows[0]?.payos_order_code || null;
+        if (paymentStatus === AD_PACKAGE_PAYMENT_STATUS.pending && payosPaymentIdentifier) {
+            try {
+                await cancelPayOsPaymentLink(
+                    payosPaymentIdentifier,
+                    'Merchant removed pending checkout'
+                );
+            } catch (cancelError) {
+                await client.query('ROLLBACK');
+                console.error('Cancel PayOS payment link error:', cancelError?.response?.data || cancelError?.message || cancelError);
+                return res.status(409).json({ message: 'Could not cancel the pending payment link right now.' });
+            }
+        }
+
+        await client.query(
+            `
+                UPDATE ad_package_purchase_history
+                SET deleted_at = NOW(),
+                    payment_status = $2,
+                    payment_cancelled_at = NOW(),
+                    payos_status = COALESCE(payos_status, 'CANCELLED'),
+                    updated_at = NOW()
+                WHERE id = $1
+            `,
+            [transactionId, AD_PACKAGE_PAYMENT_STATUS.cancelled]
+        );
+
+        const activePurchaseAfterDelete = await getLatestActiveUserAdPackagePurchase(requesterUserId, client);
+        let affectedVenueIds = [];
+
+        if ((activePurchaseBeforeDelete?.purchaseId || null) !== (activePurchaseAfterDelete?.purchaseId || null)) {
+            affectedVenueIds = await syncUserAdPackageAssignments(
+                requesterUserId,
+                activePurchaseAfterDelete?.packageId || null,
+                client
+            );
+        }
+
+        await client.query('COMMIT');
+
+        invalidatePublicVenueCachesByVenueIds(affectedVenueIds);
+        const coveredVenueCount = activePurchaseAfterDelete
+            ? (await listOwnedVenueIdsByUserId(requesterUserId)).length
+            : 0;
+
+        return res.json({
+            success: true,
+            deletedTransactionId: String(transactionId),
+            activePackage: activePurchaseAfterDelete?.package || null,
+            coveredVenueCount
+        });
+    } catch (error) {
+        if (client) {
+            try {
+                await client.query('ROLLBACK');
+            } catch {
+                // Ignore rollback failures during transaction deletion.
+            }
+        }
+        console.error('Delete merchant ad package transaction error:', error);
+        return res.status(500).json({ message: 'Could not delete this transaction right now.' });
+    } finally {
+        client?.release();
+    }
+}
+
+async function deactivateMerchantAdPackageTransaction(req, res) {
+    const transactionId = Number.parseInt(req.params?.transactionId, 10);
+    const requesterUserId = String(req.authUser?.id || '').trim();
+
+    if (!Number.isFinite(transactionId) || transactionId <= 0) {
+        return res.status(400).json({ message: 'Invalid transaction id.' });
+    }
+
+    if (!requesterUserId) {
+        return res.status(401).json({ message: 'Missing authentication context.' });
+    }
+
+    let client;
+
+    try {
+        client = await pool.connect();
+        await client.query('BEGIN');
+
+        const activePurchase = await getLatestActiveUserAdPackagePurchase(requesterUserId, client);
+        if (!activePurchase?.purchaseId || Number(activePurchase.purchaseId) !== transactionId) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({ message: 'This package is not currently active in your account.' });
+        }
+
+        await client.query(
+            `
+                UPDATE ad_package_purchase_history
+                SET selected_at = NULL,
+                    updated_at = NOW()
+                WHERE user_id = $1::uuid
+                  AND deleted_at IS NULL
+                  AND COALESCE(payment_status, $2) = $2
+            `,
+            [requesterUserId, AD_PACKAGE_PAYMENT_STATUS.paid]
+        );
+
+        const affectedVenueIds = await syncUserAdPackageAssignments(requesterUserId, null, client);
+
+        await client.query('COMMIT');
+
+        invalidatePublicVenueCachesByVenueIds(affectedVenueIds);
+
+        return res.json({
+            success: true,
+            deactivatedTransactionId: String(transactionId),
+            coveredVenueCount: 0
+        });
+    } catch (error) {
+        if (client) {
+            try {
+                await client.query('ROLLBACK');
+            } catch {
+                // Ignore rollback failures during transaction deactivation.
+            }
+        }
+
+        console.error('Deactivate merchant ad package transaction error:', error);
+        return res.status(500).json({ message: 'Could not stop this package right now.' });
+    } finally {
+        client?.release();
+    }
+}
+
+async function getMerchantAdPackageCheckoutStatus(req, res) {
+    const transactionId = Number.parseInt(req.params?.transactionId, 10);
+    const requesterUserId = String(req.authUser?.id || '').trim();
+
+    if (!Number.isFinite(transactionId) || transactionId <= 0) {
+        return res.status(400).json({ message: 'Invalid transaction id.' });
+    }
+
+    if (!requesterUserId) {
+        return res.status(401).json({ message: 'Missing authentication context.' });
+    }
+
+    let client;
+
+    try {
+        client = await pool.connect();
+        await client.query('BEGIN');
+
+        const purchaseResult = await client.query(
+            `
+                SELECT
+                    purchases.id AS purchase_id,
+                    purchases.user_id AS purchase_user_id,
+                    purchases.ad_package_id AS purchase_package_id,
+                    purchases.purchased_at,
+                    purchases.activated_at,
+                    purchases.selected_at,
+                    purchases.expires_at,
+                    purchases.deleted_at,
+                    purchases.payment_status,
+                    purchases.payment_provider,
+                    purchases.payment_amount,
+                    purchases.payment_expires_at,
+                    purchases.payment_confirmed_at,
+                    purchases.paid_at,
+                    purchases.payment_cancelled_at,
+                    purchases.payment_reference,
+                    purchases.payment_payload,
+                    purchases.payos_order_code,
+                    purchases.payos_payment_link_id,
+                    purchases.payos_checkout_url,
+                    purchases.payos_status,
+                    packages.id AS package_id,
+                    packages.name AS package_name,
+                    packages.description AS package_description,
+                    packages.duration_hours AS package_duration_hours,
+                    packages.priority_level AS package_priority_level,
+                    packages.price AS package_price,
+                    packages.status AS package_status,
+                    packages.created_at AS package_created_at,
+                    packages.updated_at AS package_updated_at
+                FROM ad_package_purchase_history AS purchases
+                JOIN ad_packages AS packages
+                  ON packages.id = purchases.ad_package_id
+                WHERE purchases.id = $1
+                  AND purchases.user_id = $2::uuid
+                  AND purchases.deleted_at IS NULL
+                LIMIT 1
+            `,
+            [transactionId, requesterUserId]
+        );
+
+        if (!purchaseResult.rows.length) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ message: 'Transaction not found.' });
+        }
+
+        let mappedPurchase = mapAdPackageHistoryRow(purchaseResult.rows[0]);
+        if (mappedPurchase?.paymentStatus === AD_PACKAGE_PAYMENT_STATUS.paid) {
+            await client.query('COMMIT');
+            return res.json({
+                success: true,
+                purchase: mappedPurchase,
+                isPaid: true
+            });
+        }
+
+        const payosIdentifier = mappedPurchase?.payosPaymentLinkId || mappedPurchase?.payosOrderCode;
+        if (!payosIdentifier) {
+            await client.query('COMMIT');
+            return res.json({
+                success: true,
+                purchase: mappedPurchase,
+                isPaid: false
+            });
+        }
+
+        let paymentSnapshot;
+        try {
+            paymentSnapshot = await fetchPayOsPaymentLink(payosIdentifier);
+        } catch (payosError) {
+            await client.query('ROLLBACK');
+            console.error('Fetch PayOS payment status error:', payosError?.response?.data || payosError?.message || payosError);
+            return res.status(502).json({ message: 'Could not verify payment status right now.' });
+        }
+
+        const paymentData = paymentSnapshot?.data || {};
+        const payosStatus = String(paymentData?.status || '').trim().toUpperCase();
+
+        if (payosStatus === 'PAID') {
+            const markedPurchase = await markAdPackagePurchaseAsPaid(transactionId, paymentData, client);
+            await client.query('COMMIT');
+            invalidatePublicVenueCachesByVenueIds(markedPurchase?.affectedVenueIds || []);
+
+            return res.json({
+                success: true,
+                purchase: markedPurchase?.purchase || mappedPurchase,
+                isPaid: true
+            });
+        }
+
+        if (payosStatus === 'CANCELLED') {
+            await client.query(
+                `
+                    UPDATE ad_package_purchase_history
+                    SET payment_status = $2,
+                        payment_cancelled_at = COALESCE(payment_cancelled_at, NOW()),
+                        payos_status = $3,
+                        payment_payload = COALESCE($4::jsonb, payment_payload),
+                        updated_at = NOW()
+                    WHERE id = $1
+                `,
+                [transactionId, AD_PACKAGE_PAYMENT_STATUS.cancelled, payosStatus, JSON.stringify(paymentData)]
+            );
+        } else {
+            await client.query(
+                `
+                    UPDATE ad_package_purchase_history
+                    SET payos_status = $2,
+                        payment_payload = COALESCE($3::jsonb, payment_payload),
+                        updated_at = NOW()
+                    WHERE id = $1
+                `,
+                [transactionId, payosStatus || 'PENDING', JSON.stringify(paymentData)]
+            );
+        }
+
+        const refreshedPurchaseResult = await client.query(
+            `
+                SELECT
+                    purchases.id AS purchase_id,
+                    purchases.user_id AS purchase_user_id,
+                    purchases.ad_package_id AS purchase_package_id,
+                    purchases.purchased_at,
+                    purchases.activated_at,
+                    purchases.selected_at,
+                    purchases.expires_at,
+                    purchases.deleted_at,
+                    purchases.payment_status,
+                    purchases.payment_provider,
+                    purchases.payment_amount,
+                    purchases.payment_expires_at,
+                    purchases.payment_confirmed_at,
+                    purchases.paid_at,
+                    purchases.payment_cancelled_at,
+                    purchases.payment_reference,
+                    purchases.payment_payload,
+                    purchases.payos_order_code,
+                    purchases.payos_payment_link_id,
+                    purchases.payos_checkout_url,
+                    purchases.payos_status,
+                    packages.id AS package_id,
+                    packages.name AS package_name,
+                    packages.description AS package_description,
+                    packages.duration_hours AS package_duration_hours,
+                    packages.priority_level AS package_priority_level,
+                    packages.price AS package_price,
+                    packages.status AS package_status,
+                    packages.created_at AS package_created_at,
+                    packages.updated_at AS package_updated_at
+                FROM ad_package_purchase_history AS purchases
+                JOIN ad_packages AS packages
+                  ON packages.id = purchases.ad_package_id
+                WHERE purchases.id = $1
+                LIMIT 1
+            `,
+            [transactionId]
+        );
+
+        mappedPurchase = mapAdPackageHistoryRow(refreshedPurchaseResult.rows[0]);
+        await client.query('COMMIT');
+
+        return res.json({
+            success: true,
+            purchase: mappedPurchase,
+            isPaid: mappedPurchase?.paymentStatus === AD_PACKAGE_PAYMENT_STATUS.paid
+        });
+    } catch (error) {
+        if (client) {
+            try {
+                await client.query('ROLLBACK');
+            } catch {
+                // Ignore rollback failures during checkout status verification.
+            }
+        }
+        console.error('Get merchant ad package checkout status error:', error);
+        return res.status(500).json({ message: 'Could not load checkout status right now.' });
+    } finally {
+        client?.release();
+    }
+}
+
+async function handlePayOsWebhook(req, res) {
+    const webhookSignature = String(req.body?.signature || '').trim();
+    const webhookData = req.body?.data;
+
+    if (!webhookSignature || !webhookData || typeof webhookData !== 'object') {
+        return res.status(400).json({ message: 'Invalid webhook payload.' });
+    }
+
+    if (!verifyPayOsWebhookSignature(webhookData, webhookSignature)) {
+        return res.status(400).json({ message: 'Invalid webhook signature.' });
+    }
+
+    const orderCode = Number.parseInt(webhookData?.orderCode, 10);
+    const paymentLinkId = String(webhookData?.paymentLinkId || '').trim();
+
+    let client;
+
+    try {
+        client = await pool.connect();
+        await client.query('BEGIN');
+
+        const purchaseResult = await client.query(
+            `
+                SELECT id
+                FROM ad_package_purchase_history
+                WHERE deleted_at IS NULL
+                  AND (
+                    ($1::bigint IS NOT NULL AND payos_order_code = $1::bigint)
+                    OR ($2 <> '' AND payos_payment_link_id = $2)
+                  )
+                ORDER BY id DESC
+                LIMIT 1
+            `,
+            [Number.isFinite(orderCode) ? orderCode : null, paymentLinkId]
+        );
+
+        if (!purchaseResult.rows.length) {
+            await client.query('COMMIT');
+            return res.status(200).json({ success: true, ignored: true });
+        }
+
+        const webhookCode = String(webhookData?.code || req.body?.code || '').trim();
+        const payosStatus = String(webhookData?.status || '').trim().toUpperCase();
+
+        if (webhookCode === PAYOS_SUCCESS_CODE && payosStatus === 'PAID') {
+            const markedPurchase = await markAdPackagePurchaseAsPaid(
+                purchaseResult.rows[0].id,
+                webhookData,
+                client
+            );
+            await client.query('COMMIT');
+            invalidatePublicVenueCachesByVenueIds(markedPurchase?.affectedVenueIds || []);
+            return res.status(200).json({ success: true });
+        }
+
+        await client.query(
+            `
+                UPDATE ad_package_purchase_history
+                SET payment_status = CASE
+                        WHEN $2 = 'CANCELLED' THEN $3
+                        WHEN $2 = 'FAILED' THEN $4
+                        ELSE payment_status
+                    END,
+                    payos_status = COALESCE($2, payos_status),
+                    payment_payload = COALESCE($5::jsonb, payment_payload),
+                    payment_cancelled_at = CASE
+                        WHEN $2 = 'CANCELLED' THEN COALESCE(payment_cancelled_at, NOW())
+                        ELSE payment_cancelled_at
+                    END,
+                    updated_at = NOW()
+                WHERE id = $1
+            `,
+            [
+                purchaseResult.rows[0].id,
+                payosStatus || null,
+                AD_PACKAGE_PAYMENT_STATUS.cancelled,
+                AD_PACKAGE_PAYMENT_STATUS.failed,
+                JSON.stringify(webhookData)
+            ]
+        );
+
+        await client.query('COMMIT');
+        return res.status(200).json({ success: true });
+    } catch (error) {
+        if (client) {
+            try {
+                await client.query('ROLLBACK');
+            } catch {
+                // Ignore rollback failures during webhook handling.
+            }
+        }
+        console.error('PayOS webhook error:', error);
+        return res.status(500).json({ message: 'Could not process payment webhook.' });
+    } finally {
+        client?.release();
+    }
+}
+
+function toTrendTimestamp(value) {
+    if (!value) {
+        return null;
+    }
+
+    const parsed = value instanceof Date ? value : new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function normalizeTrendClickToken(value) {
+    const normalized = String(value || '').trim();
+    return normalized ? normalized.slice(0, 96) : null;
+}
+
+function buildTrendAssignmentStatePayload(assignmentRow, trendingConfig) {
+    const pushLimit = Math.max(1, Math.trunc(Number(trendingConfig?.pushLimit) || AD_TREND_DEFAULT_PUSH_LIMIT));
+    const displayHours = Math.max(1, Math.trunc(Number(trendingConfig?.displayHours) || AD_TREND_DEFAULT_DISPLAY_HOURS));
+    const pushCountUsed = Math.max(0, Math.trunc(Number(assignmentRow?.trend_push_count_used) || 0));
+    const pushesRemaining = Math.max(0, pushLimit - pushCountUsed);
+    const nowMs = Date.now();
+
+    const activeFromDate = toTrendTimestamp(assignmentRow?.trend_active_from);
+    const activeUntilDate = toTrendTimestamp(assignmentRow?.trend_active_until);
+    const cooldownUntilDate = toTrendTimestamp(assignmentRow?.trend_cooldown_until);
+
+    const isAdvertising = Boolean(activeUntilDate && activeUntilDate.getTime() > nowMs);
+    const isCoolingDown = Boolean(cooldownUntilDate && cooldownUntilDate.getTime() > nowMs);
+    const nextPushAtDate = isCoolingDown
+        ? cooldownUntilDate
+        : (activeUntilDate && activeUntilDate.getTime() > nowMs ? activeUntilDate : null);
+
+    return {
+        pushLimit,
+        displayHours,
+        pushCountUsed,
+        pushesRemaining,
+        isAdvertising,
+        isCoolingDown,
+        activeFrom: activeFromDate ? activeFromDate.toISOString() : null,
+        activeUntil: activeUntilDate ? activeUntilDate.toISOString() : null,
+        cooldownUntil: cooldownUntilDate ? cooldownUntilDate.toISOString() : null,
+        nextPushAt: nextPushAtDate ? nextPushAtDate.toISOString() : null
+    };
+}
+
+function calculateTrendCtrPercent(clicks, impressions) {
+    const safeClicks = Math.max(0, Number(clicks) || 0);
+    const safeImpressions = Math.max(0, Number(impressions) || 0);
+
+    if (safeImpressions <= 0) {
+        return 0;
+    }
+
+    return Number(((safeClicks / safeImpressions) * 100).toFixed(2));
+}
+
+async function bumpTrendMetricsDaily(assignmentIds, { clicks = 0, impressions = 0 } = {}) {
+    const clickDelta = Math.max(0, Math.trunc(Number(clicks) || 0));
+    const impressionDelta = Math.max(0, Math.trunc(Number(impressions) || 0));
+
+    if (!clickDelta && !impressionDelta) {
+        return;
+    }
+
+    const normalizedIds = [...new Set(
+        (Array.isArray(assignmentIds) ? assignmentIds : [])
+            .map((value) => Number.parseInt(value, 10))
+            .filter((value) => Number.isFinite(value) && value > 0)
+    )];
+
+    if (!normalizedIds.length) {
+        return;
+    }
+
+    await pool.query(
+        `
+            WITH assignment_ids AS (
+                SELECT DISTINCT UNNEST($1::bigint[]) AS assignment_id
+            )
+            INSERT INTO ad_trend_metrics_daily (
+                assignment_id,
+                metric_date,
+                clicks,
+                impressions,
+                created_at,
+                updated_at
+            )
+            SELECT
+                assignment_id,
+                CURRENT_DATE,
+                $2::int,
+                $3::int,
+                NOW(),
+                NOW()
+            FROM assignment_ids
+            ON CONFLICT (assignment_id, metric_date)
+            DO UPDATE
+            SET clicks = ad_trend_metrics_daily.clicks + EXCLUDED.clicks,
+                impressions = ad_trend_metrics_daily.impressions + EXCLUDED.impressions,
+                updated_at = NOW()
+        `,
+        [normalizedIds, clickDelta, impressionDelta]
+    );
+}
+
+async function listPublicTrendingVenues(req, res) {
+    const requestedLimit = Number.parseInt(req.query?.limit, 10);
+    const limit = Number.isFinite(requestedLimit)
+        ? Math.max(1, Math.min(24, requestedLimit))
+        : 10;
+
+    try {
+        const trendingResult = await pool.query(
+            `
+                SELECT
+                    assignments.id AS assignment_id,
+                    assignments.trend_active_from,
+                    assignments.trend_active_until,
+                    assignments.trend_cooldown_until,
+                    assignments.trend_push_count_used,
+                    packages.id,
+                    packages.name,
+                    packages.description,
+                    packages.duration_hours,
+                    packages.priority_level,
+                    packages.status,
+                    packages.created_at,
+                    packages.updated_at,
+                    venues.id AS venue_id,
+                    COALESCE(venues.title, venues.name, CONCAT('Venue #', venues.id::text)) AS venue_name,
+                    COALESCE(venues.address, '') AS venue_address,
+                    venues.latitude,
+                    venues.longitude,
+                    venues.ward_id,
+                    wards.name AS ward_name,
+                    venues.category_id,
+                    venues.description AS venue_description,
+                    ${buildSanitizedInlineAssetSql('venues.cover_image_url', 'cover_image_url')},
+                    venue_primary_image.image_url AS venue_primary_image_url,
+                    ${buildSanitizedMetadataSql('venues.metadata', 'metadata')},
+                    venues.status::text AS venue_status
+                FROM ad_package_assignments AS assignments
+                JOIN ad_packages AS packages
+                  ON packages.id = assignments.ad_package_id
+                JOIN venues
+                  ON venues.id = assignments.venue_id
+                JOIN LATERAL (
+                    ${buildCurrentActiveAdPackagePurchaseSubquery('assignments.user_id')}
+                ) AS active_purchase
+                  ON active_purchase.ad_package_id = assignments.ad_package_id
+                LEFT JOIN wards
+                  ON wards.ward_id = venues.ward_id
+                LEFT JOIN LATERAL (
+                    SELECT image_url
+                    FROM venue_images
+                    WHERE venue_id = venues.id
+                    ORDER BY display_order ASC, id ASC
+                    LIMIT 1
+                ) AS venue_primary_image ON true
+                WHERE COALESCE(packages.status::text, 'active') = 'active'
+                  AND assignments.trend_active_until IS NOT NULL
+                  AND assignments.trend_active_until > NOW()
+                  AND (assignments.trend_active_from IS NULL OR assignments.trend_active_from <= NOW())
+                  AND LOWER(COALESCE(venues.status::text, '')) = 'approved'
+                ORDER BY RANDOM(), assignments.updated_at DESC
+                LIMIT $1
+            `,
+            [limit]
+        );
+
+        const venues = [];
+        const assignmentIds = [];
+
+        trendingResult.rows.forEach((row) => {
+            const mappedPackage = mapAdPackageRow(row);
+            const trendingConfig = resolveTrendingFeatureConfig(mappedPackage.features || {});
+
+            if (!trendingConfig) {
+                return;
+            }
+
+            const trendState = buildTrendAssignmentStatePayload(row, trendingConfig);
+            const normalizedVenue = normalizeVenueCoordinates(row);
+            const imageUrls = extractVenueImageUrls(row);
+
+            venues.push({
+                id: Number(row.venue_id),
+                name: row.venue_name,
+                address: row.venue_address,
+                description: row.venue_description || '',
+                ward_id: row.ward_id || null,
+                ward_name: row.ward_name || '',
+                category_id: Number(row.category_id) || null,
+                latitude: normalizedVenue.latitude,
+                longitude: normalizedVenue.longitude,
+                cover_image_url: row.cover_image_url || imageUrls[0] || null,
+                image: row.cover_image_url || imageUrls[0] || null,
+                metadata: normalizeVenueMetadataObject(row.metadata),
+                featuredPromotion: buildFeaturedVenuePromotionPayload(row),
+                trendPromotion: {
+                    assignmentId: String(row.assignment_id),
+                    activeFrom: trendState.activeFrom,
+                    activeUntil: trendState.activeUntil,
+                    displayHours: trendState.displayHours,
+                    pushCountUsed: trendState.pushCountUsed
+                }
+            });
+
+            assignmentIds.push(row.assignment_id);
+        });
+
+        if (assignmentIds.length) {
+            bumpTrendMetricsDaily(assignmentIds, { impressions: 1 }).catch((error) => {
+                console.error('Trend impressions update error:', error);
+            });
+        }
+
+        return res.json({ venues });
+    } catch (error) {
+        console.error('List public trending venues error:', error);
+        return res.status(500).json({ message: 'Could not load trending venues right now.' });
+    }
+}
+
+async function trackPublicTrendingClick(req, res) {
+    const assignmentId = Number.parseInt(req.params?.assignmentId, 10);
+    const userId = req.authUser?.id ? String(req.authUser.id).trim() : null;
+    const source = String(req.body?.source || req.query?.source || 'overview').trim().slice(0, 32) || 'overview';
+    const clickToken = normalizeTrendClickToken(req.body?.clickToken || req.query?.clickToken);
+
+    if (!Number.isFinite(assignmentId) || assignmentId <= 0) {
+        return res.status(400).json({ message: 'Invalid trending promotion id.' });
+    }
+
+    try {
+        const assignmentResult = await pool.query(
+            `
+                SELECT
+                    assignments.id,
+                    assignments.venue_id,
+                    assignments.user_id,
+                    packages.id AS package_id,
+                    packages.name,
+                    packages.description,
+                    packages.duration_hours,
+                    packages.priority_level,
+                    packages.status,
+                    packages.created_at,
+                    packages.updated_at
+                FROM ad_package_assignments AS assignments
+                JOIN ad_packages AS packages
+                  ON packages.id = assignments.ad_package_id
+                JOIN venues
+                  ON venues.id = assignments.venue_id
+                JOIN LATERAL (
+                    ${buildCurrentActiveAdPackagePurchaseSubquery('assignments.user_id')}
+                ) AS active_purchase
+                  ON active_purchase.ad_package_id = assignments.ad_package_id
+                WHERE assignments.id = $1
+                  AND COALESCE(packages.status::text, 'active') = 'active'
+                  AND LOWER(COALESCE(venues.status::text, '')) = 'approved'
+                LIMIT 1
+            `,
+            [assignmentId]
+        );
+
+        if (!assignmentResult.rows.length) {
+            return res.status(404).json({ message: 'Promotion assignment not found.' });
+        }
+
+        const ownerUserId = String(assignmentResult.rows[0]?.user_id || '').trim();
+        if (!userId || (ownerUserId && ownerUserId === userId)) {
+            return res.json({ success: true, counted: false });
+        }
+
+        const insertResult = await pool.query(
+            `
+                INSERT INTO ad_trend_click_events (
+                    assignment_id,
+                    venue_id,
+                    user_id,
+                    source,
+                    click_token,
+                    clicked_at
+                )
+                VALUES ($1, $2, $3, $4, $5, NOW())
+                ON CONFLICT (assignment_id, click_token)
+                WHERE click_token IS NOT NULL
+                DO NOTHING
+                RETURNING id
+            `,
+            [assignmentId, Number(assignmentResult.rows[0].venue_id) || null, userId, source, clickToken]
+        );
+
+        const shouldCountClick = clickToken ? insertResult.rows.length > 0 : true;
+
+        if (shouldCountClick) {
+            await bumpTrendMetricsDaily([assignmentId], { clicks: 1 });
+
+            if (!clickToken) {
+                await pool.query(
+                    `
+                        INSERT INTO ad_trend_click_events (
+                            assignment_id,
+                            venue_id,
+                            user_id,
+                            source,
+                            clicked_at
+                        )
+                        VALUES ($1, $2, $3, $4, NOW())
+                    `,
+                    [assignmentId, Number(assignmentResult.rows[0].venue_id) || null, userId, source]
+                );
+            }
+        }
+
+        return res.json({ success: true, counted: shouldCountClick });
+    } catch (error) {
+        console.error('Track trending click error:', error);
+        return res.status(500).json({ message: 'Could not track this click right now.' });
+    }
+}
+
+async function listMerchantTrendOverview(req, res) {
+    const requesterUserId = String(req.authUser?.id || '').trim();
+    const chartDays = clampAdTrendChartDays(req.query?.days);
+
+    if (!requesterUserId) {
+        return res.status(401).json({ message: 'Missing authentication context.' });
+    }
+
+    try {
+        const [activePurchase, assignmentsResult] = await Promise.all([
+            getLatestActiveUserAdPackagePurchase(requesterUserId),
+            pool.query(
+                `
+                    SELECT
+                        assignments.id AS assignment_id,
+                        assignments.user_id,
+                        assignments.venue_id,
+                        assignments.created_at,
+                        assignments.updated_at,
+                        assignments.trend_push_count_used,
+                        assignments.trend_active_from,
+                        assignments.trend_active_until,
+                        assignments.trend_cooldown_until,
+                        packages.id,
+                        packages.name,
+                        packages.description,
+                        packages.duration_hours,
+                        packages.priority_level,
+                        packages.status,
+                        packages.created_at AS package_created_at,
+                        packages.updated_at AS package_updated_at,
+                        COALESCE(venues.title, venues.name, CONCAT('Venue #', venues.id::text)) AS venue_name,
+                        COALESCE(venues.address, '') AS venue_address,
+                        COALESCE(venues.description, '') AS venue_description,
+                        venues.status::text AS venue_status,
+                        venues.category_id,
+                        venues.ward_id,
+                        wards.name AS ward_name,
+                        venues.latitude,
+                        venues.longitude,
+                        venues.metadata,
+                        venues.cover_image_url,
+                        venue_primary_image.image_url AS venue_primary_image_url
+                    FROM ad_package_assignments AS assignments
+                    JOIN ad_packages AS packages
+                      ON packages.id = assignments.ad_package_id
+                    JOIN venues
+                      ON venues.id = assignments.venue_id
+                    JOIN LATERAL (
+                        ${buildCurrentActiveAdPackagePurchaseSubquery('assignments.user_id')}
+                    ) AS active_purchase
+                      ON active_purchase.ad_package_id = assignments.ad_package_id
+                    LEFT JOIN wards
+                      ON wards.ward_id = venues.ward_id
+                    LEFT JOIN LATERAL (
+                        SELECT image_url
+                        FROM venue_images
+                        WHERE venue_id = venues.id
+                        ORDER BY display_order ASC, id ASC
+                        LIMIT 1
+                    ) AS venue_primary_image ON true
+                    WHERE assignments.user_id = $1
+                      AND COALESCE(packages.status::text, 'active') = 'active'
+                      AND LOWER(COALESCE(venues.status::text, '')) = 'approved'
+                    ORDER BY assignments.updated_at DESC, assignments.id DESC
+                `,
+                [requesterUserId]
+            )
+        ]);
+
+        const assignmentItems = assignmentsResult.rows
+            .map((row) => {
+                const mappedPackage = mapAdPackageRow({
+                    ...row,
+                    created_at: row.package_created_at,
+                    updated_at: row.package_updated_at
+                });
+                const trendingConfig = resolveTrendingFeatureConfig(mappedPackage.features || {});
+                const venueStatus = String(row.venue_status || '').trim().toLowerCase();
+
+                if (venueStatus === 'rejected' || venueStatus === 'deleted') {
+                    return null;
+                }
+
+                const imageUrls = extractVenueImageUrls({
+                    ...row,
+                    venue_images: row.venue_images || []
+                });
+                const normalizedVenue = normalizeVenueCoordinates(row);
+                const trendState = trendingConfig
+                    ? buildTrendAssignmentStatePayload(row, trendingConfig)
+                    : null;
+
+                return {
+                    assignmentId: Number(row.assignment_id),
+                    assignmentKey: String(row.assignment_id),
+                    venue: {
+                        id: Number(row.venue_id),
+                        name: row.venue_name,
+                        address: row.venue_address,
+                        description: row.venue_description,
+                        status: row.venue_status,
+                        wardId: row.ward_id || null,
+                        wardName: row.ward_name || '',
+                        categoryId: Number(row.category_id) || null,
+                        latitude: normalizedVenue.latitude,
+                        longitude: normalizedVenue.longitude,
+                        coverImageUrl: row.cover_image_url || imageUrls[0] || null
+                    },
+                    package: mappedPackage,
+                    supportsTrending: Boolean(trendingConfig),
+                    trendConfig: trendingConfig
+                        ? {
+                            pushLimit: Math.max(0, Number(trendingConfig.pushLimit) || 0),
+                            displayHours: Math.max(0, Number(trendingConfig.displayHours) || 0)
+                        }
+                        : null,
+                    trendState
+                };
+            })
+            .filter(Boolean);
+
+        const assignmentIds = assignmentItems.map((item) => item.assignmentId);
+        const impressionMetricsByAssignmentAndDate = new Map();
+        const chartClickMetricsByAssignmentAndDate = new Map();
+        const totalImpressionsByAssignment = new Map();
+        const totalClicksByAssignment = new Map();
+        const pushHistoryByAssignment = new Map();
+
+        if (assignmentIds.length) {
+            const [metricsResult, impressionTotalsResult, clickChartResult, clickTotalsResult, pushHistoryResult] = await Promise.all([
+                pool.query(
+                    `
+                        SELECT
+                            assignment_id,
+                            TO_CHAR(metric_date, 'YYYY-MM-DD') AS metric_date_key,
+                            impressions
+                        FROM ad_trend_metrics_daily
+                        WHERE assignment_id = ANY($1::bigint[])
+                          AND metric_date >= CURRENT_DATE - (($2::int - 1) * INTERVAL '1 day')
+                        ORDER BY metric_date ASC
+                    `,
+                    [assignmentIds, chartDays]
+                ),
+                pool.query(
+                    `
+                        SELECT
+                            assignment_id,
+                            SUM(impressions)::int AS total_impressions
+                        FROM ad_trend_metrics_daily
+                        WHERE assignment_id = ANY($1::bigint[])
+                        GROUP BY assignment_id
+                    `,
+                    [assignmentIds]
+                ),
+                pool.query(
+                    `
+                        SELECT
+                            assignment_id,
+                            TO_CHAR(clicked_at::date, 'YYYY-MM-DD') AS metric_date_key,
+                            COUNT(*)::int AS clicks
+                        FROM ad_trend_click_events
+                        WHERE assignment_id = ANY($1::bigint[])
+                          AND clicked_at::date >= CURRENT_DATE - (($2::int - 1) * INTERVAL '1 day')
+                        GROUP BY assignment_id, clicked_at::date
+                        ORDER BY clicked_at::date ASC
+                    `,
+                    [assignmentIds, chartDays]
+                ),
+                pool.query(
+                    `
+                        SELECT
+                            assignment_id,
+                            COUNT(*)::int AS total_clicks
+                        FROM ad_trend_click_events
+                        WHERE assignment_id = ANY($1::bigint[])
+                        GROUP BY assignment_id
+                    `,
+                    [assignmentIds]
+                ),
+                pool.query(
+                    `
+                        SELECT
+                            push_events.id,
+                            push_events.assignment_id,
+                            push_events.push_number,
+                            push_events.pushed_at,
+                            push_events.active_until,
+                            push_events.cooldown_until,
+                            COALESCE(click_totals.click_count, 0)::int AS click_count
+                        FROM ad_trend_push_events AS push_events
+                        LEFT JOIN LATERAL (
+                            SELECT COUNT(*)::int AS click_count
+                            FROM ad_trend_click_events AS click_events
+                            WHERE click_events.assignment_id = push_events.assignment_id
+                              AND click_events.clicked_at >= push_events.pushed_at
+                              AND click_events.clicked_at <= COALESCE(push_events.active_until, push_events.cooldown_until, NOW())
+                        ) AS click_totals ON true
+                        WHERE push_events.assignment_id = ANY($1::bigint[])
+                        ORDER BY push_events.pushed_at DESC, push_events.id DESC
+                    `,
+                    [assignmentIds]
+                )
+            ]);
+
+            metricsResult.rows.forEach((row) => {
+                const assignmentKey = String(row.assignment_id);
+                const dateKey = toDateOnlyKey(row.metric_date_key);
+                const impressions = Number(row.impressions) || 0;
+
+                if (!dateKey) {
+                    return;
+                }
+
+                impressionMetricsByAssignmentAndDate.set(
+                    `${assignmentKey}::${dateKey}`,
+                    { impressions }
+                );
+            });
+
+            impressionTotalsResult.rows.forEach((row) => {
+                totalImpressionsByAssignment.set(String(row.assignment_id), Number(row.total_impressions) || 0);
+            });
+
+            clickChartResult.rows.forEach((row) => {
+                const assignmentKey = String(row.assignment_id);
+                const dateKey = toDateOnlyKey(row.metric_date_key);
+                if (!dateKey) {
+                    return;
+                }
+
+                chartClickMetricsByAssignmentAndDate.set(
+                    `${assignmentKey}::${dateKey}`,
+                    {
+                        clicks: Number(row.clicks) || 0
+                    }
+                );
+            });
+
+            clickTotalsResult.rows.forEach((row) => {
+                totalClicksByAssignment.set(String(row.assignment_id), Number(row.total_clicks) || 0);
+            });
+
+            pushHistoryResult.rows.forEach((row) => {
+                const assignmentKey = String(row.assignment_id);
+                if (!pushHistoryByAssignment.has(assignmentKey)) {
+                    pushHistoryByAssignment.set(assignmentKey, []);
+                }
+
+                pushHistoryByAssignment.get(assignmentKey).push({
+                    id: String(row.id),
+                    pushNumber: Number(row.push_number) || 0,
+                    pushedAt: row.pushed_at || null,
+                    activeUntil: row.active_until || null,
+                    cooldownUntil: row.cooldown_until || null,
+                    clickCount: Number(row.click_count) || 0
+                });
+            });
+        }
+
+        const dateKeys = buildRecentDateOnlyKeys(chartDays);
+
+        const items = assignmentItems.map((assignment) => {
+            const chart = dateKeys.map((dateKey) => {
+                const clickMetric = chartClickMetricsByAssignmentAndDate.get(`${assignment.assignmentKey}::${dateKey}`) || { clicks: 0 };
+                const impressionMetric = impressionMetricsByAssignmentAndDate.get(`${assignment.assignmentKey}::${dateKey}`) || { impressions: 0 };
+                const clicks = Number(clickMetric.clicks) || 0;
+                const impressions = Number(impressionMetric.impressions) || 0;
+
+                return {
+                    date: dateKey,
+                    clicks,
+                    impressions,
+                    ctrPercent: calculateTrendCtrPercent(clicks, impressions)
+                };
+            });
+
+            const chartImpressions = chart.reduce((total, metric) => total + metric.impressions, 0);
+            const totalClicks = totalClicksByAssignment.get(assignment.assignmentKey) || 0;
+            const totalImpressions = totalImpressionsByAssignment.get(assignment.assignmentKey) || chartImpressions;
+            const storedPushHistory = pushHistoryByAssignment.get(assignment.assignmentKey) || [];
+            const pushHistory = assignment.supportsTrending && storedPushHistory.length
+                ? storedPushHistory
+                : (
+                    assignment.supportsTrending
+                    && assignment.trendState
+                    && assignment.trendState.pushCountUsed > 0
+                    && (assignment.trendState.activeFrom || assignment.trendState.activeUntil || assignment.trendState.cooldownUntil)
+                )
+                    ? [{
+                        id: `synthetic-${assignment.assignmentKey}`,
+                        pushNumber: assignment.trendState.pushCountUsed,
+                        pushedAt: assignment.trendState.activeFrom,
+                        activeUntil: assignment.trendState.activeUntil,
+                        cooldownUntil: assignment.trendState.cooldownUntil,
+                        clickCount: totalClicks
+                    }]
+                    : [];
+
+            return {
+                assignmentId: assignment.assignmentKey,
+                venue: assignment.venue,
+                package: assignment.package,
+                supportsTrending: assignment.supportsTrending,
+                trendConfig: assignment.trendConfig,
+                trendState: assignment.trendState,
+                pushHistory,
+                stats: {
+                    totalClicks,
+                    totalImpressions,
+                    ctrPercent: calculateTrendCtrPercent(totalClicks, totalImpressions),
+                    pushCountUsed: Number(assignment.trendState?.pushCountUsed) || 0,
+                    chart
+                }
+            };
+        });
+
+        return res.json({
+            days: chartDays,
+            dateKeys,
+            summary: {
+                activePackage: activePurchase?.package || items[0]?.package || null,
+                coveredVenueCount: items.length,
+                trendingEligibleVenueCount: items.filter((item) => item.supportsTrending).length
+            },
+            items
+        });
+    } catch (error) {
+        console.error('List merchant trend overview error:', error);
+        return res.status(500).json({ message: 'Could not load trend overview right now.' });
+    }
+}
+
+async function pushMerchantTrendVenue(req, res) {
+    const venueId = Number.parseInt(req.params?.venueId, 10);
+    const requesterUserId = String(req.authUser?.id || '').trim();
+    const requesterRole = normalizeRole(req.authUser?.role);
+
+    if (!Number.isFinite(venueId) || venueId <= 0) {
+        return res.status(400).json({ message: 'Invalid venue id.' });
+    }
+
+    if (!requesterUserId) {
+        return res.status(401).json({ message: 'Missing authentication context.' });
+    }
+
+    try {
+        const assignmentParams = requesterRole === 'admin'
+            ? [venueId]
+            : [venueId, requesterUserId];
+        const assignmentWhereClause = requesterRole === 'admin'
+            ? 'assignments.venue_id = $1'
+            : 'assignments.venue_id = $1 AND assignments.user_id = $2';
+
+        const assignmentResult = await pool.query(
+            `
+                SELECT
+                    assignments.id AS assignment_id,
+                    assignments.user_id,
+                    assignments.venue_id,
+                    assignments.trend_push_count_used,
+                    assignments.trend_active_from,
+                    assignments.trend_active_until,
+                    assignments.trend_cooldown_until,
+                    packages.id,
+                    packages.name,
+                    packages.description,
+                    packages.duration_hours,
+                    packages.priority_level,
+                    packages.status,
+                    packages.created_at,
+                    packages.updated_at,
+                    COALESCE(venues.title, venues.name, CONCAT('Venue #', venues.id::text)) AS venue_name,
+                    ${buildResolvedVenueOwnerUserSql('venues')} AS owner_user_id
+                FROM ad_package_assignments AS assignments
+                JOIN ad_packages AS packages
+                  ON packages.id = assignments.ad_package_id
+                JOIN venues
+                  ON venues.id = assignments.venue_id
+                JOIN LATERAL (
+                    ${buildCurrentActiveAdPackagePurchaseSubquery('assignments.user_id')}
+                ) AS active_purchase
+                  ON active_purchase.ad_package_id = assignments.ad_package_id
+                WHERE ${assignmentWhereClause}
+                  AND COALESCE(packages.status::text, 'active') = 'active'
+                  AND LOWER(COALESCE(venues.status::text, '')) = 'approved'
+                ORDER BY assignments.updated_at DESC
+                LIMIT 1
+            `,
+            assignmentParams
+        );
+
+        if (!assignmentResult.rows.length) {
+            return res.status(404).json({ message: 'No eligible ad package assignment found for this venue.' });
+        }
+
+        const assignmentRow = assignmentResult.rows[0];
+        const ownerUserId = String(assignmentRow.owner_user_id || '').trim();
+        if (requesterRole !== 'admin' && ownerUserId && ownerUserId !== requesterUserId) {
+            return res.status(403).json({ message: 'You can only push trending posts for your own venue.' });
+        }
+
+        const mappedPackage = mapAdPackageRow(assignmentRow);
+        const trendingConfig = resolveTrendingFeatureConfig(mappedPackage.features || {});
+        if (!trendingConfig) {
+            return res.status(400).json({ message: 'Selected package does not include Show in Trending.' });
+        }
+
+        const currentState = buildTrendAssignmentStatePayload(assignmentRow, trendingConfig);
+        if (currentState.isCoolingDown && currentState.nextPushAt) {
+            return res.status(409).json({
+                message: 'This post is cooling down and cannot be pushed yet.',
+                trendState: currentState
+            });
+        }
+
+        if (currentState.pushesRemaining <= 0) {
+            return res.status(409).json({
+                message: 'No trending pushes remaining for this package.',
+                trendState: currentState
+            });
+        }
+
+        const now = new Date();
+        const activeUntil = new Date(now.getTime() + (trendingConfig.displayHours * 60 * 60 * 1000));
+        const cooldownUntil = new Date(activeUntil.getTime() + (AD_TREND_PUSH_COOLDOWN_HOURS * 60 * 60 * 1000));
+
+        const updatedResult = await pool.query(
+            `
+                UPDATE ad_package_assignments
+                SET trend_push_count_used = COALESCE(trend_push_count_used, 0) + 1,
+                    trend_active_from = $2,
+                    trend_active_until = $3,
+                    trend_cooldown_until = $4,
+                    updated_at = NOW()
+                WHERE id = $1
+                  AND COALESCE(trend_push_count_used, 0) < $5
+                  AND (
+                      trend_cooldown_until IS NULL
+                      OR trend_cooldown_until <= $2::timestamptz
+                  )
+                RETURNING
+                    id AS assignment_id,
+                    trend_push_count_used,
+                    trend_active_from,
+                    trend_active_until,
+                    trend_cooldown_until
+            `,
+            [
+                assignmentRow.assignment_id,
+                now.toISOString(),
+                activeUntil.toISOString(),
+                cooldownUntil.toISOString(),
+                currentState.pushLimit
+            ]
+        );
+
+        if (!updatedResult.rows.length) {
+            const refreshedAssignmentResult = await pool.query(
+                `
+                    SELECT
+                        id AS assignment_id,
+                        trend_push_count_used,
+                        trend_active_from,
+                        trend_active_until,
+                        trend_cooldown_until
+                    FROM ad_package_assignments
+                    WHERE id = $1
+                    LIMIT 1
+                `,
+                [assignmentRow.assignment_id]
+            );
+
+            const refreshedState = refreshedAssignmentResult.rows.length
+                ? buildTrendAssignmentStatePayload(refreshedAssignmentResult.rows[0], trendingConfig)
+                : currentState;
+
+            if (refreshedState.isCoolingDown && refreshedState.nextPushAt) {
+                return res.status(409).json({
+                    message: 'This post is cooling down and cannot be pushed yet.',
+                    trendState: refreshedState
+                });
+            }
+
+            if (refreshedState.pushesRemaining <= 0) {
+                return res.status(409).json({
+                    message: 'No trending pushes remaining for this package.',
+                    trendState: refreshedState
+                });
+            }
+
+            return res.status(409).json({
+                message: 'This post cannot be pushed right now.',
+                trendState: refreshedState
+            });
+        }
+
+        await pool.query(
+            `
+                INSERT INTO ad_trend_push_events (
+                    assignment_id,
+                    venue_id,
+                    push_number,
+                    pushed_at,
+                    active_until,
+                    cooldown_until,
+                    created_at
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, NOW())
+            `,
+            [
+                assignmentRow.assignment_id,
+                venueId,
+                Number(updatedResult.rows[0]?.trend_push_count_used) || 0,
+                now.toISOString(),
+                activeUntil.toISOString(),
+                cooldownUntil.toISOString()
+            ]
+        );
+
+        const nextState = buildTrendAssignmentStatePayload(updatedResult.rows[0], trendingConfig);
+
+        return res.json({
+            success: true,
+            venueId: String(venueId),
+            assignmentId: String(assignmentRow.assignment_id),
+            venueName: assignmentRow.venue_name,
+            trendState: nextState
+        });
+    } catch (error) {
+        console.error('Push merchant trend venue error:', error);
+        return res.status(500).json({ message: 'Could not push this venue right now.' });
+    }
+}
+
+async function removeMerchantTrendVenue(req, res) {
+    const venueId = Number.parseInt(req.params?.venueId, 10);
+    const requesterUserId = String(req.authUser?.id || '').trim();
+
+    if (!Number.isFinite(venueId) || venueId <= 0) {
+        return res.status(400).json({ message: 'Invalid venue id.' });
+    }
+
+    if (!requesterUserId) {
+        return res.status(401).json({ message: 'Missing authentication context.' });
+    }
+
+    return res.status(409).json({
+        message: 'Account-wide packages cannot be removed from a single venue. Manage package purchases in Transaction History instead.',
+        venueId: String(venueId)
+    });
+}
+
 async function getAdminAdPackageStats(req, res) {
     const monthWindow = clampAdPackageStatsMonthWindow(req.query?.months);
 
     try {
         const packageRowsResult = await pool.query(
             `
-                SELECT id, name, description, duration_hours, priority_level, status, created_at, updated_at
+                SELECT id, name, description, duration_hours, priority_level, price, status, created_at, updated_at
                 FROM ad_packages
                 WHERE COALESCE(status::text, 'active') = 'active'
                 ORDER BY created_at DESC, id DESC
@@ -934,6 +3712,251 @@ async function getAdminAdPackageStats(req, res) {
     } catch (error) {
         console.error('Get admin ad package stats error:', error);
         return res.status(500).json({ message: 'Could not load ad package statistics right now.' });
+    }
+}
+
+async function getAdminRevenueReport(req, res) {
+    const monthWindow = clampAdPackageStatsMonthWindow(req.query?.months);
+    const monthKeys = buildAdPackageMonthKeys(monthWindow);
+
+    try {
+        const revenueByMonthResult = await pool.query(
+            `
+                SELECT
+                    TO_CHAR(DATE_TRUNC('month', COALESCE(paid_at, payment_confirmed_at, activated_at, purchased_at)), 'YYYY-MM') AS month_key,
+                    COALESCE(SUM(payment_amount), 0)::bigint AS revenue_total,
+                    COUNT(*)::int AS transaction_count
+                FROM ad_package_purchase_history
+                WHERE deleted_at IS NULL
+                  AND COALESCE(payment_status, '${AD_PACKAGE_PAYMENT_STATUS.paid}') = '${AD_PACKAGE_PAYMENT_STATUS.paid}'
+                  AND COALESCE(paid_at, payment_confirmed_at, activated_at, purchased_at) >= DATE_TRUNC('month', CURRENT_DATE) - (($1::int - 1) * INTERVAL '1 month')
+                GROUP BY month_key
+                ORDER BY month_key ASC
+            `,
+            [monthWindow]
+        );
+
+        const packageRevenueResult = await pool.query(
+            `
+                SELECT
+                    packages.id::text AS package_id,
+                    packages.name AS package_name,
+                    packages.description AS package_description,
+                    packages.duration_hours AS package_duration_hours,
+                    packages.priority_level AS package_priority_level,
+                    packages.price AS package_price,
+                    COUNT(purchases.id)::int AS paid_count,
+                    COALESCE(SUM(purchases.payment_amount), 0)::bigint AS revenue_total,
+                    COUNT(DISTINCT purchases.user_id)::int AS merchant_count,
+                    COUNT(DISTINCT CASE
+                        WHEN purchases.expires_at IS NOT NULL
+                          AND purchases.expires_at > NOW()
+                        THEN purchases.user_id
+                        ELSE NULL
+                    END)::int AS active_merchant_count,
+                    COALESCE(MAX(COALESCE(purchases.paid_at, purchases.payment_confirmed_at, purchases.activated_at, purchases.purchased_at)), NULL) AS last_paid_at
+                FROM ad_packages AS packages
+                LEFT JOIN ad_package_purchase_history AS purchases
+                  ON purchases.ad_package_id = packages.id
+                 AND purchases.deleted_at IS NULL
+                 AND COALESCE(purchases.payment_status, '${AD_PACKAGE_PAYMENT_STATUS.paid}') = '${AD_PACKAGE_PAYMENT_STATUS.paid}'
+                WHERE COALESCE(packages.status::text, 'active') = 'active'
+                GROUP BY packages.id, packages.name, packages.description, packages.duration_hours, packages.priority_level, packages.price
+                ORDER BY revenue_total DESC, paid_count DESC, package_name ASC
+            `
+        );
+
+        const packageRevenueByMonthResult = await pool.query(
+            `
+                SELECT
+                    purchases.ad_package_id::text AS package_id,
+                    TO_CHAR(DATE_TRUNC('month', COALESCE(purchases.paid_at, purchases.payment_confirmed_at, purchases.activated_at, purchases.purchased_at)), 'YYYY-MM') AS month_key,
+                    COALESCE(SUM(purchases.payment_amount), 0)::bigint AS revenue_total
+                FROM ad_package_purchase_history AS purchases
+                WHERE purchases.deleted_at IS NULL
+                  AND COALESCE(purchases.payment_status, '${AD_PACKAGE_PAYMENT_STATUS.paid}') = '${AD_PACKAGE_PAYMENT_STATUS.paid}'
+                  AND COALESCE(purchases.paid_at, purchases.payment_confirmed_at, purchases.activated_at, purchases.purchased_at) >= DATE_TRUNC('month', CURRENT_DATE) - (($1::int - 1) * INTERVAL '1 month')
+                GROUP BY package_id, month_key
+            `,
+            [monthWindow]
+        );
+
+        const statusBreakdownResult = await pool.query(
+            `
+                SELECT
+                    COALESCE(NULLIF(BTRIM(payment_status), ''), '${AD_PACKAGE_PAYMENT_STATUS.paid}') AS status,
+                    COUNT(*)::int AS total
+                FROM ad_package_purchase_history
+                WHERE deleted_at IS NULL
+                GROUP BY status
+            `
+        );
+
+        const activeAssignmentsResult = await pool.query(
+            `
+                SELECT
+                    ad_package_id::text AS package_id,
+                    COUNT(*)::int AS total
+                FROM ad_package_assignments
+                GROUP BY ad_package_id
+            `
+        );
+
+        const recentPaymentsResult = await pool.query(
+            `
+                SELECT
+                    purchases.id AS purchase_id,
+                    purchases.payment_amount,
+                    purchases.paid_at,
+                    purchases.payment_reference,
+                    purchases.payos_order_code,
+                    packages.id AS package_id,
+                    packages.name AS package_name,
+                    packages.description AS package_description,
+                    packages.duration_hours AS package_duration_hours,
+                    packages.priority_level AS package_priority_level,
+                    packages.price AS package_price,
+                    users.id AS user_id,
+                    COALESCE(users.fullname, users.username, users.email, 'Unknown merchant') AS user_name,
+                    users.email AS user_email
+                FROM ad_package_purchase_history AS purchases
+                JOIN ad_packages AS packages
+                  ON packages.id = purchases.ad_package_id
+                LEFT JOIN users
+                  ON users.id = purchases.user_id
+                WHERE purchases.deleted_at IS NULL
+                  AND COALESCE(purchases.payment_status, '${AD_PACKAGE_PAYMENT_STATUS.paid}') = '${AD_PACKAGE_PAYMENT_STATUS.paid}'
+                ORDER BY COALESCE(purchases.paid_at, purchases.payment_confirmed_at, purchases.activated_at, purchases.purchased_at) DESC, purchases.id DESC
+                LIMIT 8
+            `
+        );
+
+        const allTimeRevenueResult = await pool.query(
+            `
+                SELECT
+                    COALESCE(SUM(payment_amount), 0)::bigint AS revenue_total,
+                    COUNT(*)::int AS paid_count
+                FROM ad_package_purchase_history
+                WHERE deleted_at IS NULL
+                  AND COALESCE(payment_status, '${AD_PACKAGE_PAYMENT_STATUS.paid}') = '${AD_PACKAGE_PAYMENT_STATUS.paid}'
+            `
+        );
+
+        const revenueMonthMap = new Map();
+        revenueByMonthResult.rows.forEach((row) => {
+            revenueMonthMap.set(String(row.month_key), {
+                revenue: Number(row.revenue_total) || 0,
+                transactions: Number(row.transaction_count) || 0
+            });
+        });
+
+        const packageRevenueMonthMap = new Map();
+        packageRevenueByMonthResult.rows.forEach((row) => {
+            packageRevenueMonthMap.set(
+                `${row.package_id}::${row.month_key}`,
+                Number(row.revenue_total) || 0
+            );
+        });
+
+        const activeAssignmentMap = new Map();
+        activeAssignmentsResult.rows.forEach((row) => {
+            activeAssignmentMap.set(String(row.package_id), Number(row.total) || 0);
+        });
+
+        const packageRows = packageRevenueResult.rows.map((row) => {
+            const mappedPackage = mapAdPackageRow({
+                id: row.package_id,
+                name: row.package_name,
+                description: row.package_description,
+                duration_hours: row.package_duration_hours,
+                priority_level: row.package_priority_level,
+                price: row.package_price
+            });
+
+            return {
+                packageId: mappedPackage.id,
+                packageName: mappedPackage.name,
+                tier: mappedPackage.tier,
+                price: mappedPackage.price,
+                paidCount: Number(row.paid_count) || 0,
+                revenue: Number(row.revenue_total) || 0,
+                merchantCount: Number(row.merchant_count) || 0,
+                activeMerchantCount: Number(row.active_merchant_count) || 0,
+                activeAssignmentCount: activeAssignmentMap.get(mappedPackage.id) || 0,
+                lastPaidAt: row.last_paid_at || null,
+                revenueByMonth: monthKeys.map((monthKey) => packageRevenueMonthMap.get(`${mappedPackage.id}::${monthKey}`) || 0)
+            };
+        });
+
+        const revenueSeries = monthKeys.map((monthKey) => ({
+            month: monthKey,
+            revenue: revenueMonthMap.get(monthKey)?.revenue || 0,
+            transactions: revenueMonthMap.get(monthKey)?.transactions || 0
+        }));
+
+        const totalRevenueInWindow = revenueSeries.reduce((total, row) => total + row.revenue, 0);
+        const totalTransactionsInWindow = revenueSeries.reduce((total, row) => total + row.transactions, 0);
+        const paidTransactionsAllTime = Number(allTimeRevenueResult.rows[0]?.paid_count) || 0;
+        const totalRevenueAllTime = Number(allTimeRevenueResult.rows[0]?.revenue_total) || 0;
+        const topPackage = packageRows
+            .slice()
+            .sort((first, second) => {
+                if (second.revenue !== first.revenue) {
+                    return second.revenue - first.revenue;
+                }
+
+                return second.paidCount - first.paidCount;
+            })[0] || null;
+
+        return res.json({
+            months: monthKeys,
+            revenueSeries,
+            packageRows,
+            statusBreakdown: statusBreakdownResult.rows.map((row) => ({
+                status: String(row.status || '').trim() || AD_PACKAGE_PAYMENT_STATUS.pending,
+                total: Number(row.total) || 0
+            })),
+            recentPayments: recentPaymentsResult.rows.map((row) => ({
+                id: String(row.purchase_id),
+                amount: normalizeAdPackagePrice(row.payment_amount) ?? 0,
+                paidAt: row.paid_at || null,
+                paymentReference: row.payment_reference || '',
+                orderCode: row.payos_order_code ? String(row.payos_order_code) : '',
+                package: {
+                    id: String(row.package_id),
+                    name: row.package_name,
+                    price: normalizeAdPackagePrice(row.package_price) ?? 0,
+                    tier: mapAdPackageRow({
+                        id: row.package_id,
+                        name: row.package_name,
+                        description: row.package_description,
+                        duration_hours: row.package_duration_hours,
+                        priority_level: row.package_priority_level,
+                        price: row.package_price
+                    }).tier
+                },
+                merchant: {
+                    id: row.user_id ? String(row.user_id) : '',
+                    name: row.user_name,
+                    email: row.user_email || ''
+                }
+            })),
+            overview: {
+                totalRevenueInWindow,
+                totalRevenueAllTime,
+                totalTransactionsInWindow,
+                paidTransactionsAllTime,
+                averageOrderValue: totalTransactionsInWindow
+                    ? Math.round(totalRevenueInWindow / totalTransactionsInWindow)
+                    : 0,
+                activeAssignments: Array.from(activeAssignmentMap.values()).reduce((total, value) => total + value, 0),
+                activePackagesSold: packageRows.filter((row) => row.paidCount > 0).length,
+                topPackage
+            }
+        });
+    } catch (error) {
+        console.error('Get admin revenue report error:', error);
+        return res.status(500).json({ message: 'Could not load revenue report right now.' });
     }
 }
 
@@ -2702,6 +5725,282 @@ async function generateWardIdFromName(name) {
             `
                 CREATE INDEX IF NOT EXISTS ad_package_assignments_user_venue_idx
                 ON ad_package_assignments(user_id, venue_id)
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                ALTER TABLE IF EXISTS ad_package_assignments
+                ADD COLUMN IF NOT EXISTS trend_push_count_used INTEGER NOT NULL DEFAULT 0,
+                ADD COLUMN IF NOT EXISTS trend_active_from TIMESTAMPTZ,
+                ADD COLUMN IF NOT EXISTS trend_active_until TIMESTAMPTZ,
+                ADD COLUMN IF NOT EXISTS trend_cooldown_until TIMESTAMPTZ
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                CREATE INDEX IF NOT EXISTS ad_package_assignments_trend_active_until_idx
+                ON ad_package_assignments(trend_active_until DESC)
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                CREATE TABLE IF NOT EXISTS ad_package_purchase_history (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    ad_package_id BIGINT NOT NULL REFERENCES ad_packages(id) ON DELETE CASCADE,
+                    purchased_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    deleted_at TIMESTAMPTZ,
+                    merchant_hidden_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                CREATE INDEX IF NOT EXISTS ad_package_purchase_history_user_purchased_idx
+                ON ad_package_purchase_history(user_id, purchased_at DESC)
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                CREATE INDEX IF NOT EXISTS ad_package_purchase_history_active_user_idx
+                ON ad_package_purchase_history(user_id, deleted_at, purchased_at DESC)
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                ALTER TABLE IF EXISTS ad_package_purchase_history
+                ADD COLUMN IF NOT EXISTS activated_at TIMESTAMPTZ;
+
+                ALTER TABLE IF EXISTS ad_package_purchase_history
+                ADD COLUMN IF NOT EXISTS selected_at TIMESTAMPTZ;
+
+                ALTER TABLE IF EXISTS ad_package_purchase_history
+                ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+
+                ALTER TABLE IF EXISTS ad_package_purchase_history
+                ADD COLUMN IF NOT EXISTS merchant_hidden_at TIMESTAMPTZ;
+
+                ALTER TABLE IF EXISTS ad_package_purchase_history
+                ADD COLUMN IF NOT EXISTS payment_status TEXT NOT NULL DEFAULT 'paid';
+
+                ALTER TABLE IF EXISTS ad_package_purchase_history
+                ADD COLUMN IF NOT EXISTS payment_provider TEXT NOT NULL DEFAULT 'manual';
+
+                ALTER TABLE IF EXISTS ad_package_purchase_history
+                ADD COLUMN IF NOT EXISTS payment_amount NUMERIC(12,0) NOT NULL DEFAULT 0;
+
+                ALTER TABLE IF EXISTS ad_package_purchase_history
+                ADD COLUMN IF NOT EXISTS payment_expires_at TIMESTAMPTZ;
+
+                ALTER TABLE IF EXISTS ad_package_purchase_history
+                ADD COLUMN IF NOT EXISTS payment_confirmed_at TIMESTAMPTZ;
+
+                ALTER TABLE IF EXISTS ad_package_purchase_history
+                ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ;
+
+                ALTER TABLE IF EXISTS ad_package_purchase_history
+                ADD COLUMN IF NOT EXISTS payment_cancelled_at TIMESTAMPTZ;
+
+                ALTER TABLE IF EXISTS ad_package_purchase_history
+                ADD COLUMN IF NOT EXISTS payment_reference TEXT;
+
+                ALTER TABLE IF EXISTS ad_package_purchase_history
+                ADD COLUMN IF NOT EXISTS payment_payload JSONB;
+
+                ALTER TABLE IF EXISTS ad_package_purchase_history
+                ADD COLUMN IF NOT EXISTS payos_order_code BIGINT;
+
+                ALTER TABLE IF EXISTS ad_package_purchase_history
+                ADD COLUMN IF NOT EXISTS payos_payment_link_id TEXT;
+
+                ALTER TABLE IF EXISTS ad_package_purchase_history
+                ADD COLUMN IF NOT EXISTS payos_checkout_url TEXT;
+
+                ALTER TABLE IF EXISTS ad_package_purchase_history
+                ADD COLUMN IF NOT EXISTS payos_status TEXT;
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                UPDATE ad_package_purchase_history AS purchases
+                SET payment_amount = COALESCE(NULLIF(purchases.payment_amount, 0), packages.price, 0),
+                    payment_status = COALESCE(NULLIF(BTRIM(purchases.payment_status), ''), 'paid'),
+                    payment_provider = COALESCE(NULLIF(BTRIM(purchases.payment_provider), ''), 'manual'),
+                    paid_at = COALESCE(purchases.paid_at, purchases.activated_at, purchases.purchased_at),
+                    payment_confirmed_at = COALESCE(purchases.payment_confirmed_at, purchases.paid_at, purchases.activated_at, purchases.purchased_at),
+                    updated_at = NOW()
+                FROM ad_packages AS packages
+                WHERE packages.id = purchases.ad_package_id
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                UPDATE ad_package_purchase_history AS purchases
+                SET activated_at = COALESCE(purchases.activated_at, purchases.purchased_at),
+                    expires_at = COALESCE(
+                        purchases.expires_at,
+                        COALESCE(purchases.activated_at, purchases.purchased_at)
+                        + (COALESCE(packages.duration_hours, 0) * INTERVAL '1 hour')
+                    ),
+                    updated_at = NOW()
+                FROM ad_packages AS packages
+                WHERE packages.id = purchases.ad_package_id
+                  AND COALESCE(purchases.payment_status, 'paid') = 'paid'
+                  AND (
+                      purchases.activated_at IS NULL
+                      OR purchases.expires_at IS NULL
+                  )
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                CREATE INDEX IF NOT EXISTS ad_package_purchase_history_active_window_idx
+                ON ad_package_purchase_history(user_id, deleted_at, expires_at DESC, selected_at DESC)
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                CREATE INDEX IF NOT EXISTS ad_package_purchase_history_payment_status_idx
+                ON ad_package_purchase_history(payment_status, purchased_at DESC)
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                CREATE UNIQUE INDEX IF NOT EXISTS ad_package_purchase_history_payos_order_code_uidx
+                ON ad_package_purchase_history(payos_order_code)
+                WHERE payos_order_code IS NOT NULL
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                CREATE UNIQUE INDEX IF NOT EXISTS ad_package_purchase_history_payos_payment_link_uidx
+                ON ad_package_purchase_history(payos_payment_link_id)
+                WHERE payos_payment_link_id IS NOT NULL
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                CREATE TABLE IF NOT EXISTS ad_trend_metrics_daily (
+                    id BIGSERIAL PRIMARY KEY,
+                    assignment_id BIGINT NOT NULL REFERENCES ad_package_assignments(id) ON DELETE CASCADE,
+                    metric_date DATE NOT NULL,
+                    clicks INTEGER NOT NULL DEFAULT 0,
+                    impressions INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    CONSTRAINT ad_trend_metrics_daily_assignment_date_unique UNIQUE (assignment_id, metric_date)
+                )
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                CREATE INDEX IF NOT EXISTS ad_trend_metrics_daily_date_idx
+                ON ad_trend_metrics_daily(metric_date DESC)
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                CREATE TABLE IF NOT EXISTS ad_trend_click_events (
+                    id BIGSERIAL PRIMARY KEY,
+                    assignment_id BIGINT NOT NULL REFERENCES ad_package_assignments(id) ON DELETE CASCADE,
+                    venue_id INT4 REFERENCES venues(id) ON DELETE SET NULL,
+                    user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                    source TEXT NOT NULL DEFAULT 'overview',
+                    click_token TEXT,
+                    clicked_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                CREATE INDEX IF NOT EXISTS ad_trend_click_events_assignment_clicked_idx
+                ON ad_trend_click_events(assignment_id, clicked_at DESC)
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                CREATE UNIQUE INDEX IF NOT EXISTS ad_trend_click_events_assignment_token_unique
+                ON ad_trend_click_events(assignment_id, click_token)
+                WHERE click_token IS NOT NULL
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                CREATE TABLE IF NOT EXISTS ad_trend_push_events (
+                    id BIGSERIAL PRIMARY KEY,
+                    assignment_id BIGINT NOT NULL REFERENCES ad_package_assignments(id) ON DELETE CASCADE,
+                    venue_id INT4 REFERENCES venues(id) ON DELETE SET NULL,
+                    push_number INTEGER NOT NULL,
+                    pushed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    active_until TIMESTAMPTZ,
+                    cooldown_until TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                CREATE INDEX IF NOT EXISTS ad_trend_push_events_assignment_pushed_idx
+                ON ad_trend_push_events(assignment_id, pushed_at DESC)
             `
         ).catch(() => {
             // Ignore boot-time schema self-heal errors to keep server startup resilient.
@@ -7566,15 +10865,26 @@ async function generateWardIdFromName(name) {
                         reviewCount: resolvedStats.totalReviews,
                     };
                 });
+                const promotionAssignmentMap = await resolveCurrentVenuePromotionMapByVenueIds(
+                    enrichedRows.map((row) => row?.id)
+                );
+                const featuredPromotionMap = await resolveFeaturedVenuePromotionMapByVenueIds(
+                    enrichedRows.map((row) => row?.id)
+                );
+                const decoratedRows = enrichedRows.map((row) => attachFeaturedVenuePromotion(
+                    row,
+                    featuredPromotionMap,
+                    promotionAssignmentMap
+                ));
 
                 if (useCompactApprovedCache) {
                     publicCompactApprovedVenuesCache = {
                         timestamp: Date.now(),
-                        data: enrichedRows
+                        data: decoratedRows
                     };
                 }
 
-                res.json(enrichedRows);
+                res.json(decoratedRows);
             } catch (err) {
                 res.status(500).json({ error: err.message });
             }
@@ -7672,10 +10982,12 @@ async function generateWardIdFromName(name) {
 
                 const galleryImagesFromTable = await loadVenueGalleryImageUrls(venue.id);
                 const resolvedReviewStats = await resolveVenueReviewStatsByVenueId(venue.id);
+                const promotionAssignmentMap = await resolveCurrentVenuePromotionMapByVenueIds([venue.id]);
+                const featuredPromotionMap = await resolveFeaturedVenuePromotionMapByVenueIds([venue.id]);
 
                 const sanitizedVenue = sanitizeVenueRecord(venue);
                 const normalizedVenue = normalizeVenueCoordinates(sanitizedVenue);
-                const payload = {
+                const payload = attachFeaturedVenuePromotion({
                     ...normalizedVenue,
                     average_rating: Number(resolvedReviewStats?.averageRating ?? venue.average_rating ?? 0),
                     total_reviews: Number(resolvedReviewStats?.totalReviews ?? venue.total_reviews ?? 0),
@@ -7684,7 +10996,7 @@ async function generateWardIdFromName(name) {
                     review_count: Number(resolvedReviewStats?.totalReviews ?? venue.total_reviews ?? 0),
                     reviewCount: Number(resolvedReviewStats?.totalReviews ?? venue.total_reviews ?? 0),
                     venue_images: extractVenueImageUrls(sanitizedVenue, galleryImagesFromTable)
-                };
+                }, featuredPromotionMap, promotionAssignmentMap);
 
                 setCachedMapValue(publicVenueDetailCache, cacheKey, payload);
 
@@ -7765,25 +11077,26 @@ async function generateWardIdFromName(name) {
                 return null;
             }
 
-            return sanitizeVenueRecord(venue);
-                const resolvedReviewStats = await resolveVenueReviewStatsByVenueId(venue.id);
+            const resolvedReviewStats = await resolveVenueReviewStatsByVenueId(venue.id);
+            const galleryImagesFromTable = await loadVenueGalleryImageUrls(venue.id);
+            const promotionAssignmentMap = await resolveCurrentVenuePromotionMapByVenueIds([venue.id]);
+            const featuredPromotionMap = await resolveFeaturedVenuePromotionMapByVenueIds([venue.id]);
+            const sanitizedVenue = sanitizeVenueRecord(venue);
+            const normalizedVenue = normalizeVenueCoordinates(sanitizedVenue);
+            const enrichedVenue = attachFeaturedVenuePromotion({
+                ...normalizedVenue,
+                average_rating: Number(resolvedReviewStats?.averageRating ?? venue.average_rating ?? 0),
+                total_reviews: Number(resolvedReviewStats?.totalReviews ?? venue.total_reviews ?? 0),
+                averageRating: Number(resolvedReviewStats?.averageRating ?? venue.average_rating ?? 0),
+                totalReviews: Number(resolvedReviewStats?.totalReviews ?? venue.total_reviews ?? 0),
+                review_count: Number(resolvedReviewStats?.totalReviews ?? venue.total_reviews ?? 0),
+                reviewCount: Number(resolvedReviewStats?.totalReviews ?? venue.total_reviews ?? 0),
+                venue_images: extractVenueImageUrls(sanitizedVenue, galleryImagesFromTable)
+            }, featuredPromotionMap, promotionAssignmentMap);
 
-                const normalizedVenue = normalizeVenueCoordinates(venue);
-                const galleryImagesFromTable = await loadVenueGalleryImageUrls(venue.id);
-                const enrichedVenue = {
-                    ...normalizedVenue,
-                    average_rating: Number(resolvedReviewStats?.averageRating ?? venue.average_rating ?? 0),
-                    total_reviews: Number(resolvedReviewStats?.totalReviews ?? venue.total_reviews ?? 0),
-                    averageRating: Number(resolvedReviewStats?.averageRating ?? venue.average_rating ?? 0),
-                    totalReviews: Number(resolvedReviewStats?.totalReviews ?? venue.total_reviews ?? 0),
-                    review_count: Number(resolvedReviewStats?.totalReviews ?? venue.total_reviews ?? 0),
-                    reviewCount: Number(resolvedReviewStats?.totalReviews ?? venue.total_reviews ?? 0),
-                    venue_images: extractVenueImageUrls(venue, galleryImagesFromTable)
-                };
+            setCachedMapValue(publicVenueForDetailCache, cacheKey, enrichedVenue);
 
-                setCachedMapValue(publicVenueForDetailCache, cacheKey, enrichedVenue);
-
-                return enrichedVenue;
+            return enrichedVenue;
         }
 
         async function getVenueCommunityBundle(req, res) {
@@ -9142,6 +12455,34 @@ async function generateWardIdFromName(name) {
             try {
                 const venueHasOwnerUserColumn = await hasVenueOwnerUserColumn();
                 let resolvedCategoryId = normalizedCategoryId;
+                const activePurchase = await getLatestActiveUserAdPackagePurchase(submitterUserId);
+                const activePackageFeatures = activePurchase?.package?.features || {};
+                const isPostLimitEnabled = Boolean(activePackageFeatures.postLimitEnabled);
+                const postLimit = Number(activePackageFeatures.postLimit);
+
+                const existingVenueCountResult = await pool.query(
+                    `
+                        SELECT COUNT(*)::int AS total
+                        FROM venues
+                        WHERE ${buildResolvedVenueOwnerUserSql('venues')} = $1
+                          AND LOWER(COALESCE(venues.status::text, '')) NOT IN ('deleted', 'rejected')
+                    `,
+                    [submitterUserId]
+                );
+                const existingVenueCount = Number(existingVenueCountResult.rows[0]?.total) || 0;
+                const effectivePostLimit = isPostLimitEnabled && Number.isFinite(postLimit) && postLimit > 0
+                    ? postLimit
+                    : 1;
+
+                if (existingVenueCount >= effectivePostLimit) {
+                    const limitMessage = effectivePostLimit === 1
+                        ? 'Each merchant account can publish 1 venue by default. Purchase a package with Post Quantity Limit to unlock more posts.'
+                        : `Your active package allows up to ${effectivePostLimit} venue posts. Delete an existing venue or switch to a higher package to submit more posts.`;
+
+                    return res.status(409).json({
+                        message: limitMessage
+                    });
+                }
 
                 if (resolvedCategoryId === null && normalizedCategoryName) {
                     const inferredSlug = slugifyText(normalizedCategoryName);
@@ -9314,6 +12655,16 @@ async function generateWardIdFromName(name) {
             `,
                     insertValues
                 );
+
+                try {
+                    if (activePurchase?.packageId) {
+                        await syncUserAdPackageAssignments(submitterUserId, activePurchase.packageId, pool, {
+                            specificVenueIds: [insertResult.rows[0].id]
+                        });
+                    }
+                } catch (assignmentSyncError) {
+                    console.error('Sync account ad package for new venue error:', assignmentSyncError);
+                }
 
                 const venueDetails = await pool.query(
                     `
@@ -11453,18 +14804,84 @@ async function generateWardIdFromName(name) {
                     ${venueColumnOrNull('rejected_at')},
                     ${venueColumnOrNull('rejection_reason')},
                     ${venueColumnOrNull('created_at')},
-                    ${venueColumnOrNull('updated_at')}
+                    ${venueColumnOrNull('updated_at')},
+                    assigned_package.assignment_id AS assigned_package_assignment_id,
+                    assigned_package.assigned_at AS assigned_package_assigned_at,
+                    assigned_package.id AS assigned_package_id,
+                    assigned_package.name AS assigned_package_name,
+                    assigned_package.description AS assigned_package_description,
+                    assigned_package.duration_hours AS assigned_package_duration_hours,
+                    assigned_package.priority_level AS assigned_package_priority_level,
+                    assigned_package.status AS assigned_package_status,
+                    assigned_package.created_at AS assigned_package_created_at,
+                    assigned_package.updated_at AS assigned_package_updated_at
                 FROM venues
                 ${canJoinWards ? 'LEFT JOIN wards ON wards.ward_id = venues.ward_id' : ''}
                 ${canJoinPlaceCategories ? 'LEFT JOIN place_categories ON place_categories.id = venues.category_id' : ''}
                 ${canJoinSubmitterUsers ? 'LEFT JOIN users AS submitter_users ON submitter_users.id::text = venues.submitted_by_user_id' : ''}
+                LEFT JOIN LATERAL (
+                    SELECT
+                        assignments.id AS assignment_id,
+                        assignments.updated_at AS assigned_at,
+                        packages.id,
+                        packages.name,
+                        packages.description,
+                        packages.duration_hours,
+                        packages.priority_level,
+                        packages.status,
+                        packages.created_at,
+                        packages.updated_at
+                    FROM ad_package_assignments AS assignments
+                    JOIN ad_packages AS packages
+                      ON packages.id = assignments.ad_package_id
+                    WHERE assignments.venue_id = venues.id
+                      AND COALESCE(packages.status::text, 'active') = 'active'
+                    ORDER BY assignments.updated_at DESC, assignments.id DESC
+                    LIMIT 1
+                ) AS assigned_package ON true
                 ${whereClause}
                 ORDER BY COALESCE(${orderSubmittedAt}, ${orderCreatedAt}) DESC, ${orderId} DESC
             `,
                     values
                 );
 
-                res.json(result.rows);
+                const payload = result.rows.map((row) => {
+                    if (!row?.assigned_package_id) {
+                        return {
+                            ...row,
+                            assignedAdPackage: null,
+                            moderationPriority: {
+                                isPriorityApproval: false,
+                                label: '',
+                                queuedAt: row?.submitted_at || row?.created_at || null
+                            }
+                        };
+                    }
+
+                    const mappedPackage = mapAdPackageRow({
+                        id: row.assigned_package_id,
+                        name: row.assigned_package_name,
+                        description: row.assigned_package_description,
+                        duration_hours: row.assigned_package_duration_hours,
+                        priority_level: row.assigned_package_priority_level,
+                        status: row.assigned_package_status,
+                        created_at: row.assigned_package_created_at,
+                        updated_at: row.assigned_package_updated_at
+                    });
+                    const isPriorityApproval = Boolean(mappedPackage.features?.priorityReview);
+
+                    return {
+                        ...row,
+                        assignedAdPackage: mappedPackage,
+                        moderationPriority: {
+                            isPriorityApproval,
+                            label: isPriorityApproval ? 'Priority Approval' : '',
+                            queuedAt: row?.submitted_at || row?.created_at || row?.assigned_package_assigned_at || null
+                        }
+                    };
+                });
+
+                res.json(payload);
             } catch (error) {
                 res.status(500).json({ message: error.message });
             }
@@ -14978,11 +18395,23 @@ async function generateWardIdFromName(name) {
         registerVersionedRoute('post', '/feedback', authenticateOptional, submitFeedbackReport);
 
         registerVersionedRoute('get', '/ad-packages', listPublicAdPackages);
+        registerVersionedRoute('get', '/ad-packages/trending/venues', listPublicTrendingVenues);
+        registerVersionedRoute('post', '/ad-packages/trending/assignments/:assignmentId/click', authenticateOptional, trackPublicTrendingClick);
         registerVersionedRoute('post', '/ad-packages/:packageId/assign', authenticateRequest, checkUserStatus, assignAdPackageToVenue);
         registerVersionedRoute('get', '/ad-packages/assignments/venues/:venueId', authenticateRequest, checkUserStatus, getMyVenueAdPackageAssignment);
+        registerVersionedRoute('post', '/payments/payos/webhook', handlePayOsWebhook);
+        registerVersionedRoute('get', '/merchant/ad-packages/transactions', authenticateRequest, checkUserStatus, listMerchantAdPackageTransactions);
+        registerVersionedRoute('get', '/merchant/ad-packages/transactions/:transactionId/status', authenticateRequest, checkUserStatus, getMerchantAdPackageCheckoutStatus);
+        registerVersionedRoute('post', '/merchant/ad-packages/transactions/:transactionId/activate', authenticateRequest, checkUserStatus, activateMerchantAdPackageTransaction);
+        registerVersionedRoute('post', '/merchant/ad-packages/transactions/:transactionId/deactivate', authenticateRequest, checkUserStatus, deactivateMerchantAdPackageTransaction);
+        registerVersionedRoute('delete', '/merchant/ad-packages/transactions/:transactionId', authenticateRequest, checkUserStatus, deleteMerchantAdPackageTransaction);
+        registerVersionedRoute('get', '/merchant/ad-trending/overview', authenticateRequest, checkUserStatus, listMerchantTrendOverview);
+        registerVersionedRoute('post', '/merchant/ad-trending/venues/:venueId/push', authenticateRequest, checkUserStatus, pushMerchantTrendVenue);
+        registerVersionedRoute('delete', '/merchant/ad-trending/venues/:venueId', authenticateRequest, checkUserStatus, removeMerchantTrendVenue);
 
         registerVersionedRoute('get', '/admin/ad-packages/stats', authenticateRequest, checkUserStatus, requireAdminRole, getAdminAdPackageStats);
         registerVersionedRoute('get', '/admin/ad-packages/:packageId/usages', authenticateRequest, checkUserStatus, requireAdminRole, listAdminAdPackageUsages);
+        registerVersionedRoute('get', '/admin/reports/revenue', authenticateRequest, checkUserStatus, requireAdminRole, getAdminRevenueReport);
         registerVersionedRoute('get', '/admin/wards', authenticateRequest, requireAdminRole, listAdminWards);
         registerVersionedRoute('post', '/admin/ad-packages', authenticateRequest, checkUserStatus, requireAdminRole, createAdminAdPackage);
         registerVersionedRoute('patch', '/admin/ad-packages/:packageId', authenticateRequest, checkUserStatus, requireAdminRole, updateAdminAdPackage);
@@ -15672,28 +19101,41 @@ async function generateWardIdFromName(name) {
                         return secondRating - firstRating;
                     });
 
-                const diversifiedVenues = diversifyRecommendedVenues(scoredVenues, limit).map((venue) => ({
-                    id: venue.id,
-                    name: venue.name,
-                    title: venue.title,
-                    address: venue.address,
-                    description: venue.description,
-                    latitude: venue.latitude,
-                    longitude: venue.longitude,
-                    ward_id: venue.ward_id,
-                    ward_name: venue.ward_name,
-                    category_id: venue.category_id,
-                    category_name: venue.category_name,
-                    cover_image_url: venue.cover_image_url,
-                    metadata: venue.metadata,
-                    average_rating: venue.average_rating,
-                    total_reviews: venue.total_reviews,
-                    recommendationScore: venue.recommendationScore,
-                    distanceKm: venue.distanceKm,
-                    isOpenNow: venue.isOpenNow,
-                    openingTimeRange: venue.openingTimeRange,
-                    recommendationReasons: venue.recommendationReasons
-                }));
+                const diversifiedVenuesRaw = diversifyRecommendedVenues(scoredVenues, limit);
+                const promotionAssignmentMap = await resolveCurrentVenuePromotionMapByVenueIds(
+                    diversifiedVenuesRaw.map((v) => v.id)
+                );
+                const featuredPromotionMap = await resolveFeaturedVenuePromotionMapByVenueIds(
+                    diversifiedVenuesRaw.map((v) => v.id)
+                );
+
+                const diversifiedVenues = diversifiedVenuesRaw.map((venue) => {
+                    const decoratedVenue = attachFeaturedVenuePromotion(venue, featuredPromotionMap, promotionAssignmentMap);
+                    return {
+                        id: decoratedVenue.id,
+                        name: decoratedVenue.name,
+                        title: decoratedVenue.title,
+                        address: decoratedVenue.address,
+                        description: decoratedVenue.description,
+                        latitude: decoratedVenue.latitude,
+                        longitude: decoratedVenue.longitude,
+                        ward_id: decoratedVenue.ward_id,
+                        ward_name: decoratedVenue.ward_name,
+                        category_id: decoratedVenue.category_id,
+                        category_name: decoratedVenue.category_name,
+                        cover_image_url: decoratedVenue.cover_image_url,
+                        metadata: decoratedVenue.metadata,
+                        average_rating: decoratedVenue.average_rating,
+                        total_reviews: decoratedVenue.total_reviews,
+                        recommendationScore: decoratedVenue.recommendationScore,
+                        distanceKm: decoratedVenue.distanceKm,
+                        isOpenNow: decoratedVenue.isOpenNow,
+                        openingTimeRange: decoratedVenue.openingTimeRange,
+                        recommendationReasons: decoratedVenue.recommendationReasons,
+                        featuredPromotion: decoratedVenue.featuredPromotion,
+                        promotionAssignment: decoratedVenue.promotionAssignment
+                    };
+                });
 
                 return res.json({
                     success: true,
@@ -16120,30 +19562,43 @@ async function generateWardIdFromName(name) {
                             ? 'Semantic parser uncertain. Returned broader heuristic refine results from approved venues.'
                             : 'Unable to confidently understand this refine sentence. Please rewrite with clearer details.'));
 
-                const recommendations = refinedVenues.slice(0, limit).map((venue) => ({
-                    id: venue.id,
-                    name: venue.name,
-                    title: venue.title,
-                    address: venue.address,
-                    description: venue.description,
-                    latitude: venue.latitude,
-                    longitude: venue.longitude,
-                    ward_id: venue.ward_id,
-                    ward_name: venue.ward_name,
-                    category_id: venue.category_id,
-                    category_name: venue.category_name,
-                    cover_image_url: venue.cover_image_url,
-                    metadata: venue.metadata,
-                    average_rating: venue.average_rating,
-                    total_reviews: venue.total_reviews,
-                    recommendationScore: venue.recommendationScore,
-                    refineScore: venue.refineScore,
-                    finalScore: venue.finalScore,
-                    distanceKm: venue.distanceKm,
-                    isOpenNow: venue.isOpenNow,
-                    openingTimeRange: venue.openingTimeRange,
-                    recommendationReasons: venue.recommendationReasons
-                }));
+                const slicedRefinedVenues = refinedVenues.slice(0, limit);
+                const promotionAssignmentMap = await resolveCurrentVenuePromotionMapByVenueIds(
+                    slicedRefinedVenues.map((v) => v.id)
+                );
+                const featuredPromotionMap = await resolveFeaturedVenuePromotionMapByVenueIds(
+                    slicedRefinedVenues.map((v) => v.id)
+                );
+
+                const recommendations = slicedRefinedVenues.map((venue) => {
+                    const decoratedVenue = attachFeaturedVenuePromotion(venue, featuredPromotionMap, promotionAssignmentMap);
+                    return {
+                        id: decoratedVenue.id,
+                        name: decoratedVenue.name,
+                        title: decoratedVenue.title,
+                        address: decoratedVenue.address,
+                        description: decoratedVenue.description,
+                        latitude: decoratedVenue.latitude,
+                        longitude: decoratedVenue.longitude,
+                        ward_id: decoratedVenue.ward_id,
+                        ward_name: decoratedVenue.ward_name,
+                        category_id: decoratedVenue.category_id,
+                        category_name: decoratedVenue.category_name,
+                        cover_image_url: decoratedVenue.cover_image_url,
+                        metadata: decoratedVenue.metadata,
+                        average_rating: decoratedVenue.average_rating,
+                        total_reviews: decoratedVenue.total_reviews,
+                        recommendationScore: decoratedVenue.recommendationScore,
+                        refineScore: decoratedVenue.refineScore,
+                        finalScore: decoratedVenue.finalScore,
+                        distanceKm: decoratedVenue.distanceKm,
+                        isOpenNow: decoratedVenue.isOpenNow,
+                        openingTimeRange: decoratedVenue.openingTimeRange,
+                        recommendationReasons: decoratedVenue.recommendationReasons,
+                        featuredPromotion: decoratedVenue.featuredPromotion,
+                        promotionAssignment: decoratedVenue.promotionAssignment
+                    };
+                });
 
                 return res.json({
                     success: true,
