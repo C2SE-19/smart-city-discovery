@@ -2722,25 +2722,18 @@ function AdminBoundaryPage() {
               className={`admin-pending-queue-tab ${pendingQueueView === 'submissions' ? 'is-active' : ''}`.trim()}
               onClick={() => handlePendingQueueViewChange('submissions')}
             >
-              Pending Queue ({pendingQueueVenues.length})
+              <span className="admin-pending-queue-tab-label">Pending Queue</span>
+              <span className="admin-pending-queue-tab-count">{pendingQueueVenues.length}</span>
             </button>
             <button
               type="button"
               className={`admin-pending-queue-tab ${pendingQueueView === 'updates' ? 'is-active' : ''}`.trim()}
               onClick={() => handlePendingQueueViewChange('updates')}
             >
-              Location Updates ({pendingLocationUpdateRequests.length})
+              <span className="admin-pending-queue-tab-label">Location Updates</span>
+              <span className="admin-pending-queue-tab-count">{pendingLocationUpdateRequests.length}</span>
             </button>
           </div>
-
-          <header>
-            <h3>{pendingQueueView === 'updates' ? 'Location Update Review' : 'Pending Queue'}</h3>
-            <p>
-              {pendingQueueView === 'updates'
-                ? `${pendingLocationUpdateRequests.length} update request(s) waiting moderation`
-                : `${pendingQueueVenues.length} waiting submission(s)`}
-            </p>
-          </header>
 
           <div className="admin-scroll-list">
             {pendingQueueView === 'updates'

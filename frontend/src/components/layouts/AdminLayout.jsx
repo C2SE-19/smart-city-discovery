@@ -81,24 +81,9 @@ function NotificationGlyph() {
 
 function AdminLayout() {
   const { user, logout } = useAuth();
-  const { language, changeLanguage } = useLanguage();
+  const { changeLanguage } = useLanguage();
   const { theme, toggleTheme } = useTheme();
   const i18n = {
-    vi: {
-      dashboard: 'Bảng điều khiển',
-      users: 'Quản lý người dùng',
-      map: 'Quản lý bản đồ',
-      forum: 'Quản lý diễn đàn',
-      reports: 'Báo cáo & doanh thu',
-      packages: 'Gói quảng cáo',
-      feedback: 'Phản hồi & hỗ trợ',
-      logout: 'Đăng xuất',
-      role: 'Quản trị viên',
-      language: 'Ngôn ngữ',
-      dark: 'Tối',
-      light: 'Sáng',
-      notifications: 'Thông báo',
-    },
     en: {
       dashboard: 'Dashboard',
       users: 'User Management',
@@ -115,7 +100,7 @@ function AdminLayout() {
       notifications: 'Notifications',
     },
   };
-  const t = i18n[language] || i18n.vi;
+  const t = i18n.en;
   const adminNavigation = [
     { label: t.dashboard, path: APP_ROUTES.ADMIN_DASHBOARD, icon: 'dashboard' },
     { label: t.users, path: APP_ROUTES.ADMIN_USERS, icon: 'users' },
@@ -180,8 +165,7 @@ function AdminLayout() {
           <div className="admin-topbar-actions">
             <label className="admin-lang-wrap">
               <span>{t.language}</span>
-              <select value={language} onChange={(event) => changeLanguage(event.target.value)}>
-                <option value="vi">Tiếng Việt</option>
+              <select value="en" onChange={() => changeLanguage('en')}>
                 <option value="en">English</option>
               </select>
             </label>

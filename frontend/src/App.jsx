@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { GoogleOAuthProvider } from '@react-oauth/google';
 import { LanguageProvider } from './contexts/LanguageContext';
@@ -9,7 +10,6 @@ import MerchantLayout from './components/layouts/MerchantLayout';
 import AdminLayout from './components/layouts/AdminLayout';
 import ErrorBoundary from './components/shared/ErrorBoundary';
 import RoleGuard from './components/auth/RoleGuard';
-import ErrorBoundary from './components/shared/ErrorBoundary';
 import ChatWidget from './components/chat/ChatWidget';
 import AppOnboarding from './components/onboarding/AppOnboarding';
 import OverviewPage from './pages/overview/OverviewPage';
@@ -60,8 +60,6 @@ const formatCount = (value) => {
 };
 
 function AppRoutes({ landingStats }) {
-
-function AppRoutes() {
   return (
     <Routes>
       <Route element={<LandingLayout />}>

@@ -1,5 +1,5 @@
 .admin-shell {
-  min-height: 100vh;
+  min-height: 100dvh;
   display: block;
   gap: 0;
   padding: 0;
@@ -7,7 +7,7 @@
     radial-gradient(circle at top left, rgba(74, 99, 255, 0.14), transparent 26%),
     radial-gradient(circle at right center, rgba(72, 210, 221, 0.14), transparent 24%),
     linear-gradient(180deg, #eef1f5 0%, #f6efde 100%);
-  overflow: visible;
+  overflow-x: hidden;
 }
 
 .admin-sidebar {
@@ -21,7 +21,8 @@
 }
 
 .admin-sidebar-panel {
-  height: 100vh;
+  height: 100dvh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -29,7 +30,7 @@
     linear-gradient(180deg, rgba(86, 115, 255, 0.12), transparent 20%),
     linear-gradient(180deg, #121629 0%, #0b1020 100%);
   color: #fff;
-  padding: 30px 22px 22px;
+  padding: 18px 16px 14px;
   border-radius: 0;
   box-shadow: 0 24px 60px rgba(11, 16, 32, 0.28);
   overflow: hidden;
@@ -50,40 +51,40 @@
 .admin-sidebar-head {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 10px;
 }
 
 .admin-sidebar-eyebrow {
-  margin: 0 0 8px;
+  margin: 0 0 4px;
   color: rgba(179, 188, 219, 0.7);
-  font-size: 0.8rem;
+  font-size: 0.74rem;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
 }
 
 .admin-sidebar-panel h1 {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 2.3rem;
+  font-size: 1.85rem;
   letter-spacing: -0.04em;
 }
 
 .admin-sidebar-user {
   display: grid;
-  grid-template-columns: 48px 1fr;
-  gap: 12px;
+  grid-template-columns: 40px 1fr;
+  gap: 10px;
   align-items: center;
-  padding: 14px;
-  border-radius: 18px;
+  padding: 10px;
+  border-radius: 14px;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.06);
   backdrop-filter: blur(12px);
 }
 
 .admin-sidebar-user-avatar {
-  width: 48px;
-  height: 48px;
-  border-radius: 16px;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
   object-fit: cover;
 }
 
@@ -94,27 +95,30 @@
 
 .admin-sidebar-user span {
   display: block;
-  margin-top: 4px;
+  margin-top: 2px;
   color: rgba(205, 212, 235, 0.74);
-  font-size: 0.84rem;
+  font-size: 0.78rem;
 }
 
 .admin-nav {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-top: 26px;
+  gap: 13px;
+  margin-top: 12px;
   flex: 1;
+  min-height: auto;
+  overflow: visible;
+  padding-right: 0;
 }
 
 .admin-nav-link {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 14px 14px;
+  gap: 10px;
+  padding: 13px 15px;
   color: rgba(255, 255, 255, 0.82);
   border: 1px solid transparent;
-  border-radius: 16px;
+  border-radius: 14px;
   font-size: 0.95rem;
   transition:
     transform 0.22s ease,
@@ -135,17 +139,17 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 12px;
+  width: 31px;
+  height: 31px;
+  border-radius: 10px;
   background: rgba(255, 255, 255, 0.06);
   color: #9ab2ff;
   flex: 0 0 auto;
 }
 
 .admin-nav-icon svg {
-  width: 18px;
-  height: 18px;
+  width: 15px;
+  height: 15px;
   stroke: currentColor;
   fill: none;
   stroke-width: 1.8;
@@ -158,14 +162,14 @@
 }
 
 .admin-sidebar-footer {
-  margin-top: 16px;
+  margin-top: 10px;
 }
 
 .admin-logout-button {
   width: 100%;
-  padding: 14px 16px;
+  padding: 10px 12px;
   border: 1px solid rgba(245, 127, 127, 0.28);
-  border-radius: 18px;
+  border-radius: 14px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.04));
   color: #fff4f4;
   font-weight: 600;
@@ -186,7 +190,7 @@
   flex-direction: column;
   gap: 10px;
   min-width: 0;
-  min-height: 100vh;
+  min-height: 100dvh;
   margin-left: 320px;
   padding: 0;
   overflow: visible;
@@ -293,7 +297,7 @@
   flex: 1;
   position: relative;
   overflow: visible;
-  min-height: calc(100vh - 78px);
+  min-height: 0;
   border-radius: 0;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0.16)),

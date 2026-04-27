@@ -3962,6 +3962,123 @@ async function getAdminRevenueReport(req, res) {
     }
 }
 
+async function getAdminDashboardOverview(req, res) {
+    const monthWindow = clampAdPackageStatsMonthWindow(req.query?.months);
+    const monthKeys = buildAdPackageMonthKeys(monthWindow);
+
+    const calculateDeltaPercent = (currentValue, previousValue) => {
+        const current = Number(currentValue) || 0;
+        const previous = Number(previousValue) || 0;
+
+        if (previous <= 0) {
+            return current > 0 ? 100 : 0;
+        }
+
+        return Number((((current - previous) / previous) * 100).toFixed(1));
+    };
+
+    try {
+        const totalsResult = await pool.query(
+            `
+                SELECT
+                    (SELECT COUNT(*)::int FROM users) AS total_users,
+                    (SELECT COUNT(*)::int FROM ad_packages WHERE COALESCE(status::text, 'active') <> 'inactive') AS total_packages,
+                    (
+                        SELECT COUNT(*)::int
+                        FROM venues
+                        WHERE LOWER(COALESCE(status::text, 'pending')) NOT IN ('hidden', 'deleted')
+                    ) AS total_venues
+            `
+        );
+
+        const revenueByMonthResult = await pool.query(
+            `
+                SELECT
+                    TO_CHAR(DATE_TRUNC('month', COALESCE(paid_at, payment_confirmed_at, activated_at, purchased_at)), 'YYYY-MM') AS month_key,
+                    COALESCE(SUM(payment_amount), 0)::bigint AS revenue_total,
+                    COUNT(*)::int AS transaction_count
+                FROM ad_package_purchase_history
+                WHERE deleted_at IS NULL
+                  AND COALESCE(payment_status, '${AD_PACKAGE_PAYMENT_STATUS.paid}') = '${AD_PACKAGE_PAYMENT_STATUS.paid}'
+                  AND COALESCE(paid_at, payment_confirmed_at, activated_at, purchased_at) >= DATE_TRUNC('month', CURRENT_DATE) - (($1::int - 1) * INTERVAL '1 month')
+                GROUP BY month_key
+                ORDER BY month_key ASC
+            `,
+            [monthWindow]
+        );
+
+        const venueStatusResult = await pool.query(
+            `
+                SELECT
+                    LOWER(COALESCE(NULLIF(BTRIM(status::text), ''), 'pending')) AS status,
+                    COUNT(*)::int AS total
+                FROM venues
+                WHERE LOWER(COALESCE(status::text, 'pending')) NOT IN ('hidden', 'deleted')
+                GROUP BY status
+                ORDER BY total DESC, status ASC
+            `
+        );
+
+        const totalsRow = totalsResult.rows[0] || {};
+
+        const revenueMonthMap = new Map();
+        revenueByMonthResult.rows.forEach((row) => {
+            revenueMonthMap.set(String(row.month_key), {
+                revenue: Number(row.revenue_total) || 0,
+                transactions: Number(row.transaction_count) || 0
+            });
+        });
+
+        const revenueSeries = monthKeys.map((monthKey) => ({
+            month: monthKey,
+            revenue: revenueMonthMap.get(monthKey)?.revenue || 0,
+            transactions: revenueMonthMap.get(monthKey)?.transactions || 0
+        }));
+
+        const currentMonthKey = monthKeys[monthKeys.length - 1] || '';
+        const previousMonthKey = monthKeys.length > 1 ? monthKeys[monthKeys.length - 2] : '';
+        const currentMonthRevenue = revenueMonthMap.get(currentMonthKey)?.revenue || 0;
+        const previousMonthRevenue = revenueMonthMap.get(previousMonthKey)?.revenue || 0;
+
+        const statusLabelByKey = {
+            approved: 'Approved',
+            pending: 'Pending',
+            rejected: 'Rejected',
+            paused: 'Paused',
+            active: 'Active'
+        };
+
+        return res.json({
+            months: monthKeys,
+            overview: {
+                totalUsers: Number(totalsRow.total_users) || 0,
+                totalPackages: Number(totalsRow.total_packages) || 0,
+                totalVenues: Number(totalsRow.total_venues) || 0,
+                monthlyRevenue: Number(currentMonthRevenue) || 0,
+                deltas: {
+                    usersPercent: 0,
+                    packagesPercent: 0,
+                    venuesPercent: 0,
+                    revenuePercent: calculateDeltaPercent(currentMonthRevenue, previousMonthRevenue)
+                }
+            },
+            revenueSeries,
+            venueStatusBreakdown: venueStatusResult.rows.map((row) => {
+                const status = String(row.status || '').trim().toLowerCase();
+                return {
+                    status,
+                    label: statusLabelByKey[status] || status.charAt(0).toUpperCase() + status.slice(1),
+                    total: Number(row.total) || 0
+                };
+            }),
+            generatedAt: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error('Get admin dashboard overview error:', error);
+        return res.status(500).json({ message: 'Could not load admin dashboard overview right now.' });
+    }
+}
+
 async function listAdminAdPackageUsages(req, res) {
     const packageId = Number.parseInt(req.params?.packageId, 10);
     const monthKey = normalizeAdPackageMonthKey(req.query?.month);
@@ -11664,35 +11781,28 @@ async function generateWardIdFromName(name) {
                 }
 
                 const metadata = normalizeVenueMetadataObject(venue.metadata);
+                const selectedServiceIds = normalizeServiceIds(metadata.selectedServices);
 
-                // Extract services from metadata
-                const servicesFromMetadata = [
-                    ...(Array.isArray(metadata.selectedServiceNames) ? metadata.selectedServiceNames : []),
-                    ...(Array.isArray(metadata.servicesOffered) ? metadata.servicesOffered : []),
-                    ...(Array.isArray(metadata.services) ? metadata.services : [])
-                ];
+                if (!selectedServiceIds.length) {
+                    return res.json({
+                        venueId,
+                        services: []
+                    });
+                }
 
-                // Get merchant_services definitions
                 const servicesQuery = `
                     SELECT id, name, slug, icon, description
                     FROM merchant_services
                     WHERE is_active = true
-                    ORDER BY sort_order ASC, name ASC
+                      AND id = ANY($1::int[])
+                    ORDER BY array_position($1::int[], id), sort_order ASC, name ASC
                 `;
 
-                const { rows: allServices } = await pool.query(servicesQuery);
-
-                // Filter only services that this venue offers
-                const venueServices = allServices.filter(service =>
-                    servicesFromMetadata.some(venueSvc =>
-                        String(venueSvc).toLowerCase().includes(String(service.name).toLowerCase()) ||
-                        String(venueSvc).toLowerCase().includes(String(service.slug).toLowerCase())
-                    )
-                );
+                const { rows: venueServices } = await pool.query(servicesQuery, [selectedServiceIds]);
 
                 return res.json({
                     venueId,
-                    services: venueServices.length > 0 ? venueServices : []
+                    services: venueServices
                 });
             } catch (error) {
                 return res.status(500).json({ message: error.message });
@@ -19435,6 +19545,7 @@ async function generateWardIdFromName(name) {
 
         registerVersionedRoute('get', '/admin/ad-packages/stats', authenticateRequest, checkUserStatus, requireAdminRole, getAdminAdPackageStats);
         registerVersionedRoute('get', '/admin/ad-packages/:packageId/usages', authenticateRequest, checkUserStatus, requireAdminRole, listAdminAdPackageUsages);
+        registerVersionedRoute('get', '/admin/dashboard/overview', authenticateRequest, checkUserStatus, requireAdminRole, getAdminDashboardOverview);
         registerVersionedRoute('get', '/admin/reports/revenue', authenticateRequest, checkUserStatus, requireAdminRole, getAdminRevenueReport);
         registerVersionedRoute('get', '/admin/wards', authenticateRequest, requireAdminRole, listAdminWards);
         registerVersionedRoute('post', '/admin/ad-packages', authenticateRequest, checkUserStatus, requireAdminRole, createAdminAdPackage);

@@ -102,10 +102,10 @@
 
 .admin-workspace-grid {
   display: grid;
-  grid-template-columns: 190px minmax(0, 1fr) 360px;
+  grid-template-columns: 220px minmax(0, 1fr) 360px;
   gap: 8px;
-  height: clamp(340px, calc(100vh - 340px), 500px);
-  min-height: 340px;
+  height: clamp(520px, calc(100vh - 250px), 820px);
+  min-height: 520px;
 }
 
 .admin-workspace-panel {
@@ -138,14 +138,43 @@
   background: rgba(255, 255, 255, 0.86);
   color: #17414a;
   padding: 8px 10px;
-  font-size: 0.74rem;
+  font-size: 0.72rem;
   font-weight: 700;
   text-align: left;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  white-space: normal;
+  line-height: 1.25;
+}
+
+.admin-pending-queue-tab-label {
+  overflow-wrap: anywhere;
+}
+
+.admin-pending-queue-tab-count {
+  flex: 0 0 auto;
+  min-width: 26px;
+  height: 20px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(21, 94, 99, 0.12);
+  color: #17414a;
+  padding: 0 8px;
+  font-size: 0.68rem;
 }
 
 .admin-pending-queue-tab.is-active {
   border-color: rgba(242, 95, 41, 0.52);
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(255, 236, 227, 0.75));
+}
+
+.admin-pending-queue-tab.is-active .admin-pending-queue-tab-count {
+  background: rgba(242, 95, 41, 0.2);
+  color: #a24824;
 }
 
 .admin-list-panel header,
@@ -244,7 +273,8 @@
   color: #1a3b44;
   font-size: 0.82rem;
   display: inline-flex;
-  align-items: center;
+  align-items: flex-start;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -1384,8 +1414,8 @@
 
 @media (max-width: 1380px) {
   .admin-workspace-grid {
-    grid-template-columns: 170px minmax(0, 1fr) 320px;
-    height: clamp(330px, calc(100vh - 330px), 460px);
+    grid-template-columns: 200px minmax(0, 1fr) 320px;
+    height: clamp(500px, calc(100vh - 250px), 760px);
   }
 }
 
@@ -1412,7 +1442,7 @@
   }
 
   .admin-map-canvas {
-    min-height: 480px;
+    min-height: 520px;
   }
 
   .admin-pending-filter-panel {
