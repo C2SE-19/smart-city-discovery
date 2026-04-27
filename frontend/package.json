@@ -4,10 +4,13 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "dev": "vite --host 0.0.0.0",
+    "build": "node scripts/build-production.cjs",
+    "build:raw": "vite build",
+    "build:prod": "node scripts/build-production.cjs",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "start:lan": "node lan-server.cjs"
   },
   "dependencies": {
     "@react-oauth/google": "^0.13.4",

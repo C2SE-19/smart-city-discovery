@@ -30,3 +30,18 @@ export async function dismissAdminForumCommentReports(postId, commentId) {
   const response = await apiClient.delete(`/admin/forum/posts/${postId}/comments/${commentId}/reports`);
   return response?.data?.data || null;
 }
+
+export async function fetchAdminForumBannedKeywords() {
+  const response = await apiClient.get('/admin/forum/banned-keywords');
+  return response?.data?.data || [];
+}
+
+export async function createAdminForumBannedKeyword(keyword) {
+  const response = await apiClient.post('/admin/forum/banned-keywords', { keyword });
+  return response?.data?.data || null;
+}
+
+export async function deleteAdminForumBannedKeyword(keywordId) {
+  const response = await apiClient.delete(`/admin/forum/banned-keywords/${keywordId}`);
+  return response?.data?.data || null;
+}

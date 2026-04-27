@@ -202,16 +202,19 @@ function buildScopeDefinitions(isAuthenticated) {
         },
         {
           selector: '[data-onboarding="merchant-form-basic"]',
+          position: 'floating',
           title: 'Thông tin cơ bản',
           intro: 'Nhập tên địa điểm, danh mục, số điện thoại và mô tả để bài đăng đầy đủ thông tin.',
         },
         {
           selector: '[data-onboarding="merchant-form-location"]',
+          position: 'floating',
           title: 'Vị trí và giờ mở cửa',
           intro: 'Thiết lập địa chỉ, phường, vị trí trên bản đồ và lịch hoạt động theo ngày.',
         },
         {
           selector: '[data-onboarding="merchant-form-services"]',
+          position: 'floating',
           title: 'Dịch vụ cung cấp',
           intro: 'Chọn các dịch vụ mà cơ sở của bạn hỗ trợ để người dùng dễ lọc và tìm kiếm.',
         },

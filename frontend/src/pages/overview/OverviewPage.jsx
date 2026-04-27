@@ -15,6 +15,9 @@ import {
   fetchUserPreferences
 } from '../../services/api/userPreferencesApi';
 import { fetchCurrentWeather } from '../../services/api/weatherApi';
+import {
+  fetchTrendingVenues,
+} from '../../services/api/adPackagesApi';
 import OverviewCityMapCard from '../../components/map/OverviewCityMapCard';
 import heroFoodImage from '../../assets/images/anh1.png';
 import UserPreferenceWizard from '../../components/preferences/UserPreferenceWizard';
@@ -142,6 +145,10 @@ function resolveWeatherEmoji(conditionMain) {
 }
 
 function formatDistanceKm(value) {
+  if (value === null || value === undefined || value === '') {
+    return 'N/A';
+  }
+
   const distanceKm = Number(value);
   if (!Number.isFinite(distanceKm) || distanceKm < 0) {
     return 'N/A';
@@ -152,6 +159,117 @@ function formatDistanceKm(value) {
   }
 
   return `${distanceKm.toFixed(1)} km`;
+}
+
+function parseCoordinateValue(value) {
+  const normalizedValue = typeof value === 'string'
+    ? value.trim().replace(',', '.')
+    : value;
+  const parsed = Number(normalizedValue);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function hasValidCoordinates(coordinates) {
+  const latitude = Number(coordinates?.latitude);
+  const longitude = Number(coordinates?.longitude);
+
+  return Number.isFinite(latitude) && Number.isFinite(longitude);
+}
+
+function resolveVenueCoordinatesForDistance(venue) {
+  const metadata = normalizeVenueMetadata(venue?.metadata);
+  const locationMetadata = metadata?.location && typeof metadata.location === 'object'
+    ? metadata.location
+    : {};
+
+  const latitudeCandidates = [
+    venue?.latitude,
+    metadata?.latitude,
+    metadata?.lat,
+    locationMetadata?.latitude,
+    locationMetadata?.lat,
+  ];
+  const longitudeCandidates = [
+    venue?.longitude,
+    metadata?.longitude,
+    metadata?.lng,
+    metadata?.lon,
+    locationMetadata?.longitude,
+    locationMetadata?.lng,
+    locationMetadata?.lon,
+  ];
+
+  const latitude = latitudeCandidates
+    .map((candidate) => parseCoordinateValue(candidate))
+    .find((candidate) => candidate !== null);
+  const longitude = longitudeCandidates
+    .map((candidate) => parseCoordinateValue(candidate))
+    .find((candidate) => candidate !== null);
+
+  if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
+    return { latitude: null, longitude: null };
+  }
+
+  if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+    return { latitude: null, longitude: null };
+  }
+
+  return { latitude, longitude };
+}
+
+function computeDistanceKm(fromLatitude, fromLongitude, toLatitude, toLongitude) {
+  const lat1 = Number(fromLatitude);
+  const lon1 = Number(fromLongitude);
+  const lat2 = Number(toLatitude);
+  const lon2 = Number(toLongitude);
+
+  if (![lat1, lon1, lat2, lon2].every((value) => Number.isFinite(value))) {
+    return null;
+  }
+
+  const earthRadiusKm = 6371;
+  const toRadians = (degrees) => (degrees * Math.PI) / 180;
+  const deltaLat = toRadians(lat2 - lat1);
+  const deltaLon = toRadians(lon2 - lon1);
+  const a =
+    Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2)
+    + Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2))
+    * Math.sin(deltaLon / 2) * Math.sin(deltaLon / 2);
+
+  return 2 * earthRadiusKm * Math.asin(Math.sqrt(a));
+}
+
+function resolveBrowserCoordinates({
+  fallbackCoordinates = DEFAULT_CITY_COORDINATES,
+  timeoutMs = 8000,
+  maximumAgeMs = 60000,
+} = {}) {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) {
+      resolve(fallbackCoordinates);
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const latitude = Number(position?.coords?.latitude);
+        const longitude = Number(position?.coords?.longitude);
+
+        if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+          resolve({ latitude, longitude });
+          return;
+        }
+
+        resolve(fallbackCoordinates);
+      },
+      () => resolve(fallbackCoordinates),
+      {
+        enableHighAccuracy: true,
+        timeout: timeoutMs,
+        maximumAge: maximumAgeMs,
+      }
+    );
+  });
 }
 
 function formatLocationClockByOffset(offsetSeconds) {
@@ -167,6 +285,16 @@ function formatLocationClockByOffset(offsetSeconds) {
     timeZone: 'UTC'
   }).format(utcShiftedDate);
 }
+
+function createTrendClickToken() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+
+  return `trend-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+const CONTINUOUS_SLIDER_SECTION_IDS = new Set(['trending', 'for-you']);
 
 function buildLocalFallbackWeather() {
   return {
@@ -317,13 +445,29 @@ function FilterGroup({ title, options, selectedValues, optionValue, optionLabel,
   );
 }
 
-function VenueCard({ venue, isFavorite, onToggleFavorite, onExplore, showDistance = false }) {
+function VenueCard({ venue, isFavorite, onToggleFavorite, onExplore, showDistance = false, userCoordinates = null }) {
   const venueName = venue.name || venue.title || 'Untitled venue';
   const venueAddress = venue.address || 'Address not available';
   const wardName = venue.ward_name || venue.wardName;
+  const featuredPromotionLabel = venue?.featuredPromotion?.isHot
+    ? String(venue?.featuredPromotion?.label || 'HOT').trim() || 'HOT'
+    : '';
   const { isOpen, timeRange } = resolveVenueOpenState(venue);
   const priceRange = resolveVenuePriceRange(venue);
-  const distanceLabel = formatDistanceKm(venue.distanceKm);
+  const venueCoordinates = resolveVenueCoordinatesForDistance(venue);
+  const distanceFromClientCoordinates = hasValidCoordinates(userCoordinates)
+    ? computeDistanceKm(
+      userCoordinates.latitude,
+      userCoordinates.longitude,
+      venueCoordinates.latitude,
+      venueCoordinates.longitude
+    )
+    : null;
+  const fallbackDistanceKm = Number(venue.distanceKm);
+  const resolvedDistanceKm = Number.isFinite(distanceFromClientCoordinates)
+    ? Number(distanceFromClientCoordinates.toFixed(3))
+    : (Number.isFinite(fallbackDistanceKm) ? fallbackDistanceKm : null);
+  const distanceLabel = formatDistanceKm(resolvedDistanceKm);
 
   return (
     <article
@@ -339,6 +483,9 @@ function VenueCard({ venue, isFavorite, onToggleFavorite, onExplore, showDistanc
       }}
     >
       <div className="overview-dynamic-media">
+        {featuredPromotionLabel ? (
+          <span className="overview-featured-hot-badge">{featuredPromotionLabel}</span>
+        ) : null}
         <button
           type="button"
           className="overview-dynamic-media-link"
@@ -447,6 +594,9 @@ function OverviewPage() {
   const [forYouVenues, setForYouVenues] = useState([]);
   const [forYouLoading, setForYouLoading] = useState(false);
   const [forYouError, setForYouError] = useState('');
+  const [trendingVenues, setTrendingVenues] = useState([]);
+  const [trendingLoading, setTrendingLoading] = useState(false);
+  const [trendingError, setTrendingError] = useState('');
   const [aiSuggestMode, setAiSuggestMode] = useState(false);
   const [aiSuggestLoading, setAiSuggestLoading] = useState(false);
   const [aiSuggestError, setAiSuggestError] = useState('');
@@ -461,7 +611,13 @@ function OverviewPage() {
   const [geoCoordinates, setGeoCoordinates] = useState({ latitude: null, longitude: null });
   const [sliderPager, setSliderPager] = useState({});
   const sliderRefs = useRef(new Map());
+  const sliderRefCallbackRefs = useRef(new Map());
   const sliderCleanupRefs = useRef(new Map());
+  const sliderHoverRefs = useRef(new Map());
+  const sliderLoopWidthRefs = useRef(new Map());
+  const sliderAnimationFrameRefs = useRef(new Map());
+  const sliderAnimStateRefs = useRef(new Map());
+  const sliderManualPauseUntilRefs = useRef(new Map());
   const searchInputRef = useRef(null);
   const libraryInputRef = useRef(null);
   const cameraInputRef = useRef(null);
@@ -487,7 +643,9 @@ function OverviewPage() {
   };
 
   const apiUrl = useMemo(
-    () => import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api',
+    () =>
+      import.meta.env.VITE_API_BASE_URL
+      || (import.meta.env.DEV ? 'http://localhost:3000/api' : '/api'),
     []
   );
 
@@ -639,6 +797,14 @@ function OverviewPage() {
     (submittedSearch.trim() ? 1 : 0);
   const isSearchMode = searchTriggered && !aiSuggestMode;
   const isCondensedMode = isSearchMode || aiSuggestMode;
+  const trendingSliderVenues = useMemo(
+    () => (trendingVenues.length > 1 ? [...trendingVenues, ...trendingVenues] : trendingVenues),
+    [trendingVenues]
+  );
+  const forYouSliderVenues = useMemo(
+    () => (forYouVenues.length > 1 ? [...forYouVenues, ...forYouVenues] : forYouVenues),
+    [forYouVenues]
+  );
 
   const weatherDisplayText = useMemo(() => {
     if (weatherLoading) {
@@ -819,13 +985,39 @@ function OverviewPage() {
   }, [token, userPreferenceSignal, geoCoordinates.latitude, geoCoordinates.longitude]);
 
   useEffect(() => {
-    const sliderNode = sliderRefs.current.get('for-you');
-    if (!sliderNode) {
-      return;
-    }
+    let isMounted = true;
 
-    sliderNode.scrollLeft = 0;
-  }, [forYouVenues, userPreferenceSignal]);
+    const loadTrendingVenues = async () => {
+      setTrendingLoading(true);
+      setTrendingError('');
+
+      try {
+        const rows = await fetchTrendingVenues(12);
+        if (!isMounted) {
+          return;
+        }
+
+        setTrendingVenues(Array.isArray(rows) ? rows : []);
+      } catch (error) {
+        if (!isMounted) {
+          return;
+        }
+
+        setTrendingVenues([]);
+        setTrendingError(error?.response?.data?.message || 'Unable to load trending places right now.');
+      } finally {
+        if (isMounted) {
+          setTrendingLoading(false);
+        }
+      }
+    };
+
+    loadTrendingVenues();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -1155,14 +1347,24 @@ function OverviewPage() {
     setShowFilterPanel(false);
 
     try {
+      const fallbackCoordinates = hasValidCoordinates(geoCoordinates)
+        ? geoCoordinates
+        : DEFAULT_CITY_COORDINATES;
+      const latestCoordinates = await resolveBrowserCoordinates({
+        fallbackCoordinates,
+        timeoutMs: 9000,
+        maximumAgeMs: 0,
+      });
+      setGeoCoordinates(latestCoordinates);
+
       const params = {
         limit: 24,
         preferOpenNow: true,
         currentTimeIso: new Date().toISOString()
       };
 
-      const latitude = Number(geoCoordinates.latitude);
-      const longitude = Number(geoCoordinates.longitude);
+      const latitude = Number(latestCoordinates.latitude);
+      const longitude = Number(latestCoordinates.longitude);
 
       if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
         params.latitude = latitude;
@@ -1222,6 +1424,16 @@ function OverviewPage() {
     setAiRefineError('');
 
     try {
+      const fallbackCoordinates = hasValidCoordinates(geoCoordinates)
+        ? geoCoordinates
+        : DEFAULT_CITY_COORDINATES;
+      const latestCoordinates = await resolveBrowserCoordinates({
+        fallbackCoordinates,
+        timeoutMs: 9000,
+        maximumAgeMs: 0,
+      });
+      setGeoCoordinates(latestCoordinates);
+
       const payload = {
         query: refineText,
         scope: 'global',
@@ -1229,8 +1441,8 @@ function OverviewPage() {
         currentTimeIso: new Date().toISOString()
       };
 
-      const latitude = Number(geoCoordinates.latitude);
-      const longitude = Number(geoCoordinates.longitude);
+      const latitude = Number(latestCoordinates.latitude);
+      const longitude = Number(latestCoordinates.longitude);
       if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
         payload.latitude = latitude;
         payload.longitude = longitude;
@@ -1276,40 +1488,16 @@ function OverviewPage() {
   useEffect(() => {
     let isMounted = true;
 
-    const resolveUserCoordinates = () =>
-      new Promise((resolve) => {
-        if (!navigator.geolocation) {
-          resolve(DEFAULT_CITY_COORDINATES);
-          return;
-        }
-
-        navigator.geolocation.getCurrentPosition(
-          (position) => {
-            const latitude = Number(position?.coords?.latitude);
-            const longitude = Number(position?.coords?.longitude);
-
-            if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
-              resolve({ latitude, longitude });
-              return;
-            }
-
-            resolve(DEFAULT_CITY_COORDINATES);
-          },
-          () => resolve(DEFAULT_CITY_COORDINATES),
-          {
-            enableHighAccuracy: true,
-            timeout: 8000,
-            maximumAge: 60 * 1000
-          }
-        );
-      });
-
     const loadRealtimeWeather = async () => {
       setWeatherLoading(true);
       setWeatherError('');
 
       try {
-        const coordinates = await resolveUserCoordinates();
+        const coordinates = await resolveBrowserCoordinates({
+          fallbackCoordinates: DEFAULT_CITY_COORDINATES,
+          timeoutMs: 8000,
+          maximumAgeMs: 60 * 1000,
+        });
         if (!isMounted) {
           return;
         }
@@ -1477,11 +1665,26 @@ function OverviewPage() {
     if (cameraInputRef.current) cameraInputRef.current.value = '';
   };
 
-  const handleExploreVenue = (venue) => {
+  const handleExploreVenue = (venue, options = {}) => {
     if (!venue?.id) {
       navigate('/discovery');
       return;
     }
+
+    const source = String(options?.source || '').trim().toLowerCase();
+    const assignmentId = source === 'trending'
+      ? Number.parseInt(
+        options?.assignmentId || venue?.trendPromotion?.assignmentId,
+        10
+      )
+      : null;
+    const trendClickContext = source === 'trending' && Number.isFinite(assignmentId) && assignmentId > 0
+      ? {
+        assignmentId: String(assignmentId),
+        source: 'overview-trending',
+        clickToken: createTrendClickToken()
+      }
+      : null;
 
     const overviewReturnSnapshot = {
       aiSuggestMode,
@@ -1496,7 +1699,8 @@ function OverviewPage() {
     navigate(`/venues/${venue.id}`, {
       state: {
         fromOverview: true,
-        overviewReturnSnapshot
+        overviewReturnSnapshot,
+        trendClickContext
       }
     });
   };
@@ -1506,6 +1710,65 @@ function OverviewPage() {
     setShowPreferenceWizard(false);
   };
 
+  const isContinuousSliderSection = (sectionId) => CONTINUOUS_SLIDER_SECTION_IDS.has(String(sectionId));
+
+  const getSliderLoopWidth = (sectionId, node) => {
+    if (!node) {
+      return 0;
+    }
+
+    const key = String(sectionId);
+    if (!isContinuousSliderSection(key)) {
+      return Math.max(0, node.scrollWidth - node.clientWidth);
+    }
+
+    const cachedLoopWidth = Number(sliderLoopWidthRefs.current.get(key));
+    if (Number.isFinite(cachedLoopWidth) && cachedLoopWidth > 0) {
+      return cachedLoopWidth;
+    }
+
+    const resolvedLoopWidth = Math.max(0, Math.round(node.scrollWidth / 2));
+    sliderLoopWidthRefs.current.set(key, resolvedLoopWidth);
+    return resolvedLoopWidth;
+  };
+
+  const normalizeContinuousSliderPosition = (sectionId, node) => {
+    if (!node || !isContinuousSliderSection(sectionId)) {
+      return;
+    }
+
+    const loopWidth = getSliderLoopWidth(sectionId, node);
+    if (!loopWidth) {
+      return;
+    }
+
+    if (node.scrollLeft >= loopWidth) {
+      node.scrollLeft -= loopWidth;
+    } else if (node.scrollLeft < 0) {
+      node.scrollLeft += loopWidth;
+    }
+  };
+
+  const getSliderStepDistance = (node) => {
+    if (!node) {
+      return 0;
+    }
+
+    const firstCard = node.querySelector('.overview-dynamic-card');
+    if (!firstCard) {
+      return Math.max(1, node.clientWidth || 1);
+    }
+
+    const sliderStyles = window.getComputedStyle(node);
+    const fallbackGap = Number.parseFloat(sliderStyles.gap || sliderStyles.columnGap || '0') || 0;
+    const cardStyles = window.getComputedStyle(firstCard);
+    const cardMarginRight = Number.parseFloat(cardStyles.marginRight || '0') || 0;
+    const cardWidth = firstCard.getBoundingClientRect().width || 0;
+    const step = cardWidth + Math.max(fallbackGap, cardMarginRight);
+
+    return Math.max(1, Math.round(step));
+  };
+
   const updateSliderPager = (sectionId, node) => {
     if (!node) {
       return;
@@ -1513,9 +1776,16 @@ function OverviewPage() {
 
     const key = String(sectionId);
     const viewportWidth = node.clientWidth || 1;
-    const maxScroll = Math.max(0, node.scrollWidth - viewportWidth);
+    const loopWidth = getSliderLoopWidth(sectionId, node);
+    const effectiveScrollWidth = isContinuousSliderSection(key) && loopWidth
+      ? loopWidth
+      : node.scrollWidth;
+    const maxScroll = Math.max(0, effectiveScrollWidth - viewportWidth);
+    const normalizedScrollLeft = isContinuousSliderSection(key) && loopWidth
+      ? ((node.scrollLeft % loopWidth) + loopWidth) % loopWidth
+      : node.scrollLeft;
     const totalPages = Math.max(1, Math.ceil(maxScroll / viewportWidth) + 1);
-    const currentPage = Math.min(totalPages, Math.max(1, Math.floor(node.scrollLeft / viewportWidth) + 1));
+    const currentPage = Math.min(totalPages, Math.max(1, Math.round(normalizedScrollLeft / viewportWidth) + 1));
 
     setSliderPager((prev) => {
       const previous = prev[key];
@@ -1539,33 +1809,169 @@ function OverviewPage() {
       cleanup();
       sliderCleanupRefs.current.delete(key);
     }
-  };
 
-  const registerSliderRef = (sectionId) => (node) => {
-    const key = String(sectionId);
-    cleanupSliderRegistration(sectionId);
-
-    if (!node) {
-      sliderRefs.current.delete(sectionId);
-      return;
+    const animationFrameId = sliderAnimationFrameRefs.current.get(key);
+    if (animationFrameId) {
+      window.cancelAnimationFrame(animationFrameId);
+      sliderAnimationFrameRefs.current.delete(key);
     }
 
-    sliderRefs.current.set(sectionId, node);
+    sliderAnimStateRefs.current.delete(key);
+    sliderHoverRefs.current.delete(key);
+    sliderLoopWidthRefs.current.delete(key);
+  };
 
-    const handleScroll = () => updateSliderPager(sectionId, node);
-    node.addEventListener('scroll', handleScroll, { passive: true });
-    updateSliderPager(sectionId, node);
+  const registerSliderRef = (sectionId) => {
+    const key = String(sectionId);
+    const existingCallback = sliderRefCallbackRefs.current.get(key);
 
-    sliderCleanupRefs.current.set(key, () => {
-      node.removeEventListener('scroll', handleScroll);
-    });
+    if (existingCallback) {
+      return existingCallback;
+    }
+
+    const callback = (node) => {
+      cleanupSliderRegistration(key);
+
+      if (!node) {
+        sliderRefs.current.delete(key);
+        return;
+      }
+
+      sliderRefs.current.set(key, node);
+
+      const isContinuous = isContinuousSliderSection(key);
+      const handleScroll = () => {
+        if (isContinuous) {
+          normalizeContinuousSliderPosition(key, node);
+        }
+        updateSliderPager(key, node);
+      };
+      const handleMouseEnter = () => {
+        sliderHoverRefs.current.set(key, true);
+      };
+      const handleMouseLeave = () => {
+        sliderHoverRefs.current.set(key, false);
+      };
+
+      if (isContinuous) {
+        sliderHoverRefs.current.set(key, false);
+        sliderLoopWidthRefs.current.set(key, Math.max(0, Math.round(node.scrollWidth / 2)));
+        node.scrollLeft = 0;
+        node.addEventListener('mouseenter', handleMouseEnter);
+        node.addEventListener('mouseleave', handleMouseLeave);
+
+        let lastAutoScrollTime = performance.now();
+        sliderAnimStateRefs.current.set(key, {
+          isActive: false,
+          startLeft: 0,
+          targetLeft: 0,
+          startTime: 0,
+          duration: 1000
+        });
+
+        const animate = (timestamp) => {
+          const manualPauseUntil = Number(sliderManualPauseUntilRefs.current.get(key) || 0);
+          const isManualPauseActive = timestamp < manualPauseUntil;
+          const isHovered = sliderHoverRefs.current.get(key);
+          const animState = sliderAnimStateRefs.current.get(key);
+
+          if (animState && animState.isActive) {
+            if (node.style.scrollSnapType !== 'none') {
+              node.dataset.originalSnap = node.style.scrollSnapType || '';
+              node.style.scrollSnapType = 'none';
+            }
+
+            const elapsed = timestamp - animState.startTime;
+            const progress = Math.min(1, elapsed / animState.duration);
+            const ease = progress < 0.5 ? 2 * progress * progress : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+
+            let nextLeft = animState.startLeft + (animState.targetLeft - animState.startLeft) * ease;
+            const loopWidth = getSliderLoopWidth(key, node);
+
+            if (loopWidth > 0) {
+              if (nextLeft >= loopWidth) {
+                nextLeft -= loopWidth;
+                animState.startLeft -= loopWidth;
+                animState.targetLeft -= loopWidth;
+              } else if (nextLeft < 0) {
+                nextLeft += loopWidth;
+                animState.startLeft += loopWidth;
+                animState.targetLeft += loopWidth;
+              }
+            }
+
+            node.scrollLeft = nextLeft;
+
+            if (progress >= 1) {
+              animState.isActive = false;
+              lastAutoScrollTime = timestamp;
+              node.style.scrollSnapType = node.dataset.originalSnap || '';
+              normalizeContinuousSliderPosition(key, node);
+              updateSliderPager(key, node);
+            }
+          } else {
+            if (!isHovered && !isManualPauseActive) {
+              if (timestamp - lastAutoScrollTime > 3000) {
+                const stepDistance = getSliderStepDistance(node) * 4;
+                if (animState) {
+                  animState.isActive = true;
+                  animState.startLeft = node.scrollLeft;
+                  animState.targetLeft = node.scrollLeft + stepDistance;
+                  animState.startTime = timestamp;
+                  animState.duration = 1000;
+                }
+              }
+            } else {
+              lastAutoScrollTime = timestamp;
+            }
+          }
+
+          const nextFrameId = window.requestAnimationFrame(animate);
+          sliderAnimationFrameRefs.current.set(key, nextFrameId);
+        };
+
+        const frameId = window.requestAnimationFrame(animate);
+        sliderAnimationFrameRefs.current.set(key, frameId);
+      }
+
+      node.addEventListener('scroll', handleScroll, { passive: true });
+      updateSliderPager(key, node);
+
+      sliderCleanupRefs.current.set(key, () => {
+        node.removeEventListener('scroll', handleScroll);
+        if (isContinuous) {
+          node.removeEventListener('mouseenter', handleMouseEnter);
+          node.removeEventListener('mouseleave', handleMouseLeave);
+        }
+      });
+    };
+
+    sliderRefCallbackRefs.current.set(key, callback);
+    return callback;
   };
 
   const scrollCategorySlider = (sectionId, direction) => {
-    const node = sliderRefs.current.get(sectionId);
+    const key = String(sectionId);
+    const node = sliderRefs.current.get(key);
     if (!node) return;
 
     const viewportWidth = node.clientWidth || 1;
+    const loopWidth = getSliderLoopWidth(key, node);
+
+    if (isContinuousSliderSection(key) && loopWidth) {
+      const animState = sliderAnimStateRefs.current.get(key);
+      const stepDistance = getSliderStepDistance(node) * 4;
+      sliderManualPauseUntilRefs.current.set(key, performance.now() + 4000);
+      if (animState) {
+        animState.isActive = true;
+        animState.startLeft = node.scrollLeft;
+        animState.targetLeft = node.scrollLeft + (stepDistance * direction);
+        animState.startTime = performance.now();
+        animState.duration = 800;
+      }
+      return;
+    }
+
     const maxScroll = Math.max(0, node.scrollWidth - viewportWidth);
     const targetLeft = Math.max(0, Math.min(maxScroll, node.scrollLeft + viewportWidth * direction));
 
@@ -1576,12 +1982,27 @@ function OverviewPage() {
   };
 
   const handleSliderDotClick = (sectionId, targetPage) => {
-    const node = sliderRefs.current.get(sectionId);
+    const key = String(sectionId);
+    const node = sliderRefs.current.get(key);
     if (!node) {
       return;
     }
 
     const clampedPage = Math.max(1, Number(targetPage) || 1);
+    const loopWidth = getSliderLoopWidth(key, node);
+    if (isContinuousSliderSection(key) && loopWidth) {
+      const animState = sliderAnimStateRefs.current.get(key);
+      sliderManualPauseUntilRefs.current.set(key, performance.now() + 4000);
+      if (animState) {
+        animState.isActive = true;
+        animState.startLeft = node.scrollLeft;
+        animState.targetLeft = Math.min(loopWidth, (clampedPage - 1) * node.clientWidth);
+        animState.startTime = performance.now();
+        animState.duration = 800;
+      }
+      return;
+    }
+
     node.scrollTo({
       left: (clampedPage - 1) * node.clientWidth,
       behavior: 'smooth'
@@ -1625,6 +2046,11 @@ function OverviewPage() {
       window.removeEventListener('resize', handleWindowResize);
       sliderCleanupRefs.current.forEach((cleanup) => cleanup());
       sliderCleanupRefs.current.clear();
+      sliderHoverRefs.current.clear();
+      sliderLoopWidthRefs.current.clear();
+      sliderAnimationFrameRefs.current.forEach((frameId) => window.cancelAnimationFrame(frameId));
+      sliderAnimationFrameRefs.current.clear();
+      sliderAnimStateRefs.current.clear();
     };
   }, []);
 
@@ -1909,6 +2335,60 @@ function OverviewPage() {
         ) : null}
       </section>
 
+      {!isCondensedMode ? (
+        <section className="overview-section overview-content-lane overview-for-you-section">
+          <div className="overview-section-heading">
+            <h2>Trend</h2>
+            <span />
+            <p className="overview-section-subcopy">
+              Promoted places currently being pushed by merchants.
+            </p>
+          </div>
+
+          {trendingLoading ? <p className="overview-empty-copy">Loading trending places...</p> : null}
+          {!trendingLoading && trendingError ? <p className="overview-inline-error">{trendingError}</p> : null}
+
+          {!trendingLoading && !trendingError && trendingVenues.length > 0 ? (
+            <div className="overview-category-board">
+              <button
+                type="button"
+                className="overview-slider-btn prev"
+                aria-label="Scroll trending left"
+                onClick={() => scrollCategorySlider('trending', -1)}
+              />
+              <div
+                className="overview-dynamic-grid overview-dynamic-grid-slider is-continuous"
+                ref={registerSliderRef('trending')}
+              >
+                {trendingSliderVenues.map((venue, index) => (
+                  <VenueCard
+                    key={`trending-${venue.id}-${venue?.trendPromotion?.assignmentId || 'ad'}-${index}`}
+                    venue={venue}
+                    isFavorite={isFavorite('place', venue.id)}
+                    onToggleFavorite={handleToggleFavorite}
+                    onExplore={(nextVenue) => handleExploreVenue(nextVenue, {
+                      source: 'trending',
+                      assignmentId: nextVenue?.trendPromotion?.assignmentId,
+                    })}
+                  />
+                ))}
+              </div>
+              <button
+                type="button"
+                className="overview-slider-btn next"
+                aria-label="Scroll trending right"
+                onClick={() => scrollCategorySlider('trending', 1)}
+              />
+              {renderSliderPaginationDots('trending')}
+            </div>
+          ) : null}
+
+          {!trendingLoading && !trendingError && !trendingVenues.length ? (
+            <p className="overview-empty-copy">No promoted trending places are active right now.</p>
+          ) : null}
+        </section>
+      ) : null}
+
       {!isCondensedMode && token ? (
         <section className="overview-section overview-content-lane overview-for-you-section">
           <div className="overview-section-heading">
@@ -1953,12 +2433,12 @@ function OverviewPage() {
                 onClick={() => scrollCategorySlider('for-you', -1)}
               />
               <div
-                className="overview-dynamic-grid overview-dynamic-grid-slider"
+                className="overview-dynamic-grid overview-dynamic-grid-slider is-continuous"
                 ref={registerSliderRef('for-you')}
               >
-                {forYouVenues.map((venue) => (
+                {forYouSliderVenues.map((venue, index) => (
                   <VenueCard
-                    key={`for-you-${venue.id}`}
+                    key={`for-you-${venue.id}-${index}`}
                     venue={venue}
                     isFavorite={isFavorite('place', venue.id)}
                     onToggleFavorite={handleToggleFavorite}
@@ -2091,6 +2571,7 @@ function OverviewPage() {
                     onToggleFavorite={handleToggleFavorite}
                     onExplore={handleExploreVenue}
                     showDistance
+                    userCoordinates={geoCoordinates}
                   />
                 ))}
               </div>

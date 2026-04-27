@@ -30,12 +30,22 @@ const POST_STATUSES = {
 const FALLBACK_POST_IMAGE = 'https://via.placeholder.com/200x150?text=Venue';
 
 function resolveApiOrigin() {
-  const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api/v1';
+  const configuredBaseUrl =
+    import.meta.env.VITE_API_BASE_URL
+    || (import.meta.env.DEV ? 'http://localhost:3000/api/v1' : '/api');
+
+  if (typeof window !== 'undefined') {
+    try {
+      return new URL(configuredBaseUrl, window.location.origin).origin;
+    } catch {
+      return window.location.origin;
+    }
+  }
 
   try {
     return new URL(configuredBaseUrl).origin;
   } catch {
-    return 'http://localhost:5000';
+    return 'http://localhost:3000';
   }
 }
 
@@ -216,11 +226,6 @@ function MerchantPostListPage() {
   const [activeMenu, setActiveMenu] = useState('posts');
   const [deletingPostId, setDeletingPostId] = useState(null);
   const [togglingPausePostId, setTogglingPausePostId] = useState(null);
-  const copy = {
-    followers: language === 'en' ? 'Followers' : 'Người theo dõi',
-    following: language === 'en' ? 'Following' : 'Đang theo dõi',
-    ratingCount: language === 'en' ? 'reviews' : 'đánh giá'
-  };
 
   useEffect(() => {
     async function loadMerchantPosts() {
@@ -242,7 +247,7 @@ function MerchantPostListPage() {
 
         setPosts([...normalizedVenuePosts, ...normalizedRejectedUpdatePosts]);
       } catch (error) {
-        setLoadError(error.response?.data?.message || 'Không thể tải danh sách bài đăng của bạn.');
+        setLoadError(error.response?.data?.message || 'Could not load your posts. Please refresh and try again.');
       } finally {
         setLoadingPosts(false);
       }
@@ -253,6 +258,10 @@ function MerchantPostListPage() {
 
   const handlePublishClick = () => {
     navigate('/merchant/workbench');
+  };
+
+  const handleAdvertiseAccount = () => {
+    navigate(APP_ROUTES.MERCHANT_POST_ADVERTISE);
   };
 
   const handleMenuClick = (menuId) => {
@@ -402,13 +411,21 @@ function MerchantPostListPage() {
         </div>
 
         {/* Publish Button */}
-        <button 
-          className="merchant-publish-btn"
-          onClick={handlePublishClick}
-          data-onboarding="merchant-publish-button"
-        >
-          {t.merchant.publish}
-        </button>
+        <div className="merchant-primary-actions" data-onboarding="merchant-publish-button">
+          <button
+            className="merchant-publish-btn merchant-primary-action-btn"
+            onClick={handlePublishClick}
+          >
+            {t.merchant.publish}
+          </button>
+          <button
+            className="merchant-advertise-btn merchant-primary-action-btn"
+            type="button"
+            onClick={handleAdvertiseAccount}
+          >
+            Advertise
+          </button>
+        </div>
 
         {/* Menu Items */}
         <nav className="merchant-menu" data-onboarding="merchant-menu">
@@ -441,25 +458,28 @@ function MerchantPostListPage() {
               <div className="merchant-profile-avatar-large">{getUserInitial()}</div>
               <div className="merchant-profile-details">
                 <h2>{user?.fullname || 'Nguyễn Hữu Lộc'}</h2>
-                <div className="merchant-followers-info">
-                  <span>{copy.followers}: 18</span>
-                  <span>{copy.following}: 3</span>
-                </div>
+                <p className="merchant-profile-role">Merchant</p>
               </div>
             </div>
 
-            <div className="merchant-rating-section">
-              <div className="merchant-rating-stars">⭐⭐⭐⭐⭐</div>
-              <div className="merchant-rating-score">4.7 (14 {copy.ratingCount})</div>
+            <div className="merchant-post-header-actions">
+              <button
+                className="merchant-post-advertise-btn-header"
+                onClick={handleAdvertiseAccount}
+              >
+                Advertise
+              </button>
+              <button
+                className="merchant-post-publish-btn-header"
+                onClick={handlePublishClick}
+              >
+                {t.merchant.publish}
+              </button>
             </div>
-
-            <button 
-              className="merchant-post-publish-btn-header"
-              onClick={handlePublishClick}
-            >
-              {t.merchant.publish}
-            </button>
           </div>
+          <p className="merchant-post-header-note">
+            Advertising packages now apply to your whole merchant account, not to individual venues.
+          </p>
         </div>
 
         {/* Tabs */}

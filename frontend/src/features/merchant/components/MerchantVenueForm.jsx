@@ -39,12 +39,22 @@ function buildDefaultWeeklyOverrideMap() {
 }
 
 function resolveApiOrigin() {
-  const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api/v1';
+  const configuredBaseUrl =
+    import.meta.env.VITE_API_BASE_URL
+    || (import.meta.env.DEV ? 'http://localhost:3000/api/v1' : '/api');
+
+  if (typeof window !== 'undefined') {
+    try {
+      return new URL(configuredBaseUrl, window.location.origin).origin;
+    } catch {
+      return window.location.origin;
+    }
+  }
 
   try {
     return new URL(configuredBaseUrl).origin;
   } catch {
-    return 'http://localhost:5000';
+    return 'http://localhost:3000';
   }
 }
 
@@ -1143,6 +1153,7 @@ function MerchantVenueForm({ editVenueId = null }) {
         {/* Section 2: Basic Info */}
         <div className="form-section" data-onboarding="merchant-form-basic">
           <div className="section-header">
+            <span className="merchant-onboarding-anchor" data-onboarding-anchor="merchant-form-basic" aria-hidden="true" />
             <h2>2. Basic Information</h2>
           </div>
 
@@ -1226,6 +1237,7 @@ function MerchantVenueForm({ editVenueId = null }) {
         {/* Section 3: Location & Hours */}
         <div className="form-section" data-onboarding="merchant-form-location">
           <div className="section-header">
+            <span className="merchant-onboarding-anchor" data-onboarding-anchor="merchant-form-location" aria-hidden="true" />
             <h2>3. Location & Hours</h2>
           </div>
 
@@ -1397,6 +1409,7 @@ function MerchantVenueForm({ editVenueId = null }) {
         {/* Section 4: Services */}
         <div className="form-section" data-onboarding="merchant-form-services">
           <div className="section-header">
+            <span className="merchant-onboarding-anchor" data-onboarding-anchor="merchant-form-services" aria-hidden="true" />
             <h2>4. Services Offered</h2>
             <p className="section-hint">
               {servicesLoading ? 'Loading services...' : 'Select all applicable services'}

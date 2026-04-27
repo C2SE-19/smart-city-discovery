@@ -41,7 +41,6 @@ const COPY = {
       address: 'Địa chỉ'
     },
     loading: 'Đang tải thông tin...',
-    edit: '✎ Chỉnh sửa',
     edit: 'Chỉnh sửa',
     save: 'Lưu',
     cancel: 'Hủy',
@@ -413,7 +412,9 @@ function ProfilePage() {
   const menuIdSet = useMemo(() => new Set(MenuItems.map((item) => item.id)), [MenuItems]);
 
   const apiUrl = useMemo(
-    () => import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api',
+    () =>
+      import.meta.env.VITE_API_BASE_URL
+      || (import.meta.env.DEV ? 'http://localhost:3000/api' : '/api'),
     []
   );
 

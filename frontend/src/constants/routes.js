@@ -19,6 +19,7 @@ export const APP_ROUTES = {
   ADMIN_FORUM: '/admin/forum',
   ADMIN_FORUM_REPORTS: '/admin/forum/reports',
   ADMIN_FORUM_VIEW: '/admin/forum/view',
+  ADMIN_FORUM_KEYWORDS: '/admin/forum/keywords',
   ADMIN_USERS: '/admin/users',
   ADMIN_REPORTS: '/admin/reports',
   ADMIN_PACKAGES: '/admin/packages',
@@ -26,6 +27,10 @@ export const APP_ROUTES = {
   ADMIN_FEEDBACK: '/admin/feedback',
   MERCHANT_DASHBOARD: '/merchant',
   MERCHANT_POSTS: '/merchant/posts',
+  MERCHANT_TRANSACTIONS: '/merchant/transactions',
+  MERCHANT_CHECKOUT_RESULT: '/merchant/checkout-result',
+  MERCHANT_POST_ADVERTISE: '/merchant/posts/advertise',
+  MERCHANT_POST_ADVERTISE_LEGACY: '/merchant/posts/:venueId/advertise',
   MERCHANT_WORKBENCH: '/merchant/workbench',
   MERCHANT_WORKBENCH_EDIT: '/merchant/workbench/:venueId',
 };

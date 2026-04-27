@@ -851,14 +851,12 @@ function LandingLayout() {
                       style={{ top: `${chatActionsPosition.top}px`, left: `${chatActionsPosition.left}px` }}
                     >
                       <button type="button" onClick={() => handleTogglePinChat(openChatActionsThread)}>
-                        {(chatPrefs?.pinnedKeys || []).includes(resolveThreadGroupKey(openChatActionsThread)) ? 'Bá» ghim' : 'Ghim lÃªn Ä‘áº§u'}
+                        {(chatPrefs?.pinnedKeys || []).includes(resolveThreadGroupKey(openChatActionsThread)) ? 'Bỏ ghim' : 'Ghim tin nhắn'}
                       </button>
                       <button type="button" onClick={() => handleHideChat(openChatActionsThread)}>
-                        XÃ³a khá»i danh sÃ¡ch
+                        Xóa khỏi danh sách
                       </button>
-                      <button type="button" onClick={() => handleReportChat(openChatActionsThread)}>
-                        BÃ¡o cÃ¡o
-                      </button>
+                     
                     </div>
                   ) : null}
                 </div>
@@ -1000,7 +998,7 @@ function LandingLayout() {
                 onClick={() => setShowGlobalChatWidget(false)}
                 aria-label="Thu gá»n chat"
               >
-                âˆ’
+                x
               </button>
             </div>
 

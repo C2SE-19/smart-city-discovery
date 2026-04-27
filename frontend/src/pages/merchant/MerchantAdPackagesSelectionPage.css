@@ -1,0 +1,433 @@
+.merchant-ad-packages-page {
+  width: min(1200px, 100%);
+  margin: 0 auto 24px;
+  display: grid;
+  gap: 16px;
+}
+
+.merchant-ad-packages-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 18px 22px;
+  border-radius: 24px;
+  border: 1px solid rgba(112, 85, 33, 0.18);
+  background:
+    radial-gradient(circle at top right, rgba(241, 181, 75, 0.18), transparent 36%),
+    linear-gradient(145deg, rgba(252, 248, 238, 0.96), rgba(244, 236, 217, 0.92));
+  box-shadow: 0 16px 32px rgba(114, 86, 34, 0.14);
+}
+
+.merchant-ad-packages-kicker {
+  margin: 0;
+  color: #91723a;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.76rem;
+}
+
+.merchant-ad-packages-header h1 {
+  margin: 8px 0;
+  font-family: var(--font-display);
+  font-size: clamp(1.55rem, 2.3vw, 2.2rem);
+  letter-spacing: -0.03em;
+  color: #1a243e;
+}
+
+.merchant-ad-packages-header p {
+  margin: 0;
+  color: #5c6888;
+}
+
+.merchant-ad-account-copy {
+  max-width: 620px;
+  margin-top: 10px;
+}
+
+.merchant-ad-back-button {
+  border: 1px solid rgba(55, 66, 100, 0.24);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.86);
+  color: #2b3859;
+  font-weight: 600;
+  padding: 10px 16px;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.merchant-ad-back-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 22px rgba(56, 67, 101, 0.16);
+}
+
+.merchant-ad-selection-notice {
+  margin: 0;
+  border-radius: 14px;
+  border: 1px solid rgba(18, 140, 79, 0.3);
+  background: rgba(212, 243, 228, 0.76);
+  color: #0f6c43;
+  padding: 10px 12px;
+  font-weight: 600;
+}
+
+.merchant-ad-current-package {
+  margin: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(74, 102, 226, 0.25);
+  background: rgba(229, 236, 255, 0.84);
+  color: #324b93;
+  padding: 14px 16px;
+}
+
+.merchant-ad-current-package strong {
+  display: block;
+  margin-top: 2px;
+  font-size: 1.1rem;
+  color: #1d3579;
+}
+
+.merchant-ad-current-package p {
+  margin: 6px 0 0;
+  color: #4f659f;
+}
+
+.merchant-ad-current-price {
+  font-weight: 700;
+}
+
+.merchant-ad-current-kicker {
+  display: inline-block;
+  font-size: 0.76rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: #6379b7;
+}
+
+.merchant-ad-scope-pill {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 120px;
+  padding: 9px 14px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #1f4de0, #4e7bff);
+  color: #ffffff;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.merchant-ad-empty-state {
+  border-radius: 24px;
+  border: 1px dashed rgba(54, 66, 103, 0.34);
+  background: rgba(255, 255, 255, 0.86);
+  padding: 24px;
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}
+
+.merchant-ad-empty-state h2,
+.merchant-ad-empty-state p {
+  margin: 0;
+}
+
+.merchant-ad-empty-state h2 {
+  font-family: var(--font-display);
+  color: #212d4a;
+}
+
+.merchant-ad-empty-state p {
+  color: #5f6e8d;
+}
+
+.merchant-ad-packages-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.merchant-ad-package-card {
+  display: grid;
+  border-radius: 24px;
+  overflow: hidden;
+  border: 1px solid rgba(46, 56, 92, 0.16);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 18px 34px rgba(33, 41, 69, 0.1);
+  transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
+}
+
+.merchant-ad-package-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 24px 40px rgba(33, 41, 69, 0.16);
+}
+
+.merchant-ad-package-card.is-selected {
+  border-color: #2f5cd7;
+  box-shadow: 0 26px 42px rgba(47, 92, 215, 0.24);
+}
+
+.merchant-ad-package-head {
+  position: relative;
+  padding: 20px;
+  background: linear-gradient(145deg, var(--tier-soft, #f3f5fc), #ffffff);
+  border-bottom: 1px solid rgba(56, 66, 97, 0.14);
+  display: grid;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.merchant-ad-package-head::after {
+  content: '';
+  position: absolute;
+  right: -8px;
+  top: 8px;
+  width: 132px;
+  height: 132px;
+  background-image: url('/images/ad-package-watermark.svg');
+  background-size: contain;
+  background-repeat: no-repeat;
+  opacity: 0.14;
+  filter: blur(0.3px);
+  pointer-events: none;
+}
+
+.merchant-ad-ribbon {
+  position: absolute;
+  top: 0;
+  right: 0;
+  background: #f53e73;
+  color: #ffffff;
+  padding: 7px 12px;
+  border-radius: 0 0 0 14px;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.merchant-ad-tier-label {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 0.76rem;
+  color: #485473;
+  font-weight: 700;
+}
+
+.merchant-ad-package-head h2 {
+  margin: 0;
+  font-size: 1.9rem;
+  line-height: 1.06;
+  letter-spacing: -0.04em;
+  color: #121b35;
+  font-family: var(--font-display);
+}
+
+.merchant-ad-price {
+  margin: 0;
+  color: #19284c;
+  font-size: 1.14rem;
+  font-weight: 700;
+}
+
+.merchant-ad-impact-tag {
+  justify-self: start;
+  display: inline-flex;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-weight: 700;
+  color: #ffffff;
+  background: color-mix(in srgb, var(--tier-color, #3f4d73) 78%, #242b42);
+}
+
+.merchant-ad-impact-copy,
+.merchant-ad-duration-copy {
+  margin: 0;
+  color: #55658a;
+}
+
+.merchant-ad-duration-copy strong {
+  color: #15203c;
+}
+
+.merchant-ad-package-body {
+  display: grid;
+  gap: 14px;
+  padding: 18px 20px 20px;
+}
+
+.merchant-ad-package-body h3 {
+  margin: 0;
+  color: #1b2647;
+  font-size: 1.02rem;
+}
+
+.merchant-ad-package-body ul {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 8px;
+  color: #4a587a;
+}
+
+.merchant-ad-benefit-item {
+  display: grid;
+  gap: 6px;
+}
+
+.merchant-ad-benefit-label {
+  display: block;
+}
+
+.merchant-ad-benefit-details {
+  display: grid;
+  gap: 4px;
+  margin-left: 10px;
+  padding-left: 12px;
+  border-left: 2px solid rgba(22, 162, 78, 0.18);
+}
+
+.merchant-ad-benefit-detail {
+  display: block;
+  font-size: 0.92rem;
+  color: #71809f;
+}
+
+.merchant-ad-package-body li::marker {
+  color: #16a24e;
+}
+
+.merchant-ad-select-button {
+  border: none;
+  border-radius: 999px;
+  padding: 12px;
+  font-weight: 700;
+  color: #ffffff;
+  background: linear-gradient(90deg, #ff6c15, #ff7c20);
+  box-shadow: 0 14px 24px rgba(255, 112, 26, 0.3);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+
+.merchant-ad-select-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 20px 28px rgba(255, 112, 26, 0.35);
+  filter: saturate(1.08);
+}
+
+.merchant-ad-select-button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+  transform: none;
+  filter: none;
+}
+
+.merchant-ad-card-note {
+  margin: 0;
+  color: #647492;
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+.merchant-ad-package-card.is-selected .merchant-ad-select-button {
+  background: linear-gradient(90deg, #214ecf, #3f6cf1);
+  box-shadow: 0 14px 24px rgba(51, 86, 216, 0.3);
+}
+
+[data-theme='dark'] .merchant-ad-packages-header,
+[data-theme='dark'] .merchant-ad-package-card,
+[data-theme='dark'] .merchant-ad-empty-state {
+  background: rgba(12, 21, 38, 0.9);
+  border-color: rgba(151, 172, 214, 0.26);
+}
+
+[data-theme='dark'] .merchant-ad-package-head::after {
+  opacity: 0.2;
+}
+
+[data-theme='dark'] .merchant-ad-packages-kicker {
+  color: #f2ce7b;
+}
+
+[data-theme='dark'] .merchant-ad-packages-header h1,
+[data-theme='dark'] .merchant-ad-empty-state h2,
+[data-theme='dark'] .merchant-ad-package-head h2,
+[data-theme='dark'] .merchant-ad-price,
+[data-theme='dark'] .merchant-ad-package-body h3,
+[data-theme='dark'] .merchant-ad-duration-copy strong {
+  color: #edf3ff;
+}
+
+[data-theme='dark'] .merchant-ad-packages-header p,
+[data-theme='dark'] .merchant-ad-empty-state p,
+[data-theme='dark'] .merchant-ad-tier-label,
+[data-theme='dark'] .merchant-ad-impact-copy,
+[data-theme='dark'] .merchant-ad-duration-copy,
+[data-theme='dark'] .merchant-ad-package-body ul {
+  color: #9caed1;
+}
+
+[data-theme='dark'] .merchant-ad-benefit-details {
+  border-left-color: rgba(128, 214, 157, 0.26);
+}
+
+[data-theme='dark'] .merchant-ad-benefit-detail {
+  color: #8fa2c8;
+}
+
+[data-theme='dark'] .merchant-ad-card-note {
+  color: #93a7cf;
+}
+
+[data-theme='dark'] .merchant-ad-back-button {
+  background: rgba(9, 17, 32, 0.9);
+  border-color: rgba(155, 177, 217, 0.34);
+  color: #d8e6ff;
+}
+
+[data-theme='dark'] .merchant-ad-selection-notice {
+  background: rgba(13, 58, 36, 0.65);
+  border-color: rgba(55, 172, 113, 0.4);
+  color: #8ae9ba;
+}
+
+[data-theme='dark'] .merchant-ad-current-package {
+  background: rgba(35, 55, 115, 0.55);
+  border-color: rgba(91, 131, 255, 0.52);
+  color: #d6e2ff;
+}
+
+[data-theme='dark'] .merchant-ad-current-package strong,
+[data-theme='dark'] .merchant-ad-current-kicker {
+  color: #edf3ff;
+}
+
+[data-theme='dark'] .merchant-ad-current-package p {
+  color: #c4d3ff;
+}
+
+@media (max-width: 1060px) {
+  .merchant-ad-packages-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .merchant-ad-packages-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .merchant-ad-current-package {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .merchant-ad-packages-grid {
+    grid-template-columns: 1fr;
+  }
+}

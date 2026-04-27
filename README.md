@@ -1,14 +1,113 @@
+
+Backend (port 3000): cd backend && npm install && npm start
+Frontend (5173/5174): cd ../frontend && npm install && npm run build && BACKEND_ORIGIN=http://127.0.0.1:3000 FRONTEND_PORTS=5173,5174 npm run start:lan
+
+git checkout VoVanAnhKhoa
+git pull origin VoVanAnhKhoa
+
+git add .
+git commit -m "update something"
+git push origin VoVanAnhKhoa
+
 # smart-city-discovery
 smart-city-discovery 
-# chay đồ án:
-D:\smart-city-discovery> docker-compose up -d
+# chạy đồ án (dev)
+
+```bash
+docker-compose up -d
 
 cd backend
-node server.js
-
-cd frontend
 npm run dev
 
+cd ../frontend
+npm run dev
+```
+
+## Production deployment (LAN)
+
+Mục tiêu production:
+- Backend Node.js (Express) chạy port `3000`
+- Frontend React được build ra `frontend/dist`
+- Backend serve luôn frontend build (không dùng Vite dev server)
+- Người dùng LAN truy cập bằng IP: `http://10.50.1.240:3000`
+
+### 1) Build frontend dist
+
+```bash
+cd frontend
+npm install
+npm run build
+```
+
+Lệnh `npm run build` mặc định cấu hình frontend gọi API qua:
+- `http://10.50.1.240:3000/api`
+
+Nếu cần override API base khi build:
+
+```bash
+set VITE_API_BASE_URL=http://10.50.1.240:3000/api
+npm run build
+```
+
+### 2) Chạy backend serve API + dist
+
+```bash
+cd ../backend
+npm install
+npm start
+```
+
+Sau khi chạy:
+- App UI: `http://10.50.1.240:3000/`
+- Swagger: `http://10.50.1.240:3000/api/docs`
+- API: `http://10.50.1.240:3000/api/...`
+
+### 3) Chạy 24/7 bằng PM2
+
+```bash
+cd D:\Cap2_1504\smart-city-discovery
+npm install -g pm2
+pm2 start ecosystem.config.js
+pm2 save
+```
+
+Xem trạng thái/log:
+
+```bash
+pm2 status
+pm2 logs smartcity-backend
+```
+## cách dừng pm2 :
+pm2 list
+pm2 stop all
+
+### 4) Tự chạy lại sau reboot server
+
+```bash
+pm2 startup
+```
+
+PM2 sẽ in ra 1 lệnh cần chạy thêm (copy/paste đúng lệnh đó), sau đó chạy lại:
+
+```bash
+pm2 save
+```
+
+### 5) Không phụ thuộc npm run dev
+
+Production chỉ cần:
+- Build frontend: `npm run build`
+- Chạy backend qua PM2: `pm2 start ecosystem.config.js`
+
+Không cần mở Vite dev server.
+
+### 6) Lưu ý DB local vs DB công ty
+
+App đọc DB theo `backend/.env` (`DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`).
+- Dùng local DB: để `DB_HOST=127.0.0.1` hoặc IP local của máy DB
+- Dùng DB công ty: để `DB_HOST=10.50.1.240` (hoặc host DB thực tế)
+
+Không commit file `.env` chứa secrets.
 
 git checkout VoVanAnhKhoa
 git pull origin VoVanAnhKhoa
