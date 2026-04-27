@@ -235,12 +235,37 @@
   transition: border-color 160ms ease, transform 160ms ease, background 160ms ease;
 }
 
+.admin-list-item.is-priority {
+  border-color: rgba(230, 156, 38, 0.28);
+  background: linear-gradient(135deg, rgba(255, 251, 239, 0.98), rgba(255, 243, 223, 0.88));
+}
+
 .admin-list-item strong {
   color: #1a3b44;
   font-size: 0.82rem;
   display: inline-flex;
   align-items: center;
   gap: 8px;
+}
+
+.admin-priority-star-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #f2c14e, #f28c28);
+  color: #fffef7;
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  box-shadow: 0 8px 14px rgba(242, 140, 40, 0.16);
+}
+
+.admin-priority-star-badge.is-detail {
+  font-size: 0.72rem;
+  padding: 5px 10px;
 }
 
 .admin-list-item span,
@@ -257,6 +282,14 @@
 .admin-list-item.is-active {
   border-color: rgba(242, 95, 41, 0.52);
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(255, 236, 227, 0.75));
+}
+
+.admin-submission-title {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .admin-empty-note {
