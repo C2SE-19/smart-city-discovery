@@ -34,7 +34,9 @@ import MerchantWorkbenchPage from './pages/merchant/MerchantWorkbenchPage';
 import MerchantWorkbenchEditPage from './pages/merchant/MerchantWorkbenchEditPage';
 import MerchantDashboardPage from './pages/merchant/MerchantDashboardPage';
 import MerchantPostListPage from './pages/merchant/MerchantPostListPage';
+import MerchantAdsPage from './pages/merchant/MerchantAdsPage';
 import MerchantAdPackagesSelectionPage from './pages/merchant/MerchantAdPackagesSelectionPage';
+import MerchantAdCheckoutResultPage from './pages/merchant/MerchantAdCheckoutResultPage';
 import LoginPage from './pages/auth/LoginPage';
 import RegisterPage from './pages/auth/RegisterPage';
 import ProfilePage from './pages/profile/ProfilePage';
@@ -115,7 +117,10 @@ function AppRoutes() {
       <Route element={<MerchantLayout />}>
         <Route path={APP_ROUTES.MERCHANT_DASHBOARD} element={<MerchantDashboardPage />} />
         <Route path={APP_ROUTES.MERCHANT_POSTS} element={<MerchantPostListPage />} />
+        <Route path={APP_ROUTES.MERCHANT_TRANSACTIONS} element={<MerchantAdsPage />} />
+        <Route path={APP_ROUTES.MERCHANT_CHECKOUT_RESULT} element={<MerchantAdCheckoutResultPage />} />
         <Route path={APP_ROUTES.MERCHANT_POST_ADVERTISE} element={<MerchantAdPackagesSelectionPage />} />
+        <Route path={APP_ROUTES.MERCHANT_POST_ADVERTISE_LEGACY} element={<MerchantAdPackagesSelectionPage />} />
         <Route path={APP_ROUTES.MERCHANT_WORKBENCH} element={<MerchantWorkbenchPage />} />
         <Route path={APP_ROUTES.MERCHANT_WORKBENCH_EDIT} element={<MerchantWorkbenchEditPage />} />
       </Route>

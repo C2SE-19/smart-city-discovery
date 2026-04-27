@@ -82,6 +82,33 @@
   overflow: hidden;
 }
 
+.similar-venue-hot-badge {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.45rem 0.8rem;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #ff7a18 0%, #ff3d00 100%);
+  color: #fffdf8;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  box-shadow: 0 10px 18px rgba(255, 90, 13, 0.25);
+}
+
+.similar-venue-hot-badge::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #fff4cf;
+}
+
 .similar-venue-overlay {
   position: absolute;
   top: 0;

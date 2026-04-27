@@ -128,6 +128,9 @@ export default function SimilarVenuesSection({
             const normalizedReviewCount = Number(venue?.total_reviews ?? venue?.reviews ?? 0);
             const hasReviewCount = Number.isFinite(normalizedReviewCount) && normalizedReviewCount > 0;
             const normalizedAddress = String(venue?.address || '').trim();
+            const featuredPromotionLabel = venue?.featuredPromotion?.isHot
+              ? String(venue?.featuredPromotion?.label || 'HOT').trim() || 'HOT'
+              : '';
 
             return (
               <div
@@ -141,6 +144,9 @@ export default function SimilarVenuesSection({
                     backgroundImage: `url('${venue.cover_image_url || venue.coverImageUrl || 'https://via.placeholder.com/250x250?text=No+Image'}')`
                   }}
                 >
+                  {featuredPromotionLabel ? (
+                    <span className="similar-venue-hot-badge">{featuredPromotionLabel}</span>
+                  ) : null}
                   <div className="similar-venue-overlay">
                     <span className="similar-venue-link">{viewLabel}</span>
                   </div>

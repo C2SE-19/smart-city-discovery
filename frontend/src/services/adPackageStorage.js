@@ -1,5 +1,4 @@
 const AD_PACKAGE_STORAGE_KEY = 'smartcity.ad-packages.v1';
-const AD_SELECTION_STORAGE_KEY = 'smartcity.ad-package-selections.v1';
 
 export const PACKAGE_TIERS = {
   premium: {
@@ -36,8 +35,8 @@ export const PACKAGE_FEATURES = [
   },
   {
     key: 'showOnHomepageBanner',
-    label: 'Show on Homepage Banner',
-    description: 'Show campaign visuals on the homepage spotlight area.',
+    label: 'Featured Post Badge',
+    description: 'Highlight posts with a HOT badge across the homepage and other listing surfaces.',
   },
   {
     key: 'priorityReview',
@@ -81,6 +80,31 @@ function toDurationDays(months) {
   return Number(months) * 30;
 }
 
+export function formatCurrencyVnd(value) {
+  const amount = Number.parseInt(value, 10) || 0;
+  return `${amount.toLocaleString('vi-VN')} VND`;
+}
+
+export function normalizeDiscountPercent(value) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) {
+    return 0;
+  }
+
+  return Math.min(99, Math.max(0, Math.trunc(parsed)));
+}
+
+export function calculateDiscountedPackagePrice(price, discountPercent = 0) {
+  const normalizedPrice = Number.parseInt(price, 10) || 0;
+  const normalizedDiscountPercent = normalizeDiscountPercent(discountPercent);
+
+  if (normalizedPrice <= 0 || normalizedDiscountPercent <= 0) {
+    return normalizedPrice;
+  }
+
+  return Math.max(0, Math.trunc(normalizedPrice - ((normalizedPrice * normalizedDiscountPercent) / 100)));
+}
+
 export function getAdPackages() {
   const packages = readJsonArray(AD_PACKAGE_STORAGE_KEY);
   return packages
@@ -95,6 +119,7 @@ export function createAdPackage(payload) {
     id: `pkg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     name: String(payload.name || '').trim(),
     tier: payload.tier,
+    price: Number.parseInt(payload.price, 10) || 0,
     durationMonths,
     durationDays: toDurationDays(durationMonths),
     features: {
@@ -116,10 +141,6 @@ export function deleteAdPackage(packageId) {
   const nextPackages = getAdPackages().filter((item) => item.id !== packageId);
   writeJsonArray(AD_PACKAGE_STORAGE_KEY, nextPackages);
 
-  const selectionRows = readJsonArray(AD_SELECTION_STORAGE_KEY);
-  const nextSelections = selectionRows.filter((row) => row.packageId !== packageId);
-  writeJsonArray(AD_SELECTION_STORAGE_KEY, nextSelections);
-
   return nextPackages;
 }
 
@@ -129,28 +150,4 @@ export function getTierMeta(tier) {
 
 export function getPackageDurationMeta(durationMonths) {
   return PACKAGE_DURATIONS.find((option) => Number(option.value) === Number(durationMonths)) || PACKAGE_DURATIONS[0];
-}
-
-export function getAdPackageSelectionByVenue(venueId) {
-  const selections = readJsonArray(AD_SELECTION_STORAGE_KEY);
-  return selections.find((item) => Number(item.venueId) === Number(venueId)) || null;
-}
-
-export function saveAdPackageSelection({ venueId, packageId }) {
-  const selections = readJsonArray(AD_SELECTION_STORAGE_KEY);
-  const normalizedVenueId = Number(venueId);
-  const nextRow = {
-    venueId: normalizedVenueId,
-    packageId,
-    selectedAt: new Date().toISOString(),
-  };
-
-  const nextSelections = [
-    nextRow,
-    ...selections.filter((item) => Number(item.venueId) !== normalizedVenueId),
-  ];
-
-  writeJsonArray(AD_SELECTION_STORAGE_KEY, nextSelections);
-
-  return nextRow;
 }

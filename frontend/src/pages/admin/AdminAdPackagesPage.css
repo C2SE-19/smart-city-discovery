@@ -123,6 +123,17 @@
   gap: 8px;
 }
 
+.admin-package-price-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.admin-package-price-grid > div {
+  display: grid;
+  gap: 8px;
+}
+
 .admin-package-form-field label {
   font-size: 0.88rem;
   font-weight: 600;
@@ -144,6 +155,34 @@
 .admin-package-form-field select:focus {
   border-color: #4f66d3;
   box-shadow: 0 0 0 3px rgba(79, 102, 211, 0.15);
+}
+
+.admin-package-field-hint {
+  margin: 0;
+  color: #73809e;
+  font-size: 0.78rem;
+}
+
+.admin-package-price-preview {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(240, 245, 255, 0.9);
+  border: 1px solid rgba(79, 102, 211, 0.18);
+}
+
+.admin-package-price-preview span {
+  color: #54627f;
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.admin-package-price-preview strong {
+  color: #223052;
+  font-size: 1rem;
 }
 
 .admin-package-tier-selector,
@@ -268,6 +307,19 @@
   max-width: 160px;
 }
 
+.admin-package-trend-field-grid {
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+.admin-package-trend-field-grid > div {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-package-trend-field-grid input {
+  max-width: 100%;
+}
+
 .admin-package-form-error {
   margin: 0;
   color: #bf2b45;
@@ -368,6 +420,20 @@
 .admin-package-card-head span {
   color: #5d6887;
   font-size: 0.82rem;
+}
+
+.admin-package-price-label {
+  display: inline-flex;
+  margin-top: 8px;
+  color: #21345f;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.admin-package-price-subtitle {
+  margin-top: 4px;
+  color: #6d7893;
+  font-size: 0.76rem;
 }
 
 .admin-package-tier-badge {
@@ -770,6 +836,7 @@
 [data-theme='dark'] .admin-packages-panel-helper,
 [data-theme='dark'] .admin-package-toggle-copy span,
 [data-theme='dark'] .admin-package-card-head span,
+[data-theme='dark'] .admin-package-price-label,
 [data-theme='dark'] .admin-package-card-meta,
 [data-theme='dark'] .admin-package-empty {
   color: #9fb0cb;
@@ -830,6 +897,7 @@
 [data-theme='dark'] .admin-package-toggle,
 [data-theme='dark'] .admin-package-card,
 [data-theme='dark'] .admin-package-chip,
+[data-theme='dark'] .admin-package-price-preview,
 [data-theme='dark'] .admin-package-form-field input,
 [data-theme='dark'] .admin-package-form-field select {
   background: rgba(13, 23, 41, 0.84);
@@ -838,6 +906,12 @@
 }
 
 [data-theme='dark'] .admin-package-chip span {
+  color: #95a8c6;
+}
+
+[data-theme='dark'] .admin-package-field-hint,
+[data-theme='dark'] .admin-package-price-subtitle,
+[data-theme='dark'] .admin-package-price-preview span {
   color: #95a8c6;
 }
 
@@ -901,7 +975,8 @@
   }
 
   .admin-package-tier-selector,
-  .admin-package-duration-selector {
+  .admin-package-duration-selector,
+  .admin-package-price-grid {
     grid-template-columns: 1fr;
   }
 

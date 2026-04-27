@@ -160,6 +160,32 @@
   color: white;
 }
 
+.hero-featured-hot-badge {
+  align-self: flex-start;
+  margin-bottom: 1rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.55rem 1rem;
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(255, 122, 24, 0.95), rgba(255, 61, 0, 0.92));
+  color: #fffdf6;
+  font-size: 0.85rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  box-shadow: 0 14px 28px rgba(255, 72, 0, 0.3);
+}
+
+.hero-featured-hot-badge::before {
+  content: '';
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #fff5cf;
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.18);
+}
+
 .hero-venue-name {
   margin: 0 0 1rem 0;
   font-size: 2.5rem;

@@ -290,6 +290,25 @@ function formatDateTime(dateValue) {
   return new Date(dateValue).toLocaleString('en-US');
 }
 
+function isPriorityApprovalVenue(venue) {
+  return Boolean(
+    venue?.moderationPriority?.isPriorityApproval
+    || venue?.assignedAdPackage?.features?.priorityReview
+  );
+}
+
+function resolvePriorityQueuedAt(venue) {
+  const value = venue?.moderationPriority?.queuedAt || venue?.submitted_at || venue?.created_at || '';
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? Number.POSITIVE_INFINITY : parsed.getTime();
+}
+
+function resolveStandardQueuedAt(venue) {
+  const value = venue?.submitted_at || venue?.created_at || '';
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+}
+
 function normalizeVenueUpdateSnapshot(snapshot) {
   if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
     return {
@@ -970,7 +989,28 @@ function AdminBoundaryPage() {
   ]);
 
   const pendingQueueVenues = useMemo(
-    () => pendingFilteredVenues.filter((venue) => String(venue.status || '').toLowerCase() === 'pending'),
+    () =>
+      pendingFilteredVenues
+        .filter((venue) => String(venue.status || '').toLowerCase() === 'pending')
+        .slice()
+        .sort((firstVenue, secondVenue) => {
+          const firstIsPriority = isPriorityApprovalVenue(firstVenue);
+          const secondIsPriority = isPriorityApprovalVenue(secondVenue);
+
+          if (firstIsPriority && !secondIsPriority) {
+            return -1;
+          }
+
+          if (!firstIsPriority && secondIsPriority) {
+            return 1;
+          }
+
+          if (firstIsPriority && secondIsPriority) {
+            return resolvePriorityQueuedAt(firstVenue) - resolvePriorityQueuedAt(secondVenue);
+          }
+
+          return resolveStandardQueuedAt(secondVenue) - resolveStandardQueuedAt(firstVenue);
+        }),
     [pendingFilteredVenues]
   );
   const pendingLocationUpdateRequests = useMemo(
@@ -2723,10 +2763,13 @@ function AdminBoundaryPage() {
                   <button
                     key={venue.id}
                     type="button"
-                    className={`admin-list-item ${Number(selectedVenueId) === Number(venue.id) ? 'is-active' : ''}`.trim()}
+                    className={`admin-list-item ${isPriorityApprovalVenue(venue) ? 'is-priority' : ''} ${Number(selectedVenueId) === Number(venue.id) ? 'is-active' : ''}`.trim()}
                     onClick={() => handleOpenVenueDetails(venue.id)}
                   >
-                    <strong>{venue.title || venue.name}</strong>
+                    <strong>
+                      {isPriorityApprovalVenue(venue) ? <span className="admin-priority-star-badge">★ Priority</span> : null}
+                      <span>{venue.title || venue.name}</span>
+                    </strong>
                     <span>{venue.address || 'Address pending'}</span>
                     <small>{formatDateTime(venue.submitted_at)}</small>
                   </button>
@@ -3220,7 +3263,10 @@ function AdminBoundaryPage() {
                 <div className="admin-detail-image-placeholder">No cover image</div>
               )}
 
-              <h4>{selectedVenue.title || selectedVenue.name}</h4>
+              <h4 className="admin-submission-title">
+                <span>{selectedVenue.title || selectedVenue.name}</span>
+                {isPriorityApprovalVenue(selectedVenue) ? <span className="admin-priority-star-badge is-detail">★ Priority</span> : null}
+              </h4>
               <p>{selectedVenue.address || 'Address pending'}</p>
 
               <div className="admin-detail-tabs" role="tablist" aria-label="Submission detail sections">

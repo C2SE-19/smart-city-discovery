@@ -56,6 +56,9 @@ export default function HeroVenueSection({
   };
 
   const currentImage = images.length > 0 ? images[currentImageIndex] : '';
+  const featuredPromotionLabel = venue?.featuredPromotion?.isHot
+    ? String(venue?.featuredPromotion?.label || 'HOT').trim() || 'HOT'
+    : '';
 
   const handlePreviewImage = (imageUrl) => {
     if (!imageUrl) {
@@ -125,6 +128,9 @@ export default function HeroVenueSection({
 
           {/* Venue Info Overlay (top-right) */}
           <div className="hero-info-overlay">
+            {featuredPromotionLabel ? (
+              <div className="hero-featured-hot-badge">{featuredPromotionLabel}</div>
+            ) : null}
             <h1 className="hero-venue-name">{venue.name || 'Venue Name'}</h1>
             
             <div className="hero-rating-row">
