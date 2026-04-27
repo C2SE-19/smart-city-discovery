@@ -226,11 +226,6 @@ function MerchantPostListPage() {
   const [activeMenu, setActiveMenu] = useState('posts');
   const [deletingPostId, setDeletingPostId] = useState(null);
   const [togglingPausePostId, setTogglingPausePostId] = useState(null);
-  const copy = {
-    followers: language === 'en' ? 'Followers' : 'Người theo dõi',
-    following: language === 'en' ? 'Following' : 'Đang theo dõi',
-    ratingCount: language === 'en' ? 'reviews' : 'đánh giá'
-  };
 
   useEffect(() => {
     async function loadMerchantPosts() {
@@ -263,6 +258,10 @@ function MerchantPostListPage() {
 
   const handlePublishClick = () => {
     navigate('/merchant/workbench');
+  };
+
+  const handleAdvertiseAccount = () => {
+    navigate(APP_ROUTES.MERCHANT_POST_ADVERTISE);
   };
 
   const handleMenuClick = (menuId) => {
@@ -351,18 +350,6 @@ function MerchantPostListPage() {
     }
   };
 
-  const handleAdvertisePost = (post) => {
-    if (!post?.venueId || post.kind !== 'venue') {
-      return;
-    }
-
-    navigate(APP_ROUTES.MERCHANT_POST_ADVERTISE.replace(':venueId', String(post.venueId)), {
-      state: {
-        venueName: post.name,
-      },
-    });
-  };
-
   const statusCounts = useMemo(() => {
     const initialCounts = {
       [POST_STATUSES.approved]: 0,
@@ -424,13 +411,21 @@ function MerchantPostListPage() {
         </div>
 
         {/* Publish Button */}
-        <button 
-          className="merchant-publish-btn"
-          onClick={handlePublishClick}
-          data-onboarding="merchant-publish-button"
-        >
-          {t.merchant.publish}
-        </button>
+        <div className="merchant-primary-actions" data-onboarding="merchant-publish-button">
+          <button
+            className="merchant-publish-btn merchant-primary-action-btn"
+            onClick={handlePublishClick}
+          >
+            {t.merchant.publish}
+          </button>
+          <button
+            className="merchant-advertise-btn merchant-primary-action-btn"
+            type="button"
+            onClick={handleAdvertiseAccount}
+          >
+            Advertise
+          </button>
+        </div>
 
         {/* Menu Items */}
         <nav className="merchant-menu" data-onboarding="merchant-menu">
@@ -463,25 +458,28 @@ function MerchantPostListPage() {
               <div className="merchant-profile-avatar-large">{getUserInitial()}</div>
               <div className="merchant-profile-details">
                 <h2>{user?.fullname || 'Nguyễn Hữu Lộc'}</h2>
-                <div className="merchant-followers-info">
-                  <span>{copy.followers}: 18</span>
-                  <span>{copy.following}: 3</span>
-                </div>
+                <p className="merchant-profile-role">Merchant</p>
               </div>
             </div>
 
-            <div className="merchant-rating-section">
-              <div className="merchant-rating-stars">⭐⭐⭐⭐⭐</div>
-              <div className="merchant-rating-score">4.7 (14 {copy.ratingCount})</div>
+            <div className="merchant-post-header-actions">
+              <button
+                className="merchant-post-advertise-btn-header"
+                onClick={handleAdvertiseAccount}
+              >
+                Advertise
+              </button>
+              <button
+                className="merchant-post-publish-btn-header"
+                onClick={handlePublishClick}
+              >
+                {t.merchant.publish}
+              </button>
             </div>
-
-            <button 
-              className="merchant-post-publish-btn-header"
-              onClick={handlePublishClick}
-            >
-              {t.merchant.publish}
-            </button>
           </div>
+          <p className="merchant-post-header-note">
+            Advertising packages now apply to your whole merchant account, not to individual venues.
+          </p>
         </div>
 
         {/* Tabs */}
@@ -574,14 +572,6 @@ function MerchantPostListPage() {
                         : post.status === POST_STATUSES.hidden
                           ? 'Resume Shop'
                           : 'Pause Shop'}
-                    </button>
-                  ) : null}
-                  {post.kind === 'venue' && [POST_STATUSES.approved, POST_STATUSES.hidden].includes(post.status) ? (
-                    <button
-                      className="merchant-post-advertise-btn"
-                      onClick={() => handleAdvertisePost(post)}
-                    >
-                      Advertise
                     </button>
                   ) : null}
                   <button 

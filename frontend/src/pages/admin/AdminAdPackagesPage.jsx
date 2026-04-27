@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  calculateDiscountedPackagePrice,
+  formatCurrencyVnd,
   getAdPackages as getLegacyAdPackages,
   getPackageDurationMeta,
   getTierMeta,
@@ -26,16 +28,33 @@ const STATS_MONTH_OPTIONS = [3, 6, 12];
 
 const DEFAULT_FEATURES = {
   showInTrending: false,
+  trendPushLimit: 1,
+  trendDisplayHours: 2,
   showOnHomepageBanner: false,
   priorityReview: false,
   postLimitEnabled: false,
   postLimit: 10,
 };
 
+function stripToDigits(value) {
+  return String(value || '').replace(/\D+/g, '');
+}
+
+function formatNumberInputValue(value) {
+  const digits = stripToDigits(value);
+  if (!digits) {
+    return '';
+  }
+
+  return Number.parseInt(digits, 10).toLocaleString('vi-VN');
+}
+
 function buildInitialFormState() {
   return {
     name: '',
     tier: PACKAGE_TIERS.premium.value,
+    price: '',
+    discountPercent: '',
     durationMonths: PACKAGE_DURATIONS[0].value,
     features: {
       ...DEFAULT_FEATURES,
@@ -47,11 +66,15 @@ function buildFormStateFromPackage(packageItem) {
   return {
     name: packageItem.name || '',
     tier: packageItem.tier || PACKAGE_TIERS.basic.value,
+    price: String(packageItem.price || ''),
+    discountPercent: packageItem.discountPercent ? String(packageItem.discountPercent) : '',
     durationMonths: Number(packageItem.durationMonths) || PACKAGE_DURATIONS[0].value,
     features: {
       ...DEFAULT_FEATURES,
       ...(packageItem.features || {}),
       postLimit: Number(packageItem.features?.postLimit || DEFAULT_FEATURES.postLimit),
+      trendPushLimit: Number(packageItem.features?.trendPushLimit || DEFAULT_FEATURES.trendPushLimit),
+      trendDisplayHours: Number(packageItem.features?.trendDisplayHours || DEFAULT_FEATURES.trendDisplayHours),
     },
   };
 }
@@ -60,11 +83,19 @@ function formatPackageFeatures(features = {}) {
   const enabledFeatures = [];
 
   if (features.showInTrending) {
+    const pushLimit = Number(features.trendPushLimit);
+    const displayHours = Number(features.trendDisplayHours);
     enabledFeatures.push('Shown in Trending section');
+    if (Number.isFinite(pushLimit) && pushLimit > 0) {
+      enabledFeatures.push(`Trending pushes: ${pushLimit}`);
+    }
+    if (Number.isFinite(displayHours) && displayHours > 0) {
+      enabledFeatures.push(`Trending display time: ${displayHours} hour(s)`);
+    }
   }
 
   if (features.showOnHomepageBanner) {
-    enabledFeatures.push('Shown on Homepage Banner');
+    enabledFeatures.push('Featured Post Badge (HOT)');
   }
 
   if (features.priorityReview) {
@@ -168,6 +199,21 @@ function AdminAdPackagesPage() {
     return `${count} ${count === 1 ? 'package' : 'packages'} configured`;
   }, [packages.length]);
 
+  const normalizedBasePrice = useMemo(() => {
+    const digits = stripToDigits(formState.price);
+    return digits ? Number.parseInt(digits, 10) : 0;
+  }, [formState.price]);
+
+  const normalizedDiscountPercent = useMemo(() => {
+    const digits = stripToDigits(formState.discountPercent);
+    return digits ? Number.parseInt(digits, 10) : 0;
+  }, [formState.discountPercent]);
+
+  const discountedPreviewPrice = useMemo(
+    () => calculateDiscountedPackagePrice(normalizedBasePrice, normalizedDiscountPercent),
+    [normalizedBasePrice, normalizedDiscountPercent]
+  );
+
   const loadPackages = useCallback(async () => {
     setLoadingPackages(true);
 
@@ -183,6 +229,7 @@ function AdminAdPackagesPage() {
               createAdminAdPackage({
                 name: legacyPackage.name,
                 tier: legacyPackage.tier,
+                price: Number(legacyPackage.price) || 100000,
                 durationMonths: legacyPackage.durationMonths,
                 features: legacyPackage.features,
               }).catch(() => null)
@@ -291,6 +338,20 @@ function AdminAdPackagesPage() {
     }));
   };
 
+  const handlePriceChange = (event) => {
+    setFormState((currentState) => ({
+      ...currentState,
+      price: stripToDigits(event.target.value),
+    }));
+  };
+
+  const handleDiscountPercentChange = (event) => {
+    setFormState((currentState) => ({
+      ...currentState,
+      discountPercent: stripToDigits(event.target.value),
+    }));
+  };
+
   const handleDurationSelect = (months) => {
     setFormState((currentState) => ({
       ...currentState,
@@ -323,6 +384,26 @@ function AdminAdPackagesPage() {
     }));
   };
 
+  const handleTrendPushLimitChange = (event) => {
+    setFormState((currentState) => ({
+      ...currentState,
+      features: {
+        ...currentState.features,
+        trendPushLimit: event.target.value,
+      },
+    }));
+  };
+
+  const handleTrendDisplayHoursChange = (event) => {
+    setFormState((currentState) => ({
+      ...currentState,
+      features: {
+        ...currentState.features,
+        trendDisplayHours: event.target.value,
+      },
+    }));
+  };
+
   const handleCreatePackage = async (event) => {
     event.preventDefault();
     setFormError('');
@@ -342,16 +423,51 @@ function AdminAdPackagesPage() {
       }
     }
 
+    const price = Number.parseInt(stripToDigits(formState.price), 10);
+    if (!Number.isFinite(price) || price < 1000) {
+      setFormError('Package price must be at least 1,000 VND.');
+      return;
+    }
+
+    const discountPercent = formState.discountPercent === '' ? 0 : Number.parseInt(stripToDigits(formState.discountPercent), 10);
+    if (!Number.isFinite(discountPercent) || discountPercent < 0 || discountPercent > 99) {
+      setFormError('Discount percent must be between 0 and 99.');
+      return;
+    }
+
+    if (calculateDiscountedPackagePrice(price, discountPercent) <= 0) {
+      setFormError('Discounted package price must stay above 0 VND.');
+      return;
+    }
+
+    if (formState.features.showInTrending) {
+      const trendPushLimit = Number(formState.features.trendPushLimit);
+      if (!Number.isFinite(trendPushLimit) || trendPushLimit < 1 || trendPushLimit > 1000) {
+        setFormError('Trending pushes must be between 1 and 1000.');
+        return;
+      }
+
+      const trendDisplayHours = Number(formState.features.trendDisplayHours);
+      if (!Number.isFinite(trendDisplayHours) || trendDisplayHours < 1 || trendDisplayHours > 168) {
+        setFormError('Trending display duration must be between 1 and 168 hours.');
+        return;
+      }
+    }
+
     setSubmitting(true);
 
     try {
       const payload = {
         name: normalizedName,
         tier: formState.tier,
+        price,
+        discountPercent,
         durationMonths: Number(formState.durationMonths),
         features: {
           ...formState.features,
           postLimit: Number(formState.features.postLimit),
+          trendPushLimit: formState.features.showInTrending ? Number(formState.features.trendPushLimit) : null,
+          trendDisplayHours: formState.features.showInTrending ? Number(formState.features.trendDisplayHours) : null,
         },
       };
 
@@ -555,6 +671,42 @@ function AdminAdPackagesPage() {
             </div>
 
             <div className="admin-package-form-field">
+              <div className="admin-package-price-grid">
+                <div>
+                  <label htmlFor="package-price">Package price (VND)</label>
+                  <input
+                    id="package-price"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9.]*"
+                    value={formatNumberInputValue(formState.price)}
+                    onChange={handlePriceChange}
+                    placeholder="Example: 1.500.000"
+                  />
+                  <p className="admin-package-field-hint">Minimum 1.000 VND. Digits only.</p>
+                </div>
+
+                <div>
+                  <label htmlFor="package-discount-percent">Discount (%)</label>
+                  <input
+                    id="package-discount-percent"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    value={stripToDigits(formState.discountPercent)}
+                    onChange={handleDiscountPercentChange}
+                    placeholder="Example: 15"
+                  />
+                  <p className="admin-package-field-hint">Enter 0 to keep the original price.</p>
+                </div>
+              </div>
+              <div className="admin-package-price-preview" aria-live="polite">
+                <span>Discounted price</span>
+                <strong>{discountedPreviewPrice > 0 ? formatCurrencyVnd(discountedPreviewPrice) : 'N/A'}</strong>
+              </div>
+            </div>
+
+            <div className="admin-package-form-field">
               <label>Package capabilities</label>
               <div className="admin-package-toggle-grid">
                 {PACKAGE_FEATURES.map((featureItem) => {
@@ -594,6 +746,34 @@ function AdminAdPackagesPage() {
               </div>
             ) : null}
 
+            {formState.features.showInTrending ? (
+              <div className="admin-package-limit-field admin-package-trend-field-grid">
+                <div>
+                  <label htmlFor="package-trend-push-limit">Number of pushes</label>
+                  <input
+                    id="package-trend-push-limit"
+                    type="number"
+                    min="1"
+                    max="1000"
+                    value={formState.features.trendPushLimit}
+                    onChange={handleTrendPushLimitChange}
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="package-trend-display-hours">Display duration (hours)</label>
+                  <input
+                    id="package-trend-display-hours"
+                    type="number"
+                    min="1"
+                    max="168"
+                    value={formState.features.trendDisplayHours}
+                    onChange={handleTrendDisplayHoursChange}
+                  />
+                </div>
+              </div>
+            ) : null}
+
             {formError ? <p className="admin-package-form-error">{formError}</p> : null}
             {successMessage ? <p className="admin-package-form-success">{successMessage}</p> : null}
 
@@ -626,6 +806,8 @@ function AdminAdPackagesPage() {
                 const tierMeta = getTierMeta(packageItem.tier);
                 const durationMeta = getPackageDurationMeta(packageItem.durationMonths);
                 const featureSummary = formatPackageFeatures(packageItem.features);
+                const discountedPackagePrice = Number(packageItem.discountedPrice || packageItem.price || 0);
+                const hasDiscount = Number(packageItem.discountPercent || 0) > 0 && discountedPackagePrice < Number(packageItem.price || 0);
 
                 return (
                   <article
@@ -642,6 +824,12 @@ function AdminAdPackagesPage() {
                         <span>
                           {durationMeta.label} ({durationMeta.days} days)
                         </span>
+                        <span className="admin-package-price-label">{formatCurrencyVnd(discountedPackagePrice)}</span>
+                        {hasDiscount ? (
+                          <span className="admin-package-price-subtitle">
+                            {formatCurrencyVnd(packageItem.price)} before discount ({packageItem.discountPercent}% off)
+                          </span>
+                        ) : null}
                       </div>
 
                       <span className="admin-package-tier-badge">{tierMeta.label}</span>

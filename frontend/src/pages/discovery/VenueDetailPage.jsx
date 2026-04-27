@@ -20,6 +20,7 @@ import { useLanguage } from '../../contexts/LanguageContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { normalizeVenueMetadata } from '../../components/map/cityMapUtils';
 import { fetchVenueChatThread, markChatThreadRead, sendVenueChatMessage } from '../../services/api/chatApi';
+import { trackTrendingAssignmentClick } from '../../services/api/adPackagesApi';
 import HeroVenueSection from './HeroVenueSection';
 import VenueInfoSection from './VenueInfoSection';
 import SimilarVenuesSection from './SimilarVenuesSection';
@@ -38,6 +39,10 @@ const WEEK_DAYS = [
 	{ key: 'saturday', label: 'Saturday' },
 	{ key: 'sunday', label: 'Sunday' }
 ];
+
+function createPackageClickToken() {
+	return `venue-detail-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
 
 const REVIEW_BLOCKED_TERMS = [
 	'địt',
@@ -918,6 +923,19 @@ function VenueDetailPage() {
 	);
 	const favoriteVenueId = useMemo(() => String(venue?.id ?? venue?.venue_id ?? venueId ?? '').trim(), [venue?.id, venue?.venue_id, venueId]);
 	const authToken = useMemo(() => String(token || '').replace(/^Bearer\s+/i, '').trim(), [token]);
+	const trackedPromotionClickKeyRef = useRef('');
+	const trendClickContext = useMemo(() => {
+		const assignmentId = Number.parseInt(location.state?.trendClickContext?.assignmentId || 0, 10);
+		if (!Number.isFinite(assignmentId) || assignmentId <= 0) {
+			return null;
+		}
+
+		return {
+			assignmentId,
+			source: String(location.state?.trendClickContext?.source || 'overview-trending').trim() || 'overview-trending',
+			clickToken: String(location.state?.trendClickContext?.clickToken || '').trim()
+		};
+	}, [location.state]);
 	const reviewImagePreviews = useMemo(
 		() => reviewForm.images.map((file) => ({ id: `${file.name}-${file.lastModified}-${file.size}`, url: URL.createObjectURL(file) })),
 		[reviewForm.images]
@@ -1170,6 +1188,51 @@ function VenueDetailPage() {
 			}
 		};
 	}, [venueReportAttachmentPreview]);
+
+	useEffect(() => {
+		const assignmentId = Number.parseInt(venue?.promotionAssignment?.assignmentId || 0, 10);
+		if (!Number.isFinite(assignmentId) || assignmentId <= 0) {
+			return;
+		}
+
+		const trackingKey = `${assignmentId}:${venue?.id || venueId}:${user?.id || 'guest'}`;
+		if (trackedPromotionClickKeyRef.current === trackingKey) {
+			return;
+		}
+
+		trackedPromotionClickKeyRef.current = trackingKey;
+		trackTrendingAssignmentClick(
+			assignmentId,
+			trendClickContext?.source || 'venue-detail',
+			trendClickContext?.clickToken || createPackageClickToken()
+		).catch(() => null);
+
+		if (trendClickContext?.assignmentId) {
+			navigate(
+				{
+					pathname: location.pathname,
+					search: location.search
+				},
+				{
+					replace: true,
+					state: {
+						...(location.state || {}),
+						trendClickContext: null
+					}
+				}
+			);
+		}
+	}, [
+		venue?.promotionAssignment?.assignmentId,
+		venue?.id,
+		venueId,
+		user?.id,
+		trendClickContext,
+		navigate,
+		location.pathname,
+		location.search,
+		location.state
+	]);
 
 	useEffect(() => {
 		let mounted = true;
