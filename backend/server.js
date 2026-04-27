@@ -15,6 +15,52 @@ const multer = require('multer');
 const nodemailer = require('nodemailer');
 const { OAuth2Client } = require('google-auth-library');
 const { supabaseAdmin } = require('./src/lib/supabase');
+const { pool } = require('./src/config/database');
+
+// Global cache variables (defined early to avoid reference errors in helper functions)
+let publicCompactApprovedVenuesCache = { timestamp: 0, data: null };
+const publicVenueDetailCache = new Map();
+const publicVenueForDetailCache = new Map();
+const publicVenueCommunityBundleCache = new Map();
+const openWeatherCache = new Map();
+let publicWardsSummaryCache = { timestamp: 0, data: null };
+let publicWardsFullCache = { timestamp: 0, data: null };
+
+// Forward declarations for helper functions used before definition
+function getCachedMapValue(cacheMap, cacheKey, ttlMs) {
+    if (!cacheMap || !cacheKey) {
+        return null;
+    }
+
+    const cached = cacheMap.get(cacheKey);
+    if (!cached) {
+        return null;
+    }
+
+    const { timestamp, data } = cached;
+    if (!timestamp || !data) {
+        return null;
+    }
+
+    const now = Date.now();
+    if (Number(ttlMs) > 0 && now - timestamp > ttlMs) {
+        cacheMap.delete(cacheKey);
+        return null;
+    }
+
+    return data;
+}
+
+function setCachedMapValue(cacheMap, cacheKey, data) {
+    if (!cacheMap || !cacheKey) {
+        return;
+    }
+
+    cacheMap.set(cacheKey, {
+        timestamp: Date.now(),
+        data
+    });
+}
 
 const app = express();
 app.use(cors());
@@ -5742,7 +5788,7 @@ async function generateWardIdFromName(name) {
                 const poolIdleTimeoutMs = Number(process.env.PG_IDLE_TIMEOUT_MS || 10000);
                 const poolConnectionTimeoutMs = Number(process.env.PG_CONNECTION_TIMEOUT_MS || 60000);
 
-                const pool = new Pool({
+                const secondaryPool = new Pool({
                         ...buildDatabasePoolConfig(),
                         max: Number.isFinite(poolMax) && poolMax > 0 ? poolMax : 8,
                         idleTimeoutMillis: Number.isFinite(poolIdleTimeoutMs) && poolIdleTimeoutMs > 0 ? poolIdleTimeoutMs : 10000,
@@ -6073,18 +6119,13 @@ async function generateWardIdFromName(name) {
             // Ignore boot-time schema self-heal errors to keep server startup resilient.
         });
 
-                const pool = new Pool({
-                        ...buildDatabasePoolConfig(),
-                        max: Number.isFinite(poolMax) && poolMax > 0 ? poolMax : 8,
-                        idleTimeoutMillis: Number.isFinite(poolIdleTimeoutMs) && poolIdleTimeoutMs > 0 ? poolIdleTimeoutMs : 10000,
-                        connectionTimeoutMillis:
-                                Number.isFinite(poolConnectionTimeoutMs) && poolConnectionTimeoutMs > 0 ? poolConnectionTimeoutMs : 60000
-                });
         let ensureUserNotificationsSchemaPromise = null;
         console.log('ℹ️ PostgreSQL pool config:', {
             max: Number.isFinite(poolMax) && poolMax > 0 ? poolMax : 8,
             idleTimeoutMillis: Number.isFinite(poolIdleTimeoutMs) && poolIdleTimeoutMs > 0 ? poolIdleTimeoutMs : 10000,
             connectionTimeoutMillis: Number.isFinite(poolConnectionTimeoutMs) && poolConnectionTimeoutMs > 0 ? poolConnectionTimeoutMs : 60000
+        });
+
         pool.query(
             `
                 CREATE INDEX IF NOT EXISTS ad_trend_click_events_assignment_clicked_idx
@@ -7005,13 +7046,6 @@ async function generateWardIdFromName(name) {
         const RECOMMENDATION_REFINE_AI_ENDPOINT = 'https://api.openai.com/v1/chat/completions';
         const RECOMMENDATION_REFINE_AI_TIMEOUT_MS = 8000;
         const RECOMMENDATION_REFINE_AI_FALLBACK_MODELS = ['gpt-4.1-mini', 'gpt-4o-mini'];
-        let publicWardsSummaryCache = { timestamp: 0, data: null };
-        let publicWardsFullCache = { timestamp: 0, data: null };
-        let publicCompactApprovedVenuesCache = { timestamp: 0, data: null };
-        const publicVenueDetailCache = new Map();
-        const publicVenueForDetailCache = new Map();
-    const publicVenueCommunityBundleCache = new Map();
-        const openWeatherCache = new Map();
 
         function resolveOpenWeatherApiKey() {
             return String(process.env.OPENWEATHER_API_KEY || process.env.OPEN_WEATHER_API_KEY || '').trim();
