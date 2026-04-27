@@ -7,6 +7,7 @@ import translations from '../../constants/translations';
 import { APP_ROUTES } from '../../constants/routes';
 import { deleteChatThread, fetchChatThreads, fetchVenueChatThread, markChatThreadRead, sendVenueChatMessage } from '../../services/api/chatApi';
 import logo from '../../assets/images/logo.png';
+import NotificationBell from '../notifications/NotificationBell';
 import './LandingLayout.css';
 import { MdExpandMore } from 'react-icons/md';
 
@@ -775,7 +776,7 @@ function LandingLayout() {
               <option value="en">English</option>
               <option value="vi">Vietnamese</option>
             </select>
-            <button type="button" className="landing-icon-button" aria-label={t.header.search} />
+            <NotificationBell />
             <div className="landing-chat-menu" ref={chatMenuRef}>
               <button
                 type="button"

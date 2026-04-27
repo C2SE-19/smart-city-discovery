@@ -7,6 +7,7 @@ const { Pool } = require('pg');
 const cors = require('cors');
 const bcryptjs = require('bcryptjs');
 const axios = require('axios');
+const { EventEmitter } = require('events');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const turf = require('@turf/turf');
@@ -94,7 +95,8 @@ function registerVersionedRoute(method, path, ...handlers) {
 function extractBearerToken(req) {
     const authorizationHeader = req.headers.authorization || '';
     if (!authorizationHeader.startsWith('Bearer ')) {
-        return '';
+        const queryToken = String(req.query?.token || '').trim();
+        return queryToken;
     }
 
     return authorizationHeader.slice(7).trim();
@@ -4243,13 +4245,63 @@ async function updateAdminUserRole(req, res) {
     params.push(userId);
 
     try {
+        const existingUserResult = await pool.query(
+            `
+                SELECT id, status, pause_until, blocked_reason
+                FROM users
+                WHERE id = $1
+                LIMIT 1
+            `,
+            [userId]
+        );
+
+        if (!existingUserResult.rows.length) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        const previousUserState = existingUserResult.rows[0];
         const result = await pool.query(sql, params);
 
         if (!result.rows.length) {
             return res.status(404).json({ message: 'User not found' });
         }
 
-        return res.json({ success: true, user: result.rows[0] });
+        const updatedUser = result.rows[0];
+        const previousStatus = String(previousUserState.status || '').trim().toLowerCase();
+        const nextStatus = String(updatedUser.status || '').trim().toLowerCase();
+
+        if (nextStatus && previousStatus && nextStatus !== previousStatus) {
+            const statusTitleByKey = {
+                active: 'Tài khoản của bạn đã được kích hoạt lại',
+                paused: 'Tài khoản của bạn đang bị tạm dừng',
+                blocked: 'Tài khoản của bạn đã bị khóa'
+            };
+
+            const statusContentByKey = {
+                active: 'Bạn có thể tiếp tục sử dụng các tính năng bình thường.',
+                paused: updatedUser.pause_until
+                    ? `Tài khoản tạm dừng đến ${new Date(updatedUser.pause_until).toLocaleString('vi-VN')}.`
+                    : 'Vui lòng liên hệ quản trị viên để biết thêm chi tiết về thời gian tạm dừng.',
+                blocked: updatedUser.blocked_reason
+                    ? `Lý do: ${String(updatedUser.blocked_reason).trim()}`
+                    : 'Vui lòng liên hệ quản trị viên để biết thêm chi tiết.'
+            };
+
+            await createUserNotification({
+                userId: updatedUser.id,
+                type: 'general',
+                title: statusTitleByKey[nextStatus] || 'Trạng thái tài khoản của bạn đã thay đổi',
+                content: statusContentByKey[nextStatus] || 'Vui lòng kiểm tra trạng thái tài khoản mới nhất của bạn.',
+                metadata: {
+                    previousStatus,
+                    nextStatus,
+                    pauseUntil: updatedUser.pause_until || null,
+                    blockedReason: updatedUser.blocked_reason || null
+                }
+            });
+        }
+
+        return res.json({ success: true, user: updatedUser });
     } catch (err) {
         console.error('Admin update user role error:', err);
         return res.status(500).json({ message: 'Server error' });
@@ -4403,6 +4455,66 @@ function extractVenueOwnerCandidateIds(venue) {
             .map((value) => String(value || '').trim())
             .filter(Boolean)
     )];
+}
+
+async function resolveVenueOwnerUserIdByVenueId(venueId) {
+    const normalizedVenueId = Number(venueId);
+
+    if (!Number.isFinite(normalizedVenueId) || normalizedVenueId <= 0) {
+        return '';
+    }
+
+    const venueHasOwnerUserColumn = await hasVenueOwnerUserColumn();
+    const ownerSelect = venueHasOwnerUserColumn
+        ? `${buildResolvedVenueOwnerUserSql('venues')} AS owner_user_id,`
+        : 'NULL::uuid AS owner_user_id,';
+
+    const result = await pool.query(
+        `
+            SELECT
+                ${ownerSelect}
+                venues.submitted_by_user_id
+            FROM venues
+            WHERE venues.id = $1
+            LIMIT 1
+        `,
+        [normalizedVenueId]
+    );
+
+    if (!result.rows.length) {
+        return '';
+    }
+
+    return extractVenueOwnerCandidateIds(result.rows[0])[0] || '';
+}
+
+async function resolveNotificationActorName(userId, fallback = 'Người dùng') {
+    const normalizedUserId = String(userId || '').trim();
+
+    if (!normalizedUserId) {
+        return fallback;
+    }
+
+    try {
+        const result = await pool.query(
+            `
+                SELECT fullname, username, email
+                FROM users
+                WHERE id::text = $1
+                LIMIT 1
+            `,
+            [normalizedUserId]
+        );
+
+        return String(
+            result.rows[0]?.fullname
+            || result.rows[0]?.username
+            || result.rows[0]?.email
+            || fallback
+        ).trim() || fallback;
+    } catch {
+        return fallback;
+    }
 }
 
 function parsePositiveIntegerList(input) {
@@ -5961,6 +6073,18 @@ async function generateWardIdFromName(name) {
             // Ignore boot-time schema self-heal errors to keep server startup resilient.
         });
 
+                const pool = new Pool({
+                        ...buildDatabasePoolConfig(),
+                        max: Number.isFinite(poolMax) && poolMax > 0 ? poolMax : 8,
+                        idleTimeoutMillis: Number.isFinite(poolIdleTimeoutMs) && poolIdleTimeoutMs > 0 ? poolIdleTimeoutMs : 10000,
+                        connectionTimeoutMillis:
+                                Number.isFinite(poolConnectionTimeoutMs) && poolConnectionTimeoutMs > 0 ? poolConnectionTimeoutMs : 60000
+                });
+        let ensureUserNotificationsSchemaPromise = null;
+        console.log('ℹ️ PostgreSQL pool config:', {
+            max: Number.isFinite(poolMax) && poolMax > 0 ? poolMax : 8,
+            idleTimeoutMillis: Number.isFinite(poolIdleTimeoutMs) && poolIdleTimeoutMs > 0 ? poolIdleTimeoutMs : 10000,
+            connectionTimeoutMillis: Number.isFinite(poolConnectionTimeoutMs) && poolConnectionTimeoutMs > 0 ? poolConnectionTimeoutMs : 60000
         pool.query(
             `
                 CREATE INDEX IF NOT EXISTS ad_trend_click_events_assignment_clicked_idx
@@ -5979,6 +6103,158 @@ async function generateWardIdFromName(name) {
         ).catch(() => {
             // Ignore boot-time schema self-heal errors to keep server startup resilient.
         });
+
+        async function ensureUserNotificationsSchema() {
+            if (ensureUserNotificationsSchemaPromise) {
+                return ensureUserNotificationsSchemaPromise;
+            }
+
+            ensureUserNotificationsSchemaPromise = (async () => {
+                await pool.query(
+                    `
+                        CREATE TABLE IF NOT EXISTS user_notifications (
+                            id BIGSERIAL PRIMARY KEY,
+                            user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                            type TEXT NOT NULL DEFAULT 'general',
+                            title TEXT NOT NULL,
+                            content TEXT,
+                            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+                            is_read BOOLEAN NOT NULL DEFAULT false,
+                            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                            read_at TIMESTAMPTZ
+                        )
+                    `
+                );
+
+                await pool.query(
+                    `
+                        ALTER TABLE IF EXISTS user_notifications
+                        ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'general'
+                    `
+                );
+
+                await pool.query(
+                    `
+                        ALTER TABLE IF EXISTS user_notifications
+                        ADD COLUMN IF NOT EXISTS title TEXT
+                    `
+                );
+
+                await pool.query(
+                    `
+                        ALTER TABLE IF EXISTS user_notifications
+                        ADD COLUMN IF NOT EXISTS content TEXT
+                    `
+                );
+
+                await pool.query(
+                    `
+                        ALTER TABLE IF EXISTS user_notifications
+                        ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb
+                    `
+                );
+
+                await pool.query(
+                    `
+                        ALTER TABLE IF EXISTS user_notifications
+                        ADD COLUMN IF NOT EXISTS is_read BOOLEAN NOT NULL DEFAULT false
+                    `
+                );
+
+                await pool.query(
+                    `
+                        ALTER TABLE IF EXISTS user_notifications
+                        ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    `
+                );
+
+                await pool.query(
+                    `
+                        ALTER TABLE IF EXISTS user_notifications
+                        ADD COLUMN IF NOT EXISTS read_at TIMESTAMPTZ
+                    `
+                );
+
+                await pool.query(
+                    `
+                        UPDATE user_notifications
+                        SET title = COALESCE(NULLIF(BTRIM(title), ''), 'Thông báo')
+                        WHERE title IS NULL OR BTRIM(title) = ''
+                    `
+                );
+
+                await pool.query(
+                    `
+                        DO $$
+                        DECLARE
+                            current_user_id_type TEXT;
+                        BEGIN
+                            SELECT data_type
+                            INTO current_user_id_type
+                            FROM information_schema.columns
+                            WHERE table_schema = 'public'
+                              AND table_name = 'user_notifications'
+                              AND column_name = 'user_id'
+                            LIMIT 1;
+
+                            IF current_user_id_type IS DISTINCT FROM 'uuid' THEN
+                                DELETE FROM public.user_notifications
+                                WHERE user_id IS NULL
+                                   OR user_id::text !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$';
+
+                                ALTER TABLE public.user_notifications
+                                DROP CONSTRAINT IF EXISTS user_notifications_user_id_fkey;
+
+                                ALTER TABLE public.user_notifications
+                                ALTER COLUMN user_id TYPE UUID
+                                USING user_id::text::uuid;
+                            END IF;
+
+                            DELETE FROM public.user_notifications AS notifications
+                            WHERE user_id IS NULL
+                               OR NOT EXISTS (
+                                   SELECT 1
+                                   FROM public.users
+                                   WHERE users.id = notifications.user_id
+                               );
+
+                            ALTER TABLE public.user_notifications
+                            ALTER COLUMN user_id SET NOT NULL;
+
+                            ALTER TABLE public.user_notifications
+                            ALTER COLUMN title SET NOT NULL;
+
+                            BEGIN
+                                ALTER TABLE public.user_notifications
+                                ADD CONSTRAINT user_notifications_user_id_fkey
+                                FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+                            EXCEPTION
+                                WHEN duplicate_object THEN
+                                    NULL;
+                            END;
+                        END $$;
+                    `
+                );
+
+                await pool.query(
+                    `
+                        CREATE INDEX IF NOT EXISTS user_notifications_user_created_idx
+                        ON user_notifications (user_id, created_at DESC)
+                    `
+                );
+
+                await pool.query(
+                    `
+                        CREATE INDEX IF NOT EXISTS user_notifications_user_unread_idx
+                        ON user_notifications (user_id, is_read, created_at DESC)
+                    `
+                );
+            })().finally(() => {
+                ensureUserNotificationsSchemaPromise = null;
+            });
+
+            return ensureUserNotificationsSchemaPromise;
+        }
 
         pool.query(
             `
@@ -6035,6 +6311,10 @@ async function generateWardIdFromName(name) {
             `
         ).catch(() => {
             // Ignore if venues/users schema is not ready yet.
+        });
+
+        ensureUserNotificationsSchema().catch((error) => {
+            console.warn('user_notifications schema self-heal warning:', error.message);
         });
 
         pool.query(
@@ -11541,6 +11821,22 @@ async function generateWardIdFromName(name) {
                     );
 
                     const created = insertResult.rows[0];
+                    const venueOwnerUserId = await resolveVenueOwnerUserIdByVenueId(venueId);
+
+                    if (venueOwnerUserId && venueOwnerUserId !== userId) {
+                        await createUserNotification({
+                            userId: venueOwnerUserId,
+                            type: 'venue_review',
+                            title: 'Bài đăng của bạn có bình luận mới',
+                            content: `${authorName} đã bình luận về bài đăng của bạn.`,
+                            metadata: {
+                                venueId,
+                                reviewId: Number(created.id),
+                                actorUserId: userId
+                            }
+                        });
+                    }
+
                     invalidateVenueCommunityBundleCacheByVenueId(venueId);
 
                     return res.status(201).json({
@@ -11713,7 +12009,7 @@ async function generateWardIdFromName(name) {
                 try {
                     const reviewResult = await pool.query(
                         `
-                            SELECT id
+                            SELECT id, user_id
                             FROM venue_public_reviews
                             WHERE id = $1 AND venue_id = $2
                             LIMIT 1
@@ -11758,6 +12054,23 @@ async function generateWardIdFromName(name) {
                     );
 
                     const created = insertResult.rows[0];
+                    const reviewOwnerUserId = String(reviewResult.rows[0]?.user_id || '').trim();
+
+                    if (reviewOwnerUserId && reviewOwnerUserId !== userId) {
+                        await createUserNotification({
+                            userId: reviewOwnerUserId,
+                            type: 'venue_reply',
+                            title: 'Bình luận của bạn có phản hồi mới',
+                            content: `${authorName} đã phản hồi bình luận của bạn.`,
+                            metadata: {
+                                venueId,
+                                reviewId,
+                                replyId: Number(created.id),
+                                actorUserId: userId
+                            }
+                        });
+                    }
+
                     invalidateVenueCommunityBundleCacheByVenueId(venueId);
 
                     return res.status(201).json({
@@ -12698,6 +13011,17 @@ async function generateWardIdFromName(name) {
             `,
                     [insertResult.rows[0].id]
                 );
+
+                await createUserNotification({
+                    userId: submitterUserId,
+                    type: 'venue_submission',
+                    title: 'Đăng bài thành công',
+                    content: `${normalizedName} đang chờ quản trị viên duyệt.`,
+                    metadata: {
+                        venueId: Number(insertResult.rows[0].id),
+                        status: 'pending'
+                    }
+                });
 
                 res.json({
                     message: 'Venue submitted successfully and is waiting for admin approval.',
@@ -13826,6 +14150,22 @@ async function generateWardIdFromName(name) {
 
                     await client.query('COMMIT');
 
+                    const submitterUserId = String(updateRequest.submitted_by_user_id || '').trim();
+                    if (submitterUserId) {
+                        await createUserNotification({
+                            userId: submitterUserId,
+                            type: 'venue_submission',
+                            title: 'Yêu cầu cập nhật quán đã bị từ chối',
+                            content: normalizedRejectionReason || 'Vui lòng kiểm tra lại thông tin và gửi yêu cầu mới.',
+                            metadata: {
+                                action: 'reject',
+                                venueId: Number(updateRequest.venue_id) || null,
+                                updateRequestId: requestId,
+                                rejectionReason: normalizedRejectionReason || null
+                            }
+                        });
+                    }
+
                     return res.json({
                         message: 'Venue update request rejected successfully',
                         updateRequest: rejectResult.rows[0]
@@ -13986,6 +14326,28 @@ async function generateWardIdFromName(name) {
                 publicVenueDetailCache.delete(`admin:${targetVenueId}`);
                 publicVenueForDetailCache.delete(`public:${targetVenueId}`);
                 publicVenueForDetailCache.delete(`admin:${targetVenueId}`);
+
+                const submitterUserId = String(updateRequest.submitted_by_user_id || '').trim();
+                if (submitterUserId) {
+                    const venueNameForNotification = String(
+                        details.rows[0]?.name
+                        || details.rows[0]?.title
+                        || proposedSnapshot.name
+                        || 'Quán của bạn'
+                    ).trim();
+
+                    await createUserNotification({
+                        userId: submitterUserId,
+                        type: 'venue_submission',
+                        title: 'Yêu cầu cập nhật quán đã được duyệt',
+                        content: `${venueNameForNotification} đã được cập nhật thành công.`,
+                        metadata: {
+                            action: 'approve',
+                            venueId: targetVenueId,
+                            updateRequestId: requestId
+                        }
+                    });
+                }
 
                 return res.json({
                     message: 'Venue update approved successfully',
@@ -15354,7 +15716,7 @@ async function generateWardIdFromName(name) {
                               reviewed_by = $2,
                               updated_at = now()
                           WHERE id = $1
-                          RETURNING id
+                                                    RETURNING id, submitted_by_user_id, name, title
                       `,
                         [venueId, reviewer, normalizedRejectionReason]
                     );
@@ -15405,6 +15767,23 @@ async function generateWardIdFromName(name) {
                     publicVenueForDetailCache.delete(`admin:${venueId}`);
                     invalidateVenueCommunityBundleCacheByVenueId(venueId);
 
+                    const rejectedVenue = result.rows[0] || {};
+                    const submitterUserId = String(rejectedVenue.submitted_by_user_id || '').trim();
+                    if (submitterUserId) {
+                        const venueNameForNotification = String(rejectedVenue.name || rejectedVenue.title || `Quán #${venueId}`).trim();
+                        await createUserNotification({
+                            userId: submitterUserId,
+                            type: 'venue_submission',
+                            title: 'Bài đăng quán của bạn đã bị từ chối',
+                            content: normalizedRejectionReason || `${venueNameForNotification} chưa đủ điều kiện phê duyệt.`,
+                            metadata: {
+                                action: 'reject',
+                                venueId,
+                                rejectionReason: normalizedRejectionReason || null
+                            }
+                        });
+                    }
+
                     return res.json({
                         message: 'Venue rejected successfully',
                         venue: details.rows[0]
@@ -15422,7 +15801,7 @@ async function generateWardIdFromName(name) {
                               reviewed_by = $2,
                               updated_at = now()
                           WHERE id = $1
-                          RETURNING id
+                                                    RETURNING id, submitted_by_user_id, name, title
                       `,
                     [venueId, reviewer]
                 );
@@ -15472,6 +15851,22 @@ async function generateWardIdFromName(name) {
                 publicVenueForDetailCache.delete(`public:${venueId}`);
                 publicVenueForDetailCache.delete(`admin:${venueId}`);
                 invalidateVenueCommunityBundleCacheByVenueId(venueId);
+
+                const approvedVenue = result.rows[0] || {};
+                const submitterUserId = String(approvedVenue.submitted_by_user_id || '').trim();
+                if (submitterUserId) {
+                    const venueNameForNotification = String(approvedVenue.name || approvedVenue.title || `Quán #${venueId}`).trim();
+                    await createUserNotification({
+                        userId: submitterUserId,
+                        type: 'venue_submission',
+                        title: 'Bài đăng quán của bạn đã được duyệt',
+                        content: `${venueNameForNotification} hiện đã hiển thị công khai cho người dùng.`,
+                        metadata: {
+                            action: 'approve',
+                            venueId
+                        }
+                    });
+                }
 
                 return res.json({
                     message: 'Venue approved successfully',
@@ -15928,11 +16323,24 @@ async function generateWardIdFromName(name) {
                         req.authUser?.id || null,
                         resolvedTypeCode,
                         resolvedTypeCode,
-                        message,
+                        finalMessage,
                         contactEmail || null,
                         normalizedPhone || null,
                         attachmentUrl
                     ]);
+
+                    if (req.authUser?.id) {
+                        await createUserNotification({
+                            userId: req.authUser.id,
+                            type: 'feedback',
+                            title: 'Gửi phản hồi thành công',
+                            content: `Loại phản hồi: ${resolvedTypeName}`,
+                            metadata: {
+                                feedbackId: Number(rows?.[0]?.id || 0) || null,
+                                feedbackTypeCode: resolvedTypeCode
+                            }
+                        });
+                    }
 
                     return res.status(201).json({
                         message: 'Feedback submitted',
@@ -15964,6 +16372,19 @@ async function generateWardIdFromName(name) {
                             attachmentUrl
                         ]);
 
+                        if (req.authUser?.id) {
+                            await createUserNotification({
+                                userId: req.authUser.id,
+                                type: 'feedback',
+                                title: 'Gửi phản hồi thành công',
+                                content: `Loại phản hồi: ${resolvedTypeName}`,
+                                metadata: {
+                                    feedbackId: Number(fallbackResult.rows?.[0]?.id || 0) || null,
+                                    feedbackTypeCode: resolvedTypeCode
+                                }
+                            });
+                        }
+
                         return res.status(201).json({
                             message: 'Feedback submitted',
                             feedback: fallbackResult.rows[0],
@@ -15984,7 +16405,7 @@ async function generateWardIdFromName(name) {
         async function listAdminFeedbackReports(req, res) {
             const rawStatusFilter = String(req.query.status || '').trim().toLowerCase();
             const statuses = normalizeFeedbackStatusList(rawStatusFilter);
-            const requestedTypeCode = String(req.query.typeCode || req.query.feedbackTypeCode || '')
+            const requestedTypeCode = String(req.query.typeCode || req.query.feedbackTypeCode || req.query.type || req.query.category || '')
                 .trim()
                 .toLowerCase();
             const statusDerivedTypeCode = ['venue_report', 'review_report'].includes(rawStatusFilter)
@@ -16042,7 +16463,7 @@ async function generateWardIdFromName(name) {
                             COALESCE(ft.code, f.category, f.issue_type, 'other') AS feedback_type_code,
                             COALESCE(ft.name, f.issue_type, f.category, 'Other') AS feedback_type_name,
                             f.message,
-                            f.contact_email,
+                            message,
                             f.contact_phone,
                             f.attachment_url,
                             f.status,
@@ -16394,6 +16815,21 @@ async function generateWardIdFromName(name) {
                         [feedbackId, replyMessage, replyAttachmentUrl, reviewer, nextStatus]
                     );
 
+                    const reporterUserId = String(feedback.reporter_user_id || '').trim();
+                    if (reporterUserId) {
+                        await createUserNotification({
+                            userId: reporterUserId,
+                            type: 'feedback',
+                            title: 'Báo cáo của bạn đã có phản hồi từ quản trị viên',
+                            content: `Báo cáo #${feedback.id} đã được cập nhật trạng thái ${normalizeFeedbackStatusLabel(nextStatus)}.`,
+                            metadata: {
+                                feedbackId: feedback.id,
+                                nextStatus,
+                                hasAttachment: Boolean(replyAttachmentUrl)
+                            }
+                        });
+                    }
+
                     if (
                         req.file &&
                         feedback.admin_reply_attachment_url &&
@@ -16496,6 +16932,7 @@ async function generateWardIdFromName(name) {
                                 f.message,
                                 f.attachment_url,
                                 f.admin_reply_attachment_url,
+                                f.reporter_user_id,
                                 COALESCE(ft.code, f.category, f.issue_type, 'other') AS feedback_type_code
                             FROM feedbacks AS f
                             LEFT JOIN feedback_types AS ft ON ft.id = f.feedback_type_id
@@ -16513,6 +16950,7 @@ async function generateWardIdFromName(name) {
                     const report = feedbackResult.rows[0];
                     const reportTypeCode = String(report.feedback_type_code || '').trim().toLowerCase();
                     const metadataMap = parseFeedbackMetadataMap(report.message);
+                    const reporterUserId = String(report.reporter_user_id || '').trim();
 
                     let deletedTarget = false;
                     let deletedTargetId = null;
@@ -16594,6 +17032,26 @@ async function generateWardIdFromName(name) {
 
                     safeDeleteUploadedFile(deletedReport.attachment_url);
                     safeDeleteUploadedFile(deletedReport.admin_reply_attachment_url);
+
+                    if (reporterUserId) {
+                        await createUserNotification({
+                            userId: reporterUserId,
+                            type: 'feedback',
+                            title: deletedTarget
+                                ? 'Báo cáo của bạn đã được xử lý'
+                                : 'Báo cáo của bạn đã được tiếp nhận và đóng',
+                            content: deletedTarget
+                                ? `Quản trị viên đã xử lý báo cáo #${deletedReport.id} và áp dụng hành động với nội dung bị báo cáo.`
+                                : `Quản trị viên đã xử lý báo cáo #${deletedReport.id}.`,
+                            metadata: {
+                                feedbackId: deletedReport.id,
+                                reportTypeCode,
+                                deletedTarget,
+                                deletedTargetType,
+                                deletedTargetId
+                            }
+                        });
+                    }
 
                     return res.json({
                         message: deletedTarget
@@ -17158,6 +17616,34 @@ async function generateWardIdFromName(name) {
                     [resolvedThreadId, insertMessageResult.rows[0]?.created_at || new Date().toISOString()]
                 );
 
+                if (recipientUserId && recipientUserId !== currentUserId) {
+                    const senderDisplayName = String(
+                        req.authUser?.fullname
+                        || req.authUser?.username
+                        || req.authUser?.email
+                        || 'Người dùng'
+                    ).trim();
+                    const venueLabel = String(
+                        venue.name
+                        || venue.title
+                        || messageContextLabel
+                        || 'quán'
+                    ).trim();
+
+                    await createUserNotification({
+                        userId: recipientUserId,
+                        type: 'general',
+                        title: 'Bạn có tin nhắn mới',
+                        content: `${senderDisplayName} vừa gửi tin nhắn về ${venueLabel}.`,
+                        metadata: {
+                            threadId: resolvedThreadId,
+                            venueId: messageVenueId || venueId,
+                            contextLabel: messageContextLabel || null,
+                            senderUserId: currentUserId
+                        }
+                    });
+                }
+
                 const threadPayload = await buildChatThreadPayload(resolvedThreadId, currentUserId);
                 return res.status(201).json({
                     message: 'Chat message sent successfully',
@@ -17331,6 +17817,288 @@ async function generateWardIdFromName(name) {
         registerVersionedRoute('post', '/chat/venues/:venueId/messages', authenticateRequest, checkUserStatus, sendVenueChatMessage);
         registerVersionedRoute('post', '/chat/threads/:threadId/read', authenticateRequest, checkUserStatus, markChatThreadRead);
         registerVersionedRoute('delete', '/chat/threads/:threadId', authenticateRequest, checkUserStatus, deleteChatThread);
+
+        const USER_NOTIFICATION_TYPES = new Set([
+            'general',
+            'forum_post',
+            'forum_comment',
+            'favorite',
+            'feedback',
+            'venue_submission',
+            'venue_favorite',
+            'venue_review',
+            'venue_reply'
+        ]);
+
+        const notificationRealtimeChannels = new Map();
+        const USER_NOTIFICATION_SCHEMA_ERROR_CODES = new Set(['22P02', '23503', '42P01', '42703', '42804']);
+
+        function normalizeNotificationType(value) {
+            const normalized = String(value || '').trim().toLowerCase();
+            return USER_NOTIFICATION_TYPES.has(normalized) ? normalized : 'general';
+        }
+
+        function normalizeNotificationUserId(value) {
+            return String(value || '').trim();
+        }
+
+        function getNotificationRealtimeChannel(userId) {
+            const normalizedUserId = normalizeNotificationUserId(userId);
+
+            if (!normalizedUserId) {
+                return null;
+            }
+
+            let channel = notificationRealtimeChannels.get(normalizedUserId);
+            if (!channel) {
+                channel = new EventEmitter();
+                channel.setMaxListeners(0);
+                notificationRealtimeChannels.set(normalizedUserId, channel);
+            }
+
+            return channel;
+        }
+
+        async function runUserNotificationsQuery(task) {
+            try {
+                return await task();
+            } catch (error) {
+                if (!USER_NOTIFICATION_SCHEMA_ERROR_CODES.has(error?.code)) {
+                    throw error;
+                }
+
+                await ensureUserNotificationsSchema();
+                return task();
+            }
+        }
+
+        async function loadUserNotificationsPayload(userId, limit = 20) {
+            const normalizedUserId = normalizeNotificationUserId(userId);
+            const normalizedLimit = Math.min(Math.max(Number(limit) || 20, 1), 50);
+
+            if (!normalizedUserId) {
+                return {
+                    success: true,
+                    notifications: [],
+                    unreadCount: 0
+                };
+            }
+
+            const [notificationsResult, unreadCountResult] = await runUserNotificationsQuery(async () => Promise.all([
+                pool.query(
+                    `
+                        SELECT id,
+                               user_id AS "userId",
+                               type,
+                               title,
+                               content,
+                               metadata,
+                               is_read AS "isRead",
+                               created_at AS "createdAt",
+                               read_at AS "readAt"
+                        FROM user_notifications
+                        WHERE user_id = $1
+                        ORDER BY created_at DESC
+                        LIMIT $2
+                    `,
+                    [normalizedUserId, normalizedLimit]
+                ),
+                pool.query(
+                    `
+                        SELECT COUNT(*)::int AS unread_count
+                        FROM user_notifications
+                        WHERE user_id = $1
+                          AND is_read = false
+                    `,
+                    [normalizedUserId]
+                )
+            ]));
+
+            return {
+                success: true,
+                notifications: notificationsResult.rows,
+                unreadCount: Number(unreadCountResult.rows?.[0]?.unread_count || 0)
+            };
+        }
+
+        async function emitUserNotificationsPayload(userId, limit = 20) {
+            const normalizedUserId = normalizeNotificationUserId(userId);
+            const channel = getNotificationRealtimeChannel(normalizedUserId);
+
+            if (!normalizedUserId || !channel) {
+                return null;
+            }
+
+            try {
+                const payload = await loadUserNotificationsPayload(normalizedUserId, limit);
+                channel.emit('change', payload);
+                return payload;
+            } catch (error) {
+                if (error?.code === '42P01') {
+                    const emptyPayload = { success: true, notifications: [], unreadCount: 0 };
+                    channel.emit('change', emptyPayload);
+                    return emptyPayload;
+                }
+
+                console.warn('emitUserNotificationsPayload warning:', error.message);
+                return null;
+            }
+        }
+
+        function scheduleUserNotificationsRefresh(userId, limit = 20) {
+            const normalizedUserId = normalizeNotificationUserId(userId);
+            if (!normalizedUserId) {
+                return;
+            }
+
+            setTimeout(() => {
+                emitUserNotificationsPayload(normalizedUserId, limit).catch(() => {});
+            }, 0);
+        }
+
+        async function createUserNotification({ userId, type = 'general', title, content = null, metadata = {} }) {
+            const normalizedUserId = normalizeNotificationUserId(userId);
+            const normalizedTitle = String(title || '').trim();
+
+            if (!normalizedUserId || !normalizedTitle) {
+                return null;
+            }
+
+            try {
+                const insertResult = await runUserNotificationsQuery(() => pool.query(
+                    `
+                        INSERT INTO user_notifications (user_id, type, title, content, metadata)
+                        VALUES ($1, $2, $3, $4, $5::jsonb)
+                        RETURNING id, user_id, type, title, content, metadata, is_read, created_at, read_at
+                    `,
+                    [
+                        normalizedUserId,
+                        normalizeNotificationType(type),
+                        normalizedTitle,
+                        content ? String(content).trim() : null,
+                        JSON.stringify(metadata && typeof metadata === 'object' ? metadata : {})
+                    ]
+                ));
+
+                const createdNotification = insertResult.rows[0] || null;
+                scheduleUserNotificationsRefresh(normalizedUserId);
+                return createdNotification;
+            } catch (error) {
+                console.warn('createUserNotification warning:', error.message);
+                return null;
+            }
+        }
+
+        async function listUserNotificationsHandler(req, res) {
+            const userId = req.user.id;
+            const limit = Math.min(
+                Math.max(Number.parseInt(String(req.query?.limit || '20'), 10) || 20, 1),
+                50
+            );
+
+            try {
+                return res.json(await loadUserNotificationsPayload(userId, limit));
+            } catch (error) {
+                if (error?.code === '42P01') {
+                    return res.json({ success: true, notifications: [], unreadCount: 0 });
+                }
+                console.error('listUserNotificationsHandler error:', error);
+                return res.status(500).json({ message: 'Không thể tải thông báo lúc này.' });
+            }
+        }
+
+        async function streamUserNotificationsHandler(req, res) {
+            const userId = normalizeNotificationUserId(req.user?.id);
+
+            if (!userId) {
+                return res.status(401).json({ message: 'Thiếu thông tin người dùng.' });
+            }
+
+            res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+            res.setHeader('Cache-Control', 'no-cache, no-transform');
+            res.setHeader('Connection', 'keep-alive');
+            res.flushHeaders?.();
+
+            const channel = getNotificationRealtimeChannel(userId);
+            const writeEvent = (payload) => {
+                res.write(`event: notifications\n`);
+                res.write(`data: ${JSON.stringify(payload)}\n\n`);
+            };
+
+            try {
+                writeEvent(await loadUserNotificationsPayload(userId, Number(req.query?.limit || 20)));
+            } catch (error) {
+                if (error?.code === '42P01') {
+                    writeEvent({ success: true, notifications: [], unreadCount: 0 });
+                } else {
+                    console.error('streamUserNotificationsHandler init error:', error);
+                    writeEvent({ success: false, notifications: [], unreadCount: 0 });
+                }
+            }
+
+            const keepAliveId = setInterval(() => {
+                res.write(`: ping\n\n`);
+            }, 25000);
+
+            const handleChange = (payload) => {
+                writeEvent(payload);
+            };
+
+            channel?.on('change', handleChange);
+
+            req.on('close', () => {
+                clearInterval(keepAliveId);
+                channel?.off('change', handleChange);
+            });
+        }
+
+        async function markUserNotificationsReadHandler(req, res) {
+            const userId = req.user.id;
+            const rawIds = Array.isArray(req.body?.ids) ? req.body.ids : [];
+            const notificationIds = rawIds
+                .map((value) => Number(value))
+                .filter((value) => Number.isFinite(value) && value > 0);
+
+            try {
+                let updatedCount = 0;
+
+                if (notificationIds.length) {
+                    const updateResult = await runUserNotificationsQuery(() => pool.query(
+                        `
+                            UPDATE user_notifications
+                            SET is_read = true,
+                                read_at = COALESCE(read_at, NOW())
+                            WHERE user_id = $1
+                              AND id = ANY($2::bigint[])
+                              AND is_read = false
+                        `,
+                        [userId, notificationIds]
+                    ));
+                    updatedCount = Number(updateResult.rowCount || 0);
+                } else {
+                    const updateAllResult = await runUserNotificationsQuery(() => pool.query(
+                        `
+                            UPDATE user_notifications
+                            SET is_read = true,
+                                read_at = COALESCE(read_at, NOW())
+                            WHERE user_id = $1
+                              AND is_read = false
+                        `,
+                        [userId]
+                    ));
+                    updatedCount = Number(updateAllResult.rowCount || 0);
+                }
+
+                if (updatedCount > 0) {
+                    scheduleUserNotificationsRefresh(userId);
+                }
+
+                return res.json({ success: true, updatedCount });
+            } catch (error) {
+                console.error('markUserNotificationsReadHandler error:', error);
+                return res.status(500).json({ message: 'Không thể cập nhật thông báo lúc này.' });
+            }
+        }
 
         const FORUM_PROFANITY_PATTERNS = [
             'dit me', 'ditme', 'dit bo', 'ditba', 'dit', 'dm ', 'vcl', 'vl', 'cc', 'cmm', 'dmm',
@@ -17878,6 +18646,19 @@ async function generateWardIdFromName(name) {
                     ]
                 );
 
+                if (creatorUserId) {
+                    await createUserNotification({
+                        userId: creatorUserId,
+                        type: 'forum_post',
+                        title: 'Đăng bài diễn đàn thành công',
+                        content: title,
+                        metadata: {
+                            postId: Number(insertResult.rows?.[0]?.id || 0) || null,
+                            category
+                        }
+                    });
+                }
+
                 return res.status(201).json({ data: mapForumPost(insertResult.rows[0]) });
             } catch (error) {
                 console.error('createForumPost error:', error);
@@ -17930,7 +18711,10 @@ async function generateWardIdFromName(name) {
                     return res.status(400).json({ message: 'Bình luận chứa từ ngữ không phù hợp. Vui lòng chỉnh sửa trước khi đăng.' });
                 }
 
-                const postCheck = await pool.query('SELECT id FROM forum_posts WHERE id = $1 LIMIT 1', [postId]);
+                const postCheck = await pool.query(
+                    'SELECT id, title, creator_user_id FROM forum_posts WHERE id = $1 LIMIT 1',
+                    [postId]
+                );
                 if (!postCheck.rows.length) {
                     return res.status(404).json({ message: 'Không tìm thấy bài viết.' });
                 }
@@ -17972,6 +18756,35 @@ async function generateWardIdFromName(name) {
                     [postId]
                 );
 
+                if (creatorUserId) {
+                    await createUserNotification({
+                        userId: creatorUserId,
+                        type: 'forum_comment',
+                        title: 'Bình luận diễn đàn đã được đăng',
+                        content: content.slice(0, 140),
+                        metadata: {
+                            postId,
+                            commentId: Number(insertResult.rows?.[0]?.id || 0) || null,
+                            parentCommentId
+                        }
+                    });
+                }
+
+                const postCreatorUserId = String(postCheck.rows[0]?.creator_user_id || '').trim();
+                if (postCreatorUserId && postCreatorUserId !== creatorUserId) {
+                    await createUserNotification({
+                        userId: postCreatorUserId,
+                        type: 'forum_comment',
+                        title: 'Bài viết diễn đàn của bạn có bình luận mới',
+                        content: content.slice(0, 140),
+                        metadata: {
+                            postId,
+                            commentId: Number(insertResult.rows?.[0]?.id || 0) || null,
+                            parentCommentId
+                        }
+                    });
+                }
+
                 return res.status(201).json({ data: mapForumComment(insertResult.rows[0]) });
             } catch (error) {
                 console.error('createForumComment error:', error);
@@ -17992,7 +18805,10 @@ async function generateWardIdFromName(name) {
                     return res.status(400).json({ message: 'Thiếu thông tin người dùng để thực hiện thao tác thích.' });
                 }
 
-                const postCheck = await pool.query('SELECT id FROM forum_posts WHERE id = $1 LIMIT 1', [postId]);
+                const postCheck = await pool.query(
+                    'SELECT id, title, creator_user_id, author_actor_key FROM forum_posts WHERE id = $1 LIMIT 1',
+                    [postId]
+                );
                 if (!postCheck.rows.length) {
                     return res.status(404).json({ message: 'Không tìm thấy bài viết.' });
                 }
@@ -18023,6 +18839,21 @@ async function generateWardIdFromName(name) {
 
                 const likesResult = await pool.query('SELECT likes_count FROM forum_posts WHERE id = $1', [postId]);
                 const likesCount = Number(likesResult.rows?.[0]?.likes_count || 0);
+
+                const postCreatorUserId = String(postCheck.rows[0]?.creator_user_id || '').trim();
+                const postActorKey = String(postCheck.rows[0]?.author_actor_key || '').trim();
+                if (liked && postCreatorUserId && postActorKey !== actorKey) {
+                    await createUserNotification({
+                        userId: postCreatorUserId,
+                        type: 'forum_post',
+                        title: 'Bài viết diễn đàn của bạn có lượt thích mới',
+                        content: String(postCheck.rows[0]?.title || '').trim() || `Bài viết #${postId}`,
+                        metadata: {
+                            postId,
+                            actorKey
+                        }
+                    });
+                }
 
                 return res.json({ data: { postId, liked, likesCount } });
             } catch (error) {
@@ -18424,7 +19255,48 @@ async function generateWardIdFromName(name) {
                     return res.status(404).json({ message: 'Không tìm thấy bài viết.' });
                 }
 
+                const reporterActorResult = await pool.query(
+                    `
+                        SELECT DISTINCT actor_key
+                        FROM forum_post_reports
+                        WHERE post_id = $1
+                          AND COALESCE(actor_key, '') <> ''
+                    `,
+                    [postId]
+                );
+
                 const deletedResult = await pool.query('DELETE FROM forum_post_reports WHERE post_id = $1', [postId]);
+
+                const actorKeys = reporterActorResult.rows
+                    .map((row) => String(row.actor_key || '').trim())
+                    .filter(Boolean);
+
+                if (actorKeys.length && Number(deletedResult.rowCount || 0) > 0) {
+                    const reporterUsersResult = await pool.query(
+                        `
+                            SELECT id::text AS id
+                            FROM users
+                            WHERE id::text = ANY($1::text[])
+                        `,
+                        [actorKeys]
+                    );
+
+                    await Promise.all(
+                        reporterUsersResult.rows.map((row) =>
+                            createUserNotification({
+                                userId: row.id,
+                                type: 'forum_post',
+                                title: 'Báo cáo bài viết diễn đàn của bạn đã được xử lý',
+                                content: `Báo cáo liên quan đến bài viết #${postId} đã được quản trị viên xem xét.`,
+                                metadata: {
+                                    postId,
+                                    dismissedCount: Number(deletedResult.rowCount || 0)
+                                }
+                            })
+                        )
+                    );
+                }
+
                 return res.json({ data: { postId, dismissedCount: Number(deletedResult.rowCount || 0) } });
             } catch (error) {
                 console.error('dismissAdminForumPostReports error:', error);
@@ -18454,7 +19326,49 @@ async function generateWardIdFromName(name) {
                     return res.status(404).json({ message: 'Không tìm thấy bình luận.' });
                 }
 
+                const reporterActorResult = await pool.query(
+                    `
+                        SELECT DISTINCT actor_key
+                        FROM forum_comment_reports
+                        WHERE comment_id = $1
+                          AND COALESCE(actor_key, '') <> ''
+                    `,
+                    [commentId]
+                );
+
                 const deletedResult = await pool.query('DELETE FROM forum_comment_reports WHERE comment_id = $1', [commentId]);
+
+                const actorKeys = reporterActorResult.rows
+                    .map((row) => String(row.actor_key || '').trim())
+                    .filter(Boolean);
+
+                if (actorKeys.length && Number(deletedResult.rowCount || 0) > 0) {
+                    const reporterUsersResult = await pool.query(
+                        `
+                            SELECT id::text AS id
+                            FROM users
+                            WHERE id::text = ANY($1::text[])
+                        `,
+                        [actorKeys]
+                    );
+
+                    await Promise.all(
+                        reporterUsersResult.rows.map((row) =>
+                            createUserNotification({
+                                userId: row.id,
+                                type: 'forum_comment',
+                                title: 'Báo cáo bình luận diễn đàn của bạn đã được xử lý',
+                                content: `Báo cáo liên quan đến bình luận #${commentId} đã được quản trị viên xem xét.`,
+                                metadata: {
+                                    postId,
+                                    commentId,
+                                    dismissedCount: Number(deletedResult.rowCount || 0)
+                                }
+                            })
+                        )
+                    );
+                }
+
                 return res.json({ data: { postId, commentId, dismissedCount: Number(deletedResult.rowCount || 0) } });
             } catch (error) {
                 console.error('dismissAdminForumCommentReports error:', error);
@@ -18867,6 +19781,17 @@ async function generateWardIdFromName(name) {
                     bio: sanitizeTextField(updatedRawUser.bio)
                 };
 
+                await createUserNotification({
+                    userId,
+                    type: 'general',
+                    title: 'Bạn đã cập nhật thông tin cá nhân thành công',
+                    content: 'Hồ sơ của bạn vừa được lưu với thông tin mới nhất.',
+                    metadata: {
+                        section: 'profile',
+                        action: 'updated'
+                    }
+                });
+
                 res.json({
                     success: true,
                     message: 'Profile updated successfully',
@@ -19049,6 +19974,21 @@ async function generateWardIdFromName(name) {
                     `,
                     [userId, ageRangeKey, preferredGender, preferredTimes, interests, latitude, longitude]
                 );
+
+                await createUserNotification({
+                    userId,
+                    type: 'general',
+                    title: 'Bạn đã cập nhật sở thích thành công',
+                    content: 'Hệ thống sẽ dùng sở thích mới để gợi ý địa điểm phù hợp hơn.',
+                    metadata: {
+                        section: 'preferences',
+                        action: 'updated',
+                        ageRangeKey,
+                        preferredGender,
+                        preferredTimes,
+                        interests
+                    }
+                });
 
                 return res.json({
                     success: true,
@@ -19936,6 +20876,17 @@ async function generateWardIdFromName(name) {
                         'DELETE FROM user_favorites WHERE user_id = $1 AND item_id = $2 AND item_type = $3',
                         [userId, normalizedItemId, normalizedItemType]
                     );
+                    await createUserNotification({
+                        userId,
+                        type: 'favorite',
+                        title: 'Đã bỏ khỏi yêu thích',
+                        content: String(name || normalizedItemId),
+                        metadata: {
+                            itemId: normalizedItemId,
+                            itemType: normalizedItemType,
+                            action: 'removed'
+                        }
+                    });
                     return res.json({ success: true, favorited: false });
                 }
 
@@ -19953,6 +20904,38 @@ async function generateWardIdFromName(name) {
                     ]
                 );
 
+                await createUserNotification({
+                    userId,
+                    type: 'favorite',
+                    title: 'Đã thêm vào yêu thích',
+                    content: String(name || normalizedItemId),
+                    metadata: {
+                        itemId: normalizedItemId,
+                        itemType: normalizedItemType,
+                        action: 'added'
+                    }
+                });
+
+                if (normalizedItemType === 'place') {
+                    const venueOwnerUserId = await resolveVenueOwnerUserIdByVenueId(normalizedItemId);
+                    const actorName = await resolveNotificationActorName(userId);
+
+                    if (venueOwnerUserId && venueOwnerUserId !== String(userId || '').trim()) {
+                        await createUserNotification({
+                            userId: venueOwnerUserId,
+                            type: 'venue_favorite',
+                            title: 'Bài đăng của bạn có lượt yêu thích mới',
+                            content: `${actorName} đã yêu thích bài đăng của bạn.`,
+                            metadata: {
+                                itemId: normalizedItemId,
+                                itemType: normalizedItemType,
+                                action: 'added',
+                                actorUserId: String(userId || '').trim()
+                            }
+                        });
+                    }
+                }
+
                 res.json({ success: true, favorited: true });
             } catch (err) {
                 console.error('Favorites toggle error:', err);
@@ -19962,6 +20945,12 @@ async function generateWardIdFromName(name) {
 
         registerVersionedRoute('post', '/users/favorites/toggle', authenticateOptional, requireAuth, toggleUserFavoriteHandler);
         app.post('/users/favorites/toggle', authenticateOptional, requireAuth, toggleUserFavoriteHandler);
+    registerVersionedRoute('get', '/users/notifications', authenticateOptional, requireAuth, listUserNotificationsHandler);
+    app.get('/users/notifications', authenticateOptional, requireAuth, listUserNotificationsHandler);
+    registerVersionedRoute('get', '/users/notifications/stream', authenticateOptional, requireAuth, streamUserNotificationsHandler);
+    app.get('/users/notifications/stream', authenticateOptional, requireAuth, streamUserNotificationsHandler);
+    registerVersionedRoute('patch', '/users/notifications/read', authenticateOptional, requireAuth, markUserNotificationsReadHandler);
+    app.patch('/users/notifications/read', authenticateOptional, requireAuth, markUserNotificationsReadHandler);
 
         // ==========================================
         // GOOGLE OAUTH

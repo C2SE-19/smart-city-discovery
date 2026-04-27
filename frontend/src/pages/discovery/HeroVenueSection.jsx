@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { FiFlag } from 'react-icons/fi';
 import './HeroVenueSection.css';
 
 export default function HeroVenueSection({
@@ -15,7 +16,8 @@ export default function HeroVenueSection({
   onAddPhotos = () => {},
   onShare = () => {},
   onSave = () => {},
-  onPreviewImage = () => {}
+  onPreviewImage = () => {},
+  onReportVenue = () => {}
 }) {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [showAllPhotosModal, setShowAllPhotosModal] = useState(false);
@@ -88,6 +90,20 @@ export default function HeroVenueSection({
           }} title="Go back">
             ←
           </button>
+
+          <button
+            className="hero-report-btn"
+            onClick={(event) => {
+              event.stopPropagation();
+              onReportVenue();
+            }}
+            title="Report venue"
+            aria-label="Report venue"
+          >
+            <FiFlag aria-hidden="true" />
+            <span>Report</span>
+          </button>
+
           {/* See all photos button */}
           <button
             className="hero-see-all-photos-btn"
