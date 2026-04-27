@@ -10,6 +10,7 @@ import {
 	fetchVenueCommunityBundle,
 	fetchVenueDetails,
 	fetchVenueOpeningHoursRealtime,
+	fetchVenueServices,
 	toggleVenueReviewLike,
 	toggleVenueReviewReplyLike
 } from '../../services/api/venuesApi';
@@ -583,57 +584,6 @@ function resolveWeeklySchedule(venue) {
 	return [];
 }
 
-function resolveVenueServicesFromMetadata(venue) {
-	const metadata = normalizeVenueMetadata(venue?.metadata);
-
-	const normalizedFromNamedArray = (source) => {
-		if (!Array.isArray(source)) {
-			return [];
-		}
-
-		return source
-			.map((item) => {
-				if (typeof item === 'string') {
-					const name = item.trim();
-					return name ? { name } : null;
-				}
-
-				if (item && typeof item === 'object') {
-					const name = String(item.name || item.label || item.title || '').trim();
-					if (!name) {
-						return null;
-					}
-
-					return {
-						name,
-						description: String(item.description || '').trim(),
-						icon: String(item.icon || '').trim()
-					};
-				}
-
-				return null;
-			})
-			.filter(Boolean);
-	};
-
-	const prioritizedSources = [
-		metadata.selectedServiceNames,
-		metadata.services,
-		metadata.serviceNames,
-		metadata.availableServices,
-		metadata.amenities
-	];
-
-	for (const source of prioritizedSources) {
-		const normalized = normalizedFromNamedArray(source);
-		if (normalized.length) {
-			return normalized;
-		}
-	}
-
-	return [];
-}
-
 function formatDisplayTime(value) {
 	if (!value || value === 'OFF') {
 		return 'Closed';
@@ -858,7 +808,6 @@ function VenueDetailPage() {
 	}, [apiBase, venueId]);
 
 	const weeklySchedule = useMemo(() => resolveWeeklySchedule(venue), [venue]);
-	const fallbackVenueServices = useMemo(() => resolveVenueServicesFromMetadata(venue), [venue]);
 	const todaySchedule = useMemo(() => resolveTodaySchedule(weeklySchedule), [weeklySchedule]);
 	const venuePriceRange = useMemo(() => resolveVenuePriceRange(venue), [venue]);
 	const fullVenueDescription = useMemo(() => resolveVenueDescription(venue), [venue]);
@@ -1305,20 +1254,17 @@ function VenueDetailPage() {
 
 		async function loadVenueServices() {
 			try {
-				const response = await axios.get(
-					`${apiUrl}/venues/${venueId}/services`,
-					{ headers: { 'Content-Type': 'application/json' } }
-				);
+				const response = await fetchVenueServices(venueId);
 				if (!active) {
 					return;
 				}
 
-				const servicesFromApi = Array.isArray(response.data?.services) ? response.data.services : [];
-				setVenueServices(servicesFromApi.length ? servicesFromApi : fallbackVenueServices);
+				const servicesFromApi = Array.isArray(response?.services) ? response.services : [];
+				setVenueServices(servicesFromApi);
 			} catch (err) {
 				console.error('Error fetching venue services:', err);
 				if (active) {
-					setVenueServices(fallbackVenueServices);
+					setVenueServices([]);
 				}
 			}
 		}
@@ -1328,7 +1274,7 @@ function VenueDetailPage() {
 		return () => {
 			active = false;
 		};
-	}, [venueId, apiUrl, fallbackVenueServices]);
+	}, [venueId]);
 
 	useEffect(() => {
 		let active = true;
