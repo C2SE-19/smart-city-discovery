@@ -674,6 +674,7 @@ function ProfilePage() {
       setFormData(editData);
       setError(null);
       setSuccessMessage(ui.messages.saveSuccess);
+  window.dispatchEvent(new CustomEvent('smart-city-notification-refresh'));
       setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
       setShowPasswordForm(false);
       setPasswordVisibility({ current: false, next: false, confirm: false });

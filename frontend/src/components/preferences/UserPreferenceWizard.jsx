@@ -346,6 +346,7 @@ export default function UserPreferenceWizard({
       if (typeof onSaved === 'function') {
         onSaved(response?.preference || null);
       }
+      window.dispatchEvent(new CustomEvent('smart-city-notification-refresh'));
       if (typeof onClose === 'function') {
         onClose();
       }

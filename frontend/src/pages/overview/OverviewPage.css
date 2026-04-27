@@ -203,7 +203,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 50;
+  z-index: 3000;
   padding: 16px;
 }
 
@@ -211,6 +211,7 @@
   max-width: 720px;
   width: min(760px, 100%);
   position: relative;
+  z-index: 3001;
   border-radius: 22px;
   background: linear-gradient(145deg, #ffffff, #f8f3ea);
   box-shadow: 0 26px 58px rgba(0, 0, 0, 0.22);

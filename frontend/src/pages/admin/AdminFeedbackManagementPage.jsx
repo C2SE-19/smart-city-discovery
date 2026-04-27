@@ -19,6 +19,10 @@ const REPORT_STATUS_OPTIONS = [
   { value: 'in_progress', label: 'In Progress' },
   { value: 'replied', label: 'Replied' },
   { value: 'closed', label: 'Closed' },
+];
+
+const REPORT_TYPE_OPTIONS = [
+  { value: 'all', label: 'All report types' },
   { value: 'venue_report', label: 'Venue Report' },
   { value: 'review_report', label: 'Review Report' },
 ];
@@ -89,6 +93,7 @@ function AdminFeedbackManagementPage() {
   const [activeView, setActiveView] = useState('types');
 
   const [statusFilter, setStatusFilter] = useState('all');
+  const [typeFilter, setTypeFilter] = useState('all');
   const [searchInput, setSearchInput] = useState('');
   const [appliedSearch, setAppliedSearch] = useState('');
 
@@ -170,6 +175,7 @@ function AdminFeedbackManagementPage() {
 
       const response = await fetchAdminFeedbackReports({
         status: statusFilter === 'all' ? undefined : statusFilter,
+        typeCode: typeFilter === 'all' ? undefined : typeFilter,
         search: appliedSearch || undefined,
         page: 1,
         pageSize: 50,
@@ -247,7 +253,7 @@ function AdminFeedbackManagementPage() {
     }
 
     loadReports();
-  }, [activeView, statusFilter, appliedSearch]);
+  }, [activeView, statusFilter, typeFilter, appliedSearch]);
 
   useEffect(() => {
     if (activeView !== 'reports') {
@@ -286,7 +292,7 @@ function AdminFeedbackManagementPage() {
     return () => {
       window.clearInterval(pollingTimerId);
     };
-  }, [activeView, statusFilter, appliedSearch, selectedReportId]);
+  }, [activeView, statusFilter, typeFilter, appliedSearch, selectedReportId]);
 
   useEffect(() => {
     if (!lightboxImageUrl) {
@@ -638,6 +644,13 @@ function AdminFeedbackManagementPage() {
         <form className="admin-feedback-filters" onSubmit={handleSearchSubmit}>
           <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
             {REPORT_STATUS_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)}>
+            {REPORT_TYPE_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>

@@ -2174,6 +2174,7 @@ function VenueDetailPage() {
 				onAddPhotos={() => setShowImagesModal(true)}
 				onShare={() => setShowShareModal(true)}
 				onSave={handleToggleFavorite}
+				onReportVenue={openVenueReportModal}
 				isSaved={isFavorite}
 				isOpen={showOpenState}
 				rating={Number(communityStats.averageRating || 0)}

@@ -5,6 +5,7 @@ import { useTheme } from '../../contexts/ThemeContext';
 import { useAuth } from '../../contexts/AuthContext';
 import translations from '../../constants/translations';
 import { APP_ROUTES } from '../../constants/routes';
+import NotificationBell from '../notifications/NotificationBell';
 import logo from '../../assets/images/logo.png';
 import '../layouts/LandingLayout.css';
 
@@ -113,7 +114,7 @@ function MerchantLayout() {
             >
               ?
             </button>
-            <button type="button" className="landing-icon-button" aria-label={t.header.search} />
+            <NotificationBell />
             
             {/* User Profile Dropdown */}
             <div className="landing-profile-menu" ref={profileMenuRef}>
