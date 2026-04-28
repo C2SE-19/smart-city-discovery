@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import {
 	createVenueReviewReply,
@@ -713,6 +713,7 @@ function resolveServiceIcon(service) {
 }
 
 function VenueDetailPage() {
+	const [searchParams] = useSearchParams();
 	const { venueId } = useParams();
 	const location = useLocation();
 	const navigate = useNavigate();
@@ -873,6 +874,7 @@ function VenueDetailPage() {
 	const favoriteVenueId = useMemo(() => String(venue?.id ?? venue?.venue_id ?? venueId ?? '').trim(), [venue?.id, venue?.venue_id, venueId]);
 	const authToken = useMemo(() => String(token || '').replace(/^Bearer\s+/i, '').trim(), [token]);
 	const trackedPromotionClickKeyRef = useRef('');
+	const reviewItemRefs = useRef({});
 	const trendClickContext = useMemo(() => {
 		const assignmentId = Number.parseInt(location.state?.trendClickContext?.assignmentId || 0, 10);
 		if (!Number.isFinite(assignmentId) || assignmentId <= 0) {
@@ -1520,6 +1522,26 @@ function VenueDetailPage() {
 			active = false;
 		};
 	}, [apiUrl, authToken, favoriteVenueId]);
+
+	useEffect(() => {
+		const reviewId = searchParams.get('reviewId');
+		
+		if (!reviewId || !reviews.length) {
+			return;
+		}
+
+		setTimeout(() => {
+			const reviewElement = reviewItemRefs.current[reviewId];
+			if (reviewElement) {
+				reviewElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+				// Add subtle glow animation
+				reviewElement.classList.add('scrolled-to');
+				setTimeout(() => {
+					reviewElement.classList.remove('scrolled-to');
+				}, 800);
+			}
+		}, 100);
+	}, [searchParams, reviews]);
 
 	useEffect(() => {
 		let active = true;
@@ -2469,7 +2491,17 @@ function VenueDetailPage() {
 
 				<div className="venue-review-list">
 					{reviews.map((review) => (
-						<article key={`review-${review.id}`} className="venue-review-card">
+						<article
+							key={`review-${review.id}`}
+							className="venue-review-card"
+							ref={(el) => {
+								if (el) {
+									reviewItemRefs.current[review.id] = el;
+								} else {
+									delete reviewItemRefs.current[review.id];
+								}
+							}}
+						>
 							<header>
 								<strong>{review.authorName || 'Anonymous'}</strong>
 								<span>{new Date(review.createdAt || review.created_at).toLocaleString('en-US')}</span>

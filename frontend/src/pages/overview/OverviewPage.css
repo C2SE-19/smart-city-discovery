@@ -82,6 +82,8 @@
   height: calc(100% - 38px);
   object-fit: cover;
   border-radius: 34px;
+  filter: brightness(1.08) contrast(1.15) saturate(1.1);
+  transition: filter 0.3s ease;
 }
 
 .overview-hero-float {
