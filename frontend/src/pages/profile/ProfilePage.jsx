@@ -364,7 +364,6 @@ function ProfilePage() {
     { id: 'overview', label: copy.menu.overview, icon: FiGrid },
     { id: 'account-info', label: copy.menu.account, icon: FiUser },
     { id: 'favorites', label: copy.menu.favorites, icon: FiHeart },
-    { id: 'ratings', label: copy.menu.ratings, icon: FiStar },
     { id: 'support', label: copy.menu.support, icon: FiMessageSquare }
   ];
   const [activeMenu, setActiveMenu] = useState('account-info');
@@ -1223,14 +1222,6 @@ function ProfilePage() {
                 )}
               </>
             )}
-          </div>
-        );
-
-      case 'ratings':
-        return (
-          <div className="profile-content">
-            <h2>{copy.headings.ratings}</h2>
-            <p className="placeholder-text">{copy.placeholder.ratings}</p>
           </div>
         );
 

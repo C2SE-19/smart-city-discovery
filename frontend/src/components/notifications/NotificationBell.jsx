@@ -34,13 +34,101 @@ function formatNotificationTime(value) {
 
 function resolveNotificationDestination(item) {
   const type = String(item?.type || '').trim().toLowerCase();
+  const metadata = item?.metadata || {};
 
-  if (type.startsWith('venue_')) {
+  // Forum notifications
+  if (type === 'forum_post' || type === 'forum_comment') {
+    const postId = metadata?.postId;
+    const commentId = metadata?.commentId;
+    
+    let path = '/forum';
+    if (postId) {
+      const params = new URLSearchParams();
+      params.set('postId', String(postId));
+      if (commentId) {
+        params.set('commentId', String(commentId));
+      }
+      path = `/forum?${params.toString()}`;
+    }
+    return path;
+  }
+
+  // Venue review notification - go to venue detail with review focus
+  if (type === 'venue_review') {
+    const venueId = metadata?.venueId;
+    const reviewId = metadata?.reviewId;
+    
+    if (venueId) {
+      const params = new URLSearchParams();
+      if (reviewId) {
+        params.set('reviewId', String(reviewId));
+      }
+      return `/venues/${String(venueId)}?${params.toString()}`;
+    }
+  }
+
+  // Venue reply notification - go to venue detail with review focus
+  if (type === 'venue_reply') {
+    const venueId = metadata?.venueId;
+    const reviewId = metadata?.reviewId;
+    
+    if (venueId) {
+      const params = new URLSearchParams();
+      if (reviewId) {
+        params.set('reviewId', String(reviewId));
+      }
+      return `/venues/${String(venueId)}?${params.toString()}`;
+    }
+  }
+
+  // Venue favorite notification - go to venue detail
+  if (type === 'venue_favorite') {
+    const venueId = metadata?.itemId;
+    
+    if (venueId) {
+      return `/venues/${String(venueId)}`;
+    }
+  }
+
+  // Feedback notification - go to feedback page
+  if (type === 'feedback') {
+    const feedbackId = metadata?.feedbackId;
+    
+    if (feedbackId) {
+      const params = new URLSearchParams();
+      params.set('feedbackId', String(feedbackId));
+      return `/feedback?${params.toString()}`;
+    }
+    return '/feedback';
+  }
+
+  // Venue submission notification - go to merchant posts
+  if (type === 'venue_submission') {
+    const venueId = metadata?.venueId;
+    
+    if (venueId) {
+      const params = new URLSearchParams();
+      params.set('venueId', String(venueId));
+      return `/merchant/posts?${params.toString()}`;
+    }
     return '/merchant/posts';
   }
 
-  if (type.startsWith('forum_')) {
-    return '/forum';
+  // Chat notification - go to chat
+  if (type === 'general' && metadata?.threadId) {
+    const threadId = metadata?.threadId;
+    const venueId = metadata?.venueId;
+    
+    const params = new URLSearchParams();
+    if (threadId) params.set('threadId', String(threadId));
+    if (venueId) params.set('venueId', String(venueId));
+    
+    return `/chat?${params.toString()}`;
+  }
+
+  // Profile update notification - go to profile
+  if (type === 'general' && item?.title?.includes('cập nhật')) {
+    return '/profile';
   }
 
   return '';

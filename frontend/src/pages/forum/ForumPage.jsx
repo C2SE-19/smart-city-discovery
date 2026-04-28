@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../../contexts/AuthContext';
 import translations from '../../constants/translations';
@@ -236,6 +237,7 @@ function buildCommentTree(commentsList) {
 }
 
 function ForumPage() {
+  const [searchParams] = useSearchParams();
   const { user, isAuthenticated } = useAuth();
   const { language } = useLanguage();
   const t = translations[language];
@@ -277,6 +279,8 @@ function ForumPage() {
   const [deleteFeedback, setDeleteFeedback] = useState('');
   const commentTextareaRefs = useRef({});
   const replyTextareaRefs = useRef({});
+  const postItemRefs = useRef({});
+  const commentItemRefs = useRef({});
 
   const [draft, setDraft] = useState({
     title: '',
@@ -359,6 +363,43 @@ function ForumPage() {
       isMounted = false;
     };
   }, [ui.justNow]);
+
+  useEffect(() => {
+    const postId = searchParams.get('postId');
+    const commentId = searchParams.get('commentId');
+
+    if (!postId) {
+      return;
+    }
+
+    const postElement = postItemRefs.current[postId];
+    if (!postElement) {
+      return;
+    }
+
+    setTimeout(() => {
+      postElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      // Add subtle glow animation
+      postElement.classList.add('scrolled-to');
+      setTimeout(() => {
+        postElement.classList.remove('scrolled-to');
+      }, 800);
+
+      if (commentId) {
+        const commentElement = commentItemRefs.current[`${postId}-${commentId}`];
+        if (commentElement) {
+          setTimeout(() => {
+            commentElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            // Add subtle glow animation to comment
+            commentElement.classList.add('scrolled-to');
+            setTimeout(() => {
+              commentElement.classList.remove('scrolled-to');
+            }, 800);
+          }, 500);
+        }
+      }
+    }, 100);
+  }, [searchParams, posts]);
 
   useEffect(() => {
     Object.values(commentTextareaRefs.current).forEach((el) => autoResizeTextarea(el));
@@ -907,7 +948,17 @@ function ForumPage() {
     );
 
     return (
-      <article key={`${comment.id}-${depth}`} className={`forum-comment-item${depth > 0 ? ' is-reply' : ''}`}>
+      <article
+        key={`${comment.id}-${depth}`}
+        className={`forum-comment-item${depth > 0 ? ' is-reply' : ''}`}
+        ref={(el) => {
+          if (el) {
+            commentItemRefs.current[`${postId}-${comment.id}`] = el;
+          } else {
+            delete commentItemRefs.current[`${postId}-${comment.id}`];
+          }
+        }}
+      >
         <div className="forum-comment-head">
           <strong>{comment.author}</strong>
           <span>{formatRelativeTime(comment.time || comment.createdAt, ui.justNow)}</span>
@@ -1242,7 +1293,17 @@ function ForumPage() {
               currentAuthorName
             };
             return (
-              <article key={`${post.id || post.title}-${post.time || post.createdAt || ''}`} className="forum-post-item">
+              <article
+                key={`${post.id || post.title}-${post.time || post.createdAt || ''}`}
+                className="forum-post-item"
+                ref={(el) => {
+                  if (el) {
+                    postItemRefs.current[post.id] = el;
+                  } else {
+                    delete postItemRefs.current[post.id];
+                  }
+                }}
+              >
                 <div className="forum-post-meta">
                   <span className="forum-post-category">{post.category}</span>
                   <span>{post.time}</span>
