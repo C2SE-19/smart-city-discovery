@@ -114,11 +114,11 @@ function AdminUserManagementPage() {
 
   const handleBulkDelete = async () => {
     if (selectedUserIds.length === 0) {
-      setSubmitStatus('Chưa chọn tài khoản để xóa.');
+      setSubmitStatus('No accounts selected for deletion.');
       return;
     }
 
-    if (!window.confirm(`Xác nhận xóa ${selectedUserIds.length} tài khoản đã chọn?`)) {
+    if (!window.confirm(`Delete ${selectedUserIds.length} selected account(s)?`)) {
       return;
     }
 
@@ -128,11 +128,11 @@ function AdminUserManagementPage() {
         await deleteAdminUser(id);
       }
       setUsers((prev) => prev.filter((user) => !selectedUserIds.includes(String(user.id))));
-      setSubmitStatus(`${selectedUserIds.length} tài khoản đã được xóa`);
+      setSubmitStatus(`${selectedUserIds.length} account(s) deleted.`);
       setSelectedUserIds([]);
     } catch (err) {
       console.error('Failed bulk delete', err);
-      setSubmitStatus(err?.response?.data?.message || 'Xóa hàng loạt thất bại');
+      setSubmitStatus(err?.response?.data?.message || 'Bulk delete failed.');
     } finally {
       setLoading(false);
     }
@@ -189,27 +189,27 @@ function AdminUserManagementPage() {
 
     if (!fullname.trim() || !email.trim() || !username.trim() || (!password && !isEditMode)) {
       setSubmitStatus('');
-      setAddFormError('Vui lòng điền đầy đủ tên, email, username và mật khẩu.');
+      setAddFormError('Enter full name, email, username, and password.');
       return;
     }
 
     const emailRegex = /^[\w.-]+@([\w-]+\.)+[\w-]{2,4}$/;
     if (!emailRegex.test(email)) {
       setSubmitStatus('');
-      setAddFormError('Email không hợp lệ.');
+      setAddFormError('Invalid email address.');
       return;
     }
 
     const phoneRegex = /^\d{9,15}$/;
     if (newUserData.phone && !phoneRegex.test(newUserData.phone)) {
       setSubmitStatus('');
-      setAddFormError('Số điện thoại phải là 9-15 chữ số.');
+      setAddFormError('Phone number must contain 9 to 15 digits.');
       return;
     }
 
     if (!newUserData.address.trim() || newUserData.address.trim().length < 5) {
       setSubmitStatus('');
-      setAddFormError('Địa chỉ phải có ít nhất 5 ký tự.');
+      setAddFormError('Address must be at least 5 characters long.');
       return;
     }
 
@@ -217,7 +217,7 @@ function AdminUserManagementPage() {
     const usernameRegex = /^[a-zA-Z0-9._-]{3,30}$/;
     if (!usernameRegex.test(username)) {
       setSubmitStatus('');
-      setAddFormError('Username phải từ 3-30 ký tự, chỉ gồm chữ, số, ., _, -');
+      setAddFormError('Username must be 3-30 characters and only include letters, numbers, ., _, or -.');
       return;
     }
 
@@ -245,46 +245,46 @@ function AdminUserManagementPage() {
 
     if (sameEmail) {
       setSubmitStatus('');
-      setAddFormError('Email đã tồn tại trên hệ thống.');
+      setAddFormError('This email already exists.');
       return;
     }
 
     if (sameUsername) {
       setSubmitStatus('');
-      setAddFormError('Username đã tồn tại trên hệ thống.');
+      setAddFormError('This username already exists.');
       return;
     }
 
     if (samePhone) {
       setSubmitStatus('');
-      setAddFormError('Số điện thoại đã tồn tại trên hệ thống.');
+      setAddFormError('This phone number already exists.');
       return;
     }
 
     if (sameAddress) {
       setSubmitStatus('');
-      setAddFormError('Địa chỉ đã tồn tại trên hệ thống.');
+      setAddFormError('This address already exists.');
       return;
     }
 
     const passwordErrors = [];
     if (!isEditMode || password) {
-      if (password.length < 8) passwordErrors.push('ít nhất 8 ký tự');
-      if (!/[A-Z]/.test(password)) passwordErrors.push('1 chữ hoa');
-      if (!/[a-z]/.test(password)) passwordErrors.push('1 chữ thường');
-      if (!/[0-9]/.test(password)) passwordErrors.push('1 chữ số');
-      if (!/[!@#$%^&*]/.test(password)) passwordErrors.push('1 ký tự đặc biệt (!@#$%^&*)');
+      if (password.length < 8) passwordErrors.push('at least 8 characters');
+      if (!/[A-Z]/.test(password)) passwordErrors.push('1 uppercase letter');
+      if (!/[a-z]/.test(password)) passwordErrors.push('1 lowercase letter');
+      if (!/[0-9]/.test(password)) passwordErrors.push('1 number');
+      if (!/[!@#$%^&*]/.test(password)) passwordErrors.push('1 special character (!@#$%^&*)');
 
       if (passwordErrors.length > 0) {
         setSubmitStatus('');
-        setAddFormError(`Mật khẩu phải có ${passwordErrors.join(', ')}.`);
+        setAddFormError(`Password must include ${passwordErrors.join(', ')}.`);
         return;
       }
     }
 
     setAddFormError('');
     setLoading(true);
-    setSubmitStatus(isEditMode ? 'Đang cập nhật tài khoản...' : 'Đang tạo tài khoản mới...');
+    setSubmitStatus(isEditMode ? 'Updating account...' : 'Creating new account...');
 
     try {
       let response;
@@ -304,7 +304,7 @@ function AdminUserManagementPage() {
 
         resultUser = response.user || response;
         setUsers((prev) => prev.map((u) => (String(u.id) === String(editingUserId) ? { ...u, ...resultUser } : u)));
-        setSubmitStatus('Cập nhật người dùng thành công.');
+        setSubmitStatus('User updated successfully.');
       } else {
         response = await createAdminUser(newUserData);
         resultUser = response.user || response;
@@ -326,7 +326,7 @@ function AdminUserManagementPage() {
           setUsers((prev) => [fakeNewUser, ...prev]);
         }
 
-        setSubmitStatus('Đã tạo người dùng mới thành công.');
+        setSubmitStatus('New user created successfully.');
       }
 
       setAddFormError('');
@@ -334,7 +334,7 @@ function AdminUserManagementPage() {
       setSelectedUserIds([]);
     } catch (err) {
       console.error('Failed to create user', err);
-      const errMsg = err?.response?.data?.message || 'Tạo user thất bại';
+      const errMsg = err?.response?.data?.message || 'Failed to create user.';
       setSubmitStatus('');
       setAddFormError(errMsg);
     } finally {
@@ -343,7 +343,7 @@ function AdminUserManagementPage() {
   };
 
   const handleDelete = async (userId) => {
-    const confirmDelete = window.confirm('Bạn có chắc muốn xóa người dùng này?');
+    const confirmDelete = window.confirm('Are you sure you want to delete this user?');
     if (!confirmDelete) {
       return;
     }
@@ -353,10 +353,10 @@ function AdminUserManagementPage() {
     try {
       await deleteAdminUser(userId);
       setUsers((prev) => prev.filter((u) => String(u.id) !== String(userId)));
-      setSubmitStatus('Người dùng đã được xóa.');
+      setSubmitStatus('User deleted.');
     } catch (err) {
       console.error('Failed to delete user', err);
-      setSubmitStatus(err?.response?.data?.message || 'Xóa người dùng thất bại');
+      setSubmitStatus(err?.response?.data?.message || 'Failed to delete user.');
     }
   };
 
@@ -420,16 +420,16 @@ function AdminUserManagementPage() {
     }
 
     if (action === 'block') {
-      const reason = window.prompt('Lý do khóa vĩnh viễn (vi phạm):', 'Vi phạm chính sách');
+      const reason = window.prompt('Reason for permanent block:', 'Policy violation');
       try {
         const resp = await updateAdminUser(userId, {
           status: 'blocked',
-          blocked_reason: reason || 'Vi phạm điều khoản'
+          blocked_reason: reason || 'Terms violation'
         });
         setUsers((prev) => prev.map((u) => (String(u.id) === String(userId) ? { ...u, ...resp.user } : u)));
-        setSubmitStatus('Tài khoản đã bị khóa vĩnh viễn');
+        setSubmitStatus('Account permanently blocked.');
       } catch (err) {
-        setSubmitStatus(err?.response?.data?.message || 'Khóa tài khoản thất bại');
+        setSubmitStatus(err?.response?.data?.message || 'Failed to block account.');
       }
       return;
     }
@@ -442,9 +442,9 @@ function AdminUserManagementPage() {
           blocked_reason: null
         });
         setUsers((prev) => prev.map((u) => (String(u.id) === String(userId) ? { ...u, ...resp.user } : u)));
-        setSubmitStatus('Bỏ khóa hoàn tất');
+        setSubmitStatus('Account unblocked.');
       } catch (err) {
-        setSubmitStatus(err?.response?.data?.message || 'Bỏ khóa thất bại');
+        setSubmitStatus(err?.response?.data?.message || 'Failed to unblock account.');
       }
       return;
     }
@@ -464,11 +464,11 @@ function AdminUserManagementPage() {
         setUsers((prev) => prev.map((u) => (String(u.id) === String(userId) ? { ...u, ...resp.user } : u)));
         setSubmitStatus(
           isPaused
-            ? 'Tài khoản đã được mở lại từ trạng thái tạm dừng'
-            : `Tài khoản bị tạm dừng đến ${new Date(pauseUntil).toLocaleString()}`
+            ? 'Account reactivated from paused status.'
+            : `Account paused until ${new Date(pauseUntil).toLocaleString('en-US')}`
         );
       } catch (err) {
-        setSubmitStatus(err?.response?.data?.message || 'Cập nhật trạng thái thất bại');
+        setSubmitStatus(err?.response?.data?.message || 'Failed to update account status.');
       }
       return;
     }
@@ -478,13 +478,13 @@ function AdminUserManagementPage() {
     <div className="admin-user-management-page">
       <header className="admin-user-management-header">
         <div>
-          <h1>Quản lý người dùng</h1>
-          <p>Danh sách người dùng, phân quyền và xóa tài khoản.</p>
+          <h1>User Management</h1>
+          <p>Manage user accounts, roles, and account removal.</p>
         </div>
         <form className="admin-user-management-toolbar" onSubmit={applySearch}>
           <input
             type="search"
-            placeholder="Tìm kiếm theo tên, email hoặc username"
+            placeholder="Search by name, email, or username"
             value={search}
             onChange={handleSearch}
             className="admin-user-search"
@@ -501,7 +501,7 @@ function AdminUserManagementPage() {
             ))}
           </select>
           <button type="submit" className="admin-user-search-btn" disabled={loading}>
-            Tìm
+            Search
           </button>
           <button
             type="button"
@@ -509,7 +509,7 @@ function AdminUserManagementPage() {
             onClick={openAddUserModal}
             disabled={loading}
           >
-            Thêm user
+            Add user
           </button>
           <button
             type="button"
@@ -517,14 +517,14 @@ function AdminUserManagementPage() {
             onClick={loadUsers}
             disabled={loading}
           >
-            Làm mới
+            Refresh
           </button>
         </form>
         {selectedUserIds.length > 0 && (
           <div className="admin-user-bulk-bar">
-            <span>{selectedUserIds.length} người dùng đã chọn</span>
+            <span>{selectedUserIds.length} selected user(s)</span>
             <button type="button" className="admin-user-delete-btn" onClick={handleBulkDelete} disabled={loading}>
-              Xóa đã chọn
+              Delete selected
             </button>
           </div>
         )}
@@ -536,11 +536,11 @@ function AdminUserManagementPage() {
       {isAddModalOpen && (
         <div className="modal-overlay">
           <div className="add-user-modal">
-            <h2>{isEditMode ? 'Sửa User' : 'Thêm User'}</h2>
+            <h2>{isEditMode ? 'Edit User' : 'Add User'}</h2>
             <form onSubmit={handleAddUserSubmit}>
               <div className="modal-grid">
                 <label>
-                  Họ tên
+                  Full Name
                   <input
                     value={newUserData.fullname}
                     onChange={(e) => setNewUserData((prev) => ({ ...prev, fullname: e.target.value }))}
@@ -572,14 +572,14 @@ function AdminUserManagementPage() {
                       value={newUserData.password}
                       onChange={(e) => setNewUserData((prev) => ({ ...prev, password: e.target.value }))}
                       required={!isEditMode}
-                      placeholder={isEditMode ? 'Để trống nếu không đổi mật khẩu' : ''}
+                      placeholder={isEditMode ? 'Leave blank to keep the current password' : ''}
                     />
                     <button
                       type="button"
                       className="password-toggle-btn"
                       onClick={() => setShowPassword((prev) => !prev)}
                     >
-                      {showPassword ? 'Ẩn' : 'Hiện'}
+                      {showPassword ? 'Hide' : 'Show'}
                     </button>
                   </div>
                 </label>

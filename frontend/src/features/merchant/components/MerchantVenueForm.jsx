@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import ImageUploader from './ImageUploader';
 import ServiceSelector from './ServiceSelector';
 import BusinessLicenseUploader from './BusinessLicenseUploader';
@@ -7,6 +7,7 @@ import { createVenueRequest, fetchVenueEditDraft, submitVenueUpdateRequest } fro
 import { fetchPlaceCategories } from '../../../services/api/placeCategoriesApi';
 import { fetchMerchantServices } from '../../../services/api/merchantServicesApi';
 import { fetchWards } from '../../../services/api/wardsApi';
+import { buildPlaceCategoryTree, resolveCategoryBranch } from '../../../utils/placeCategoryTree';
 import '../styles/MerchantVenueForm.css';
 
 const WEEK_DAYS = [
@@ -255,6 +256,7 @@ function MerchantVenueForm({ editVenueId = null }) {
   const [activeWeekDay, setActiveWeekDay] = useState(WEEK_DAYS[0].key);
   const [formData, setFormData] = useState({
     venueName: '',
+    mainCategory: '',
     category: '',
     address: '',
     wardId: '',
@@ -293,6 +295,12 @@ function MerchantVenueForm({ editVenueId = null }) {
   const [loadingDraft, setLoadingDraft] = useState(false);
   const [draftLoadError, setDraftLoadError] = useState('');
   const [pendingUpdateRequest, setPendingUpdateRequest] = useState(null);
+  const placeCategoryTree = useMemo(() => buildPlaceCategoryTree(placeCategories), [placeCategories]);
+  const mainCategories = placeCategoryTree.rootCategories;
+  const selectedMainCategoryChildren = useMemo(
+    () => placeCategoryTree.childrenByParentId.get(Number(formData.mainCategory)) || [],
+    [formData.mainCategory, placeCategoryTree]
+  );
   const existingImageCount = Math.min(Array.isArray(formData.existingGalleryImageUrls) ? formData.existingGalleryImageUrls.length : 0, 6);
   const remainingUploadSlots = Math.max(0, 6 - existingImageCount);
 
@@ -535,12 +543,19 @@ function MerchantVenueForm({ editVenueId = null }) {
           accumulator[day.key] = Boolean(daySchedule?.isClosed || daySchedule?.openTime || daySchedule?.closeTime);
           return accumulator;
         }, {});
+        const resolvedCategoryId = String(
+          pendingSnapshot?.categoryId ?? venue.category_id ?? mergedMetadata.categoryId ?? ''
+        ).trim();
+        const resolvedCategoryBranch = resolveCategoryBranch(resolvedCategoryId, buildPlaceCategoryTree(placeCategories));
 
         const nextFormData = {
           venueName: String(pendingSnapshot?.name || pendingSnapshot?.title || venue.name || venue.title || '').trim(),
-          category: String(
-            pendingSnapshot?.categoryId ?? venue.category_id ?? mergedMetadata.categoryId ?? ''
+          mainCategory: String(
+            resolvedCategoryBranch.mainCategory?.id || resolvedCategoryId || ''
           ).trim(),
+          category: resolvedCategoryBranch.subcategory
+            ? String(resolvedCategoryBranch.subcategory.id)
+            : resolvedCategoryId,
           address: String(pendingSnapshot?.address || venue.address || '').trim(),
           wardId: String(pendingSnapshot?.wardId || venue.ward_id || mergedMetadata.wardId || '').trim(),
           latitude: resolvedLatitude,
@@ -677,14 +692,75 @@ function MerchantVenueForm({ editVenueId = null }) {
     }
   };
 
+  const handleMainCategoryChange = (event) => {
+    const nextMainCategoryId = String(event.target.value || '').trim();
+    const childCategories = placeCategoryTree.childrenByParentId.get(Number(nextMainCategoryId)) || [];
+
+    unlockResubmitIfNeeded();
+    setFormData((prev) => ({
+      ...prev,
+      mainCategory: nextMainCategoryId,
+      category: childCategories.length ? '' : nextMainCategoryId
+    }));
+
+    setFormErrors((prev) => ({
+      ...prev,
+      category: '',
+      subcategory: ''
+    }));
+
+    if (submitStatus?.type === 'success') {
+      setSubmitStatus(null);
+    }
+  };
+
+  const handleSubcategoryChange = (event) => {
+    const nextCategoryId = String(event.target.value || '').trim();
+
+    unlockResubmitIfNeeded();
+    setFormData((prev) => ({
+      ...prev,
+      category: nextCategoryId
+    }));
+
+    setFormErrors((prev) => ({
+      ...prev,
+      category: '',
+      subcategory: ''
+    }));
+
+    if (submitStatus?.type === 'success') {
+      setSubmitStatus(null);
+    }
+  };
+
+  useEffect(() => {
+    if (!placeCategories.length || !formData.category) {
+      return;
+    }
+
+    const categoryBranch = resolveCategoryBranch(formData.category, placeCategoryTree);
+    const nextMainCategoryId = String(categoryBranch.mainCategory?.id || formData.mainCategory || '').trim();
+
+    if (nextMainCategoryId && nextMainCategoryId !== String(formData.mainCategory || '').trim()) {
+      setFormData((prev) => ({
+        ...prev,
+        mainCategory: nextMainCategoryId
+      }));
+    }
+  }, [formData.category, formData.mainCategory, placeCategories, placeCategoryTree]);
+
   const validateForm = () => {
     const errors = {};
+    const requiresSubcategory = selectedMainCategoryChildren.length > 0;
 
     // Required fields
     if (!formData.venueName.trim()) errors.venueName = 'Venue name is required';
-    if (!formData.category) errors.category = 'Category is required';
+    if (!formData.mainCategory) errors.category = 'Main category is required';
+    if (requiresSubcategory && !formData.category) errors.subcategory = 'Subcategory is required';
+    if (!requiresSubcategory && !formData.category) errors.category = 'Category is required';
     if (formData.category && !placeCategories.some((category) => String(category.id) === String(formData.category))) {
-      errors.category = 'Selected category is not available';
+      errors.subcategory = requiresSubcategory ? 'Selected subcategory is not available' : 'Selected category is not available';
     }
     if (!categoriesLoading && !placeCategories.length) {
       errors.category = 'No active categories found. Contact admin to add categories.';
@@ -1176,23 +1252,42 @@ function MerchantVenueForm({ editVenueId = null }) {
             </div>
 
             <div className="form-group">
-              <label htmlFor="category">
+              <label htmlFor="phone">
+                Phone Number <span className="required">*</span>
+                {formErrors.phone && <span className="error-text"> - {formErrors.phone}</span>}
+              </label>
+              <input
+                type="tel"
+                id="phone"
+                name="phone"
+                value={formData.phone}
+                onChange={handleInputChange}
+                placeholder="e.g., +84 123 456 789"
+                required
+                className={`form-input ${formErrors.phone ? 'input-error' : ''}`}
+              />
+            </div>
+          </div>
+
+          <div className="form-row">
+            <div className="form-group">
+              <label htmlFor="mainCategory">
                 Category <span className="required">*</span>
                 {formErrors.category && <span className="error-text"> - {formErrors.category}</span>}
               </label>
               <select
-                id="category"
-                name="category"
-                value={formData.category}
-                onChange={handleInputChange}
+                id="mainCategory"
+                name="mainCategory"
+                value={formData.mainCategory}
+                onChange={handleMainCategoryChange}
                 required
                 disabled={categoriesLoading}
                 className={`form-input ${formErrors.category ? 'input-error' : ''}`}
               >
                 <option value="">
-                  {categoriesLoading ? 'Loading categories...' : 'Select a category'}
+                  {categoriesLoading ? 'Loading categories...' : 'Select a main category'}
                 </option>
-                {placeCategories.map((category) => (
+                {mainCategories.map((category) => (
                   <option key={category.id} value={String(category.id)}>
                     {category.name}
                   </option>
@@ -1201,23 +1296,31 @@ function MerchantVenueForm({ editVenueId = null }) {
 
               {categoryLoadError ? <p className="error-text">{categoryLoadError}</p> : null}
             </div>
-          </div>
 
-          <div className="form-group">
-            <label htmlFor="phone">
-              Phone Number <span className="required">*</span>
-              {formErrors.phone && <span className="error-text"> - {formErrors.phone}</span>}
-            </label>
-            <input
-              type="tel"
-              id="phone"
-              name="phone"
-              value={formData.phone}
-              onChange={handleInputChange}
-              placeholder="e.g., +84 123 456 789"
-              required
-              className={`form-input ${formErrors.phone ? 'input-error' : ''}`}
-            />
+            <div className="form-group">
+              <label htmlFor="subcategory">
+                Subcategory
+                {selectedMainCategoryChildren.length ? <span className="required">*</span> : null}
+                {formErrors.subcategory && <span className="error-text"> - {formErrors.subcategory}</span>}
+              </label>
+              <select
+                id="subcategory"
+                name="subcategory"
+                value={selectedMainCategoryChildren.length ? formData.category : ''}
+                onChange={handleSubcategoryChange}
+                disabled={categoriesLoading || !selectedMainCategoryChildren.length}
+                className={`form-input ${formErrors.subcategory ? 'input-error' : ''}`}
+              >
+                <option value="">
+                  {selectedMainCategoryChildren.length ? 'Select a subcategory' : 'No subcategory required'}
+                </option>
+                {selectedMainCategoryChildren.map((subcategory) => (
+                  <option key={subcategory.id} value={String(subcategory.id)}>
+                    {subcategory.name}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           <div className="form-group">

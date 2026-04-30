@@ -21,6 +21,11 @@ import {
 import OverviewCityMapCard from '../../components/map/OverviewCityMapCard';
 import heroFoodImage from '../../assets/images/anh1.png';
 import UserPreferenceWizard from '../../components/preferences/UserPreferenceWizard';
+import {
+  buildPlaceCategoryTree,
+  expandCategorySelection,
+  normalizeCategoryIcon
+} from '../../utils/placeCategoryTree';
 import './OverviewPage.css';
 
 const FALLBACK_VENUE_IMAGE =
@@ -445,6 +450,76 @@ function FilterGroup({ title, options, selectedValues, optionValue, optionLabel,
   );
 }
 
+function OverviewCategoryFilterGroup({
+  rootCategories,
+  childCategoriesByParentId,
+  selectedValues,
+  expandedRootIds,
+  onToggleBranch,
+  onToggleChild,
+}) {
+  return (
+    <section className="overview-filter-group">
+      <header>
+        <h3>Place Categories</h3>
+      </header>
+
+      {!rootCategories.length ? (
+        <p className="overview-empty-copy">No options available.</p>
+      ) : (
+        <div className="overview-filter-options">
+          {rootCategories.map((category) => {
+            const categoryId = Number(category.id);
+            const childCategories = childCategoriesByParentId.get(categoryId) || [];
+            const isExpanded = expandedRootIds.includes(categoryId);
+            const branchIds = [categoryId, ...childCategories.map((subcategory) => Number(subcategory.id))];
+            const isChecked = branchIds.every((branchId) => selectedValues.includes(branchId));
+
+            return (
+              <div key={`overview-category-${categoryId}`} className="overview-category-branch">
+                <label className="overview-filter-option overview-filter-option-parent">
+                  <input
+                    type="checkbox"
+                    checked={isChecked}
+                    onChange={() => onToggleBranch(categoryId)}
+                  />
+                  <span className="overview-category-option-label">
+                    <b>{normalizeCategoryIcon(category.icon)}</b>
+                    <span>{category.name}</span>
+                  </span>
+                </label>
+
+                {childCategories.length && isExpanded ? (
+                  <div className="overview-category-children">
+                    {childCategories.map((subcategory) => {
+                      const subcategoryId = Number(subcategory.id);
+                      const checked = selectedValues.includes(subcategoryId);
+
+                      return (
+                        <label key={`overview-subcategory-${subcategoryId}`} className="overview-filter-option overview-filter-option-child">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => onToggleChild(subcategoryId)}
+                          />
+                          <span className="overview-category-option-label">
+                            <b>{normalizeCategoryIcon(subcategory.icon)}</b>
+                            <span>{subcategory.name}</span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function VenueCard({ venue, isFavorite, onToggleFavorite, onExplore, showDistance = false, userCoordinates = null }) {
   const venueName = venue.name || venue.title || 'Untitled venue';
   const venueAddress = venue.address || 'Address not available';
@@ -561,6 +636,7 @@ function OverviewPage() {
   const [submittedSearch, setSubmittedSearch] = useState('');
   const [showFilterPanel, setShowFilterPanel] = useState(false);
   const [selectedCategoryIds, setSelectedCategoryIds] = useState([]);
+  const [expandedCategoryRootIds, setExpandedCategoryRootIds] = useState([]);
   const [selectedWardIds, setSelectedWardIds] = useState([]);
   const [selectedServiceIds, setSelectedServiceIds] = useState([]);
   const [appliedCategoryIds, setAppliedCategoryIds] = useState([]);
@@ -621,6 +697,13 @@ function OverviewPage() {
   const searchInputRef = useRef(null);
   const libraryInputRef = useRef(null);
   const cameraInputRef = useRef(null);
+  const placeCategoryTree = useMemo(() => buildPlaceCategoryTree(categories), [categories]);
+  const rootPlaceCategories = placeCategoryTree.rootCategories;
+  const childCategoriesByParentId = placeCategoryTree.childrenByParentId;
+  const expandedAppliedCategoryIds = useMemo(
+    () => expandCategorySelection(appliedCategoryIds, placeCategoryTree),
+    [appliedCategoryIds, placeCategoryTree]
+  );
 
   // Carousel state for hero float images
   const [carouselIndex, setCarouselIndex] = useState(0);
@@ -690,8 +773,8 @@ function OverviewPage() {
   const venueParams = useMemo(() => {
     const params = { status: 'approved' };
 
-    if (appliedCategoryIds.length) {
-      params.categoryIds = appliedCategoryIds.join(',');
+    if (expandedAppliedCategoryIds.length) {
+      params.categoryIds = expandedAppliedCategoryIds.join(',');
     }
 
     if (appliedWardIds.length) {
@@ -703,7 +786,7 @@ function OverviewPage() {
     }
 
     return params;
-  }, [appliedCategoryIds, appliedWardIds, appliedServiceIds]);
+  }, [expandedAppliedCategoryIds, appliedWardIds, appliedServiceIds]);
 
   const normalizedSubmittedSearch = useMemo(
     () => normalizeSearchText(submittedSearch),
@@ -1218,6 +1301,7 @@ function OverviewPage() {
       return;
     }
     setSelectedCategoryIds([]);
+    setExpandedCategoryRootIds([]);
     setSelectedWardIds([]);
     setSelectedServiceIds([]);
     setAppliedCategoryIds([]);
@@ -1287,6 +1371,26 @@ function OverviewPage() {
     );
   };
 
+  const toggleCategoryBranchSelection = (categoryId) => {
+    const branchIds = expandCategorySelection([categoryId], placeCategoryTree);
+
+    setExpandedCategoryRootIds((currentIds) => (
+      currentIds.includes(categoryId)
+        ? currentIds
+        : [...currentIds, categoryId]
+    ));
+
+    setSelectedCategoryIds((currentIds) => {
+      const everySelected = branchIds.every((branchId) => currentIds.includes(branchId));
+
+      if (everySelected) {
+        return currentIds.filter((currentId) => !branchIds.includes(currentId));
+      }
+
+      return [...new Set([...currentIds, ...branchIds])];
+    });
+  };
+
   const toggleWardSelection = (wardId) => {
     setSelectedWardIds((current) =>
       current.includes(wardId)
@@ -1328,6 +1432,7 @@ function OverviewPage() {
     setAiRefineMeta(null);
     setImageSearchVenues([]);
     setSelectedCategoryIds([]);
+    setExpandedCategoryRootIds([]);
     setSelectedWardIds([]);
     setSelectedServiceIds([]);
     setAppliedCategoryIds([]);
@@ -1647,6 +1752,7 @@ function OverviewPage() {
       setAiRefineMeta(null);
 
       setSelectedCategoryIds([]);
+      setExpandedCategoryRootIds([]);
       setSelectedWardIds([]);
       setSelectedServiceIds([]);
       setAppliedCategoryIds([]);
@@ -2340,13 +2446,13 @@ function OverviewPage() {
 
         {showFilterPanel ? (
           <div className="overview-filter-panel" role="region" aria-label="Filter options">
-            <FilterGroup
-              title="Place Categories"
-              options={categories}
+            <OverviewCategoryFilterGroup
+              rootCategories={rootPlaceCategories}
+              childCategoriesByParentId={childCategoriesByParentId}
               selectedValues={selectedCategoryIds}
-              optionValue={(category) => Number(category.id)}
-              optionLabel={(category) => category.name}
-              onToggle={toggleCategorySelection}
+              expandedRootIds={expandedCategoryRootIds}
+              onToggleBranch={toggleCategoryBranchSelection}
+              onToggleChild={toggleCategorySelection}
             />
 
             <FilterGroup
