@@ -274,6 +274,10 @@ function buildSanitizedMetadataSql(columnSql, alias = 'metadata') {
     `;
 }
 
+function buildVenueMerchantDeletedSql(venueAlias = 'venues') {
+    return `LOWER(COALESCE(${venueAlias}.metadata ->> 'merchantDeleted', 'false')) = 'true'`;
+}
+
 async function hasVenueOwnerUserColumn() {
     const now = Date.now();
 
@@ -1024,6 +1028,7 @@ async function listOwnedVenueIdsByUserId(userId, db = pool, options = {}) {
             SELECT venues.id
             FROM venues
             WHERE ${buildResolvedVenueOwnerUserSql('venues')} = $1
+              AND NOT (${buildVenueMerchantDeletedSql('venues')})
               ${scopedVenueSql}
             ORDER BY COALESCE(venues.submitted_at, venues.created_at) DESC, venues.id DESC
         `,
@@ -11146,6 +11151,7 @@ async function generateWardIdFromName(name) {
 
                 const values = [effectiveStatuses];
                 const whereConditions = ['venues.status::text = ANY($1::text[])'];
+                whereConditions.push(`NOT (${buildVenueMerchantDeletedSql('venues')})`);
 
                 if (isMineRequest) {
                     values.push(requesterId);
@@ -14007,7 +14013,8 @@ async function generateWardIdFromName(name) {
                             venues.title,
                             ${ownerSelect}
                             venues.submitted_by_user_id,
-                            venues.status::text AS status
+                            venues.status::text AS status,
+                            venues.metadata
                         FROM venues
                         WHERE venues.id = $1
                         LIMIT 1
@@ -14020,6 +14027,10 @@ async function generateWardIdFromName(name) {
                 }
 
                 const venue = venueResult.rows[0];
+                const venueMetadata = normalizeVenueMetadataObject(venue?.metadata);
+                if (venueMetadata?.merchantDeleted === true || String(venueMetadata?.merchantDeleted || '').trim().toLowerCase() === 'true') {
+                    return res.status(404).json({ message: 'Venue not found' });
+                }
                 const ownerCandidateIds = extractVenueOwnerCandidateIds(venue);
                 const isOwner = Boolean(currentUserId && ownerCandidateIds.includes(String(currentUserId || '').trim()));
 
@@ -14032,6 +14043,17 @@ async function generateWardIdFromName(name) {
                         UPDATE venues
                         SET
                             status = 'hidden',
+                            metadata = jsonb_set(
+                                jsonb_set(
+                                    COALESCE(venues.metadata, '{}'::jsonb),
+                                    '{merchantDeleted}',
+                                    'true'::jsonb,
+                                    true
+                                ),
+                                '{merchantDeletedAt}',
+                                to_jsonb(NOW()::text),
+                                true
+                            ),
                             updated_at = now()
                         WHERE id = $1
                         RETURNING id
@@ -14117,7 +14139,8 @@ async function generateWardIdFromName(name) {
                             venues.title,
                             ${ownerSelect}
                             venues.submitted_by_user_id,
-                            venues.status::text AS status
+                            venues.status::text AS status,
+                            venues.metadata
                         FROM venues
                         WHERE venues.id = $1
                         LIMIT 1
@@ -14130,6 +14153,10 @@ async function generateWardIdFromName(name) {
                 }
 
                 const venue = venueResult.rows[0];
+                const venueMetadata = normalizeVenueMetadataObject(venue?.metadata);
+                if (venueMetadata?.merchantDeleted === true || String(venueMetadata?.merchantDeleted || '').trim().toLowerCase() === 'true') {
+                    return res.status(404).json({ message: 'Venue not found' });
+                }
                 const ownerCandidateIds = extractVenueOwnerCandidateIds(venue);
                 const isOwner = Boolean(currentUserId && ownerCandidateIds.includes(String(currentUserId || '').trim()));
 
