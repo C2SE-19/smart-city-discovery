@@ -23,7 +23,6 @@ import heroFoodImage from '../../assets/images/anh1.png';
 import UserPreferenceWizard from '../../components/preferences/UserPreferenceWizard';
 import {
   buildPlaceCategoryTree,
-  expandCategorySelection,
   normalizeCategoryIcon
 } from '../../utils/placeCategoryTree';
 import './OverviewPage.css';
@@ -472,8 +471,7 @@ function OverviewCategoryFilterGroup({
             const categoryId = Number(category.id);
             const childCategories = childCategoriesByParentId.get(categoryId) || [];
             const isExpanded = expandedRootIds.includes(categoryId);
-            const branchIds = [categoryId, ...childCategories.map((subcategory) => Number(subcategory.id))];
-            const isChecked = branchIds.every((branchId) => selectedValues.includes(branchId));
+            const isChecked = selectedValues.includes(categoryId);
 
             return (
               <div key={`overview-category-${categoryId}`} className="overview-category-branch">
@@ -700,10 +698,6 @@ function OverviewPage() {
   const placeCategoryTree = useMemo(() => buildPlaceCategoryTree(categories), [categories]);
   const rootPlaceCategories = placeCategoryTree.rootCategories;
   const childCategoriesByParentId = placeCategoryTree.childrenByParentId;
-  const expandedAppliedCategoryIds = useMemo(
-    () => expandCategorySelection(appliedCategoryIds, placeCategoryTree),
-    [appliedCategoryIds, placeCategoryTree]
-  );
 
   // Carousel state for hero float images
   const [carouselIndex, setCarouselIndex] = useState(0);
@@ -773,8 +767,8 @@ function OverviewPage() {
   const venueParams = useMemo(() => {
     const params = { status: 'approved' };
 
-    if (expandedAppliedCategoryIds.length) {
-      params.categoryIds = expandedAppliedCategoryIds.join(',');
+    if (appliedCategoryIds.length) {
+      params.categoryIds = appliedCategoryIds.join(',');
     }
 
     if (appliedWardIds.length) {
@@ -786,7 +780,7 @@ function OverviewPage() {
     }
 
     return params;
-  }, [expandedAppliedCategoryIds, appliedWardIds, appliedServiceIds]);
+  }, [appliedCategoryIds, appliedWardIds, appliedServiceIds]);
 
   const normalizedSubmittedSearch = useMemo(
     () => normalizeSearchText(submittedSearch),
@@ -1372,8 +1366,6 @@ function OverviewPage() {
   };
 
   const toggleCategoryBranchSelection = (categoryId) => {
-    const branchIds = expandCategorySelection([categoryId], placeCategoryTree);
-
     setExpandedCategoryRootIds((currentIds) => (
       currentIds.includes(categoryId)
         ? currentIds
@@ -1381,13 +1373,9 @@ function OverviewPage() {
     ));
 
     setSelectedCategoryIds((currentIds) => {
-      const everySelected = branchIds.every((branchId) => currentIds.includes(branchId));
-
-      if (everySelected) {
-        return currentIds.filter((currentId) => !branchIds.includes(currentId));
-      }
-
-      return [...new Set([...currentIds, ...branchIds])];
+      return currentIds.includes(categoryId)
+        ? currentIds.filter((currentId) => currentId !== categoryId)
+        : [...currentIds, categoryId];
     });
   };
 

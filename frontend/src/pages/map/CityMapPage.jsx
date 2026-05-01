@@ -39,9 +39,8 @@ import {
 } from '../../components/map/cityMapUtils';
 import {
   buildPlaceCategoryTree,
-  expandCategorySelection,
   formatCategoryBranchLabel,
-  normalizeCategoryIcon
+  normalizeCategoryIcon,
 } from '../../utils/placeCategoryTree';
 import translations from '../../constants/translations';
 import './CityMapPage.css';
@@ -1136,8 +1135,6 @@ function CityMapPage() {
   };
 
   const toggleCategoryBranchSelection = (categoryId) => {
-    const branchIds = expandCategorySelection([categoryId], placeCategoryTree);
-
     setExpandedCategoryRootIds((currentIds) => (
       currentIds.includes(categoryId)
         ? currentIds
@@ -1145,13 +1142,9 @@ function CityMapPage() {
     ));
 
     setSelectedCategoryIds((currentIds) => {
-      const everySelected = branchIds.every((branchId) => currentIds.includes(branchId));
-
-      if (everySelected) {
-        return currentIds.filter((currentId) => !branchIds.includes(currentId));
-      }
-
-      return [...new Set([...currentIds, ...branchIds])];
+      return currentIds.includes(categoryId)
+        ? currentIds.filter((currentId) => currentId !== categoryId)
+        : [...currentIds, categoryId];
     });
   };
 
@@ -2175,8 +2168,7 @@ function CityMapPage() {
                   {rootPlaceCategories.map((category) => {
                     const categoryId = Number(category.id);
                     const childCategories = childCategoriesByParentId.get(categoryId) || [];
-                    const branchIds = expandCategorySelection([categoryId], placeCategoryTree);
-                    const isChecked = branchIds.every((branchId) => selectedCategoryIds.includes(branchId));
+                    const isChecked = selectedCategoryIds.includes(categoryId);
                     const isExpanded = expandedCategoryRootIds.includes(categoryId);
 
                     return (

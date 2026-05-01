@@ -777,11 +777,11 @@ function LandingLayout() {
               <option value="vi">Vietnamese</option>
             </select>
             <NotificationBell />
-            <div className="landing-chat-menu" ref={chatMenuRef}>
+              <div className="landing-chat-menu" ref={chatMenuRef}>
               <button
                 type="button"
                 className="landing-chat-trigger"
-                aria-label="Tin nhắn"
+                aria-label="Messages"
                 onClick={() => {
                   setShowProfileMenu(false);
                   setShowChatMenu((current) => {
@@ -802,12 +802,12 @@ function LandingLayout() {
               {showChatMenu ? (
                 <div className="landing-chat-dropdown">
                   <div className="landing-chat-dropdown-header">
-                    <strong>Tin nhắn</strong>
+                    <strong>Messages</strong>
                     <span>{recentChats.length}</span>
                   </div>
 
                   {!recentChats.length ? (
-                    <p className="landing-chat-empty">Chưa có đoạn chat nào.</p>
+                    <p className="landing-chat-empty">No chat threads.</p>
                   ) : (
                     <div className="landing-chat-list">
                       {recentChats.map((thread) => {
@@ -822,11 +822,11 @@ function LandingLayout() {
                             <img src={thread.venueImage || logo} alt={thread.venueName} loading="lazy" />
                             <div className="landing-chat-item-body">
                               <strong>
-                                {thread.ownerName || 'Chủ quán'}
+                                {thread.ownerName || 'Venue Owner'}
                                 {thread.unreadCount > 0 ? <em>{thread.unreadCount}</em> : null}
                               </strong>
                               <p>{thread.venueName}</p>
-                              <span>{lastMessage?.content || 'Chưa có nội dung'}</span>
+                              <span>{lastMessage?.content || 'No content'}</span>
                             </div>
                           </button>
                           <div className="landing-chat-item-actions">
@@ -851,10 +851,10 @@ function LandingLayout() {
                       style={{ top: `${chatActionsPosition.top}px`, left: `${chatActionsPosition.left}px` }}
                     >
                       <button type="button" onClick={() => handleTogglePinChat(openChatActionsThread)}>
-                        {(chatPrefs?.pinnedKeys || []).includes(resolveThreadGroupKey(openChatActionsThread)) ? 'Bỏ ghim' : 'Ghim tin nhắn'}
+                        {(chatPrefs?.pinnedKeys || []).includes(resolveThreadGroupKey(openChatActionsThread)) ? 'Unpin' : 'Pin message'}
                       </button>
                       <button type="button" onClick={() => handleHideChat(openChatActionsThread)}>
-                        Xóa khỏi danh sách
+                        Remove from list
                       </button>
                      
                     </div>
@@ -978,7 +978,7 @@ function LandingLayout() {
                   type="button"
                   className="landing-global-chat-back"
                   onClick={handleBackToChatList}
-                  aria-label="Quay lại danh sách chat"
+                  aria-label="Back to chat list"
                 >
                   ←
                 </button>
@@ -996,7 +996,7 @@ function LandingLayout() {
                 type="button"
                 className="landing-global-chat-minimize"
                 onClick={() => setShowGlobalChatWidget(false)}
-                aria-label="Thu gá»n chat"
+                aria-label="Minimize chat"
               >
                 x
               </button>
@@ -1004,14 +1004,14 @@ function LandingLayout() {
 
             <div className="landing-global-chat-body">
               <div className="landing-global-chat-intro">
-                <p className="landing-global-chat-intro-title">Thông tin quán đang nhắn</p>
-                <p><strong>{globalChatVenueContext?.name || activeChatThread.venueName || 'Chưa có tên quán'}</strong></p>
-                <p>{globalChatVenueContext?.address || activeChatThread.venueAddress || 'Chưa có địa chỉ'}</p>
+                <p className="landing-global-chat-intro-title">Venue information</p>
+                <p><strong>{globalChatVenueContext?.name || activeChatThread.venueName || 'No venue name'}</strong></p>
+                <p>{globalChatVenueContext?.address || activeChatThread.venueAddress || 'No address'}</p>
               </div>
 
               <div className="landing-global-chat-messages" ref={globalChatListRef}>
                 {globalChatLoading ? (
-                  <div className="landing-global-chat-empty"><p>Đang tải tin nhắn...</p></div>
+                  <div className="landing-global-chat-empty"><p>Loading messages...</p></div>
                 ) : globalChatError ? (
                   <div className="landing-global-chat-empty"><p>{globalChatError}</p></div>
                 ) : globalChatMessages.length ? (
@@ -1033,7 +1033,7 @@ function LandingLayout() {
                     );
                   })
                 ) : (
-                  <div className="landing-global-chat-empty"><p>Chưa có tin nhắn nào.</p></div>
+                  <div className="landing-global-chat-empty"><p>No messages yet.</p></div>
                 )}
               </div>
 
@@ -1042,10 +1042,10 @@ function LandingLayout() {
                   rows="3"
                   value={globalChatInput}
                   onChange={(event) => setGlobalChatInput(event.target.value)}
-                  placeholder="Nhập tin nhắn..."
+                  placeholder="Type a message..."
                 />
                 <div className="landing-global-chat-form-footer">
-                  <span>{globalChatMessages.length} tin nhắn</span>
+                  <span>{globalChatMessages.length} messages</span>
                   <select
                     className="landing-global-chat-context-select"
                     value={selectedGlobalChatContextValue}
@@ -1060,7 +1060,7 @@ function LandingLayout() {
                     <option value="other">Other</option>
                   </select>
                   <button type="submit" disabled={globalChatSending || !globalChatInput.trim()}>
-                    {globalChatSending ? 'Đang gửi...' : 'Gửi'}
+                    {globalChatSending ? 'Sending...' : 'Send'}
                   </button>
                 </div>
               </form>
