@@ -613,10 +613,10 @@ function AdminUserManagementPage() {
                     value={newUserData.gender}
                     onChange={(e) => setNewUserData((prev) => ({ ...prev, gender: e.target.value }))}
                   >
-                    <option value="">Chưa chọn</option>
-                    <option value="male">Nam</option>
-                    <option value="female">Nữ</option>
-                    <option value="other">Khác</option>
+                    <option value="">Not selected</option>
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                    <option value="other">Other</option>
                   </select>
                 </label>
               </div>
@@ -624,10 +624,10 @@ function AdminUserManagementPage() {
               {addFormError && <div className="add-user-error">{addFormError}</div>}
               <div className="modal-actions">
                 <button type="submit" className="admin-user-add-btn" disabled={loading}>
-                  Lưu vào danh sách
+                  Save
                 </button>
                 <button type="button" className="admin-user-refresh-btn" onClick={closeAddUserModal}>
-                  Hủy
+                  Cancel
                 </button>
               </div>
             </form>
@@ -644,30 +644,30 @@ function AdminUserManagementPage() {
                   type="checkbox"
                   checked={isAllSelected()}
                   onChange={(e) => toggleSelectAll(e.target.checked)}
-                  aria-label="Chọn tất cả"
+                  aria-label="Select all"
                 />
               </th>
-              <th>Họ tên</th>
+              <th>Full name</th>
               <th>Email</th>
               <th>Username</th>
               <th>Role</th>
-              <th>Trạng thái</th>
-              <th>Pause đến</th>
-              <th>Ngày gia nhập</th>
-              <th>Hành động</th>
+              <th>Status</th>
+              <th>Pause until</th>
+              <th>Joined at</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
                 <td colSpan="9" className="admin-user-loading">
-                  Đang tải dữ liệu...
+                  Loading data...
                 </td>
               </tr>
             ) : filteredUsers.length === 0 ? (
               <tr>
                 <td colSpan="9" className="admin-user-empty">
-                  Không tìm thấy người dùng.
+                  No users found.
                 </td>
               </tr>
             ) : (
@@ -678,7 +678,7 @@ function AdminUserManagementPage() {
                       type="checkbox"
                       checked={selectedUserIds.includes(String(user.id))}
                       onChange={(e) => toggleSelectOne(user.id, e.target.checked)}
-                      aria-label={`Chọn ${user.fullname || user.username || user.email}`}
+                      aria-label={`Select ${user.fullname || user.username || user.email}`}
                     />
                   </td>
                   <td>{user.fullname || 'N/A'}</td>
@@ -706,17 +706,17 @@ function AdminUserManagementPage() {
 
                       {expandedRow === user.id ? (
                         <ul className="admin-action-menu">
-                          <li onClick={() => handleAction(user.id, 'edit')}>Sửa</li>
+                          <li onClick={() => handleAction(user.id, 'edit')}>Edit</li>
                           <li onClick={() => handleAction(user.id, 'delete')}>
-                            Xóa
+                            Delete
                           </li>
                           {user.status === 'blocked' ? (
-                            <li onClick={() => handleAction(user.id, 'unblock')}>Bỏ khóa</li>
+                            <li onClick={() => handleAction(user.id, 'unblock')}>Unblock</li>
                           ) : (
-                            <li onClick={() => handleAction(user.id, 'block')}>Khóa vĩnh viễn</li>
+                            <li onClick={() => handleAction(user.id, 'block')}>Block permanently</li>
                           )}
                           <li onClick={() => handleAction(user.id, 'pause')}>
-                            {user.status === 'paused' ? 'Mở lại' : 'Tạm dừng'}
+                            {user.status === 'paused' ? 'Resume' : 'Pause'}
                           </li>
                         </ul>
                       ) : null}
@@ -731,7 +731,7 @@ function AdminUserManagementPage() {
 
       <div className="admin-user-pagination">
         <div>
-          <strong>Trang {currentPage}/{totalPages}</strong> (Tổng {sortedUsers.length} users)
+          <strong>Page {currentPage}/{totalPages}</strong> (Total {sortedUsers.length} users)
         </div>
         <div className="admin-user-pagination-controls">
           <button
@@ -739,14 +739,14 @@ function AdminUserManagementPage() {
             onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
             disabled={currentPage <= 1}
           >
-            « Trước
+            « Prev
           </button>
           <button
             type="button"
             onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
             disabled={currentPage >= totalPages}
           >
-            Tiếp »
+            Next »
           </button>
         </div>
       </div>

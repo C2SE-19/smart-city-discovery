@@ -11,7 +11,7 @@ const WIDGET_HEIGHT = 600;
 
 const createDefaultGreeting = () => ({
   id: 1,
-  text: 'Xin chào! 👋 Tôi có thể giúp gì cho bạn với Smart City Discovery?',
+  text: 'Hello! 👋 How can I help you with Smart City Discovery?',
   sender: 'bot',
   timestamp: new Date(),
 });
@@ -259,12 +259,12 @@ const ChatWidget = () => {
     const trimmedInput = inputValue.trim();
 
     if (!trimmedInput) {
-      alert('Vui lòng nhập tin nhắn!');
+      alert('Please enter a message!');
       return;
     }
 
     if (trimmedInput.length > 500) {
-      alert('Tin nhắn không được vượt quá 500 ký tự!');
+      alert('Message cannot exceed 500 characters!');
       return;
     }
 
@@ -292,7 +292,7 @@ const ChatWidget = () => {
 
       const botMessage = {
         id: messages.length + 2,
-        text: data.reply || 'Xin lỗi, tôi không thể trả lời ngay bây giờ.',
+        text: data.reply || 'Sorry, I cannot respond right now.',
         sender: 'bot',
         timestamp: new Date(),
       };
@@ -305,7 +305,7 @@ const ChatWidget = () => {
 
       const errorMessage = {
         id: messages.length + 2,
-        text: 'Xin lỗi, tôi gặp sự cố. Vui lòng thử lại sau!',
+        text: "Sorry, there's an error. Please try again later.",
         sender: 'bot',
         timestamp: new Date(),
       };
@@ -393,7 +393,7 @@ const ChatWidget = () => {
 
           {venueResults.length > 0 && (
             <div className="chat-venue-results fade-in">
-              <div className="chat-venue-results-title">Gợi ý quán liên quan</div>
+                <div className="chat-venue-results-title">Suggested venues</div>
 
               {venueResults.map((venue) => {
                 const isSuggested = aiSuggestedNames && aiSuggestedNames.length
@@ -430,7 +430,7 @@ const ChatWidget = () => {
           <input
             type="text"
             className="chat-input"
-            placeholder="Nhập tin nhắn..."
+            placeholder="Type a message..."
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             disabled={isLoading}
@@ -441,7 +441,7 @@ const ChatWidget = () => {
             className="chat-send-btn"
             disabled={isLoading || !inputValue.trim() || inputValue.length > 500}
             aria-label="Send message"
-            title={inputValue.length > 500 ? 'Tin nhắn quá dài (tối đa 500 ký tự)' : 'Gửi tin nhắn'}
+            title={inputValue.length > 500 ? 'Message too long (max 500 characters)' : 'Send message'}
           >
             ✉️
           </button>

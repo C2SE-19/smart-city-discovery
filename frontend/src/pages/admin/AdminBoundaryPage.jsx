@@ -28,7 +28,6 @@ import {
 } from '../../services/api/adminMapApi';
 import {
   buildPlaceCategoryTree,
-  expandCategorySelection,
   formatCategoryBranchLabel,
   normalizeCategoryIcon
 } from '../../utils/placeCategoryTree';
@@ -906,10 +905,9 @@ function AdminBoundaryPage() {
           return true;
         }
 
-        const selectedCategoryFilterIds = expandCategorySelection([selectedCategoryId], placeCategoryTree);
-        return selectedCategoryFilterIds.includes(Number(venue.category_id));
+        return Number(venue.category_id) === Number(selectedCategoryId);
       }),
-    [approvedVenues, placeCategoryTree, selectedCategoryId]
+    [approvedVenues, selectedCategoryId]
   );
   const serviceModeVenues = useMemo(
     () =>
@@ -966,14 +964,12 @@ function AdminBoundaryPage() {
   );
 
   const pendingFilteredVenues = useMemo(() => {
-    const expandedPendingCategoryIds = expandCategorySelection(appliedPendingCategoryIds, placeCategoryTree);
-
     return pendingModeVenues.filter((venue) => {
       const categoryId = Number(venue.category_id);
       const wardId = String(venue.ward_id || '');
       const venueServiceIds = extractVenueServiceIds(venue);
 
-      if (expandedPendingCategoryIds.length && !expandedPendingCategoryIds.includes(categoryId)) {
+      if (appliedPendingCategoryIds.length && !appliedPendingCategoryIds.includes(categoryId)) {
         return false;
       }
 
@@ -1734,8 +1730,6 @@ function AdminBoundaryPage() {
   };
 
   const togglePendingCategoryBranchSelection = (categoryId) => {
-    const branchIds = expandCategorySelection([categoryId], placeCategoryTree);
-
     setExpandedPendingCategoryRootIds((currentIds) => (
       currentIds.includes(categoryId)
         ? currentIds
@@ -1743,13 +1737,9 @@ function AdminBoundaryPage() {
     ));
 
     setSelectedPendingCategoryIds((currentIds) => {
-      const everySelected = branchIds.every((branchId) => currentIds.includes(branchId));
-
-      if (everySelected) {
-        return currentIds.filter((currentId) => !branchIds.includes(currentId));
-      }
-
-      return [...new Set([...currentIds, ...branchIds])];
+      return currentIds.includes(categoryId)
+        ? currentIds.filter((currentId) => currentId !== categoryId)
+        : [...currentIds, categoryId];
     });
   };
 
@@ -4494,8 +4484,7 @@ function AdminBoundaryPage() {
                       {rootPlaceCategories.map((category) => {
                         const categoryId = Number(category.id);
                         const childCategories = childCategoriesByParentId.get(categoryId) || [];
-                        const branchIds = expandCategorySelection([categoryId], placeCategoryTree);
-                        const isChecked = branchIds.every((branchId) => selectedPendingCategoryIds.includes(branchId));
+                        const isChecked = selectedPendingCategoryIds.includes(categoryId);
                         const isExpanded = expandedPendingCategoryRootIds.includes(categoryId);
 
                         return (

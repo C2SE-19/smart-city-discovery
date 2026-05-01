@@ -179,7 +179,7 @@ function FeedbackSupportPage() {
       <div className="feedback-card">
         <div className="feedback-header" data-onboarding="feedback-header">
           <button type="button" className="feedback-back-btn" onClick={() => navigate(-1)}>
-            ← Quay lại
+            ← Back
           </button>
           <p className="feedback-kicker">{t.kicker}</p>
           <h1 className="feedback-title">{t.title}</h1>

@@ -2,12 +2,12 @@
 Backend (port 3000): cd backend && npm install && npm start
 Frontend (5173/5174): cd ../frontend && npm install && npm run build && BACKEND_ORIGIN=http://127.0.0.1:3000 FRONTEND_PORTS=5173,5174 npm run start:lan
 
-git checkout VoVanAnhKhoa
-git pull origin VoVanAnhKhoa
+git checkout VoVanAnhKhoa2
+git pull origin VoVanAnhKhoa2
 
 git add .
 git commit -m "update something"
-git push origin VoVanAnhKhoa
+git push origin VoVanAnhKhoa2
 
 # smart-city-discovery
 smart-city-discovery 

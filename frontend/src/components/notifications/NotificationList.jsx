@@ -21,20 +21,20 @@ function NotificationList({
       : notifications;
 
   return (
-    <div className="notification-bell__dropdown" role="dialog" aria-label="Thông báo">
+    <div className="notification-bell__dropdown" role="dialog" aria-label="Notifications">
       <div className="notification-bell__panel-header">
         <div>
-          <h2>Thông báo</h2>
-          <p>{unreadCount > 0 ? `${unreadCount} chưa đọc` : 'Đã xem hết'}</p>
+          <h2>Notifications</h2>
+          <p>{unreadCount > 0 ? `${unreadCount} unread` : 'All read'}</p>
         </div>
 
         <div className="notification-bell__actions">
-          <button
-            type="button"
-            className="notification-bell__icon-btn"
-            aria-label="Tùy chọn thông báo"
-            onClick={onToggleActionsMenu}
-          >
+            <button
+              type="button"
+              className="notification-bell__icon-btn"
+              aria-label="Notification options"
+              onClick={onToggleActionsMenu}
+            >
             <FiMoreHorizontal />
           </button>
 
@@ -47,7 +47,7 @@ function NotificationList({
                 disabled={unreadCount <= 0}
               >
                 <FiCheck />
-                <span>Đánh dấu tất cả là đã đọc</span>
+                <span>Mark all as read</span>
               </button>
             </div>
           ) : null}
@@ -60,24 +60,24 @@ function NotificationList({
           className={`notification-bell__filter ${activeFilter === 'all' ? 'is-active' : ''}`}
           onClick={() => onFilterChange?.('all')}
         >
-          Tất cả
+          All
         </button>
         <button
           type="button"
           className={`notification-bell__filter ${activeFilter === 'unread' ? 'is-active' : ''}`}
           onClick={() => onFilterChange?.('unread')}
         >
-          Chưa đọc
+          Unread
         </button>
       </div>
 
       <div className="notification-bell__content">
         <div className="notification-bell__section-head">
-          <strong>Mới</strong>
+          <strong>New</strong>
         </div>
 
         {isLoading ? (
-          <p className="notification-bell__empty">Đang tải thông báo...</p>
+          <p className="notification-bell__empty">Loading notifications...</p>
         ) : visibleNotifications.length ? (
           <div className="notification-bell__list">
             {visibleNotifications.map((item) => (
@@ -89,16 +89,16 @@ function NotificationList({
               >
                 <div className="notification-bell__item-copy">
                   <div className="notification-bell__item-title-row">
-                    <strong>{item?.title || 'Thông báo'}</strong>
+                    <strong>{item?.title || 'Notification'}</strong>
                     {!item?.isRead ? <span className="notification-bell__item-dot" aria-hidden="true" /> : null}
                   </div>
-                  <p>{item?.content || 'Bạn có một cập nhật mới.'}</p>
+                  <p>{item?.content || 'You have a new update.'}</p>
                   <span>{formatTimestamp?.(item?.createdAt)}</span>
                 </div>
               </button>
             ))}
 
-            {activeFilter === 'all' && hasMore ? (
+                {activeFilter === 'all' && hasMore ? (
               <div className="notification-bell__load-more-wrap">
                 <button
                   type="button"
@@ -106,14 +106,14 @@ function NotificationList({
                   onClick={() => onLoadMore?.()}
                   disabled={isLoadingMore}
                 >
-                  {isLoadingMore ? 'Đang tải thêm...' : 'Xem thông báo trước đó'}
+                      {isLoadingMore ? 'Loading more...' : 'Load earlier notifications'}
                 </button>
               </div>
             ) : null}
           </div>
         ) : (
           <p className="notification-bell__empty">
-            {activeFilter === 'unread' ? 'Không còn thông báo chưa đọc.' : 'Chưa có thông báo nào.'}
+            {activeFilter === 'unread' ? 'No unread notifications.' : 'No notifications yet.'}
           </p>
         )}
       </div>
