@@ -26,6 +26,12 @@ import {
   updateAdminPlaceCategory,
   upsertAdminWard,
 } from '../../services/api/adminMapApi';
+import {
+  buildPlaceCategoryTree,
+  expandCategorySelection,
+  formatCategoryBranchLabel,
+  normalizeCategoryIcon
+} from '../../utils/placeCategoryTree';
 import './AdminBoundaryPage.css';
 
 const DEFAULT_CENTER = [16.0471, 108.2068];
@@ -380,7 +386,7 @@ function resolveCategoryColor(categoryId) {
 
 function resolveCategoryIcon(categoryId, iconSymbol) {
   const color = resolveCategoryColor(categoryId);
-  const normalizedIcon = PLACE_CATEGORY_ICON_OPTIONS.includes(iconSymbol) ? iconSymbol : DEFAULT_PLACE_CATEGORY_ICON;
+  const normalizedIcon = normalizeCategoryIcon(iconSymbol);
   const cacheKey = `${color}-${normalizedIcon}`;
 
   if (!categoryIconCache.has(cacheKey)) {
@@ -441,6 +447,27 @@ function sortMerchantServices(services) {
 
     return String(first.name || '').localeCompare(String(second.name || ''));
   });
+}
+
+function formatVenueCategoryLabel(venue, placeCategoryTree, fallbackLabel = 'Uncategorized') {
+  const categoryId = Number(venue?.category_id ?? venue?.categoryId);
+  const fallbackCategoryName = String(venue?.category_name || venue?.categoryName || '').trim();
+
+  if (Number.isInteger(categoryId) && categoryId > 0) {
+    return formatCategoryBranchLabel(categoryId, placeCategoryTree, fallbackCategoryName || fallbackLabel);
+  }
+
+  return fallbackCategoryName || fallbackLabel;
+}
+
+function formatVenueUpdateCategoryLabel(snapshot, placeCategoryTree, fallbackLabel = 'Not provided') {
+  const categoryId = Number(snapshot?.categoryId ?? snapshot?.category_id);
+
+  if (Number.isInteger(categoryId) && categoryId > 0) {
+    return formatCategoryBranchLabel(categoryId, placeCategoryTree, fallbackLabel);
+  }
+
+  return fallbackLabel;
 }
 
 function normalizeVenueMetadata(metadata) {
@@ -783,6 +810,7 @@ function AdminBoundaryPage() {
   const [selectedUpdateLocationView, setSelectedUpdateLocationView] = useState('new');
   const [selectedWardId, setSelectedWardId] = useState('');
   const [selectedCategoryId, setSelectedCategoryId] = useState(null);
+  const [selectedSubcategoryId, setSelectedSubcategoryId] = useState(null);
   const [selectedServiceId, setSelectedServiceId] = useState(null);
   const [rejectReasons, setRejectReasons] = useState({});
   const [updateRejectReasons, setUpdateRejectReasons] = useState({});
@@ -810,6 +838,7 @@ function AdminBoundaryPage() {
   const [isPendingFilterPanelOpen, setIsPendingFilterPanelOpen] = useState(false);
   const [pendingSearchInput, setPendingSearchInput] = useState('');
   const [selectedPendingCategoryIds, setSelectedPendingCategoryIds] = useState([]);
+  const [expandedPendingCategoryRootIds, setExpandedPendingCategoryRootIds] = useState([]);
   const [selectedPendingWardIds, setSelectedPendingWardIds] = useState([]);
   const [selectedPendingServiceIds, setSelectedPendingServiceIds] = useState([]);
   const [appliedPendingSearch, setAppliedPendingSearch] = useState('');
@@ -824,7 +853,8 @@ function AdminBoundaryPage() {
   });
   const [categoryNameInput, setCategoryNameInput] = useState('');
   const [categoryIconInput, setCategoryIconInput] = useState('');
-  const [isCategoryIconPickerOpen, setIsCategoryIconPickerOpen] = useState(false);
+  const [subcategoryNameInput, setSubcategoryNameInput] = useState('');
+  const [subcategoryIconInput, setSubcategoryIconInput] = useState('');
   const [serviceNameInput, setServiceNameInput] = useState('');
 
   const buildDefaultAdminReplyDraft = (authorName = '') => {
@@ -853,6 +883,18 @@ function AdminBoundaryPage() {
       ),
     [merchantServices]
   );
+  const placeCategoryTree = useMemo(() => buildPlaceCategoryTree(placeCategories), [placeCategories]);
+  const rootPlaceCategories = placeCategoryTree.rootCategories;
+  const childCategoriesByParentId = placeCategoryTree.childrenByParentId;
+  const placeCategoryById = useMemo(
+    () =>
+      new Map(
+        placeCategoryTree.categories
+          .map((category) => [Number(category.id), category])
+          .filter(([categoryId]) => Number.isInteger(categoryId) && categoryId > 0)
+      ),
+    [placeCategoryTree.categories]
+  );
   const usageEligibleVenues = useMemo(
     () => venues.filter((venue) => String(venue.status || '').toLowerCase() !== 'rejected'),
     [venues]
@@ -864,9 +906,10 @@ function AdminBoundaryPage() {
           return true;
         }
 
-        return Number(venue.category_id) === Number(selectedCategoryId);
+        const selectedCategoryFilterIds = expandCategorySelection([selectedCategoryId], placeCategoryTree);
+        return selectedCategoryFilterIds.includes(Number(venue.category_id));
       }),
-    [approvedVenues, selectedCategoryId]
+    [approvedVenues, placeCategoryTree, selectedCategoryId]
   );
   const serviceModeVenues = useMemo(
     () =>
@@ -923,12 +966,14 @@ function AdminBoundaryPage() {
   );
 
   const pendingFilteredVenues = useMemo(() => {
+    const expandedPendingCategoryIds = expandCategorySelection(appliedPendingCategoryIds, placeCategoryTree);
+
     return pendingModeVenues.filter((venue) => {
       const categoryId = Number(venue.category_id);
       const wardId = String(venue.ward_id || '');
       const venueServiceIds = extractVenueServiceIds(venue);
 
-      if (appliedPendingCategoryIds.length && !appliedPendingCategoryIds.includes(categoryId)) {
+      if (expandedPendingCategoryIds.length && !expandedPendingCategoryIds.includes(categoryId)) {
         return false;
       }
 
@@ -985,6 +1030,7 @@ function AdminBoundaryPage() {
     exactAppliedPendingSearch,
     toneInsensitiveAppliedPendingSearch,
     normalizedAppliedPendingSearch,
+    placeCategoryTree,
     serviceNameById,
   ]);
 
@@ -1096,21 +1142,20 @@ function AdminBoundaryPage() {
     [wards, selectedWardId]
   );
   const selectedCategory = useMemo(
-    () => placeCategories.find((category) => Number(category.id) === Number(selectedCategoryId)) || null,
-    [placeCategories, selectedCategoryId]
+    () => placeCategoryTree.categoryById.get(Number(selectedCategoryId)) || null,
+    [placeCategoryTree, selectedCategoryId]
+  );
+  const selectedSubcategory = useMemo(
+    () => placeCategoryTree.categoryById.get(Number(selectedSubcategoryId)) || null,
+    [placeCategoryTree, selectedSubcategoryId]
+  );
+  const selectedCategoryChildren = useMemo(
+    () => childCategoriesByParentId.get(Number(selectedCategoryId)) || [],
+    [childCategoriesByParentId, selectedCategoryId]
   );
   const selectedMerchantService = useMemo(
     () => merchantServices.find((service) => Number(service.id) === Number(selectedServiceId)) || null,
     [merchantServices, selectedServiceId]
-  );
-  const placeCategoryById = useMemo(
-    () =>
-      new Map(
-        placeCategories
-          .map((category) => [Number(category.id), category])
-          .filter(([categoryId]) => Number.isInteger(categoryId) && categoryId > 0)
-      ),
-    [placeCategories]
   );
   const serviceUsageCountById = useMemo(() => {
     const countById = new Map();
@@ -1559,9 +1604,24 @@ function AdminBoundaryPage() {
       setSelectedCategoryId(null);
       setCategoryNameInput('');
       setCategoryIconInput('');
-      setIsCategoryIconPickerOpen(false);
+      setSelectedSubcategoryId(null);
+      setSubcategoryNameInput('');
+      setSubcategoryIconInput('');
     }
   }, [placeCategories, selectedCategoryId]);
+
+  useEffect(() => {
+    if (!selectedSubcategoryId) {
+      return;
+    }
+
+    const foundSubcategory = placeCategories.find((category) => Number(category.id) === Number(selectedSubcategoryId));
+    if (!foundSubcategory) {
+      setSelectedSubcategoryId(null);
+      setSubcategoryNameInput('');
+      setSubcategoryIconInput('');
+    }
+  }, [placeCategories, selectedSubcategoryId]);
 
   useEffect(() => {
     if (!selectedServiceId) {
@@ -1663,6 +1723,34 @@ function AdminBoundaryPage() {
     setter((current) =>
       current.includes(value) ? current.filter((item) => item !== value) : [...current, value]
     );
+  };
+
+  const togglePendingCategoryBranchExpansion = (categoryId) => {
+    setExpandedPendingCategoryRootIds((currentIds) =>
+      currentIds.includes(categoryId)
+        ? currentIds.filter((currentId) => currentId !== categoryId)
+        : [...currentIds, categoryId]
+    );
+  };
+
+  const togglePendingCategoryBranchSelection = (categoryId) => {
+    const branchIds = expandCategorySelection([categoryId], placeCategoryTree);
+
+    setExpandedPendingCategoryRootIds((currentIds) => (
+      currentIds.includes(categoryId)
+        ? currentIds
+        : [...currentIds, categoryId]
+    ));
+
+    setSelectedPendingCategoryIds((currentIds) => {
+      const everySelected = branchIds.every((branchId) => currentIds.includes(branchId));
+
+      if (everySelected) {
+        return currentIds.filter((currentId) => !branchIds.includes(currentId));
+      }
+
+      return [...new Set([...currentIds, ...branchIds])];
+    });
   };
 
   function applyPendingFilters() {
@@ -1934,7 +2022,15 @@ function AdminBoundaryPage() {
     setSelectedCategoryId(category.id);
     setCategoryNameInput(category.name || '');
     setCategoryIconInput(String(category.icon || '').trim());
-    setIsCategoryIconPickerOpen(false);
+    setSelectedSubcategoryId(null);
+    setSubcategoryNameInput('');
+    setSubcategoryIconInput('');
+  }
+
+  function loadSubcategoryToEditor(category) {
+    setSelectedSubcategoryId(category.id);
+    setSubcategoryNameInput(category.name || '');
+    setSubcategoryIconInput(String(category.icon || '').trim());
   }
 
   async function handleAddCategory() {
@@ -1946,8 +2042,8 @@ function AdminBoundaryPage() {
       return;
     }
 
-    if (!PLACE_CATEGORY_ICON_OPTIONS.includes(icon)) {
-      setError('Category icon is required. Please choose an icon before adding.');
+    if (!icon) {
+      setError('Main category icon is required. Type an emoji or icon symbol.');
       return;
     }
 
@@ -1960,16 +2056,19 @@ function AdminBoundaryPage() {
         name,
         slug: slugifyText(name),
         icon,
+        parentId: null,
       });
 
       await refreshCategoriesAndVenues();
       setSelectedCategoryId(created.id);
       setCategoryNameInput(created.name || name);
       setCategoryIconInput(created.icon || icon);
-      setIsCategoryIconPickerOpen(false);
-      setOperationMessage('Category added successfully.');
+      setSelectedSubcategoryId(null);
+      setSubcategoryNameInput('');
+      setSubcategoryIconInput('');
+      setOperationMessage('Main category added successfully.');
     } catch (saveError) {
-      setError(saveError.response?.data?.message || 'Could not add category.');
+      setError(saveError.response?.data?.message || 'Could not add main category.');
     } finally {
       setSubmittingCategory(false);
     }
@@ -1989,17 +2088,17 @@ function AdminBoundaryPage() {
     const name = categoryNameInput.trim();
     const icon = String(categoryIconInput || '').trim();
     if (!name) {
-      setError('Category name is required.');
+      setError('Main category name is required.');
       return;
     }
 
     if (!icon) {
-      setError('Category icon is required.');
+      setError('Main category icon is required.');
       return;
     }
 
     if (normalizeComparableText(selectedCategory.name) === name && String(selectedCategory.icon || '').trim() === icon) {
-      setError('No changes detected. Please edit category before updating.');
+      setError('No changes detected. Edit the main category before updating.');
       return;
     }
 
@@ -2011,15 +2110,15 @@ function AdminBoundaryPage() {
       const updated = await updateAdminPlaceCategory(selectedCategoryId, {
         name,
         icon,
+        parentId: null,
       });
 
       await refreshCategoriesAndVenues();
       setCategoryNameInput(updated.name || name);
       setCategoryIconInput(updated.icon || icon);
-      setIsCategoryIconPickerOpen(false);
-      setOperationMessage('Category updated successfully.');
+      setOperationMessage('Main category updated successfully.');
     } catch (updateError) {
-      setError(updateError.response?.data?.message || 'Could not update category.');
+      setError(updateError.response?.data?.message || 'Could not update main category.');
     } finally {
       setSubmittingCategory(false);
     }
@@ -2046,10 +2145,132 @@ function AdminBoundaryPage() {
       setSelectedCategoryId(null);
       setCategoryNameInput('');
       setCategoryIconInput('');
-      setIsCategoryIconPickerOpen(false);
-      setOperationMessage('Category deleted successfully.');
+      setSelectedSubcategoryId(null);
+      setSubcategoryNameInput('');
+      setSubcategoryIconInput('');
+      setOperationMessage('Main category deleted successfully.');
     } catch (deleteError) {
-      setError(deleteError.response?.data?.message || 'Could not delete category.');
+      setError(deleteError.response?.data?.message || 'Could not delete main category.');
+    } finally {
+      setDeletingCategoryId(null);
+    }
+  }
+
+  async function handleAddSubcategory() {
+    if (!selectedCategory) {
+      setError('Select a main category before adding a subcategory.');
+      return;
+    }
+
+    const name = subcategoryNameInput.trim();
+    const icon = String(subcategoryIconInput || '').trim();
+
+    if (!name) {
+      setError('Subcategory name is required.');
+      return;
+    }
+
+    if (!icon) {
+      setError('Subcategory icon is required.');
+      return;
+    }
+
+    setError('');
+    setOperationMessage('');
+    setSubmittingCategory(true);
+
+    try {
+      const created = await createAdminPlaceCategory({
+        name,
+        icon,
+        parentId: selectedCategory.id,
+      });
+
+      await refreshCategoriesAndVenues();
+      setSelectedSubcategoryId(created.id);
+      setSubcategoryNameInput(created.name || name);
+      setSubcategoryIconInput(created.icon || icon);
+      setOperationMessage('Subcategory added successfully.');
+    } catch (saveError) {
+      setError(saveError.response?.data?.message || 'Could not add subcategory.');
+    } finally {
+      setSubmittingCategory(false);
+    }
+  }
+
+  async function handleUpdateSubcategory() {
+    if (!selectedCategory || !selectedSubcategory) {
+      setError('Select a subcategory first before updating.');
+      return;
+    }
+
+    const name = subcategoryNameInput.trim();
+    const icon = String(subcategoryIconInput || '').trim();
+
+    if (!name) {
+      setError('Subcategory name is required.');
+      return;
+    }
+
+    if (!icon) {
+      setError('Subcategory icon is required.');
+      return;
+    }
+
+    if (
+      normalizeComparableText(selectedSubcategory.name) === name
+      && String(selectedSubcategory.icon || '').trim() === icon
+    ) {
+      setError('No changes detected. Edit the subcategory before updating.');
+      return;
+    }
+
+    setError('');
+    setOperationMessage('');
+    setSubmittingCategory(true);
+
+    try {
+      const updated = await updateAdminPlaceCategory(selectedSubcategory.id, {
+        name,
+        icon,
+        parentId: selectedCategory.id,
+      });
+
+      await refreshCategoriesAndVenues();
+      setSelectedSubcategoryId(updated.id);
+      setSubcategoryNameInput(updated.name || name);
+      setSubcategoryIconInput(updated.icon || icon);
+      setOperationMessage('Subcategory updated successfully.');
+    } catch (updateError) {
+      setError(updateError.response?.data?.message || 'Could not update subcategory.');
+    } finally {
+      setSubmittingCategory(false);
+    }
+  }
+
+  async function handleDeleteSubcategory() {
+    if (!selectedSubcategory) {
+      return;
+    }
+
+    const shouldDelete = window.confirm(`Delete subcategory "${selectedSubcategory.name || subcategoryNameInput}"?`);
+    if (!shouldDelete) {
+      return;
+    }
+
+    setError('');
+    setOperationMessage('');
+    setDeletingCategoryId(selectedSubcategory.id);
+
+    try {
+      await deleteAdminPlaceCategory(selectedSubcategory.id);
+      await refreshCategoriesAndVenues();
+      setSelectedSubcategoryId(null);
+      setSubcategoryNameInput('');
+      setSubcategoryIconInput('');
+      setOperationMessage('Subcategory deleted successfully.');
+    } catch (deleteError) {
+      setError(deleteError.response?.data?.message || 'Could not delete subcategory.');
     } finally {
       setDeletingCategoryId(null);
     }
@@ -2746,9 +2967,17 @@ function AdminBoundaryPage() {
                       className={`admin-list-item ${Number(selectedUpdateRequestId) === Number(request.id) ? 'is-active' : ''}`.trim()}
                       onClick={() => handleOpenUpdateRequestDetails(request.id)}
                     >
-                      <strong>{request.venue_title || request.venue_name || `Venue #${request.venue_id}`}</strong>
-                      <span>{proposedSnapshot.address || request.venue_address || 'Address pending'}</span>
-                      <small>{formatDateTime(request.submitted_at || request.created_at)}</small>
+                      <strong>
+                        <span className="admin-list-item-title">
+                          {request.venue_title || request.venue_name || `Venue #${request.venue_id}`}
+                        </span>
+                      </strong>
+                      <span className="admin-list-item-address">
+                        {proposedSnapshot.address || request.venue_address || 'Address pending'}
+                      </span>
+                      <small className="admin-list-item-timestamp">
+                        {formatDateTime(request.submitted_at || request.created_at)}
+                      </small>
                     </button>
                   );
                 })
@@ -2761,10 +2990,10 @@ function AdminBoundaryPage() {
                   >
                     <strong>
                       {isPriorityApprovalVenue(venue) ? <span className="admin-priority-star-badge">★ Priority</span> : null}
-                      <span>{venue.title || venue.name}</span>
+                      <span className="admin-list-item-title">{venue.title || venue.name}</span>
                     </strong>
-                    <span>{venue.address || 'Address pending'}</span>
-                    <small>{formatDateTime(venue.submitted_at)}</small>
+                    <span className="admin-list-item-address">{venue.address || 'Address pending'}</span>
+                    <small className="admin-list-item-timestamp">{formatDateTime(venue.submitted_at)}</small>
                   </button>
                 ))}
 
@@ -2840,12 +3069,12 @@ function AdminBoundaryPage() {
     return (
       <div className="admin-list-panel">
         <header>
-          <h3>Place Categories</h3>
-          <p>Click one category to preview matching markers on the map.</p>
+          <h3>Main Categories</h3>
+          <p>Select a main category to manage its subcategories and preview matching markers.</p>
         </header>
 
         <div className="admin-scroll-list">
-          {placeCategories.map((category) => (
+          {rootPlaceCategories.map((category) => (
             <button
               key={category.id}
               type="button"
@@ -2854,15 +3083,20 @@ function AdminBoundaryPage() {
             >
               <strong>
                 <span className="category-icon-dot" aria-hidden="true">
-                  {PLACE_CATEGORY_ICON_OPTIONS.includes(category.icon) ? category.icon : DEFAULT_PLACE_CATEGORY_ICON}
+                  {normalizeCategoryIcon(category.icon)}
                 </span>
                 {category.name}
               </strong>
-                <span>{categoryUsageCountById.get(Number(category.id)) || 0} venue(s) using this category</span>
+              <span>
+                {selectedCategoryId === category.id
+                  ? 'Currently managing this main category'
+                  : `${(childCategoriesByParentId.get(Number(category.id)) || []).length} subcategories available`}
+              </span>
+              <small>{categoryUsageCountById.get(Number(category.id)) || 0} venue(s) assigned directly</small>
             </button>
           ))}
 
-          {!placeCategories.length ? <p className="admin-empty-note">No categories yet.</p> : null}
+          {!rootPlaceCategories.length ? <p className="admin-empty-note">No main categories yet.</p> : null}
         </div>
       </div>
     );
@@ -2879,13 +3113,16 @@ function AdminBoundaryPage() {
           wards.find((ward) => String(ward.ward_id) === String(selectedUpdateProposedSnapshot.wardId))?.name ||
           selectedUpdateProposedSnapshot.wardId ||
           'Not provided';
-        const oldCategoryName =
-          placeCategoryById.get(Number(selectedUpdateOldSnapshot.categoryId))?.name ||
-          selectedUpdateRequest?.venue_category_name ||
-          'Not provided';
-        const newCategoryName =
-          placeCategoryById.get(Number(selectedUpdateProposedSnapshot.categoryId))?.name ||
-          oldCategoryName;
+        const oldCategoryName = formatVenueUpdateCategoryLabel(
+          selectedUpdateOldSnapshot,
+          placeCategoryTree,
+          String(selectedUpdateRequest?.venue_category_name || '').trim() || 'Not provided'
+        );
+        const newCategoryName = formatVenueUpdateCategoryLabel(
+          selectedUpdateProposedSnapshot,
+          placeCategoryTree,
+          oldCategoryName
+        );
         const activeWardName = selectedUpdateLocationView === 'old' ? oldWardName : newWardName;
         const activeCategoryName = selectedUpdateLocationView === 'old' ? oldCategoryName : newCategoryName;
         const submitterEmail =
@@ -2936,11 +3173,6 @@ function AdminBoundaryPage() {
         return (
           <div className="admin-detail-panel">
             <header className="admin-detail-panel-header">
-              <div className="admin-detail-panel-header-text">
-                <h3>Location Update Detail</h3>
-                <p>Use Old Location and New Location to switch marker focus and detail data.</p>
-              </div>
-
               {selectedUpdateRequest ? (
                 <button
                   type="button"
@@ -3186,11 +3418,6 @@ function AdminBoundaryPage() {
       return (
         <div className="admin-detail-panel">
           <header className="admin-detail-panel-header">
-            <div className="admin-detail-panel-header-text">
-              <h3>Submission Detail</h3>
-              <p>Review selected post and decide moderation action.</p>
-            </div>
-
             {selectedVenue ? (
               <button
                 type="button"
@@ -3299,7 +3526,7 @@ function AdminBoundaryPage() {
                     <li>Venue ID: {selectedVenue.id}</li>
                     <li>Name: {selectedVenue.name || 'Not provided'}</li>
                     <li>Ward: {selectedVenue.ward_name || selectedVenue.ward_id || 'Not detected'}</li>
-                    <li>Category: {selectedVenue.category_name || 'Uncategorized'}</li>
+                    <li>Category: {formatVenueCategoryLabel(selectedVenue, placeCategoryTree)}</li>
                     <li>Status: {statusLabel(selectedVenue.status)}</li>
                     <li>Submitter full name: {selectedVenue.submitter_full_name || selectedVenue.owner_name || 'Not provided'}</li>
                     <li>Submitter email: {selectedVenue.submitter_email || selectedVenue.submitted_by_user_id || 'Not provided'}</li>
@@ -3881,85 +4108,159 @@ function AdminBoundaryPage() {
       <div className="admin-detail-panel">
         <header>
           <h3>Place Categories</h3>
-          <p>One shared list for Merchant category dropdown and User category filters.</p>
+          <p>Manage main categories on the left, then add subcategories for the selected branch.</p>
         </header>
 
         <div className="admin-form-stack">
-          <div className="admin-form-field">
-            <label htmlFor="placeCategoryName">Category Name</label>
-            <div className="admin-category-input-row">
-              <button
-                type="button"
-                className="admin-category-icon-picker-btn"
-                onClick={() => setIsCategoryIconPickerOpen((currentState) => !currentState)}
-                aria-label="Choose category icon"
-              >
-                {PLACE_CATEGORY_ICON_OPTIONS.includes(categoryIconInput) ? categoryIconInput : '🙂'}
-              </button>
-              <input
-                id="placeCategoryName"
-                value={categoryNameInput}
-                onChange={(event) => setCategoryNameInput(event.target.value)}
-                placeholder="e.g. Entertainment Venue"
-              />
+          <div className="admin-extra-detail-block">
+            <strong>Main Category</strong>
+
+            <div className="admin-category-grid">
+              <div className="admin-form-field admin-form-field-icon">
+                <label htmlFor="placeCategoryIcon">Icon</label>
+                <input
+                  id="placeCategoryIcon"
+                  value={categoryIconInput}
+                  onChange={(event) => setCategoryIconInput(event.target.value)}
+                  placeholder="Type an emoji with Windows + ."
+                  maxLength={24}
+                />
+              </div>
+
+              <div className="admin-form-field">
+                <label htmlFor="placeCategoryName">Main Category Name</label>
+                <input
+                  id="placeCategoryName"
+                  value={categoryNameInput}
+                  onChange={(event) => setCategoryNameInput(event.target.value)}
+                  placeholder="e.g. Entertainment"
+                />
+              </div>
             </div>
 
-            {isCategoryIconPickerOpen ? (
-              <div className="admin-category-icon-picker-grid">
-                {PLACE_CATEGORY_ICON_OPTIONS.map((iconOption) => (
-                  <button
-                    key={iconOption}
-                    type="button"
-                    className={`admin-category-icon-option ${categoryIconInput === iconOption ? 'is-active' : ''}`.trim()}
-                    onClick={() => {
-                      setCategoryIconInput(iconOption);
-                      setIsCategoryIconPickerOpen(false);
-                    }}
-                    aria-label={`Select ${iconOption} icon`}
-                  >
-                    {iconOption}
-                  </button>
-                ))}
-              </div>
-            ) : null}
+            <div className="admin-action-row">
+              <button type="button" className="action-primary" disabled={submittingCategory} onClick={handleAddCategory}>
+                {submittingCategory ? 'Processing...' : 'Add'}
+              </button>
+
+              <button
+                type="button"
+                className="action-secondary"
+                disabled={!selectedCategoryId || submittingCategory}
+                onClick={handleUpdateCategory}
+              >
+                {submittingCategory ? 'Processing...' : 'Update'}
+              </button>
+
+              <button
+                type="button"
+                className="action-danger"
+                disabled={!selectedCategoryId || deletingCategoryId === selectedCategoryId}
+                onClick={handleDeleteCategory}
+              >
+                {deletingCategoryId === selectedCategoryId ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+
+            {selectedCategory ? (
+              <p className="admin-inline-note">
+                Selected main category:
+                <span className="category-icon-dot" aria-hidden="true">
+                  {normalizeCategoryIcon(selectedCategory.icon)}
+                </span>
+                {selectedCategory.name}
+                <span>{selectedCategoryChildren.length} subcategories</span>
+              </p>
+            ) : (
+              <p className="admin-inline-note">Create a new main category or select one from the left panel.</p>
+            )}
           </div>
 
-          <div className="admin-action-row">
-            <button type="button" className="action-primary" disabled={submittingCategory} onClick={handleAddCategory}>
-              {submittingCategory ? 'Processing...' : 'Add'}
-            </button>
-
-            <button
-              type="button"
-              className="action-secondary"
-              disabled={!selectedCategoryId || submittingCategory}
-              onClick={handleUpdateCategory}
-            >
-              {submittingCategory ? 'Processing...' : 'Update'}
-            </button>
-
-            <button
-              type="button"
-              className="action-danger"
-              disabled={!selectedCategoryId || deletingCategoryId === selectedCategoryId}
-              onClick={handleDeleteCategory}
-            >
-              {deletingCategoryId === selectedCategoryId ? 'Deleting...' : 'Delete'}
-            </button>
-          </div>
-
-          {selectedCategory ? (
-            <p className="admin-inline-note">
-              Selected category:
-              <span className="category-icon-dot" aria-hidden="true">
-                {PLACE_CATEGORY_ICON_OPTIONS.includes(selectedCategory.icon) ? selectedCategory.icon : DEFAULT_PLACE_CATEGORY_ICON}
-              </span>
-              {selectedCategory.name}
-              <span>({categoryUsageCountById.get(Number(selectedCategory.id)) || 0} venue(s) use this category)</span>
+          <div className="admin-extra-detail-block">
+            <strong>Subcategories</strong>
+            <p className="admin-empty-note">
+              {selectedCategory
+                ? `Every venue still stores the final subcategory. Main category "${selectedCategory.name}" is only used for grouping and filtering.`
+                : 'Select a main category first to create or manage its subcategories.'}
             </p>
-          ) : (
-            <p className="admin-inline-note">Select a category from the list to update or delete it.</p>
-          )}
+
+            <div className="admin-category-grid">
+              <div className="admin-form-field admin-form-field-icon">
+                <label htmlFor="placeSubcategoryIcon">Icon</label>
+                <input
+                  id="placeSubcategoryIcon"
+                  value={subcategoryIconInput}
+                  onChange={(event) => setSubcategoryIconInput(event.target.value)}
+                  placeholder="Type an emoji with Windows + ."
+                  maxLength={24}
+                  disabled={!selectedCategory}
+                />
+              </div>
+
+              <div className="admin-form-field">
+                <label htmlFor="placeSubcategoryName">Subcategory Name</label>
+                <input
+                  id="placeSubcategoryName"
+                  value={subcategoryNameInput}
+                  onChange={(event) => setSubcategoryNameInput(event.target.value)}
+                  placeholder="e.g. Karaoke"
+                  disabled={!selectedCategory}
+                />
+              </div>
+            </div>
+
+            <div className="admin-action-row">
+              <button
+                type="button"
+                className="action-primary"
+                disabled={!selectedCategory || submittingCategory}
+                onClick={handleAddSubcategory}
+              >
+                {submittingCategory ? 'Processing...' : 'Add'}
+              </button>
+
+              <button
+                type="button"
+                className="action-secondary"
+                disabled={!selectedSubcategory || submittingCategory}
+                onClick={handleUpdateSubcategory}
+              >
+                {submittingCategory ? 'Processing...' : 'Update'}
+              </button>
+
+              <button
+                type="button"
+                className="action-danger"
+                disabled={!selectedSubcategory || deletingCategoryId === selectedSubcategoryId}
+                onClick={handleDeleteSubcategory}
+              >
+                {deletingCategoryId === selectedSubcategoryId ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+
+            <div className="admin-subcategory-list">
+              {selectedCategoryChildren.map((subcategory) => (
+                <button
+                  key={subcategory.id}
+                  type="button"
+                  className={`admin-subcategory-item ${Number(selectedSubcategoryId) === Number(subcategory.id) ? 'is-active' : ''}`.trim()}
+                  onClick={() => loadSubcategoryToEditor(subcategory)}
+                >
+                  <strong>
+                    <span className="category-icon-dot" aria-hidden="true">
+                      {normalizeCategoryIcon(subcategory.icon)}
+                    </span>
+                    {subcategory.name}
+                  </strong>
+                  <span>{categoryUsageCountById.get(Number(subcategory.id)) || 0} venue(s) use this subcategory</span>
+                </button>
+              ))}
+
+              {selectedCategory && !selectedCategoryChildren.length ? (
+                <p className="admin-empty-note">No subcategories under this main category yet.</p>
+              ) : null}
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -4132,7 +4433,7 @@ function AdminBoundaryPage() {
                             <p>{venue.address || 'Address pending'}</p>
                             <ul>
                               <li>Ward: {venue.ward_name || venue.ward_id || 'Not detected'}</li>
-                              <li>Category: {venue.category_name || 'Uncategorized'}</li>
+                              <li>Category: {formatVenueCategoryLabel(venue, placeCategoryTree)}</li>
                               <li>Status: {statusLabel(venue.status)}</li>
                               <li>Phone: {venue.phone || 'Not provided'}</li>
                             </ul>
@@ -4190,19 +4491,57 @@ function AdminBoundaryPage() {
                   <div className="admin-pending-filter-group">
                     <h4>Place Categories</h4>
                     <div className="admin-pending-filter-list">
-                      {placeCategories.map((category) => {
+                      {rootPlaceCategories.map((category) => {
                         const categoryId = Number(category.id);
-                        const checked = selectedPendingCategoryIds.includes(categoryId);
+                        const childCategories = childCategoriesByParentId.get(categoryId) || [];
+                        const branchIds = expandCategorySelection([categoryId], placeCategoryTree);
+                        const isChecked = branchIds.every((branchId) => selectedPendingCategoryIds.includes(branchId));
+                        const isExpanded = expandedPendingCategoryRootIds.includes(categoryId);
 
                         return (
-                          <label key={`pending-category-${categoryId}`}>
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => togglePendingSelection(setSelectedPendingCategoryIds)(categoryId)}
-                            />
-                            <span>{category.icon || DEFAULT_PLACE_CATEGORY_ICON} {category.name}</span>
-                          </label>
+                          <div key={`pending-category-${categoryId}`} className="admin-category-filter-branch">
+                            <div className="admin-category-filter-parent">
+                              <label>
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => togglePendingCategoryBranchSelection(categoryId)}
+                                />
+                                <span>{normalizeCategoryIcon(category.icon)} {category.name}</span>
+                              </label>
+
+                              {childCategories.length ? (
+                                <button
+                                  type="button"
+                                  className="admin-category-filter-toggle"
+                                  onClick={() => togglePendingCategoryBranchExpansion(categoryId)}
+                                  aria-label={isExpanded ? 'Collapse subcategories' : 'Expand subcategories'}
+                                >
+                                  {isExpanded ? '−' : '+'}
+                                </button>
+                              ) : null}
+                            </div>
+
+                            {childCategories.length && isExpanded ? (
+                              <div className="admin-category-filter-children">
+                                {childCategories.map((subcategory) => {
+                                  const subcategoryId = Number(subcategory.id);
+                                  const subcategoryChecked = selectedPendingCategoryIds.includes(subcategoryId);
+
+                                  return (
+                                    <label key={`pending-subcategory-${subcategoryId}`}>
+                                      <input
+                                        type="checkbox"
+                                        checked={subcategoryChecked}
+                                        onChange={() => togglePendingSelection(setSelectedPendingCategoryIds)(subcategoryId)}
+                                      />
+                                      <span>{normalizeCategoryIcon(subcategory.icon)} {subcategory.name}</span>
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            ) : null}
+                          </div>
                         );
                       })}
                     </div>

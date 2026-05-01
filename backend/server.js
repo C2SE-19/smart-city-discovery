@@ -4959,11 +4959,66 @@ function normalizePlaceCategoryIcon(value, options = {}) {
         return { value: null, error: null };
     }
 
-    if (!PLACE_CATEGORY_ICON_SET.has(normalized)) {
-        return { value: null, error: 'icon is invalid' };
+    if (normalized.length > 24) {
+        return { value: null, error: 'icon must be 24 characters or fewer' };
     }
 
     return { value: normalized, error: null };
+}
+
+function normalizePlaceCategoryParentId(value) {
+    const normalized = normalizeCategoryId(value);
+    if (Number.isNaN(normalized)) {
+        return NaN;
+    }
+
+    return normalized;
+}
+
+function derivePlaceCategoryParentId(category, categories) {
+    const explicitParentId = normalizeCategoryId(category?.parent_id ?? category?.parentId);
+    if (explicitParentId !== null && !Number.isNaN(explicitParentId)) {
+        return explicitParentId;
+    }
+
+    const categoryId = normalizeCategoryId(category?.id);
+    const categorySlug = String(category?.slug || '').trim().toLowerCase();
+
+    if (categoryId === null || Number.isNaN(categoryId) || !categorySlug) {
+        return null;
+    }
+
+    let matchedParentId = null;
+    let matchedParentSlugLength = 0;
+
+    categories.forEach((candidate) => {
+        const candidateId = normalizeCategoryId(candidate?.id);
+        const candidateSlug = String(candidate?.slug || '').trim().toLowerCase();
+
+        if (candidateId === null || Number.isNaN(candidateId) || candidateId === categoryId || !candidateSlug) {
+            return;
+        }
+
+        if (!categorySlug.startsWith(`${candidateSlug}-`)) {
+            return;
+        }
+
+        if (candidateSlug.length > matchedParentSlugLength) {
+            matchedParentId = candidateId;
+            matchedParentSlugLength = candidateSlug.length;
+        }
+    });
+
+    return matchedParentId;
+}
+
+function attachDerivedPlaceCategoryParents(categories) {
+    const normalizedCategories = Array.isArray(categories) ? categories : [];
+
+    return normalizedCategories.map((category) => ({
+        ...category,
+        parent_id: derivePlaceCategoryParentId(category, normalizedCategories)
+    }));
 }
 
 function isUndefinedColumnError(error) {
@@ -14527,10 +14582,10 @@ async function generateWardIdFromName(name) {
             try {
                 const result = await pool.query(
                     `
-                SELECT id, name, slug, icon, description, sort_order, is_active, created_at, updated_at
+                SELECT id, name, slug, icon, description, sort_order, is_active, parent_id, created_at, updated_at
                 FROM place_categories
                 ${includeInactive ? '' : 'WHERE is_active = true'}
-                ORDER BY sort_order ASC, name ASC
+                ORDER BY COALESCE(parent_id, id) ASC, CASE WHEN parent_id IS NULL THEN 0 ELSE 1 END ASC, sort_order ASC, name ASC
             `
                 );
 
@@ -14548,7 +14603,7 @@ async function generateWardIdFromName(name) {
                         );
 
                         return res.json(
-                            fallbackResult.rows.map((row) => ({
+                            attachDerivedPlaceCategoryParents(fallbackResult.rows).map((row) => ({
                                 ...row,
                                 icon: '📍'
                             }))
@@ -14566,9 +14621,9 @@ async function generateWardIdFromName(name) {
             try {
                 const result = await pool.query(
                     `
-                SELECT id, name, slug, icon, description, sort_order, is_active, created_at, updated_at
+                SELECT id, name, slug, icon, description, sort_order, is_active, parent_id, created_at, updated_at
                 FROM place_categories
-                ORDER BY sort_order ASC, name ASC
+                ORDER BY COALESCE(parent_id, id) ASC, CASE WHEN parent_id IS NULL THEN 0 ELSE 1 END ASC, sort_order ASC, name ASC
             `
                 );
 
@@ -14585,7 +14640,7 @@ async function generateWardIdFromName(name) {
                         );
 
                         return res.json(
-                            fallbackResult.rows.map((row) => ({
+                            attachDerivedPlaceCategoryParents(fallbackResult.rows).map((row) => ({
                                 ...row,
                                 icon: '📍'
                             }))
@@ -14604,16 +14659,16 @@ async function generateWardIdFromName(name) {
             const iconResult = normalizePlaceCategoryIcon(req.body.icon, { required: true });
             const description = String(req.body.description || '').trim() || null;
             const slugInput = String(req.body.slug || '').trim();
-            const slug = slugifyText(slugInput || name);
             const sortOrder = Number.isFinite(Number(req.body.sortOrder)) ? Number(req.body.sortOrder) : 0;
             const isActive = req.body.isActive !== false;
+            const parentId = normalizePlaceCategoryParentId(req.body.parentId ?? req.body.parent_id);
 
             if (!name) {
                 return res.status(400).json({ message: 'name is required' });
             }
 
-            if (!slug) {
-                return res.status(400).json({ message: 'slug is required' });
+            if (Number.isNaN(parentId)) {
+                return res.status(400).json({ message: 'parentId must be a positive integer or null' });
             }
 
             if (iconResult.error) {
@@ -14621,16 +14676,63 @@ async function generateWardIdFromName(name) {
             }
 
             try {
-                const result = await pool.query(
-                    `
-                INSERT INTO place_categories (name, slug, icon, description, sort_order, is_active, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, now())
-                RETURNING id, name, slug, icon, description, sort_order, is_active, created_at, updated_at
-            `,
-                    [name, slug, iconResult.value, description, sortOrder, isActive]
-                );
+                let parentCategory = null;
 
-                return res.status(201).json(result.rows[0]);
+                if (parentId !== null) {
+                    const parentResult = await pool.query(
+                        `
+                            SELECT id, slug
+                            FROM place_categories
+                            WHERE id = $1
+                            LIMIT 1
+                        `,
+                        [parentId]
+                    );
+
+                    if (!parentResult.rows.length) {
+                        return res.status(404).json({ message: 'Parent category not found' });
+                    }
+
+                    parentCategory = parentResult.rows[0];
+                }
+
+                const localSlug = slugifyText(slugInput || name);
+                const slug = parentCategory ? `${parentCategory.slug}-${localSlug}` : localSlug;
+
+                if (!slug) {
+                    return res.status(400).json({ message: 'slug is required' });
+                }
+
+                try {
+                    const result = await pool.query(
+                        `
+                    INSERT INTO place_categories (name, slug, icon, description, sort_order, is_active, parent_id, updated_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+                    RETURNING id, name, slug, icon, description, sort_order, is_active, parent_id, created_at, updated_at
+                `,
+                        [name, slug, iconResult.value, description, sortOrder, isActive, parentId]
+                    );
+
+                    return res.status(201).json(result.rows[0]);
+                } catch (insertError) {
+                    if (!isUndefinedColumnError(insertError)) {
+                        throw insertError;
+                    }
+
+                    const fallbackResult = await pool.query(
+                        `
+                    INSERT INTO place_categories (name, slug, icon, description, sort_order, is_active, updated_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, now())
+                    RETURNING id, name, slug, icon, description, sort_order, is_active, created_at, updated_at
+                `,
+                        [name, slug, iconResult.value, description, sortOrder, isActive]
+                    );
+
+                    return res.status(201).json({
+                        ...fallbackResult.rows[0],
+                        parent_id: parentId
+                    });
+                }
             } catch (error) {
                 if (error.code === '23505') {
                     return res.status(409).json({ message: 'Category slug already exists' });
@@ -14669,6 +14771,8 @@ async function generateWardIdFromName(name) {
                 const hasDescription = Object.prototype.hasOwnProperty.call(req.body, 'description');
                 const hasSortOrder = Object.prototype.hasOwnProperty.call(req.body, 'sortOrder');
                 const hasIsActive = Object.prototype.hasOwnProperty.call(req.body, 'isActive');
+                const hasParentId = Object.prototype.hasOwnProperty.call(req.body, 'parentId')
+                    || Object.prototype.hasOwnProperty.call(req.body, 'parent_id');
 
                 const nextName = hasName ? String(req.body.name || '').trim() : existing.name;
                 const nextDescription = hasDescription
@@ -14688,37 +14792,99 @@ async function generateWardIdFromName(name) {
                         : existing.sort_order
                     : existing.sort_order;
                 const nextIsActive = hasIsActive ? req.body.isActive !== false : existing.is_active;
+                const nextParentId = hasParentId
+                    ? normalizePlaceCategoryParentId(req.body.parentId ?? req.body.parent_id)
+                    : null;
 
                 if (!nextName) {
                     return res.status(400).json({ message: 'name is required' });
                 }
 
-                if (!nextSlug) {
-                    return res.status(400).json({ message: 'slug is required' });
+                if (Number.isNaN(nextParentId)) {
+                    return res.status(400).json({ message: 'parentId must be a positive integer or null' });
                 }
 
                 if (nextIcon.error) {
                     return res.status(400).json({ message: nextIcon.error });
                 }
 
-                const updateResult = await pool.query(
-                    `
-                UPDATE place_categories
-                SET
-                    name = $2,
-                    slug = $3,
-                    icon = $4,
-                    description = $5,
-                    sort_order = $6,
-                    is_active = $7,
-                    updated_at = now()
-                WHERE id = $1
-                RETURNING id, name, slug, icon, description, sort_order, is_active, created_at, updated_at
-            `,
-                    [categoryId, nextName, nextSlug, nextIcon.value, nextDescription, nextSortOrder, nextIsActive]
-                );
+                if (nextParentId === categoryId) {
+                    return res.status(400).json({ message: 'A category cannot be its own parent' });
+                }
 
-                return res.json(updateResult.rows[0]);
+                let parentCategory = null;
+                if (nextParentId !== null) {
+                    const parentResult = await pool.query(
+                        `
+                            SELECT id, slug
+                            FROM place_categories
+                            WHERE id = $1
+                            LIMIT 1
+                        `,
+                        [nextParentId]
+                    );
+
+                    if (!parentResult.rows.length) {
+                        return res.status(404).json({ message: 'Parent category not found' });
+                    }
+
+                    parentCategory = parentResult.rows[0];
+                }
+
+                const localSlug = slugifyText(hasSlug ? String(req.body.slug || '').trim() : nextName);
+                const resolvedSlug = parentCategory ? `${parentCategory.slug}-${localSlug}` : (nextSlug || localSlug);
+
+                if (!resolvedSlug) {
+                    return res.status(400).json({ message: 'slug is required' });
+                }
+
+                try {
+                    const updateResult = await pool.query(
+                        `
+                    UPDATE place_categories
+                    SET
+                        name = $2,
+                        slug = $3,
+                        icon = $4,
+                        description = $5,
+                        sort_order = $6,
+                        is_active = $7,
+                        parent_id = $8,
+                        updated_at = now()
+                    WHERE id = $1
+                    RETURNING id, name, slug, icon, description, sort_order, is_active, parent_id, created_at, updated_at
+                `,
+                        [categoryId, nextName, resolvedSlug, nextIcon.value, nextDescription, nextSortOrder, nextIsActive, nextParentId]
+                    );
+
+                    return res.json(updateResult.rows[0]);
+                } catch (updateError) {
+                    if (!isUndefinedColumnError(updateError)) {
+                        throw updateError;
+                    }
+
+                    const fallbackResult = await pool.query(
+                        `
+                    UPDATE place_categories
+                    SET
+                        name = $2,
+                        slug = $3,
+                        icon = $4,
+                        description = $5,
+                        sort_order = $6,
+                        is_active = $7,
+                        updated_at = now()
+                    WHERE id = $1
+                    RETURNING id, name, slug, icon, description, sort_order, is_active, created_at, updated_at
+                `,
+                        [categoryId, nextName, resolvedSlug, nextIcon.value, nextDescription, nextSortOrder, nextIsActive]
+                    );
+
+                    return res.json({
+                        ...fallbackResult.rows[0],
+                        parent_id: nextParentId
+                    });
+                }
             } catch (error) {
                 if (error.code === '23505') {
                     return res.status(409).json({ message: 'Category slug already exists' });
@@ -14736,6 +14902,52 @@ async function generateWardIdFromName(name) {
             }
 
             try {
+                let childCountResult;
+                try {
+                    childCountResult = await pool.query(
+                        `
+                            SELECT COUNT(*)::int AS child_count
+                            FROM place_categories
+                            WHERE parent_id = $1
+                        `,
+                        [categoryId]
+                    );
+                } catch (childCountError) {
+                    if (!isUndefinedColumnError(childCountError)) {
+                        throw childCountError;
+                    }
+
+                    const categoryResult = await pool.query(
+                        `
+                            SELECT slug
+                            FROM place_categories
+                            WHERE id = $1
+                            LIMIT 1
+                        `,
+                        [categoryId]
+                    );
+
+                    if (!categoryResult.rows.length) {
+                        return res.status(404).json({ message: 'Category not found' });
+                    }
+
+                    childCountResult = await pool.query(
+                        `
+                            SELECT COUNT(*)::int AS child_count
+                            FROM place_categories
+                            WHERE id <> $1
+                              AND slug LIKE $2
+                        `,
+                        [categoryId, `${categoryResult.rows[0].slug}-%`]
+                    );
+                }
+
+                if ((childCountResult.rows[0]?.child_count || 0) > 0) {
+                    return res.status(409).json({
+                        message: 'This main category still has subcategories. Move or delete them first.'
+                    });
+                }
+
                 const usageResult = await pool.query(
                     `
                 SELECT COUNT(*)::int AS usage_count

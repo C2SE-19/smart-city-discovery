@@ -14,7 +14,7 @@ function formatTime(value) {
   if (!value) return 'N/A';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return 'N/A';
-  return date.toLocaleString('vi-VN');
+  return date.toLocaleString('en-US');
 }
 
 function collectDescendantCommentIds(comments, rootCommentId) {
@@ -72,7 +72,7 @@ function AdminForumManagementPage() {
       } catch (apiError) {
         if (isMounted) {
           const message = String(apiError?.response?.data?.message || apiError?.message || '').trim();
-          setError(message || 'Không thể tải dữ liệu quản lý diễn đàn.');
+          setError(message || 'Unable to load forum management data.');
         }
       } finally {
         if (isMounted) {
@@ -135,7 +135,7 @@ function AdminForumManagementPage() {
   }, [posts]);
 
   const handleDeletePost = async (postId) => {
-    const accepted = window.confirm('Bạn có chắc muốn xóa bài viết này không?');
+    const accepted = window.confirm('Are you sure you want to delete this post?');
     if (!accepted) return;
 
     setActionError('');
@@ -145,17 +145,17 @@ function AdminForumManagementPage() {
     try {
       await deleteAdminForumPost(postId);
       setPosts((current) => current.filter((post) => String(post.id) !== String(postId)));
-      setActionSuccess('Đã xóa bài viết thành công.');
+      setActionSuccess('Post deleted successfully.');
     } catch (apiError) {
       const message = String(apiError?.response?.data?.message || apiError?.message || '').trim();
-      setActionError(message || 'Không thể xóa bài viết lúc này. Vui lòng thử lại.');
+      setActionError(message || 'Unable to delete post at this time. Please try again.');
     } finally {
       setDeletingPostId(null);
     }
   };
 
   const handleDeleteComment = async (postId, commentId) => {
-    const accepted = window.confirm('Bạn có chắc muốn xóa bình luận này không?');
+    const accepted = window.confirm('Are you sure you want to delete this comment?');
     if (!accepted) return;
 
     setActionError('');
@@ -182,17 +182,17 @@ function AdminForumManagementPage() {
         })
       );
 
-      setActionSuccess('Đã xóa bình luận thành công.');
+      setActionSuccess('Comment deleted successfully.');
     } catch (apiError) {
       const message = String(apiError?.response?.data?.message || apiError?.message || '').trim();
-      setActionError(message || 'Không thể xóa bình luận lúc này. Vui lòng thử lại.');
+      setActionError(message || 'Unable to delete comment at this time. Please try again.');
     } finally {
       setDeletingCommentId(null);
     }
   };
 
   const handleDismissPostReports = async (postId) => {
-    const accepted = window.confirm('Hủy toàn bộ báo cáo của bài viết này?');
+    const accepted = window.confirm('Dismiss all reports for this post?');
     if (!accepted) return;
 
     setActionError('');
@@ -219,17 +219,17 @@ function AdminForumManagementPage() {
         })
       );
 
-      setActionSuccess('Đã hủy báo cáo bài viết.');
+      setActionSuccess('Post reports dismissed successfully.');
     } catch (apiError) {
       const message = String(apiError?.response?.data?.message || apiError?.message || '').trim();
-      setActionError(message || 'Không thể hủy báo cáo bài viết lúc này. Vui lòng thử lại.');
+      setActionError(message || 'Unable to dismiss post reports right now. Please try again.');
     } finally {
       setDismissingPostId(null);
     }
   };
 
   const handleDismissCommentReports = async (postId, commentId) => {
-    const accepted = window.confirm('Hủy toàn bộ báo cáo của bình luận này?');
+    const accepted = window.confirm('Dismiss all reports for this comment?');
     if (!accepted) return;
 
     setActionError('');
@@ -268,10 +268,10 @@ function AdminForumManagementPage() {
         })
       );
 
-      setActionSuccess('Đã hủy báo cáo bình luận.');
+      setActionSuccess('Comment reports dismissed.');
     } catch (apiError) {
       const message = String(apiError?.response?.data?.message || apiError?.message || '').trim();
-      setActionError(message || 'Không thể hủy báo cáo bình luận lúc này. Vui lòng thử lại.');
+      setActionError(message || 'Unable to dismiss comment reports at this time. Please try again.');
     } finally {
       setDismissingCommentId(null);
     }
@@ -287,35 +287,35 @@ function AdminForumManagementPage() {
       <header className="admin-forum-header">
         <div>
           <p className="admin-forum-eyebrow">Forum moderation workspace</p>
-          <h2>Xem báo cáo</h2>
-          <p>Xem và hành động với các bài viết, bình luận bị báo cáo.</p>
+          <h2>View Reports</h2>
+          <p>View and take action on reported posts and comments.</p>
         </div>
       </header>
 
-      <nav className="admin-forum-section-switch" aria-label="Điều hướng quản lý diễn đàn">
+      <nav className="admin-forum-section-switch" aria-label="Forum management navigation">
         <NavLink to={APP_ROUTES.ADMIN_FORUM_REPORTS} className={({ isActive }) => `admin-forum-switch-link ${isActive ? 'is-active' : ''}`}>
-          Xem báo cáo
+          View Reports
         </NavLink>
         <NavLink to={APP_ROUTES.ADMIN_FORUM_VIEW} className={({ isActive }) => `admin-forum-switch-link ${isActive ? 'is-active' : ''}`}>
-          Xem diễn đàn
+          Forum Overview
         </NavLink>
         <NavLink to={APP_ROUTES.ADMIN_FORUM_KEYWORDS} className={({ isActive }) => `admin-forum-switch-link ${isActive ? 'is-active' : ''}`}>
-          Cấm từ khóa
+          Banned Keywords
         </NavLink>
       </nav>
 
       <section className="admin-forum-stats">
         <article>
           <strong>{summary.totalPosts}</strong>
-          <span>Tổng bài viết</span>
+          <span>Total Posts</span>
         </article>
         <article className="is-warning">
           <strong>{summary.reportedPosts}</strong>
-          <span>Bài viết bị báo cáo</span>
+          <span>Reported Posts</span>
         </article>
         <article className="is-warning">
           <strong>{summary.reportedComments}</strong>
-          <span>Bình luận bị báo cáo</span>
+          <span>Reported Comments</span>
         </article>
       </section>
 
@@ -330,21 +330,21 @@ function AdminForumManagementPage() {
               setSearchTerm('');
             }
           }}
-          placeholder="Tìm theo tiêu đề, nội dung, tác giả hoặc bình luận..."
-          aria-label="Tìm kiếm bài viết diễn đàn"
+          placeholder="Search by title, content, author, or comments..."
+          aria-label="Search forum posts"
         />
-        <button type="submit">Tìm kiếm</button>
+        <button type="submit">Search</button>
       </form>
 
       {error ? <p className="admin-forum-error">{error}</p> : null}
       {actionError ? <p className="admin-forum-error">{actionError}</p> : null}
       {actionSuccess ? <p className="admin-forum-loading">{actionSuccess}</p> : null}
-      {loading ? <p className="admin-forum-loading">Đang tải dữ liệu diễn đàn...</p> : null}
+      {loading ? <p className="admin-forum-loading">Loading forum data...</p> : null}
 
       <section className="admin-forum-split">
         <article className="admin-forum-split-column">
           <header className="admin-forum-split-head">
-            <h3>Bài viết bị báo cáo</h3>
+            <h3>Reported Posts</h3>
             <span>{reportedPosts.length}</span>
           </header>
 
@@ -355,11 +355,11 @@ function AdminForumManagementPage() {
                   <div>
                     <h3>{post.title}</h3>
                     <p>
-                      Tác giả: <strong>{post.author}</strong> · Chủ đề: <strong>{post.category}</strong>
+                      Author: <strong>{post.author}</strong> · Category: <strong>{post.category}</strong>
                     </p>
                   </div>
                   <div className="admin-forum-card-meta">
-                    <span className="admin-flag-badge">Đã báo cáo</span>
+                    <span className="admin-flag-badge">Reported</span>
                     <span>{formatTime(post.lastReportedAt || post.createdAt)}</span>
                   </div>
                 </div>
@@ -375,13 +375,13 @@ function AdminForumManagementPage() {
                 ) : null}
 
                 <div className="admin-forum-badges-row">
-                  <span className="admin-chip is-danger">Số lượt báo cáo: {Number(post.reportCount || 0)}</span>
-                  <span className="admin-chip">Lượt thích: {Number(post.likesCount || 0)}</span>
-                  <span className="admin-chip">Bình luận: {Number(post.comments || 0)}</span>
+                  <span className="admin-chip is-danger">Report count: {Number(post.reportCount || 0)}</span>
+                  <span className="admin-chip">Likes: {Number(post.likesCount || 0)}</span>
+                  <span className="admin-chip">Comments: {Number(post.comments || 0)}</span>
                 </div>
 
                 <div className="admin-forum-report-block">
-                  <h4>Lý do bị báo cáo</h4>
+                  <h4>Report reasons</h4>
                   <ul>
                     {(Array.isArray(post.postReportReasons) ? post.postReportReasons : []).map((item) => (
                       <li key={`post-report-${post.id}-${item.id}`}>
@@ -401,7 +401,7 @@ function AdminForumManagementPage() {
                     onClick={() => handleDismissPostReports(post.id)}
                     disabled={dismissingPostId === post.id}
                   >
-                    {dismissingPostId === post.id ? 'Đang hủy...' : 'Hủy báo cáo'}
+                    {dismissingPostId === post.id ? 'Dismissing...' : 'Dismiss report'}
                   </button>
                   <button
                     type="button"
@@ -409,21 +409,21 @@ function AdminForumManagementPage() {
                     onClick={() => handleDeletePost(post.id)}
                     disabled={deletingPostId === post.id || dismissingPostId === post.id}
                   >
-                    {deletingPostId === post.id ? 'Đang xóa...' : 'Xóa bài viết'}
+                    {deletingPostId === post.id ? 'Deleting...' : 'Delete Post'}
                   </button>
                 </div>
               </article>
             ))}
 
             {!loading && !reportedPosts.length ? (
-              <p className="admin-forum-empty">Hiện chưa có bài viết bị báo cáo.</p>
+              <p className="admin-forum-empty">There are no reported posts yet.</p>
             ) : null}
           </div>
         </article>
 
         <article className="admin-forum-split-column">
           <header className="admin-forum-split-head">
-            <h3>Bình luận bị báo cáo</h3>
+            <h3>Reported Comments</h3>
             <span>{reportedComments.length}</span>
           </header>
 
@@ -434,11 +434,11 @@ function AdminForumManagementPage() {
                   <div>
                     <h3>{comment.author}</h3>
                     <p>
-                      Thuộc bài: <strong>{comment.postTitle}</strong> · Tác giả bài viết: <strong>{comment.postAuthor}</strong>
+                      Post: <strong>{comment.postTitle}</strong> · Post author: <strong>{comment.postAuthor}</strong>
                     </p>
                   </div>
                   <div className="admin-forum-card-meta">
-                    <span className="admin-flag-badge">Đã báo cáo</span>
+                    <span className="admin-flag-badge">Reported</span>
                     <span>{formatTime(comment.lastReportedAt || comment.createdAt)}</span>
                   </div>
                 </div>
@@ -454,12 +454,12 @@ function AdminForumManagementPage() {
                 ) : null}
 
                 <div className="admin-forum-badges-row">
-                  <span className="admin-chip is-danger">Số lượt báo cáo: {Number(comment.reportCount || 0)}</span>
-                  <span className="admin-chip">Chủ đề bài viết: {comment.postCategory || 'N/A'}</span>
+                  <span className="admin-chip is-danger">Report count: {Number(comment.reportCount || 0)}</span>
+                  <span className="admin-chip">Post category: {comment.postCategory || 'N/A'}</span>
                 </div>
 
                 <div className="admin-forum-report-block">
-                  <h4>Lý do bị báo cáo</h4>
+                  <h4>Report reasons</h4>
                   <ul>
                     {(Array.isArray(comment.reportReasons) ? comment.reportReasons : []).map((item) => (
                       <li key={`comment-report-${comment.id}-${item.id}`}>
@@ -479,7 +479,7 @@ function AdminForumManagementPage() {
                     onClick={() => handleDismissCommentReports(comment.postId, comment.id)}
                     disabled={dismissingCommentId === comment.id}
                   >
-                    {dismissingCommentId === comment.id ? 'Đang hủy...' : 'Hủy báo cáo'}
+                    {dismissingCommentId === comment.id ? 'Dismissing...' : 'Dismiss report'}
                   </button>
                   <button
                     type="button"
@@ -487,21 +487,21 @@ function AdminForumManagementPage() {
                     onClick={() => handleDeleteComment(comment.postId, comment.id)}
                     disabled={deletingCommentId === comment.id || dismissingCommentId === comment.id}
                   >
-                    {deletingCommentId === comment.id ? 'Đang xóa...' : 'Xóa bình luận'}
+                    {deletingCommentId === comment.id ? 'Deleting...' : 'Delete Comment'}
                   </button>
                 </div>
               </article>
             ))}
 
             {!loading && !reportedComments.length ? (
-              <p className="admin-forum-empty">Hiện chưa có bình luận bị báo cáo.</p>
+              <p className="admin-forum-empty">There are no reported comments yet.</p>
             ) : null}
           </div>
         </article>
       </section>
 
       {!loading && !posts.length ? (
-        <p className="admin-forum-empty">Không có bài viết diễn đàn phù hợp với điều kiện tìm kiếm.</p>
+        <p className="admin-forum-empty">No forum posts match the current search criteria.</p>
       ) : null}
     </section>
   );

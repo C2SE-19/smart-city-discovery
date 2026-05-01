@@ -12,7 +12,7 @@ function formatTime(value) {
   if (!value) return 'N/A';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return 'N/A';
-  return date.toLocaleString('vi-VN');
+  return date.toLocaleString('en-US');
 }
 
 function AdminForumKeywordBanPage() {
@@ -39,7 +39,7 @@ function AdminForumKeywordBanPage() {
       } catch (apiError) {
         if (isMounted) {
           const message = String(apiError?.response?.data?.message || apiError?.message || '').trim();
-          setError(message || 'Không thể tải danh sách từ khóa cấm.');
+          setError(message || 'Unable to load banned keywords.');
         }
       } finally {
         if (isMounted) {
@@ -60,7 +60,7 @@ function AdminForumKeywordBanPage() {
     const keyword = String(keywordInput || '').trim();
 
     if (!keyword) {
-      setError('Vui lòng nhập từ khóa cần cấm.');
+      setError('Enter a keyword to ban.');
       setSuccess('');
       return;
     }
@@ -76,17 +76,17 @@ function AdminForumKeywordBanPage() {
         return created ? [created, ...next] : next;
       });
       setKeywordInput('');
-      setSuccess('Đã áp dụng từ khóa cấm thành công.');
+      setSuccess('Keyword ban applied successfully.');
     } catch (apiError) {
       const message = String(apiError?.response?.data?.message || apiError?.message || '').trim();
-      setError(message || 'Không thể áp dụng từ khóa cấm lúc này.');
+      setError(message || 'Unable to apply the keyword ban right now.');
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleRemoveKeyword = async (keywordId) => {
-    const accepted = window.confirm('Bạn có chắc muốn gỡ từ khóa cấm này không?');
+    const accepted = window.confirm('Are you sure you want to remove this banned keyword?');
     if (!accepted) return;
 
     setDeletingKeywordId(keywordId);
@@ -96,10 +96,10 @@ function AdminForumKeywordBanPage() {
     try {
       await deleteAdminForumBannedKeyword(keywordId);
       setKeywords((current) => current.filter((item) => String(item.id) !== String(keywordId)));
-      setSuccess('Đã gỡ từ khóa cấm.');
+      setSuccess('Banned keyword removed.');
     } catch (apiError) {
       const message = String(apiError?.response?.data?.message || apiError?.message || '').trim();
-      setError(message || 'Không thể gỡ từ khóa cấm lúc này.');
+      setError(message || 'Unable to remove this banned keyword right now.');
     } finally {
       setDeletingKeywordId(null);
     }
@@ -110,20 +110,20 @@ function AdminForumKeywordBanPage() {
       <header className="admin-forum-keyword-header">
         <div>
           <p className="admin-forum-keyword-eyebrow">Forum moderation workspace</p>
-          <h2>Cấm từ khóa</h2>
-          <p>Thêm từ cấm để chặn người dùng đăng bài hoặc bình luận chứa từ khóa đó.</p>
+          <h2>Banned Keywords</h2>
+          <p>Add blocked words or phrases to prevent posts and comments containing them.</p>
         </div>
       </header>
 
-      <nav className="admin-forum-section-switch" aria-label="Điều hướng quản lý diễn đàn">
+      <nav className="admin-forum-section-switch" aria-label="Forum moderation navigation">
         <NavLink to={APP_ROUTES.ADMIN_FORUM_REPORTS} className={({ isActive }) => `admin-forum-switch-link ${isActive ? 'is-active' : ''}`}>
-          Xem báo cáo
+          Reports
         </NavLink>
         <NavLink to={APP_ROUTES.ADMIN_FORUM_VIEW} className={({ isActive }) => `admin-forum-switch-link ${isActive ? 'is-active' : ''}`}>
-          Xem diễn đàn
+          Forum
         </NavLink>
         <NavLink to={APP_ROUTES.ADMIN_FORUM_KEYWORDS} className={({ isActive }) => `admin-forum-switch-link ${isActive ? 'is-active' : ''}`}>
-          Cấm từ khóa
+          Banned Keywords
         </NavLink>
       </nav>
 
@@ -132,26 +132,26 @@ function AdminForumKeywordBanPage() {
           type="text"
           value={keywordInput}
           onChange={(event) => setKeywordInput(event.target.value)}
-          placeholder="Nhập từ hoặc cụm từ cần cấm..."
+          placeholder="Enter a blocked word or phrase..."
           maxLength={160}
           disabled={submitting}
         />
         <button type="submit" disabled={submitting}>
-          {submitting ? 'Đang áp dụng...' : 'Áp dụng'}
+          {submitting ? 'Applying...' : 'Apply'}
         </button>
       </form>
 
       {error ? <p className="admin-forum-keyword-error">{error}</p> : null}
       {success ? <p className="admin-forum-keyword-success">{success}</p> : null}
-      {loading ? <p className="admin-forum-keyword-loading">Đang tải danh sách từ khóa cấm...</p> : null}
+      {loading ? <p className="admin-forum-keyword-loading">Loading banned keywords...</p> : null}
 
       <section className="admin-forum-keyword-table-wrap">
         <table className="admin-forum-keyword-table">
           <thead>
             <tr>
-              <th>Từ khóa</th>
-              <th>Ngày áp dụng</th>
-              <th>Hành động</th>
+              <th>Keyword</th>
+              <th>Applied On</th>
+              <th>Action</th>
             </tr>
           </thead>
           <tbody>
@@ -166,14 +166,14 @@ function AdminForumKeywordBanPage() {
                     onClick={() => handleRemoveKeyword(item.id)}
                     disabled={deletingKeywordId === item.id}
                   >
-                    {deletingKeywordId === item.id ? 'Đang gỡ...' : 'Gỡ'}
+                    {deletingKeywordId === item.id ? 'Removing...' : 'Remove'}
                   </button>
                 </td>
               </tr>
             ))}
             {!loading && !keywords.length ? (
               <tr>
-                <td colSpan={3} className="admin-forum-keyword-empty">Chưa có từ khóa cấm nào được áp dụng.</td>
+                <td colSpan={3} className="admin-forum-keyword-empty">No banned keywords have been applied yet.</td>
               </tr>
             ) : null}
           </tbody>

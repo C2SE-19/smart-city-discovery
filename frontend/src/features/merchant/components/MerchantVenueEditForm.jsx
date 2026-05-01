@@ -12,6 +12,7 @@ import {
 import { fetchPlaceCategories } from '../../../services/api/placeCategoriesApi';
 import { fetchMerchantServices } from '../../../services/api/merchantServicesApi';
 import { fetchWards } from '../../../services/api/wardsApi';
+import { buildPlaceCategoryTree, resolveCategoryBranch } from '../../../utils/placeCategoryTree';
 import '../styles/MerchantVenueForm.css';
 
 const WEEK_DAYS = [
@@ -469,6 +470,7 @@ function MerchantVenueEditForm({ editVenueId = null }) {
   const [coverPreference, setCoverPreference] = useState(COVER_PREFERENCES.EXISTING);
   const [formData, setFormData] = useState({
     venueName: '',
+    mainCategory: '',
     category: '',
     address: '',
     wardId: '',
@@ -510,6 +512,12 @@ function MerchantVenueEditForm({ editVenueId = null }) {
   const [initialComparableState, setInitialComparableState] = useState(null);
   const existingImageCount = Math.min(Array.isArray(formData.existingGalleryImageUrls) ? formData.existingGalleryImageUrls.length : 0, 6);
   const remainingUploadSlots = Math.max(0, 6 - existingImageCount);
+  const placeCategoryTree = useMemo(() => buildPlaceCategoryTree(placeCategories), [placeCategories]);
+  const mainCategories = placeCategoryTree.rootCategories;
+  const selectedMainCategoryChildren = useMemo(
+    () => placeCategoryTree.childrenByParentId.get(Number(formData.mainCategory)) || [],
+    [formData.mainCategory, placeCategoryTree]
+  );
 
   const simpleComparableState = useMemo(() => buildSimpleComparableState(formData), [formData]);
   const reviewComparableState = useMemo(
@@ -766,11 +774,19 @@ function MerchantVenueEditForm({ editVenueId = null }) {
         const resolvedWeeklyOpenHours = normalizeWeeklyOpenHours(mergedMetadata);
         const resolvedWeeklyOverrides = deriveWeeklyOverrideMapFromHours(resolvedWeeklyOpenHours);
 
+        const resolvedCategoryId = String(
+          pendingSnapshot?.categoryId ?? pendingSnapshot?.category_id ?? venue.category_id ?? mergedMetadata.categoryId ?? ''
+        ).trim();
+        const resolvedCategoryBranch = resolveCategoryBranch(resolvedCategoryId, buildPlaceCategoryTree(placeCategories));
+
         const nextFormData = {
           venueName: String(pendingSnapshot?.name || pendingSnapshot?.title || venue.name || venue.title || '').trim(),
-          category: String(
-            pendingSnapshot?.categoryId ?? pendingSnapshot?.category_id ?? venue.category_id ?? mergedMetadata.categoryId ?? ''
+          mainCategory: String(
+            resolvedCategoryBranch.mainCategory?.id || resolvedCategoryId || ''
           ).trim(),
+          category: resolvedCategoryBranch.subcategory
+            ? String(resolvedCategoryBranch.subcategory.id)
+            : resolvedCategoryId,
           address: String(pendingSnapshot?.address || venue.address || '').trim(),
           wardId: String(pendingSnapshot?.wardId || pendingSnapshot?.ward_id || venue.ward_id || mergedMetadata.wardId || '').trim(),
           latitude: resolvedLatitude,
@@ -916,13 +932,74 @@ function MerchantVenueEditForm({ editVenueId = null }) {
     }
   };
 
+  const handleMainCategoryChange = (event) => {
+    const nextMainCategoryId = String(event.target.value || '').trim();
+    const childCategories = placeCategoryTree.childrenByParentId.get(Number(nextMainCategoryId)) || [];
+
+    unlockResubmitIfNeeded();
+    setFormData((prev) => ({
+      ...prev,
+      mainCategory: nextMainCategoryId,
+      category: childCategories.length ? '' : nextMainCategoryId
+    }));
+
+    setFormErrors((prev) => ({
+      ...prev,
+      category: '',
+      subcategory: ''
+    }));
+
+    if (submitStatus?.type === 'success') {
+      setSubmitStatus(null);
+    }
+  };
+
+  const handleSubcategoryChange = (event) => {
+    const nextCategoryId = String(event.target.value || '').trim();
+
+    unlockResubmitIfNeeded();
+    setFormData((prev) => ({
+      ...prev,
+      category: nextCategoryId
+    }));
+
+    setFormErrors((prev) => ({
+      ...prev,
+      category: '',
+      subcategory: ''
+    }));
+
+    if (submitStatus?.type === 'success') {
+      setSubmitStatus(null);
+    }
+  };
+
+  useEffect(() => {
+    if (!placeCategories.length || !formData.category) {
+      return;
+    }
+
+    const categoryBranch = resolveCategoryBranch(formData.category, placeCategoryTree);
+    const nextMainCategoryId = String(categoryBranch.mainCategory?.id || formData.mainCategory || '').trim();
+
+    if (nextMainCategoryId && nextMainCategoryId !== String(formData.mainCategory || '').trim()) {
+      setFormData((prev) => ({
+        ...prev,
+        mainCategory: nextMainCategoryId
+      }));
+    }
+  }, [formData.category, formData.mainCategory, placeCategories, placeCategoryTree]);
+
   const validateReviewForm = () => {
     const errors = {};
+    const requiresSubcategory = selectedMainCategoryChildren.length > 0;
 
     if (!formData.venueName.trim()) errors.venueName = 'Venue name is required';
-    if (!formData.category) errors.category = 'Category is required';
+    if (!formData.mainCategory) errors.category = 'Main category is required';
+    if (requiresSubcategory && !formData.category) errors.subcategory = 'Subcategory is required';
+    if (!requiresSubcategory && !formData.category) errors.category = 'Category is required';
     if (formData.category && !placeCategories.some((category) => String(category.id) === String(formData.category))) {
-      errors.category = 'Selected category is not available';
+      errors.subcategory = requiresSubcategory ? 'Selected subcategory is not available' : 'Selected category is not available';
     }
     if (!categoriesLoading && !placeCategories.length) {
       errors.category = 'No active categories found. Contact admin to add categories.';
@@ -1374,6 +1451,7 @@ function MerchantVenueEditForm({ editVenueId = null }) {
       setTimeout(() => {
         setFormData({
           venueName: '',
+          mainCategory: '',
           category: '',
           address: '',
           wardId: '',
@@ -1617,54 +1695,105 @@ function MerchantVenueEditForm({ editVenueId = null }) {
           </div>
 
           {isReviewVariantActive ? (
-            <div className="form-row">
-              <div className="form-group">
-                <label htmlFor="venueName">
-                  Venue Name <span className="required">*</span>
-                  {formErrors.venueName && <span className="error-text"> - {formErrors.venueName}</span>}
-                </label>
-                <input
-                  type="text"
-                  id="venueName"
-                  name="venueName"
-                  value={formData.venueName}
-                  onChange={handleInputChange}
-                  placeholder="Enter venue name"
-                  required
-                  className={`form-input ${formErrors.venueName ? 'input-error' : ''}`}
-                />
+            <>
+              <div className="form-row">
+                <div className="form-group">
+                  <label htmlFor="venueName">
+                    Venue Name <span className="required">*</span>
+                    {formErrors.venueName && <span className="error-text"> - {formErrors.venueName}</span>}
+                  </label>
+                  <input
+                    type="text"
+                    id="venueName"
+                    name="venueName"
+                    value={formData.venueName}
+                    onChange={handleInputChange}
+                    placeholder="Enter venue name"
+                    required
+                    className={`form-input ${formErrors.venueName ? 'input-error' : ''}`}
+                  />
+                </div>
+
+                {!isEditMode ? (
+                  <div className="form-group">
+                    <label htmlFor="phone">
+                      Phone Number <span className="required">*</span>
+                      {formErrors.phone && <span className="error-text"> - {formErrors.phone}</span>}
+                    </label>
+                    <input
+                      type="tel"
+                      id="phone"
+                      name="phone"
+                      value={formData.phone}
+                      onChange={handleInputChange}
+                      placeholder="e.g., +84 123 456 789"
+                      inputMode="numeric"
+                      maxLength={11}
+                      pattern="[0-9]{10,11}"
+                      required
+                      className={`form-input ${formErrors.phone ? 'input-error' : ''}`}
+                    />
+                  </div>
+                ) : null}
               </div>
 
-              <div className="form-group">
-                <label htmlFor="category">
-                  Category <span className="required">*</span>
-                  {formErrors.category && <span className="error-text"> - {formErrors.category}</span>}
-                </label>
-                <select
-                  id="category"
-                  name="category"
-                  value={formData.category}
-                  onChange={handleInputChange}
-                  required
-                  disabled={categoriesLoading}
-                  className={`form-input ${formErrors.category ? 'input-error' : ''}`}
-                >
-                  <option value="">
-                    {categoriesLoading ? 'Loading categories...' : 'Select a category'}
-                  </option>
-                  {placeCategories.map((category) => (
-                    <option key={category.id} value={String(category.id)}>
-                      {category.name}
+              <div className="form-row">
+                <div className="form-group">
+                  <label htmlFor="mainCategory">
+                    Category <span className="required">*</span>
+                    {formErrors.category && <span className="error-text"> - {formErrors.category}</span>}
+                  </label>
+                  <select
+                    id="mainCategory"
+                    name="mainCategory"
+                    value={formData.mainCategory}
+                    onChange={handleMainCategoryChange}
+                    required
+                    disabled={categoriesLoading}
+                    className={`form-input ${formErrors.category ? 'input-error' : ''}`}
+                  >
+                    <option value="">
+                      {categoriesLoading ? 'Loading categories...' : 'Select a main category'}
                     </option>
-                  ))}
-                </select>
+                    {mainCategories.map((category) => (
+                      <option key={category.id} value={String(category.id)}>
+                        {category.name}
+                      </option>
+                    ))}
+                  </select>
 
-                {categoryLoadError ? <p className="error-text">{categoryLoadError}</p> : null}
+                  {categoryLoadError ? <p className="error-text">{categoryLoadError}</p> : null}
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="subcategory">
+                    Subcategory
+                    {selectedMainCategoryChildren.length ? <span className="required">*</span> : null}
+                    {formErrors.subcategory && <span className="error-text"> - {formErrors.subcategory}</span>}
+                  </label>
+                  <select
+                    id="subcategory"
+                    name="subcategory"
+                    value={selectedMainCategoryChildren.length ? formData.category : ''}
+                    onChange={handleSubcategoryChange}
+                    disabled={categoriesLoading || !selectedMainCategoryChildren.length}
+                    className={`form-input ${formErrors.subcategory ? 'input-error' : ''}`}
+                  >
+                    <option value="">
+                      {selectedMainCategoryChildren.length ? 'Select a subcategory' : 'No subcategory required'}
+                    </option>
+                    {selectedMainCategoryChildren.map((subcategory) => (
+                      <option key={subcategory.id} value={String(subcategory.id)}>
+                        {subcategory.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
-            </div>
+            </>
           ) : null}
 
-          {!isEditMode || activeEditVariant === EDIT_VARIANTS.SIMPLE ? (
+          {isEditMode && activeEditVariant === EDIT_VARIANTS.SIMPLE ? (
             <>
               <div className="form-group">
                 <label htmlFor="phone">
@@ -1685,20 +1814,22 @@ function MerchantVenueEditForm({ editVenueId = null }) {
                   className={`form-input ${formErrors.phone ? 'input-error' : ''}`}
                 />
               </div>
-
-              <div className="form-group">
-                <label htmlFor="description">Description</label>
-                <textarea
-                  id="description"
-                  name="description"
-                  value={formData.description}
-                  onChange={handleInputChange}
-                  placeholder="Tell us about your venue, atmosphere, specialties..."
-                  rows="5"
-                  className="form-textarea"
-                />
-              </div>
             </>
+          ) : null}
+
+          {!isEditMode || activeEditVariant === EDIT_VARIANTS.SIMPLE ? (
+            <div className="form-group">
+              <label htmlFor="description">Description</label>
+              <textarea
+                id="description"
+                name="description"
+                value={formData.description}
+                onChange={handleInputChange}
+                placeholder="Tell us about your venue, atmosphere, specialties..."
+                rows="5"
+                className="form-textarea"
+              />
+            </div>
           ) : null}
         </div>
 
