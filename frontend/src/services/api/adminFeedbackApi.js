@@ -59,3 +59,31 @@ export async function deleteAdminFeedbackReport(feedbackId, { deleteTarget = fal
   });
   return response.data;
 }
+
+export async function searchAdminUsers(searchQuery) {
+  const response = await apiClient.get('/admin/users/search', {
+    params: {
+      query: searchQuery,
+    },
+  });
+  return response.data;
+}
+
+export async function sendContactEmail(userId, { title, content, attachments }) {
+  const formData = new FormData();
+  formData.append('userId', userId);
+  formData.append('title', title || '');
+  formData.append('content', content || '');
+  
+  if (Array.isArray(attachments)) {
+    attachments.forEach((file, index) => {
+      formData.append(`attachments`, file);
+    });
+  }
+
+  const response = await apiClient.post('/admin/users/send-contact-email', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+
+  return response.data;
+}

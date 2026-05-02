@@ -743,11 +743,15 @@ function VenueDetailPage() {
 	const [showShareModal, setShowShareModal] = useState(false);
 	const [showVenueReportModal, setShowVenueReportModal] = useState(false);
 	const [showReviewReportModal, setShowReviewReportModal] = useState(false);
+	const [showReplyReportModal, setShowReplyReportModal] = useState(false);
 	const [activeReviewToReport, setActiveReviewToReport] = useState(null);
+	const [activeReplyToReport, setActiveReplyToReport] = useState(null);
 	const [submittingVenueReport, setSubmittingVenueReport] = useState(false);
 	const [submittingReviewReport, setSubmittingReviewReport] = useState(false);
+	const [submittingReplyReport, setSubmittingReplyReport] = useState(false);
 	const [venueReportStatus, setVenueReportStatus] = useState({ type: '', message: '' });
 	const [reviewReportStatus, setReviewReportStatus] = useState({ type: '', message: '' });
+	const [replyReportStatus, setReplyReportStatus] = useState({ type: '', message: '' });
 	const [venueReportForm, setVenueReportForm] = useState({
 		reason: '',
 		description: '',
@@ -755,6 +759,10 @@ function VenueDetailPage() {
 		attachment: null
 	});
 	const [reviewReportForm, setReviewReportForm] = useState({
+		reason: 'inappropriate_language',
+		description: ''
+	});
+	const [replyReportForm, setReplyReportForm] = useState({
 		reason: 'inappropriate_language',
 		description: ''
 	});
@@ -999,6 +1007,20 @@ function VenueDetailPage() {
 		setShowReviewReportModal(true);
 	};
 
+	const openReplyReportModal = (review, reply) => {
+		if (!reply) {
+			return;
+		}
+
+		setActiveReplyToReport({ review, reply });
+		setReplyReportForm({
+			reason: 'inappropriate_language',
+			description: ''
+		});
+		setReplyReportStatus({ type: '', message: '' });
+		setShowReplyReportModal(true);
+	};
+
 	const handleSubmitVenueReport = async (event) => {
 		event.preventDefault();
 
@@ -1111,6 +1133,65 @@ function VenueDetailPage() {
 			});
 		} finally {
 			setSubmittingReviewReport(false);
+		}
+	};
+
+	const handleSubmitReplyReport = async (event) => {
+		event.preventDefault();
+
+		if (!activeReplyToReport?.reply) {
+			return;
+		}
+
+		if (!replyReportForm.reason) {
+			setReplyReportStatus({ type: 'error', message: 'Please select a report reason.' });
+			return;
+		}
+
+		setSubmittingReplyReport(true);
+		setReplyReportStatus({ type: '', message: '' });
+
+		const selectedReasonLabel =
+			REVIEW_REPORT_REASON_OPTIONS.find((item) => item.value === replyReportForm.reason)?.label || 'Other';
+		const detailText = String(replyReportForm.description || '').trim();
+		const reply = activeReplyToReport.reply;
+		const parentReview = activeReplyToReport.review;
+
+		const message = [
+			`Review reply report #${reply.id || 'N/A'}`,
+			`Reason: ${selectedReasonLabel}`,
+			`Author: ${reply.authorName || 'Anonymous'}`,
+			`Content: ${reply.content || ''}`,
+			detailText ? `Details: ${detailText}` : ''
+		]
+			.filter(Boolean)
+			.join('\n');
+
+		try {
+			await submitFeedback({
+				category: 'review_report',
+				message,
+				contactEmail: user?.email || '',
+				metadata: {
+					contextType: 'review_reply',
+					contextId: reply?.id,
+					parentReviewId: parentReview?.id,
+					venueId: venue?.id,
+					venueName: resolveVenueName(venue)
+				}
+			});
+
+			setReplyReportStatus({ type: 'success', message: 'Reply report submitted successfully.' });
+			window.setTimeout(() => {
+				setShowReplyReportModal(false);
+			}, 700);
+		} catch (submitError) {
+			setReplyReportStatus({
+				type: 'error',
+				message: submitError?.response?.data?.message || 'Unable to submit reply report right now.'
+			});
+		} finally {
+			setSubmittingReplyReport(false);
 		}
 	};
 
@@ -2621,6 +2702,15 @@ function VenueDetailPage() {
 													<span>{i18n.discuss}</span>
 												</button>
 
+												<button
+													type="button"
+													className="venue-review-action-btn"
+													onClick={() => openReplyReportModal(review, reply)}
+												>
+													<span aria-hidden="true">⚠</span>
+													<span>Report</span>
+												</button>
+
 												{reply.canDelete ? (
 													<button
 														type="button"
@@ -2789,6 +2879,66 @@ function VenueDetailPage() {
 								</button>
 								<button type="submit" className="is-danger" disabled={submittingReviewReport}>
 									{submittingReviewReport ? 'Submitting...' : 'Submit report'}
+								</button>
+							</div>
+						</form>
+					</div>
+				</div>
+			) : null}
+
+			{showReplyReportModal && activeReplyToReport?.reply ? (
+				<div className="venue-modal-overlay" onClick={() => setShowReplyReportModal(false)}>
+					<div className="venue-modal-card venue-comment-report-modal" onClick={(event) => event.stopPropagation()}>
+						<header className="venue-report-modal-head">
+							<h3>🚨 Report reply</h3>
+							<button type="button" onClick={() => setShowReplyReportModal(false)}>×</button>
+						</header>
+
+						<p className="venue-report-intro">Please select a reason and describe the reply issue in detail.</p>
+
+						<div className="venue-comment-report-preview">
+							<strong>{activeReplyToReport.reply.authorName || 'Anonymous'}</strong>
+							<p>{activeReplyToReport.reply.content || ''}</p>
+						</div>
+
+						<form className="venue-report-modal-form" onSubmit={handleSubmitReplyReport}>
+							<fieldset className="venue-report-radio-grid">
+								<legend>Report reason:</legend>
+								{REVIEW_REPORT_REASON_OPTIONS.map((item) => (
+									<label key={`reply-report-reason-${item.value}`}>
+										<input
+											type="radio"
+											name="venue-reply-report-reason"
+											value={item.value}
+											checked={replyReportForm.reason === item.value}
+											onChange={(event) => setReplyReportForm((prev) => ({ ...prev, reason: event.target.value }))}
+										/>
+										<span>{item.label}</span>
+									</label>
+								))}
+							</fieldset>
+
+							<label>
+								<textarea
+									rows="3"
+									value={replyReportForm.description}
+									onChange={(event) => setReplyReportForm((prev) => ({ ...prev, description: event.target.value }))}
+									placeholder="Describe the issue in detail..."
+								/>
+							</label>
+
+							<p className="venue-report-warning">⚠️ False reports may lead to account restrictions</p>
+
+							{replyReportStatus.message ? (
+								<p className={`venue-report-status ${replyReportStatus.type}`}>{replyReportStatus.message}</p>
+							) : null}
+
+							<div className="venue-report-actions">
+								<button type="button" onClick={() => setShowReplyReportModal(false)}>
+									Cancel
+								</button>
+								<button type="submit" className="is-danger" disabled={submittingReplyReport}>
+									{submittingReplyReport ? 'Submitting...' : 'Submit report'}
 								</button>
 							</div>
 						</form>
