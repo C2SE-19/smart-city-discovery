@@ -308,6 +308,12 @@ function resolvePriorityQueuedAt(venue) {
   return Number.isNaN(parsed.getTime()) ? Number.POSITIVE_INFINITY : parsed.getTime();
 }
 
+function resolveLocationUpdateQueuedAt(request) {
+  const value = request?.submitted_at || request?.created_at || '';
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? Number.POSITIVE_INFINITY : parsed.getTime();
+}
+
 function resolveStandardQueuedAt(venue) {
   const value = venue?.submitted_at || venue?.created_at || '';
   const parsed = new Date(value);
@@ -1057,9 +1063,27 @@ function AdminBoundaryPage() {
   );
   const pendingLocationUpdateRequests = useMemo(
     () =>
-      venueUpdateRequests.filter(
-        (request) => String(request?.status || '').toLowerCase() === 'pending'
-      ),
+      venueUpdateRequests
+        .filter((request) => String(request?.status || '').toLowerCase() === 'pending')
+        .slice()
+        .sort((firstRequest, secondRequest) => {
+          const firstIsPriority = Boolean(firstRequest?.has_priority_approval);
+          const secondIsPriority = Boolean(secondRequest?.has_priority_approval);
+
+          if (firstIsPriority && !secondIsPriority) {
+            return -1;
+          }
+
+          if (!firstIsPriority && secondIsPriority) {
+            return 1;
+          }
+
+          if (firstIsPriority && secondIsPriority) {
+            return resolveLocationUpdateQueuedAt(firstRequest) - resolveLocationUpdateQueuedAt(secondRequest);
+          }
+
+          return resolveLocationUpdateQueuedAt(secondRequest) - resolveLocationUpdateQueuedAt(firstRequest);
+        }),
     [venueUpdateRequests]
   );
 
@@ -1421,8 +1445,15 @@ function AdminBoundaryPage() {
     const focusSource = pendingQueueView === 'updates'
       ? selectedUpdateActiveSnapshot
       : selectedVenue;
-    const latitude = Number(focusSource?.latitude);
-    const longitude = Number(focusSource?.longitude);
+
+    const rawLatitude = focusSource?.latitude;
+    const rawLongitude = focusSource?.longitude;
+    if (rawLatitude === null || rawLatitude === undefined || rawLongitude === null || rawLongitude === undefined) {
+      return;
+    }
+
+    const latitude = Number(rawLatitude);
+    const longitude = Number(rawLongitude);
 
     if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
       setMapCenter([latitude, longitude]);
@@ -2958,6 +2989,7 @@ function AdminBoundaryPage() {
                       onClick={() => handleOpenUpdateRequestDetails(request.id)}
                     >
                       <strong>
+                        {request.has_priority_approval ? <span className="admin-priority-star-badge">★ Priority</span> : null}
                         <span className="admin-list-item-title">
                           {request.venue_title || request.venue_name || `Venue #${request.venue_id}`}
                         </span>
