@@ -9,6 +9,7 @@ import axios from 'axios';
 import { FiGrid, FiHeart, FiMessageSquare, FiStar, FiUser } from 'react-icons/fi';
 import UserPreferenceWizard from '../../components/preferences/UserPreferenceWizard';
 import { fetchUserPreferences } from '../../services/api/userPreferencesApi';
+import { getApiBaseUrl } from '../../services/api/client';
 import './ProfilePage.css';
 
 const COPY = {
@@ -410,12 +411,7 @@ function ProfilePage() {
   const [userPreference, setUserPreference] = useState(null);
   const menuIdSet = useMemo(() => new Set(MenuItems.map((item) => item.id)), [MenuItems]);
 
-  const apiUrl = useMemo(
-    () =>
-      import.meta.env.VITE_API_BASE_URL
-      || (import.meta.env.DEV ? 'http://localhost:3000/api' : '/api'),
-    []
-  );
+  const apiUrl = useMemo(() => getApiBaseUrl(), []);
 
   const apiBase = useMemo(() => apiUrl.replace(/\/api\/v1$|\/api$/i, ''), [apiUrl]);
 

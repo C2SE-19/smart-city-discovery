@@ -1,10 +1,38 @@
 import axios from 'axios';
 
-const DEFAULT_API_BASE_URL = import.meta.env.DEV ? 'http://localhost:3000/api' : '/api';
+const DEV_API_FALLBACK = 'http://localhost:3000/api';
 
 function normalizeBaseUrl(value) {
   const trimmed = String(value || '').trim();
   return trimmed.replace(/\/+$/, '');
+}
+
+export function getApiBaseUrl() {
+  const envBaseUrl = String(import.meta.env.VITE_API_BASE_URL || '').trim();
+
+  if (import.meta.env.DEV) {
+    return normalizeBaseUrl(envBaseUrl || DEV_API_FALLBACK);
+  }
+
+  return '/api';
+}
+
+export function getApiOrigin() {
+  const baseUrl = getApiBaseUrl();
+
+  if (typeof window !== 'undefined' && window.location) {
+    try {
+      return new URL(baseUrl, window.location.origin).origin;
+    } catch {
+      return window.location.origin;
+    }
+  }
+
+  try {
+    return new URL(baseUrl).origin;
+  } catch {
+    return 'http://localhost:3000';
+  }
 }
 
 function resolveFallbackBaseUrl(baseUrl) {
@@ -21,7 +49,7 @@ function resolveFallbackBaseUrl(baseUrl) {
   return '';
 }
 
-const baseURL = normalizeBaseUrl(import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL);
+const baseURL = getApiBaseUrl();
 
 export const apiClient = axios.create({
   baseURL,

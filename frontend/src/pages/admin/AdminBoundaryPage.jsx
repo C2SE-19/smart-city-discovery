@@ -31,6 +31,7 @@ import {
   formatCategoryBranchLabel,
   normalizeCategoryIcon
 } from '../../utils/placeCategoryTree';
+import { getApiOrigin } from '../../services/api/client';
 import './AdminBoundaryPage.css';
 
 const DEFAULT_CENTER = [16.0471, 108.2068];
@@ -544,24 +545,7 @@ function resolveAssetUrl(rawUrl) {
     return normalizedUrl;
   }
 
-  const configuredBaseUrl =
-    import.meta.env.VITE_API_BASE_URL
-    || (import.meta.env.DEV ? 'http://localhost:3000/api/v1' : '/api');
-  let apiOrigin = 'http://localhost:3000';
-
-  if (typeof window !== 'undefined') {
-    try {
-      apiOrigin = new URL(configuredBaseUrl, window.location.origin).origin;
-    } catch {
-      apiOrigin = window.location.origin;
-    }
-  } else {
-    try {
-      apiOrigin = new URL(configuredBaseUrl).origin;
-    } catch {
-      apiOrigin = 'http://localhost:3000';
-    }
-  }
+  const apiOrigin = getApiOrigin();
 
   if (normalizedUrl.startsWith('/')) {
     return `${apiOrigin}${normalizedUrl}`;

@@ -2,6 +2,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { ROLES } from '../constants/roles';
 import axios from 'axios';
+import { getApiBaseUrl } from '../services/api/client';
 
 const AuthContext = createContext(null);
 const AUTH_STORAGE_KEY = 'auth';
@@ -86,9 +87,7 @@ export function AuthProvider({ children }) {
       return;
     }
 
-    const apiUrl =
-      import.meta.env.VITE_API_BASE_URL
-      || (import.meta.env.DEV ? 'http://localhost:3000/api' : '/api');
+    const apiUrl = getApiBaseUrl();
     const fetchProfile = async () => {
       try {
         const response = await axios.get(`${apiUrl}/users/profile`, {
