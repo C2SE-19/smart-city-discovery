@@ -7,6 +7,7 @@ import { APP_ROUTES } from '../../constants/routes';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { submitFeedback } from '../../services/feedbackService';
+import { getApiBaseUrl } from '../../services/api/client';
 import { fetchMerchantServices } from '../../services/api/merchantServicesApi';
 import { fetchPlaceCategories } from '../../services/api/placeCategoriesApi';
 import {
@@ -441,12 +442,7 @@ function CityMapPage() {
   const { token, user } = useAuth();
   const { language } = useLanguage();
   const t = translations[language] || translations.vi;
-  const apiUrl = useMemo(
-    () =>
-      import.meta.env.VITE_API_BASE_URL
-      || (import.meta.env.DEV ? 'http://localhost:3000/api' : '/api'),
-    []
-  );
+  const apiUrl = useMemo(() => getApiBaseUrl(), []);
   const apiBase = useMemo(() => apiUrl.replace(/\/api\/v1$|\/api$/i, ''), [apiUrl]);
   const [loadingBaseData, setLoadingBaseData] = useState(true);
   const [loadingVenues, setLoadingVenues] = useState(true);

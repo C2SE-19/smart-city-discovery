@@ -4,6 +4,7 @@ import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../../contexts/AuthContext';
 import translations from '../../constants/translations';
 import axios from 'axios';
+import { getApiBaseUrl } from '../../services/api/client';
 import { fetchPlaceCategories } from '../../services/api/placeCategoriesApi';
 import { fetchMerchantServices } from '../../services/api/merchantServicesApi';
 import { fetchWards } from '../../services/api/wardsApi';
@@ -805,12 +806,7 @@ function OverviewPage() {
     setCarouselIndex((prev) => (prev + 1) % carouselImages.length);
   };
 
-  const apiUrl = useMemo(
-    () =>
-      import.meta.env.VITE_API_BASE_URL
-      || (import.meta.env.DEV ? 'http://localhost:3000/api' : '/api'),
-    []
-  );
+  const apiUrl = useMemo(() => getApiBaseUrl(), []);
 
   const venueParams = useMemo(() => {
     const params = { status: 'approved' };

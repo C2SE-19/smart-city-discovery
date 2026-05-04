@@ -11,6 +11,7 @@ import {
   fetchMyVenueUpdateRequests,
   toggleMerchantVenuePauseStatus,
 } from '../../services/api/venuesApi';
+import { getApiOrigin } from '../../services/api/client';
 import './MerchantPostList.css';
 
 const MenuItems = [
@@ -29,26 +30,6 @@ const POST_STATUSES = {
 
 const FALLBACK_POST_IMAGE = 'https://via.placeholder.com/200x150?text=Venue';
 
-function resolveApiOrigin() {
-  const configuredBaseUrl =
-    import.meta.env.VITE_API_BASE_URL
-    || (import.meta.env.DEV ? 'http://localhost:3000/api/v1' : '/api');
-
-  if (typeof window !== 'undefined') {
-    try {
-      return new URL(configuredBaseUrl, window.location.origin).origin;
-    } catch {
-      return window.location.origin;
-    }
-  }
-
-  try {
-    return new URL(configuredBaseUrl).origin;
-  } catch {
-    return 'http://localhost:3000';
-  }
-}
-
 function resolveVenueImageUrl(rawUrl) {
   const normalizedUrl = String(rawUrl || '').trim();
 
@@ -60,7 +41,7 @@ function resolveVenueImageUrl(rawUrl) {
     return normalizedUrl;
   }
 
-  const apiOrigin = resolveApiOrigin();
+  const apiOrigin = getApiOrigin();
   if (normalizedUrl.startsWith('/')) {
     return `${apiOrigin}${normalizedUrl}`;
   }

@@ -37,6 +37,7 @@ Mục tiêu production:
 cd frontend
 npm install
 npm run build
+npx serve -s dist -l 5173
 ```
 
 Lệnh `npm run build` mặc định cấu hình frontend gọi API qua:
@@ -70,6 +71,9 @@ npm install -g pm2
 pm2 start ecosystem.config.js
 pm2 save
 ```
+## chạy bên frontend:
+pm2 start "npx serve -s frontend/dist -l 5173" --name frontend
+pm2 save
 
 Xem trạng thái/log:
 

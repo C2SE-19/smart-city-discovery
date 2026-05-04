@@ -22,6 +22,7 @@ import { useTheme } from '../../contexts/ThemeContext';
 import { normalizeVenueMetadata } from '../../components/map/cityMapUtils';
 import { fetchVenueChatThread, markChatThreadRead, sendVenueChatMessage } from '../../services/api/chatApi';
 import { trackTrendingAssignmentClick } from '../../services/api/adPackagesApi';
+import { getApiBaseUrl } from '../../services/api/client';
 import HeroVenueSection from './HeroVenueSection';
 import VenueInfoSection from './VenueInfoSection';
 import SimilarVenuesSection from './SimilarVenuesSection';
@@ -720,12 +721,7 @@ function VenueDetailPage() {
 	const { language } = useLanguage();
 	const { token, user } = useAuth();
 	const { theme } = useTheme();
-	const apiUrl = useMemo(
-		() =>
-			import.meta.env.VITE_API_BASE_URL
-			|| (import.meta.env.DEV ? 'http://localhost:3000/api' : '/api'),
-		[]
-	);
+	const apiUrl = useMemo(() => getApiBaseUrl(), []);
 	const apiBase = useMemo(() => apiUrl.replace(/\/api\/v1$|\/api$/i, ''), [apiUrl]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState('');

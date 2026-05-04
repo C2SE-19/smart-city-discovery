@@ -11,6 +11,7 @@ import {
   searchAdminUsers,
   sendContactEmail,
 } from '../../services/api/adminFeedbackApi';
+import { getApiBaseUrl } from '../../services/api/client';
 import './AdminFeedbackManagementPage.css';
 
 const REFRESH_INTERVAL_MS = 7000;
@@ -55,8 +56,7 @@ function resolveApiOrigin(baseUrl) {
   return 'http://localhost:3000';
 }
 
-const DEFAULT_API_BASE_URL = import.meta.env.DEV ? 'http://localhost:3000/api/v1' : '/api';
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL;
+const API_BASE_URL = getApiBaseUrl();
 const API_ORIGIN = resolveApiOrigin(API_BASE_URL);
 
 function toUploadedFileUrl(rawUrl) {
