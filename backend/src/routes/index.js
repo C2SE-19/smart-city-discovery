@@ -2,7 +2,6 @@ const express = require('express');
 const { query } = require('../config/database');
 const authRoutes = require('../modules/auth/auth.routes');
 const usersRoutes = require('../modules/users/users.routes');
-const { query } = require('../config/database');
 
 const router = express.Router();
 

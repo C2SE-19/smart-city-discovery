@@ -127,9 +127,26 @@ app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(specs));
 let chatV2;
 
 try {
+    // Try to load express-rate-limit if installed; fall back gracefully.
+    const _maybeRateLimit = (() => {
+        try { return require('express-rate-limit'); } catch (_) { return null; }
+    })();
+
+    const chatLimiter = _maybeRateLimit ? _maybeRateLimit({
+        windowMs: 1 * 60 * 1000, // 1 minute
+        max: 10, 
+        standardHeaders: true,
+        legacyHeaders: false
+    }) : null;
+
     chatV2 = require('./src/routes/chat.route');
-    app.use('/api/chat-v2', chatV2);
-    console.log('✅ chat-v2 route loaded');
+    if (chatLimiter) {
+        app.use('/api/chat-v2', chatLimiter, chatV2);
+        console.log('✅ chat-v2 route loaded (rate-limited)');
+    } else {
+        app.use('/api/chat-v2', chatV2);
+        console.log('✅ chat-v2 route loaded');
+    }
 } catch (e) {
     console.warn('❌ Could not mount /api/chat-v2:', e.message);
 }
