@@ -558,3 +558,257 @@
     align-items: stretch;
   }
 }
+
+/* Contact View Styles */
+.admin-contact-search-panel {
+  max-width: 380px;
+}
+
+.admin-contact-search-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.admin-contact-search-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.admin-contact-search-form input {
+  padding: 8px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+.admin-contact-search-form button {
+  padding: 8px 12px;
+  background: #0066cc;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.admin-contact-search-form button:hover:not(:disabled) {
+  background: #0052a3;
+}
+
+.admin-contact-search-form button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.admin-contact-selected-user {
+  margin-top: 20px;
+  padding: 12px;
+  background: #f0f4f8;
+  border-radius: 8px;
+  border-left: 4px solid #0066cc;
+}
+
+.admin-contact-selected-user h3 {
+  margin: 0 0 10px;
+  font-size: 0.95rem;
+  color: #1f2741;
+}
+
+.admin-contact-user-info {
+  margin: 0 0 12px;
+}
+
+.admin-contact-user-info p {
+  margin: 4px 0;
+  font-size: 0.85rem;
+  color: #656f86;
+}
+
+.admin-contact-selected-user button {
+  width: 100%;
+  padding: 6px;
+  background: #ef4444;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.admin-contact-search-results {
+  margin-top: 20px;
+  max-height: 400px;
+  overflow-y: auto;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+}
+
+.admin-contact-search-results h3 {
+  margin: 0;
+  padding: 10px 12px;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+  font-size: 0.9rem;
+}
+
+.admin-contact-user-result {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-bottom: 1px solid #e5e7eb;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.2s;
+}
+
+.admin-contact-user-result:hover {
+  background: #f0f4f8;
+}
+
+.admin-contact-user-result strong {
+  font-size: 0.9rem;
+  color: #1f2741;
+}
+
+.admin-contact-user-result span {
+  font-size: 0.8rem;
+  color: #656f86;
+  margin-top: 2px;
+}
+
+.admin-contact-form-panel {
+  flex: 1;
+  min-width: 0;
+}
+
+.admin-contact-compose-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.admin-contact-compose-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.admin-contact-compose-form input,
+.admin-contact-compose-form textarea {
+  padding: 10px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-family: inherit;
+}
+
+.admin-contact-compose-form textarea {
+  resize: vertical;
+}
+
+.admin-contact-images-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.admin-contact-images-section label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.admin-contact-images-section input {
+  padding: 8px 12px;
+  background: #f9fafb;
+  border: 1px dashed #d1d5db;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.admin-contact-images-section input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.admin-contact-image-previews {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.admin-contact-image-item {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #f9fafb;
+}
+
+.admin-contact-image-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.admin-contact-image-item button {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 4px;
+  background: rgba(239, 68, 68, 0.9);
+  color: white;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.admin-contact-image-item button:hover {
+  background: rgba(239, 68, 68, 1);
+}
+
+.admin-contact-form-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.admin-contact-form-actions button {
+  flex: 1;
+  padding: 10px 16px;
+  background: #0066cc;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.admin-contact-form-actions button:hover:not(:disabled) {
+  background: #0052a3;
+}
+
+.admin-contact-form-actions button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.admin-feedback-placeholder {
+  padding: 40px 20px;
+  text-align: center;
+  color: #989fb0;
+  background: #f9fafb;
+  border-radius: 8px;
+}

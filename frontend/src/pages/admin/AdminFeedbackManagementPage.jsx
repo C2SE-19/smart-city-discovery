@@ -8,6 +8,8 @@ import {
   fetchAdminFeedbackTypes,
   sendAdminFeedbackReply,
   updateAdminFeedbackType,
+  searchAdminUsers,
+  sendContactEmail,
 } from '../../services/api/adminFeedbackApi';
 import './AdminFeedbackManagementPage.css';
 
@@ -123,6 +125,20 @@ function AdminFeedbackManagementPage() {
   const [typeSubmitting, setTypeSubmitting] = useState(false);
   const [selectedTypeId, setSelectedTypeId] = useState(null);
   const [typeNameInput, setTypeNameInput] = useState('');
+
+  // Contact form states
+  const [contactUserSearchInput, setContactUserSearchInput] = useState('');
+  const [contactUserSearchResults, setContactUserSearchResults] = useState([]);
+  const [contactUserSearching, setContactUserSearching] = useState(false);
+  const [selectedContactUser, setSelectedContactUser] = useState(null);
+  const [contactFormData, setContactFormData] = useState({
+    title: '',
+    content: '',
+    images: []
+  });
+  const [contactSending, setContactSending] = useState(false);
+  const [contactError, setContactError] = useState('');
+  const [contactSuccess, setContactSuccess] = useState('');
 
   const selectedSummary = useMemo(
     () => reports.find((item) => Number(item.id) === Number(selectedReportId)) || null,
@@ -827,6 +843,239 @@ function AdminFeedbackManagementPage() {
     );
   };
 
+  const renderContactView = () => {
+    const contactImagePreviews = contactFormData.images.map((file) => ({
+      id: `${file.name}-${file.lastModified}-${file.size}`,
+      url: URL.createObjectURL(file),
+      file
+    }));
+
+    const handleUserSearch = async (e) => {
+      e.preventDefault();
+      const query = String(contactUserSearchInput || '').trim();
+      if (!query) {
+        setContactUserSearchResults([]);
+        return;
+      }
+
+      setContactUserSearching(true);
+      setContactError('');
+      try {
+        const results = await searchAdminUsers(query);
+        setContactUserSearchResults(Array.isArray(results) ? results : []);
+      } catch (error) {
+        setContactError(error?.response?.data?.message || 'Failed to search users');
+        setContactUserSearchResults([]);
+      } finally {
+        setContactUserSearching(false);
+      }
+    };
+
+    const handleSelectUser = (user) => {
+      setSelectedContactUser(user);
+      setContactUserSearchInput('');
+      setContactUserSearchResults([]);
+    };
+
+    const handleAddImage = (e) => {
+      const files = Array.from(e.target.files || []);
+      const newImages = contactFormData.images.concat(files).slice(0, 5);
+      setContactFormData((prev) => ({ ...prev, images: newImages }));
+    };
+
+    const handleRemoveImage = (imageId) => {
+      setContactFormData((prev) => ({
+        ...prev,
+        images: prev.images.filter(
+          (file) => `${file.name}-${file.lastModified}-${file.size}` !== imageId
+        )
+      }));
+    };
+
+    const handleSendEmail = async (e) => {
+      e.preventDefault();
+      if (!selectedContactUser) {
+        setContactError('Please select a user');
+        return;
+      }
+      if (!contactFormData.title.trim()) {
+        setContactError('Please enter email title');
+        return;
+      }
+      if (!contactFormData.content.trim()) {
+        setContactError('Please enter email content');
+        return;
+      }
+
+      setContactSending(true);
+      setContactError('');
+      setContactSuccess('');
+
+      try {
+        await sendContactEmail(selectedContactUser.id, {
+          title: contactFormData.title,
+          content: contactFormData.content,
+          attachments: contactFormData.images
+        });
+        
+        setContactSuccess('Email sent successfully!');
+        setContactFormData({ title: '', content: '', images: [] });
+        window.setTimeout(() => {
+          setContactSuccess('');
+        }, 3000);
+      } catch (error) {
+        setContactError(error?.response?.data?.message || 'Failed to send email');
+      } finally {
+        setContactSending(false);
+      }
+    };
+
+    return (
+      <section className="admin-feedback-split">
+        <article className="admin-feedback-card admin-contact-search-panel">
+          <div className="admin-feedback-card-head">
+            <h2>Search User</h2>
+            <p>Enter username, email, phone, or full name to find user contact</p>
+          </div>
+
+          <form className="admin-contact-search-form" onSubmit={handleUserSearch}>
+            <label>
+              Search
+              <input
+                type="text"
+                placeholder="Username, email, phone, or full name..."
+                value={contactUserSearchInput}
+                onChange={(e) => setContactUserSearchInput(e.target.value)}
+              />
+            </label>
+            <button type="submit" disabled={contactUserSearching || !contactUserSearchInput.trim()}>
+              {contactUserSearching ? 'Searching...' : 'Search'}
+            </button>
+          </form>
+
+          {contactError && <p className="admin-feedback-error">{contactError}</p>}
+
+          {selectedContactUser ? (
+            <div className="admin-contact-selected-user">
+              <h3>Selected User</h3>
+              <div className="admin-contact-user-info">
+                <p><strong>Name:</strong> {selectedContactUser.fullName || selectedContactUser.username || 'N/A'}</p>
+                <p><strong>Email:</strong> {selectedContactUser.email || 'No email'}</p>
+                <p><strong>Phone:</strong> {selectedContactUser.phone || 'No phone'}</p>
+              </div>
+              <button 
+                type="button" 
+                className="danger" 
+                onClick={() => {
+                  setSelectedContactUser(null);
+                  setContactFormData({ title: '', content: '', images: [] });
+                }}
+              >
+                Change User
+              </button>
+            </div>
+          ) : null}
+
+          {contactUserSearchResults.length > 0 ? (
+            <div className="admin-contact-search-results">
+              <h3>Search Results</h3>
+              {contactUserSearchResults.map((user) => (
+                <button
+                  key={user.id}
+                  type="button"
+                  className="admin-contact-user-result"
+                  onClick={() => handleSelectUser(user)}
+                >
+                  <strong>{user.fullName || user.username || 'Anonymous'}</strong>
+                  <span>{user.email}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </article>
+
+        <article className="admin-feedback-card admin-contact-form-panel">
+          <div className="admin-feedback-card-head">
+            <h2>Compose Email</h2>
+            <p>Enter email details and optional images</p>
+          </div>
+
+          {selectedContactUser ? (
+            <form className="admin-contact-compose-form" onSubmit={handleSendEmail}>
+              <label>
+                Email Title
+                <input
+                  type="text"
+                  placeholder="Subject line..."
+                  value={contactFormData.title}
+                  onChange={(e) => setContactFormData((prev) => ({ ...prev, title: e.target.value }))}
+                  required
+                />
+              </label>
+
+              <label>
+                Email Content
+                <textarea
+                  rows="6"
+                  placeholder="Write your message here..."
+                  value={contactFormData.content}
+                  onChange={(e) => setContactFormData((prev) => ({ ...prev, content: e.target.value }))}
+                  required
+                />
+              </label>
+
+              <div className="admin-contact-images-section">
+                <label>
+                  Attach Images (Max 5)
+                  <input
+                    type="file"
+                    multiple
+                    accept="image/*"
+                    onChange={handleAddImage}
+                    disabled={contactFormData.images.length >= 5}
+                  />
+                </label>
+
+                {contactImagePreviews.length > 0 ? (
+                  <div className="admin-contact-image-previews">
+                    {contactImagePreviews.map((preview) => (
+                      <div key={preview.id} className="admin-contact-image-item">
+                        <img src={preview.url} alt="Preview" />
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveImage(preview.id)}
+                          aria-label="Remove image"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
+              {contactError ? (
+                <p className="admin-feedback-error">{contactError}</p>
+              ) : null}
+
+              {contactSuccess ? (
+                <p className="admin-feedback-success">{contactSuccess}</p>
+              ) : null}
+
+              <div className="admin-contact-form-actions">
+                <button type="submit" disabled={contactSending || !selectedContactUser}>
+                  {contactSending ? 'Sending...' : 'Send Email'}
+                </button>
+              </div>
+            </form>
+          ) : (
+            <p className="admin-feedback-placeholder">Please select a user from the search results to compose email</p>
+          )}
+        </article>
+      </section>
+    );
+  };
+
   return (
     <div className="admin-feedback-page">
       <section className="admin-feedback-hero">
@@ -859,9 +1108,16 @@ function AdminFeedbackManagementPage() {
         >
           Manage Feedback Reports
         </button>
+        <button
+          type="button"
+          className={activeView === 'contact' ? 'is-active' : ''}
+          onClick={() => setActiveView('contact')}
+        >
+          Contact
+        </button>
       </section>
 
-      {activeView === 'types' ? renderFeedbackTypesView() : renderFeedbackReportsView()}
+      {activeView === 'types' ? renderFeedbackTypesView() : activeView === 'reports' ? renderFeedbackReportsView() : renderContactView()}
 
       {lightboxImageUrl ? (
         <div

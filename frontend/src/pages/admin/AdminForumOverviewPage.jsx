@@ -8,7 +8,7 @@ function formatTime(value) {
   if (!value) return 'N/A';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return 'N/A';
-  return date.toLocaleString('vi-VN');
+  return date.toLocaleString('en-US');
 }
 
 function collectDescendantCommentIds(comments, rootCommentId) {
@@ -86,7 +86,7 @@ function AdminForumOverviewPage() {
       } catch (apiError) {
         if (isMounted) {
           const message = String(apiError?.response?.data?.message || apiError?.message || '').trim();
-          setError(message || 'Không thể tải dữ liệu diễn đàn.');
+          setError(message || 'Unable to load forum data.');
         }
       } finally {
         if (isMounted) {
@@ -123,7 +123,7 @@ function AdminForumOverviewPage() {
   };
 
   const handleDeletePost = async (postId) => {
-    const accepted = window.confirm('Bạn có chắc muốn xóa bài viết này không?');
+    const accepted = window.confirm('Are you sure you want to delete this post?');
     if (!accepted) return;
 
     setActionError('');
@@ -133,10 +133,10 @@ function AdminForumOverviewPage() {
     try {
       await deleteAdminForumPost(postId);
       setPosts((current) => current.filter((post) => String(post.id) !== String(postId)));
-      setActionSuccess('Đã xóa bài viết thành công.');
+      setActionSuccess('Post deleted successfully.');
     } catch (apiError) {
       const message = String(apiError?.response?.data?.message || apiError?.message || '').trim();
-      setActionError(message || 'Không thể xóa bài viết lúc này. Vui lòng thử lại.');
+      setActionError(message || 'Unable to delete this post right now. Please try again.');
     } finally {
       setDeletingPostId(null);
     }
@@ -167,12 +167,12 @@ function AdminForumOverviewPage() {
     const selectedIds = selectedCommentsByPost[String(postId)] || [];
 
     if (!selectedIds.length) {
-      setActionError('Vui lòng chọn ít nhất một bình luận để xóa.');
+      setActionError('Select at least one comment to delete.');
       setActionSuccess('');
       return;
     }
 
-    const accepted = window.confirm('Bạn có chắc muốn xóa các bình luận đã chọn không? Nếu chọn bình luận gốc, toàn bộ nhánh phản hồi sẽ bị xóa.');
+    const accepted = window.confirm('Are you sure you want to delete the selected comments? If a root comment is selected, its entire reply thread will be removed.');
     if (!accepted) return;
 
     setActionError('');
@@ -208,10 +208,10 @@ function AdminForumOverviewPage() {
       );
 
       setSelectedCommentsByPost((current) => ({ ...current, [String(postId)]: [] }));
-      setActionSuccess(`Đã xóa ${toRemove.size} bình luận.`);
+      setActionSuccess(`Deleted ${toRemove.size} comment(s).`);
     } catch (apiError) {
       const message = String(apiError?.response?.data?.message || apiError?.message || '').trim();
-      setActionError(message || 'Không thể xóa các bình luận đã chọn. Vui lòng thử lại.');
+      setActionError(message || 'Unable to delete the selected comments. Please try again.');
     } finally {
       setDeletingCommentsPostId(null);
     }
@@ -222,37 +222,35 @@ function AdminForumOverviewPage() {
       <header className="admin-forum-overview-header">
         <div>
           <p className="admin-forum-overview-eyebrow">Forum moderation workspace</p>
-          <h2>Xem diễn đàn</h2>
-          <p>
-            Xem toàn bộ bài viết và bình luận. Nội dung bị báo cáo sẽ được ưu tiên hiển thị phía trên và đánh dấu vàng.
-          </p>
+          <h2>Forum Overview</h2>
+          <p>Review all posts and comments. Reported content is prioritized and highlighted for faster moderation.</p>
         </div>
       </header>
 
-      <nav className="admin-forum-section-switch" aria-label="Điều hướng quản lý diễn đàn">
+      <nav className="admin-forum-section-switch" aria-label="Forum moderation navigation">
         <NavLink to={APP_ROUTES.ADMIN_FORUM_REPORTS} className={({ isActive }) => `admin-forum-switch-link ${isActive ? 'is-active' : ''}`}>
-          Xem báo cáo
+          Reports
         </NavLink>
         <NavLink to={APP_ROUTES.ADMIN_FORUM_VIEW} className={({ isActive }) => `admin-forum-switch-link ${isActive ? 'is-active' : ''}`}>
-          Xem diễn đàn
+          Forum
         </NavLink>
         <NavLink to={APP_ROUTES.ADMIN_FORUM_KEYWORDS} className={({ isActive }) => `admin-forum-switch-link ${isActive ? 'is-active' : ''}`}>
-          Cấm từ khóa
+          Banned Keywords
         </NavLink>
       </nav>
 
       <section className="admin-forum-overview-stats">
         <article>
           <strong>{summary.totalPosts}</strong>
-          <span>Tổng bài viết</span>
+          <span>Total Posts</span>
         </article>
         <article className="is-warning">
           <strong>{summary.reportedPosts}</strong>
-          <span>Bài viết bị báo cáo</span>
+          <span>Reported Posts</span>
         </article>
         <article className="is-warning">
           <strong>{summary.reportedComments}</strong>
-          <span>Bình luận bị báo cáo</span>
+          <span>Reported Comments</span>
         </article>
       </section>
 
@@ -267,16 +265,16 @@ function AdminForumOverviewPage() {
               setSearchTerm('');
             }
           }}
-          placeholder="Tìm theo tiêu đề, nội dung, tác giả hoặc bình luận..."
-          aria-label="Tìm kiếm diễn đàn"
+          placeholder="Search by title, content, author, or comment..."
+          aria-label="Search forum content"
         />
-        <button type="submit">Tìm kiếm</button>
+        <button type="submit">Search</button>
       </form>
 
       {error ? <p className="admin-forum-overview-error">{error}</p> : null}
       {actionError ? <p className="admin-forum-overview-error">{actionError}</p> : null}
       {actionSuccess ? <p className="admin-forum-overview-loading">{actionSuccess}</p> : null}
-      {loading ? <p className="admin-forum-overview-loading">Đang tải dữ liệu diễn đàn...</p> : null}
+      {loading ? <p className="admin-forum-overview-loading">Loading forum data...</p> : null}
 
       <div className="admin-forum-overview-list">
         {posts.map((post) => {
@@ -294,13 +292,13 @@ function AdminForumOverviewPage() {
                 <div>
                   <h3>{post.title}</h3>
                   <p>
-                    Tác giả: <strong>{post.author}</strong> · Chủ đề: <strong>{post.category}</strong>
+                    Author: <strong>{post.author}</strong> · Topic: <strong>{post.category}</strong>
                   </p>
                 </div>
                 <div className="admin-forum-overview-meta">
-                  {postIsReported ? <span className="admin-forum-overview-badge is-post">Bài viết bị báo cáo</span> : null}
+                  {postIsReported ? <span className="admin-forum-overview-badge is-post">Reported Post</span> : null}
                   {!postIsReported && reportedCommentsCount > 0 ? (
-                    <span className="admin-forum-overview-badge is-comment">Có bình luận bị báo cáo</span>
+                    <span className="admin-forum-overview-badge is-comment">Reported Comments</span>
                   ) : null}
                   <span>{formatTime(post.lastReportedAt || post.createdAt)}</span>
                 </div>
@@ -317,10 +315,10 @@ function AdminForumOverviewPage() {
               ) : null}
 
               <div className="admin-forum-overview-chips">
-                <span>Lượt thích: {Number(post.likesCount || 0)}</span>
-                <span>Bình luận: {comments.length}</span>
-                <span className={postIsReported ? 'is-highlight' : ''}>Báo cáo bài viết: {Number(post.reportCount || 0)}</span>
-                <span className={reportedCommentsCount > 0 ? 'is-highlight' : ''}>Bình luận bị báo cáo: {reportedCommentsCount}</span>
+                <span>Likes: {Number(post.likesCount || 0)}</span>
+                <span>Comments: {comments.length}</span>
+                <span className={postIsReported ? 'is-highlight' : ''}>Post reports: {Number(post.reportCount || 0)}</span>
+                <span className={reportedCommentsCount > 0 ? 'is-highlight' : ''}>Comment reports: {reportedCommentsCount}</span>
               </div>
 
               <div className="admin-forum-overview-actions">
@@ -331,8 +329,8 @@ function AdminForumOverviewPage() {
                   disabled={deletingCommentsPostId === post.id || deletingPostId === post.id}
                 >
                   {deletingCommentsPostId === post.id
-                    ? 'Đang xóa bình luận...'
-                    : `Xóa bình luận đã chọn${selectedCommentIds.length ? ` (${selectedCommentIds.length})` : ''}`}
+                    ? 'Deleting comments...'
+                    : `Delete selected comments${selectedCommentIds.length ? ` (${selectedCommentIds.length})` : ''}`}
                 </button>
                 <button
                   type="button"
@@ -340,12 +338,12 @@ function AdminForumOverviewPage() {
                   onClick={() => handleDeletePost(post.id)}
                   disabled={deletingPostId === post.id || deletingCommentsPostId === post.id}
                 >
-                  {deletingPostId === post.id ? 'Đang xóa...' : 'Xóa bài viết'}
+                  {deletingPostId === post.id ? 'Deleting...' : 'Delete post'}
                 </button>
               </div>
 
               <section className="admin-forum-overview-comments">
-                <h4>Bình luận ({comments.length})</h4>
+                <h4>Comments ({comments.length})</h4>
                 <ul>
                   {comments.map((comment) => {
                     const commentIsReported = Number(comment.reportCount || 0) > 0;
@@ -359,7 +357,7 @@ function AdminForumOverviewPage() {
                             onChange={() => handleToggleCommentSelection(post.id, comment.id)}
                             disabled={deletingCommentsPostId === post.id || deletingPostId === post.id}
                           />
-                          <span>Chọn xóa</span>
+                          <span>Select</span>
                         </label>
                         <div className="admin-forum-overview-comment-head">
                           <strong>{comment.author}</strong>
@@ -376,20 +374,20 @@ function AdminForumOverviewPage() {
                         ) : null}
 
                         {commentIsReported ? (
-                          <small className="admin-forum-overview-comment-flag">Bình luận bị báo cáo: {Number(comment.reportCount || 0)}</small>
+                          <small className="admin-forum-overview-comment-flag">Reported comments: {Number(comment.reportCount || 0)}</small>
                         ) : null}
                       </li>
                     );
                   })}
 
-                  {!comments.length ? <li className="is-empty">Chưa có bình luận.</li> : null}
+                  {!comments.length ? <li className="is-empty">No comments yet.</li> : null}
                 </ul>
               </section>
             </article>
           );
         })}
 
-        {!loading && !posts.length ? <p className="admin-forum-overview-empty">Không có bài viết diễn đàn phù hợp điều kiện tìm kiếm.</p> : null}
+        {!loading && !posts.length ? <p className="admin-forum-overview-empty">No forum posts match the current search.</p> : null}
       </div>
     </section>
   );

@@ -21,6 +21,10 @@ import {
 import OverviewCityMapCard from '../../components/map/OverviewCityMapCard';
 import heroFoodImage from '../../assets/images/anh1.png';
 import UserPreferenceWizard from '../../components/preferences/UserPreferenceWizard';
+import {
+  buildPlaceCategoryTree,
+  normalizeCategoryIcon
+} from '../../utils/placeCategoryTree';
 import './OverviewPage.css';
 
 const FALLBACK_VENUE_IMAGE =
@@ -487,6 +491,75 @@ function FilterGroup({ title, options, selectedValues, optionValue, optionLabel,
   );
 }
 
+function OverviewCategoryFilterGroup({
+  rootCategories,
+  childCategoriesByParentId,
+  selectedValues,
+  expandedRootIds,
+  onToggleBranch,
+  onToggleChild,
+}) {
+  return (
+    <section className="overview-filter-group">
+      <header>
+        <h3>Place Categories</h3>
+      </header>
+
+      {!rootCategories.length ? (
+        <p className="overview-empty-copy">No options available.</p>
+      ) : (
+        <div className="overview-filter-options">
+          {rootCategories.map((category) => {
+            const categoryId = Number(category.id);
+            const childCategories = childCategoriesByParentId.get(categoryId) || [];
+            const isExpanded = expandedRootIds.includes(categoryId);
+            const isChecked = selectedValues.includes(categoryId);
+
+            return (
+              <div key={`overview-category-${categoryId}`} className="overview-category-branch">
+                <label className="overview-filter-option overview-filter-option-parent">
+                  <input
+                    type="checkbox"
+                    checked={isChecked}
+                    onChange={() => onToggleBranch(categoryId)}
+                  />
+                  <span className="overview-category-option-label">
+                    <b>{normalizeCategoryIcon(category.icon)}</b>
+                    <span>{category.name}</span>
+                  </span>
+                </label>
+
+                {childCategories.length && isExpanded ? (
+                  <div className="overview-category-children">
+                    {childCategories.map((subcategory) => {
+                      const subcategoryId = Number(subcategory.id);
+                      const checked = selectedValues.includes(subcategoryId);
+
+                      return (
+                        <label key={`overview-subcategory-${subcategoryId}`} className="overview-filter-option overview-filter-option-child">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => onToggleChild(subcategoryId)}
+                          />
+                          <span className="overview-category-option-label">
+                            <b>{normalizeCategoryIcon(subcategory.icon)}</b>
+                            <span>{subcategory.name}</span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function VenueCard({ venue, isFavorite, onToggleFavorite, onExplore, showDistance = false, userCoordinates = null }) {
   const venueName = venue.name || venue.title || 'Untitled venue';
   const venueAddress = venue.address || 'Address not available';
@@ -603,6 +676,7 @@ function OverviewPage() {
   const [submittedSearch, setSubmittedSearch] = useState('');
   const [showFilterPanel, setShowFilterPanel] = useState(false);
   const [selectedCategoryIds, setSelectedCategoryIds] = useState([]);
+  const [expandedCategoryRootIds, setExpandedCategoryRootIds] = useState([]);
   const [selectedWardIds, setSelectedWardIds] = useState([]);
   const [selectedServiceIds, setSelectedServiceIds] = useState([]);
   const [appliedCategoryIds, setAppliedCategoryIds] = useState([]);
@@ -667,6 +741,9 @@ function OverviewPage() {
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
   const [showCameraOverlay, setShowCameraOverlay] = useState(false);
+  const placeCategoryTree = useMemo(() => buildPlaceCategoryTree(categories), [categories]);
+  const rootPlaceCategories = placeCategoryTree.rootCategories;
+  const childCategoriesByParentId = placeCategoryTree.childrenByParentId;
 
   // Carousel state for hero float images
   const [carouselIndex, setCarouselIndex] = useState(0);
@@ -1266,6 +1343,7 @@ function OverviewPage() {
       return;
     }
     setSelectedCategoryIds([]);
+    setExpandedCategoryRootIds([]);
     setSelectedWardIds([]);
     setSelectedServiceIds([]);
     setAppliedCategoryIds([]);
@@ -1335,6 +1413,20 @@ function OverviewPage() {
     );
   };
 
+  const toggleCategoryBranchSelection = (categoryId) => {
+    setExpandedCategoryRootIds((currentIds) => (
+      currentIds.includes(categoryId)
+        ? currentIds
+        : [...currentIds, categoryId]
+    ));
+
+    setSelectedCategoryIds((currentIds) => {
+      return currentIds.includes(categoryId)
+        ? currentIds.filter((currentId) => currentId !== categoryId)
+        : [...currentIds, categoryId];
+    });
+  };
+
   const toggleWardSelection = (wardId) => {
     setSelectedWardIds((current) =>
       current.includes(wardId)
@@ -1376,6 +1468,7 @@ function OverviewPage() {
     setAiRefineMeta(null);
     setImageSearchVenues([]);
     setSelectedCategoryIds([]);
+    setExpandedCategoryRootIds([]);
     setSelectedWardIds([]);
     setSelectedServiceIds([]);
     setAppliedCategoryIds([]);
@@ -1765,6 +1858,7 @@ function OverviewPage() {
       setAiRefineMeta(null);
 
       setSelectedCategoryIds([]);
+      setExpandedCategoryRootIds([]);
       setSelectedWardIds([]);
       setSelectedServiceIds([]);
       setAppliedCategoryIds([]);
@@ -2474,13 +2568,13 @@ function OverviewPage() {
 
         {showFilterPanel ? (
           <div className="overview-filter-panel" role="region" aria-label="Filter options">
-            <FilterGroup
-              title="Place Categories"
-              options={categories}
+            <OverviewCategoryFilterGroup
+              rootCategories={rootPlaceCategories}
+              childCategoriesByParentId={childCategoriesByParentId}
               selectedValues={selectedCategoryIds}
-              optionValue={(category) => Number(category.id)}
-              optionLabel={(category) => category.name}
-              onToggle={toggleCategorySelection}
+              expandedRootIds={expandedCategoryRootIds}
+              onToggleBranch={toggleCategoryBranchSelection}
+              onToggleChild={toggleCategorySelection}
             />
 
             <FilterGroup
@@ -2851,111 +2945,7 @@ function OverviewPage() {
             </div>
           </div>
         </section>
-      ) : (
-        <section className="overview-section overview-content-lane overview-dynamic-showcase-section">
-          <div className="overview-section-heading">
-            <h2>Dynamic Category Showcase</h2>
-            <span />
-          </div>
-
-          {venueError ? <p className="overview-inline-error">{venueError}</p> : null}
-
-          {!loadingVenues && !venueError && !categorySections.length && !uncategorizedVenues.length ? (
-            <p className="overview-empty-copy">No approved venues match your current filters.</p>
-          ) : null}
-
-          <div className="overview-category-sections">
-            {categorySections.map((section) => (
-              <article key={`category-section-${section.id}`} className="overview-category-block">
-                <header className="overview-category-block-header">
-                  <div>
-                    <h3>{section.name}</h3>
-                    <p>
-                      {section.description ||
-                        ''}
-                    </p>
-                  </div>
-                </header>
-
-                {section.venues.length ? (
-                  <div className="overview-category-board">
-                    <button
-                      type="button"
-                      className="overview-slider-btn prev"
-                      aria-label={`Scroll ${section.name} left`}
-                      onClick={() => scrollCategorySlider(section.id, -1)}
-                    />
-                    <div
-                      className="overview-dynamic-grid overview-dynamic-grid-slider"
-                      ref={registerSliderRef(section.id)}
-                    >
-                      {section.venues.slice(0, 12).map((venue) => (
-                        <VenueCard
-                          key={`venue-${section.id}-${venue.id}`}
-                          venue={venue}
-                          isFavorite={isFavorite('place', venue.id)}
-                          onToggleFavorite={handleToggleFavorite}
-                          onExplore={handleExploreVenue}
-                        />
-                      ))}
-                    </div>
-                    <button
-                      type="button"
-                      className="overview-slider-btn next"
-                      aria-label={`Scroll ${section.name} right`}
-                      onClick={() => scrollCategorySlider(section.id, 1)}
-                    />
-                    {renderSliderPaginationDots(section.id)}
-                  </div>
-                ) : (
-                  <p className="overview-empty-copy">No approved places in this category yet.</p>
-                )}
-              </article>
-            ))}
-
-            {!selectedCategoryIds.length && uncategorizedVenues.length ? (
-              <article className="overview-category-block">
-                <header className="overview-category-block-header">
-                  <div>
-                    <h3>Other Places</h3>
-                    <p>Approved venues that are not linked to a place category yet.</p>
-                  </div>
-                </header>
-
-                <div className="overview-category-board">
-                  <button
-                    type="button"
-                    className="overview-slider-btn prev"
-                    aria-label="Scroll other places left"
-                    onClick={() => scrollCategorySlider('uncategorized', -1)}
-                  />
-                  <div
-                    className="overview-dynamic-grid overview-dynamic-grid-slider"
-                    ref={registerSliderRef('uncategorized')}
-                  >
-                    {uncategorizedVenues.slice(0, 12).map((venue) => (
-                      <VenueCard
-                        key={`uncategorized-${venue.id}`}
-                        venue={venue}
-                        isFavorite={isFavorite('place', venue.id)}
-                        onToggleFavorite={handleToggleFavorite}
-                        onExplore={handleExploreVenue}
-                      />
-                    ))}
-                  </div>
-                  <button
-                    type="button"
-                    className="overview-slider-btn next"
-                    aria-label="Scroll other places right"
-                    onClick={() => scrollCategorySlider('uncategorized', 1)}
-                  />
-                  {renderSliderPaginationDots('uncategorized')}
-                </div>
-              </article>
-            ) : null}
-          </div>
-        </section>
-      )}
+      ) : null}
 
       {!isCondensedMode && (
         <section className="overview-section overview-map-section" data-onboarding="overview-map">

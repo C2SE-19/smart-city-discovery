@@ -68,6 +68,34 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
+// Setup multer for contact email attachments
+const contactEmailUploadDir = path.join(__dirname, 'uploads', 'contact-emails');
+if (!fs.existsSync(contactEmailUploadDir)) {
+    fs.mkdirSync(contactEmailUploadDir, { recursive: true });
+}
+
+const contactEmailStorage = multer.diskStorage({
+    destination: contactEmailUploadDir,
+    filename: (_req, file, cb) => {
+        const safeName = file.originalname.replace(/\s+/g, '-');
+        cb(null, `${Date.now()}-${safeName}`);
+    }
+});
+
+const upload = multer({
+    storage: contactEmailStorage,
+    limits: { fileSize: 10 * 1024 * 1024, files: 5 },
+    fileFilter: (_req, file, cb) => {
+        const allowed = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+        if (allowed.includes(file.mimetype)) {
+            cb(null, true);
+        } else {
+            cb(new Error('Only image files are allowed'));
+        }
+    }
+});
+
+
 const swaggerUi = require('swagger-ui-express');
 const swaggerJsdoc = require('swagger-jsdoc');
 
@@ -279,6 +307,10 @@ function buildSanitizedMetadataSql(columnSql, alias = 'metadata') {
             ELSE ${columnSql}
         END AS ${alias}
     `;
+}
+
+function buildVenueMerchantDeletedSql(venueAlias = 'venues') {
+    return `LOWER(COALESCE(${venueAlias}.metadata ->> 'merchantDeleted', 'false')) = 'true'`;
 }
 
 async function hasVenueOwnerUserColumn() {
@@ -1044,6 +1076,7 @@ async function listOwnedVenueIdsByUserId(userId, db = pool, options = {}) {
             SELECT venues.id
             FROM venues
             WHERE ${buildResolvedVenueOwnerUserSql('venues')} = $1
+              AND NOT (${buildVenueMerchantDeletedSql('venues')})
               ${scopedVenueSql}
             ORDER BY COALESCE(venues.submitted_at, venues.created_at) DESC, venues.id DESC
         `,
@@ -1082,6 +1115,11 @@ function mapAdPackageHistoryRow(row) {
         selectedAt: row.selected_at || null,
         expiresAt: row.expires_at || null,
         deletedAt: row.deleted_at || null,
+        totalTrendingPushCountUsed: Number(row.total_trending_push_count_used || 0),
+        totalTrendingClicks: Number(row.total_trending_clicks || 0),
+        totalTrendingImpressions: Number(row.total_trending_impressions || 0),
+        lastDeactivatedAt: row.last_deactivated_at || null,
+        packageState: row.package_state || {},
         package: mapAdPackageRow({
             id: row.package_id || row.id,
             name: row.package_name || row.name,
@@ -1094,6 +1132,41 @@ function mapAdPackageHistoryRow(row) {
             updated_at: row.package_updated_at || row.updated_at
         })
     };
+}
+
+function buildAdPackagePurchaseStateSnapshot(assignments = [], totals = {}) {
+    const trendAssignments = (Array.isArray(assignments) ? assignments : [])
+        .map((assignment) => ({
+            venueId: Number.parseInt(assignment?.venue_id ?? assignment?.venueId, 10) || null,
+            trendPushCountUsed: Math.max(0, Math.trunc(Number(assignment?.trend_push_count_used ?? assignment?.trendPushCountUsed) || 0)),
+            trendActiveFrom: assignment?.trend_active_from ?? assignment?.trendActiveFrom ?? null,
+            trendActiveUntil: assignment?.trend_active_until ?? assignment?.trendActiveUntil ?? null,
+            trendCooldownUntil: assignment?.trend_cooldown_until ?? assignment?.trendCooldownUntil ?? null
+        }))
+        .filter((assignment) => Number.isFinite(assignment.venueId) && assignment.venueId > 0);
+
+    return {
+        trendAssignments,
+        totalTrendingPushCountUsed: Math.max(0, Math.trunc(Number(totals?.totalTrendingPushCountUsed) || 0)),
+        totalTrendingClicks: Math.max(0, Math.trunc(Number(totals?.totalTrendingClicks) || 0)),
+        totalTrendingImpressions: Math.max(0, Math.trunc(Number(totals?.totalTrendingImpressions) || 0)),
+        savedAt: new Date().toISOString()
+    };
+}
+
+function extractAdPackagePurchaseStateAssignments(packageState) {
+    const source = packageState && typeof packageState === 'object' ? packageState : {};
+    const storedAssignments = Array.isArray(source.trendAssignments) ? source.trendAssignments : [];
+
+    return storedAssignments
+        .map((assignment) => ({
+            venueId: Number.parseInt(assignment?.venueId ?? assignment?.venue_id, 10) || null,
+            trendPushCountUsed: Math.max(0, Math.trunc(Number(assignment?.trendPushCountUsed ?? assignment?.trend_push_count_used) || 0)),
+            trendActiveFrom: assignment?.trendActiveFrom ?? assignment?.trend_active_from ?? null,
+            trendActiveUntil: assignment?.trendActiveUntil ?? assignment?.trend_active_until ?? null,
+            trendCooldownUntil: assignment?.trendCooldownUntil ?? assignment?.trend_cooldown_until ?? null
+        }))
+        .filter((assignment) => Number.isFinite(assignment.venueId) && assignment.venueId > 0);
 }
 
 function buildAdPackagePurchaseOrderSql(alias = 'purchases') {
@@ -1183,6 +1256,11 @@ async function getLatestActiveUserAdPackagePurchase(userId, db = pool) {
                 purchases.payos_payment_link_id,
                 purchases.payos_checkout_url,
                 purchases.payos_status,
+                purchases.total_trending_push_count_used,
+                purchases.total_trending_clicks,
+                purchases.total_trending_impressions,
+                purchases.last_deactivated_at,
+                purchases.package_state,
                 packages.id AS package_id,
                 packages.name AS package_name,
                 packages.description AS package_description,
@@ -1200,6 +1278,68 @@ async function getLatestActiveUserAdPackagePurchase(userId, db = pool) {
               AND COALESCE(purchases.payment_status, '${AD_PACKAGE_PAYMENT_STATUS.paid}') = '${AD_PACKAGE_PAYMENT_STATUS.paid}'
               AND purchases.activated_at IS NOT NULL
               AND purchases.selected_at IS NOT NULL
+              AND purchases.expires_at IS NOT NULL
+              AND purchases.expires_at > NOW()
+              AND COALESCE(packages.status::text, 'active') = 'active'
+            ORDER BY ${buildAdPackagePurchaseOrderSql('purchases')}
+            LIMIT 1
+        `,
+        [normalizedUserId]
+    );
+
+    return result.rows.length ? mapAdPackageHistoryRow(result.rows[0]) : null;
+}
+
+async function getLatestEntitledUserAdPackagePurchase(userId, db = pool) {
+    const normalizedUserId = String(userId || '').trim();
+    if (!normalizedUserId) {
+        return null;
+    }
+
+    const result = await db.query(
+        `
+            SELECT
+                purchases.id AS purchase_id,
+                purchases.user_id AS purchase_user_id,
+                purchases.ad_package_id AS purchase_package_id,
+                purchases.purchased_at,
+                purchases.activated_at,
+                purchases.selected_at,
+                purchases.expires_at,
+                purchases.deleted_at,
+                purchases.payment_status,
+                purchases.payment_provider,
+                purchases.payment_amount,
+                purchases.payment_expires_at,
+                purchases.payment_confirmed_at,
+                purchases.paid_at,
+                purchases.payment_cancelled_at,
+                purchases.payment_reference,
+                purchases.payment_payload,
+                purchases.payos_order_code,
+                purchases.payos_payment_link_id,
+                purchases.payos_checkout_url,
+                purchases.payos_status,
+                purchases.total_trending_push_count_used,
+                purchases.total_trending_clicks,
+                purchases.total_trending_impressions,
+                purchases.last_deactivated_at,
+                purchases.package_state,
+                packages.id AS package_id,
+                packages.name AS package_name,
+                packages.description AS package_description,
+                packages.duration_hours AS package_duration_hours,
+                packages.priority_level AS package_priority_level,
+                packages.price AS package_price,
+                packages.status AS package_status,
+                packages.created_at AS package_created_at,
+                packages.updated_at AS package_updated_at
+            FROM ad_package_purchase_history AS purchases
+            JOIN ad_packages AS packages
+              ON packages.id = purchases.ad_package_id
+            WHERE purchases.user_id = $1
+              AND purchases.deleted_at IS NULL
+              AND COALESCE(purchases.payment_status, '${AD_PACKAGE_PAYMENT_STATUS.paid}') = '${AD_PACKAGE_PAYMENT_STATUS.paid}'
               AND purchases.expires_at IS NOT NULL
               AND purchases.expires_at > NOW()
               AND COALESCE(packages.status::text, 'active') = 'active'
@@ -1254,7 +1394,6 @@ async function syncUserAdPackageAssignments(userId, nextPackageId, db = pool, op
                 ON CONFLICT (user_id, venue_id)
                 DO UPDATE
                 SET ad_package_id = EXCLUDED.ad_package_id,
-                    trend_push_count_used = 0,
                     trend_active_from = NULL,
                     trend_active_until = NULL,
                     trend_cooldown_until = NULL,
@@ -1265,7 +1404,11 @@ async function syncUserAdPackageAssignments(userId, nextPackageId, db = pool, op
     } else {
         await db.query(
             `
-                DELETE FROM ad_package_assignments
+                UPDATE ad_package_assignments
+                SET trend_active_from = NULL,
+                    trend_active_until = NULL,
+                    trend_cooldown_until = NULL,
+                    updated_at = NOW()
                 WHERE user_id = $1::uuid
                   AND venue_id = ANY($2::int[])
             `,
@@ -2288,6 +2431,36 @@ async function activateMerchantAdPackageTransaction(req, res) {
             client
         );
 
+        const storedAssignmentStates = extractAdPackagePurchaseStateAssignments(mappedPurchase?.packageState);
+        if (storedAssignmentStates.length && affectedVenueIds.length) {
+            for (const assignmentState of storedAssignmentStates) {
+                if (!affectedVenueIds.includes(assignmentState.venueId)) {
+                    continue;
+                }
+
+                await client.query(
+                    `
+                        UPDATE ad_package_assignments
+                        SET trend_push_count_used = $2::integer,
+                            trend_active_from = $3::timestamptz,
+                            trend_active_until = $4::timestamptz,
+                            trend_cooldown_until = $5::timestamptz,
+                            updated_at = NOW()
+                        WHERE user_id = $1::uuid
+                          AND venue_id = $6::int
+                    `,
+                    [
+                        requesterUserId,
+                        assignmentState.trendPushCountUsed,
+                        assignmentState.trendActiveFrom,
+                        assignmentState.trendActiveUntil,
+                        assignmentState.trendCooldownUntil,
+                        assignmentState.venueId
+                    ]
+                );
+            }
+        }
+
         await client.query('COMMIT');
 
         invalidatePublicVenueCachesByVenueIds(affectedVenueIds);
@@ -2358,6 +2531,31 @@ async function deleteMerchantAdPackageTransaction(req, res) {
         }
 
         if (paymentStatus === AD_PACKAGE_PAYMENT_STATUS.paid) {
+            const assignmentSnapshotResult = await client.query(
+                `
+                    SELECT
+                        venue_id,
+                        trend_push_count_used,
+                        trend_active_from,
+                        trend_active_until,
+                        trend_cooldown_until
+                    FROM ad_package_assignments
+                    WHERE user_id = $1::uuid
+                      AND ad_package_id = $2
+                    ORDER BY venue_id ASC
+                `,
+                [requesterUserId, historyResult.rows[0].ad_package_id]
+            );
+
+            const packageStateSnapshot = buildAdPackagePurchaseStateSnapshot(
+                assignmentSnapshotResult.rows,
+                {
+                    totalTrendingPushCountUsed: activePurchaseBeforeDelete?.totalTrendingPushCountUsed || 0,
+                    totalTrendingClicks: activePurchaseBeforeDelete?.totalTrendingClicks || 0,
+                    totalTrendingImpressions: activePurchaseBeforeDelete?.totalTrendingImpressions || 0
+                }
+            );
+
             await client.query(
                 `
                     UPDATE ad_package_purchase_history
@@ -2367,10 +2565,11 @@ async function deleteMerchantAdPackageTransaction(req, res) {
                             WHEN expires_at IS NULL OR expires_at > NOW() THEN NOW()
                             ELSE expires_at
                         END,
+                        package_state = $2::jsonb,
                         updated_at = NOW()
                     WHERE id = $1
                 `,
-                [transactionId]
+                [transactionId, JSON.stringify(packageStateSnapshot)]
             );
 
             await client.query('COMMIT');
@@ -2480,12 +2679,47 @@ async function deactivateMerchantAdPackageTransaction(req, res) {
             `
                 UPDATE ad_package_purchase_history
                 SET selected_at = NULL,
+                    last_deactivated_at = NOW(),
+                    package_state = (
+                        SELECT jsonb_build_object(
+                            'trend_push_count_used', COALESCE((
+                                SELECT SUM(trend_push_count_used)
+                                FROM ad_package_assignments
+                                WHERE user_id = $1::uuid
+                                  AND ad_package_id = (
+                                      SELECT ad_package_id
+                                      FROM ad_package_purchase_history
+                                      WHERE id = $2
+                                  )
+                            ), 0),
+                            'trend_active_from', MAX(trend_active_from),
+                            'trend_active_until', MAX(trend_active_until),
+                            'trend_cooldown_until', MAX(trend_cooldown_until),
+                            'total_trending_push_count_used', $3::bigint,
+                            'total_trending_clicks', $4::bigint,
+                            'total_trending_impressions', $5::bigint
+                        )
+                        FROM ad_package_assignments
+                        WHERE user_id = $1::uuid
+                          AND ad_package_id = (
+                              SELECT ad_package_id
+                              FROM ad_package_purchase_history
+                              WHERE id = $2
+                          )
+                    ),
                     updated_at = NOW()
                 WHERE user_id = $1::uuid
                   AND deleted_at IS NULL
-                  AND COALESCE(payment_status, $2) = $2
+                  AND COALESCE(payment_status, $6) = $6
             `,
-            [requesterUserId, AD_PACKAGE_PAYMENT_STATUS.paid]
+            [
+                requesterUserId,
+                activePurchase?.purchaseId || 0,
+                activePurchase?.totalTrendingPushCountUsed || 0,
+                activePurchase?.totalTrendingClicks || 0,
+                activePurchase?.totalTrendingImpressions || 0,
+                AD_PACKAGE_PAYMENT_STATUS.paid
+            ]
         );
 
         const affectedVenueIds = await syncUserAdPackageAssignments(requesterUserId, null, client);
@@ -4517,6 +4751,149 @@ async function deleteAdminUserById(req, res) {
     }
 }
 
+async function searchAdminUsers(req, res) {
+    try {
+        const query = String(req.query.query || '').trim();
+        
+        if (!query || query.length < 2) {
+            return res.json([]);
+        }
+
+        const searchTerm = `%${query.toLowerCase()}%`;
+        
+        const result = await pool.query(
+            `SELECT id, fullname, username, email, phone
+             FROM users
+             WHERE LOWER(username) LIKE $1 
+                OR LOWER(email) LIKE $1
+                OR LOWER(phone) LIKE $1
+                OR LOWER(fullname) LIKE $1
+             LIMIT 20`,
+            [searchTerm]
+        );
+
+        return res.json(result.rows || []);
+    } catch (err) {
+        console.error('Admin search users error:', err);
+        return res.status(500).json({ message: 'Server error', details: err.message });
+    }
+}
+
+async function sendContactEmail(req, res) {
+    const { userId, title, content } = req.body;
+
+    if (!userId) {
+        return res.status(400).json({ message: 'User ID is required' });
+    }
+
+    if (!title || !content) {
+        return res.status(400).json({ message: 'Email title and content are required' });
+    }
+
+    try {
+        // Get user email
+        const userResult = await pool.query(
+            'SELECT email, fullname FROM users WHERE id = $1',
+            [userId]
+        );
+
+        if (!userResult.rows.length) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        const user = userResult.rows[0];
+        const userEmail = String(user.email || '').trim();
+        
+        if (!isValidEmail(userEmail)) {
+            return res.status(400).json({ message: 'User does not have a valid email address' });
+        }
+
+        // Prepare email attachments from uploaded files
+        const attachments = [];
+        if (req.files && Array.isArray(req.files.attachments)) {
+            for (const file of req.files.attachments) {
+                attachments.push({
+                    filename: file.originalname,
+                    content: file.buffer,
+                    contentType: file.mimetype
+                });
+            }
+        }
+
+        const fromEmail = String(process.env.FEEDBACK_REPLY_FROM_EMAIL || 'support@smartcitydiscovery.com').trim();
+        const fromName = String(process.env.FEEDBACK_REPLY_FROM_NAME || 'Smart City Discovery').trim();
+
+        // Generate HTML email
+        const htmlContent = `
+            <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f7fa;">
+                <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 12px 12px 0 0; text-align: center;">
+                    <h1 style="margin: 0; font-size: 24px;">Smart City Discovery</h1>
+                </div>
+                
+                <div style="background-color: white; padding: 30px; border-radius: 0 0 12px 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                    <h2 style="color: #333; margin-top: 0; font-size: 18px;">${String(title || 'Message from Smart City Discovery').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</h2>
+                    
+                    <div style="color: #555; line-height: 1.6; margin: 20px 0; font-size: 14px; white-space: pre-wrap;">
+${String(content || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}
+                    </div>
+                    
+                    <div style="border-top: 1px solid #e0e0e0; margin-top: 30px; padding-top: 20px; font-size: 12px; color: #999;">
+                        <p style="margin: 5px 0;">This message was sent from Smart City Discovery Support</p>
+                        <p style="margin: 5px 0;">© 2026 Smart City Discovery. All rights reserved.</p>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // Setup email transport
+        const feedbackReplySmtpUser = String(
+            process.env.FEEDBACK_REPLY_SMTP_USER || process.env.FEEDBACK_GMAIL_USER || ''
+        ).trim();
+
+        const feedbackReplySmtpPass = String(
+            process.env.FEEDBACK_REPLY_SMTP_PASS || process.env.FEEDBACK_GMAIL_APP_PASSWORD || ''
+        ).trim();
+
+        let transporter = null;
+
+        if (feedbackReplySmtpUser && feedbackReplySmtpPass) {
+            transporter = nodemailer.createTransport({
+                host: 'smtp.gmail.com',
+                port: 465,
+                secure: true,
+                auth: {
+                    user: feedbackReplySmtpUser,
+                    pass: feedbackReplySmtpPass
+                }
+            });
+        }
+
+        if (!transporter) {
+            return res.status(503).json({ message: 'Email service is not configured' });
+        }
+
+        // Send email
+        const mailOptions = {
+            from: `"${fromName}" <${fromEmail}>`,
+            to: userEmail,
+            subject: String(title || 'Message from Smart City Discovery'),
+            html: htmlContent,
+            attachments: attachments
+        };
+
+        await transporter.sendMail(mailOptions);
+
+        return res.json({ 
+            success: true, 
+            message: 'Email sent successfully',
+            sentTo: userEmail
+        });
+    } catch (err) {
+        console.error('Admin send contact email error:', err);
+        return res.status(500).json({ message: 'Failed to send email', details: err.message });
+    }
+}
+
 function normalizeStatusList(statusInput) {
     if (!statusInput) {
         return [];
@@ -4979,11 +5356,66 @@ function normalizePlaceCategoryIcon(value, options = {}) {
         return { value: null, error: null };
     }
 
-    if (!PLACE_CATEGORY_ICON_SET.has(normalized)) {
-        return { value: null, error: 'icon is invalid' };
+    if (normalized.length > 24) {
+        return { value: null, error: 'icon must be 24 characters or fewer' };
     }
 
     return { value: normalized, error: null };
+}
+
+function normalizePlaceCategoryParentId(value) {
+    const normalized = normalizeCategoryId(value);
+    if (Number.isNaN(normalized)) {
+        return NaN;
+    }
+
+    return normalized;
+}
+
+function derivePlaceCategoryParentId(category, categories) {
+    const explicitParentId = normalizeCategoryId(category?.parent_id ?? category?.parentId);
+    if (explicitParentId !== null && !Number.isNaN(explicitParentId)) {
+        return explicitParentId;
+    }
+
+    const categoryId = normalizeCategoryId(category?.id);
+    const categorySlug = String(category?.slug || '').trim().toLowerCase();
+
+    if (categoryId === null || Number.isNaN(categoryId) || !categorySlug) {
+        return null;
+    }
+
+    let matchedParentId = null;
+    let matchedParentSlugLength = 0;
+
+    categories.forEach((candidate) => {
+        const candidateId = normalizeCategoryId(candidate?.id);
+        const candidateSlug = String(candidate?.slug || '').trim().toLowerCase();
+
+        if (candidateId === null || Number.isNaN(candidateId) || candidateId === categoryId || !candidateSlug) {
+            return;
+        }
+
+        if (!categorySlug.startsWith(`${candidateSlug}-`)) {
+            return;
+        }
+
+        if (candidateSlug.length > matchedParentSlugLength) {
+            matchedParentId = candidateId;
+            matchedParentSlugLength = candidateSlug.length;
+        }
+    });
+
+    return matchedParentId;
+}
+
+function attachDerivedPlaceCategoryParents(categories) {
+    const normalizedCategories = Array.isArray(categories) ? categories : [];
+
+    return normalizedCategories.map((category) => ({
+        ...category,
+        parent_id: derivePlaceCategoryParentId(category, normalizedCategories)
+    }));
 }
 
 function isUndefinedColumnError(error) {
@@ -6216,6 +6648,28 @@ async function generateWardIdFromName(name) {
 
         pool.query(
             `
+                ALTER TABLE IF EXISTS ad_package_purchase_history
+                ADD COLUMN IF NOT EXISTS total_trending_push_count_used INTEGER NOT NULL DEFAULT 0,
+                ADD COLUMN IF NOT EXISTS total_trending_clicks BIGINT NOT NULL DEFAULT 0,
+                ADD COLUMN IF NOT EXISTS total_trending_impressions BIGINT NOT NULL DEFAULT 0,
+                ADD COLUMN IF NOT EXISTS package_state JSONB DEFAULT '{}'::jsonb,
+                ADD COLUMN IF NOT EXISTS last_deactivated_at TIMESTAMPTZ
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                CREATE INDEX IF NOT EXISTS ad_package_purchase_history_total_trending_idx
+                ON ad_package_purchase_history(user_id, total_trending_push_count_used DESC, updated_at DESC)
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
                 CREATE TABLE IF NOT EXISTS ad_trend_metrics_daily (
                     id BIGSERIAL PRIMARY KEY,
                     assignment_id BIGINT NOT NULL REFERENCES ad_package_assignments(id) ON DELETE CASCADE,
@@ -6277,6 +6731,27 @@ async function generateWardIdFromName(name) {
                 CREATE UNIQUE INDEX IF NOT EXISTS ad_trend_click_events_assignment_token_unique
                 ON ad_trend_click_events(assignment_id, click_token)
                 WHERE click_token IS NOT NULL
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                ALTER TABLE IF EXISTS venue_update_requests
+                ADD COLUMN IF NOT EXISTS has_priority_approval BOOLEAN NOT NULL DEFAULT FALSE,
+                ADD COLUMN IF NOT EXISTS priority_score INTEGER NOT NULL DEFAULT 0,
+                ADD COLUMN IF NOT EXISTS submitter_user_id UUID REFERENCES users(id) ON DELETE SET NULL
+            `
+        ).catch(() => {
+            // Ignore boot-time schema self-heal errors to keep server startup resilient.
+        });
+
+        pool.query(
+            `
+                CREATE INDEX IF NOT EXISTS venue_update_requests_priority_submitted_idx
+                ON venue_update_requests(status, has_priority_approval DESC, submitted_at DESC, id DESC)
+                WHERE status = 'pending'
             `
         ).catch(() => {
             // Ignore boot-time schema self-heal errors to keep server startup resilient.
@@ -11111,6 +11586,7 @@ async function generateWardIdFromName(name) {
 
                 const values = [effectiveStatuses];
                 const whereConditions = ['venues.status::text = ANY($1::text[])'];
+                whereConditions.push(`NOT (${buildVenueMerchantDeletedSql('venues')})`);
 
                 if (isMineRequest) {
                     values.push(requesterId);
@@ -13625,6 +14101,11 @@ async function generateWardIdFromName(name) {
                     return res.status(400).json({ message: 'No changes detected. Please update at least one field.' });
                 }
 
+                // Get user's active package to check for Priority Approval feature
+                const entitledPurchase = await getLatestEntitledUserAdPackagePurchase(currentUserId);
+                const hasPriorityApproval = Boolean(entitledPurchase?.package?.features?.priorityReview);
+                const priorityScore = hasPriorityApproval ? 1 : 0;
+
                 const pendingRequestResult = await pool.query(
                     `
                         SELECT id
@@ -13648,6 +14129,8 @@ async function generateWardIdFromName(name) {
                                 submitted_by_user_id = $2,
                                 old_snapshot = $3::jsonb,
                                 proposed_snapshot = $4::jsonb,
+                                has_priority_approval = $5::boolean,
+                                priority_score = $6::integer,
                                 status = 'pending',
                                 rejection_reason = NULL,
                                 reviewed_by = NULL,
@@ -13657,7 +14140,7 @@ async function generateWardIdFromName(name) {
                             WHERE id = $1
                             RETURNING *
                         `,
-                        [existingRequestId, currentUserId, oldSnapshot, proposedSnapshot]
+                        [existingRequestId, currentUserId, oldSnapshot, proposedSnapshot, hasPriorityApproval, priorityScore]
                     );
 
                     requestRecord = updateResult.rows[0] || null;
@@ -13669,6 +14152,8 @@ async function generateWardIdFromName(name) {
                                 submitted_by_user_id,
                                 old_snapshot,
                                 proposed_snapshot,
+                                has_priority_approval,
+                                priority_score,
                                 status,
                                 submitted_at,
                                 created_at,
@@ -13679,6 +14164,8 @@ async function generateWardIdFromName(name) {
                                 $2,
                                 $3::jsonb,
                                 $4::jsonb,
+                                $5::boolean,
+                                $6::integer,
                                 'pending',
                                 now(),
                                 now(),
@@ -13686,7 +14173,7 @@ async function generateWardIdFromName(name) {
                             )
                             RETURNING *
                         `,
-                        [venueId, currentUserId, oldSnapshot, proposedSnapshot]
+                        [venueId, currentUserId, oldSnapshot, proposedSnapshot, hasPriorityApproval, priorityScore]
                     );
 
                     requestRecord = insertResult.rows[0] || null;
@@ -13972,7 +14459,8 @@ async function generateWardIdFromName(name) {
                             venues.title,
                             ${ownerSelect}
                             venues.submitted_by_user_id,
-                            venues.status::text AS status
+                            venues.status::text AS status,
+                            venues.metadata
                         FROM venues
                         WHERE venues.id = $1
                         LIMIT 1
@@ -13985,6 +14473,10 @@ async function generateWardIdFromName(name) {
                 }
 
                 const venue = venueResult.rows[0];
+                const venueMetadata = normalizeVenueMetadataObject(venue?.metadata);
+                if (venueMetadata?.merchantDeleted === true || String(venueMetadata?.merchantDeleted || '').trim().toLowerCase() === 'true') {
+                    return res.status(404).json({ message: 'Venue not found' });
+                }
                 const ownerCandidateIds = extractVenueOwnerCandidateIds(venue);
                 const isOwner = Boolean(currentUserId && ownerCandidateIds.includes(String(currentUserId || '').trim()));
 
@@ -13997,6 +14489,17 @@ async function generateWardIdFromName(name) {
                         UPDATE venues
                         SET
                             status = 'hidden',
+                            metadata = jsonb_set(
+                                jsonb_set(
+                                    COALESCE(venues.metadata, '{}'::jsonb),
+                                    '{merchantDeleted}',
+                                    'true'::jsonb,
+                                    true
+                                ),
+                                '{merchantDeletedAt}',
+                                to_jsonb(NOW()::text),
+                                true
+                            ),
                             updated_at = now()
                         WHERE id = $1
                         RETURNING id
@@ -14082,7 +14585,8 @@ async function generateWardIdFromName(name) {
                             venues.title,
                             ${ownerSelect}
                             venues.submitted_by_user_id,
-                            venues.status::text AS status
+                            venues.status::text AS status,
+                            venues.metadata
                         FROM venues
                         WHERE venues.id = $1
                         LIMIT 1
@@ -14095,6 +14599,10 @@ async function generateWardIdFromName(name) {
                 }
 
                 const venue = venueResult.rows[0];
+                const venueMetadata = normalizeVenueMetadataObject(venue?.metadata);
+                if (venueMetadata?.merchantDeleted === true || String(venueMetadata?.merchantDeleted || '').trim().toLowerCase() === 'true') {
+                    return res.status(404).json({ message: 'Venue not found' });
+                }
                 const ownerCandidateIds = extractVenueOwnerCandidateIds(venue);
                 const isOwner = Boolean(currentUserId && ownerCandidateIds.includes(String(currentUserId || '').trim()));
 
@@ -14162,6 +14670,8 @@ async function generateWardIdFromName(name) {
                             requests.status,
                             requests.rejection_reason,
                             requests.reviewed_by,
+                            requests.has_priority_approval,
+                            requests.priority_score,
                             requests.submitted_at,
                             requests.reviewed_at,
                             requests.created_at,
@@ -14184,7 +14694,15 @@ async function generateWardIdFromName(name) {
                         LEFT JOIN wards ON wards.ward_id = venues.ward_id
                         LEFT JOIN place_categories ON place_categories.id = venues.category_id
                         WHERE requests.status = ANY($1::text[])
-                        ORDER BY COALESCE(requests.submitted_at, requests.created_at) DESC, requests.id DESC
+                        ORDER BY 
+                            CASE 
+                                WHEN COALESCE(requests.status, 'pending') = 'pending' THEN 0
+                                ELSE 1
+                            END,
+                            COALESCE(requests.has_priority_approval, FALSE) DESC,
+                            COALESCE(requests.priority_score, 0) DESC,
+                            COALESCE(requests.submitted_at, requests.created_at) DESC,
+                            requests.id DESC
                     `,
                     [statusFilter]
                 );
@@ -14547,10 +15065,10 @@ async function generateWardIdFromName(name) {
             try {
                 const result = await pool.query(
                     `
-                SELECT id, name, slug, icon, description, sort_order, is_active, created_at, updated_at
+                SELECT id, name, slug, icon, description, sort_order, is_active, parent_id, created_at, updated_at
                 FROM place_categories
                 ${includeInactive ? '' : 'WHERE is_active = true'}
-                ORDER BY sort_order ASC, name ASC
+                ORDER BY COALESCE(parent_id, id) ASC, CASE WHEN parent_id IS NULL THEN 0 ELSE 1 END ASC, sort_order ASC, name ASC
             `
                 );
 
@@ -14568,7 +15086,7 @@ async function generateWardIdFromName(name) {
                         );
 
                         return res.json(
-                            fallbackResult.rows.map((row) => ({
+                            attachDerivedPlaceCategoryParents(fallbackResult.rows).map((row) => ({
                                 ...row,
                                 icon: '📍'
                             }))
@@ -14586,9 +15104,9 @@ async function generateWardIdFromName(name) {
             try {
                 const result = await pool.query(
                     `
-                SELECT id, name, slug, icon, description, sort_order, is_active, created_at, updated_at
+                SELECT id, name, slug, icon, description, sort_order, is_active, parent_id, created_at, updated_at
                 FROM place_categories
-                ORDER BY sort_order ASC, name ASC
+                ORDER BY COALESCE(parent_id, id) ASC, CASE WHEN parent_id IS NULL THEN 0 ELSE 1 END ASC, sort_order ASC, name ASC
             `
                 );
 
@@ -14605,7 +15123,7 @@ async function generateWardIdFromName(name) {
                         );
 
                         return res.json(
-                            fallbackResult.rows.map((row) => ({
+                            attachDerivedPlaceCategoryParents(fallbackResult.rows).map((row) => ({
                                 ...row,
                                 icon: '📍'
                             }))
@@ -14624,16 +15142,16 @@ async function generateWardIdFromName(name) {
             const iconResult = normalizePlaceCategoryIcon(req.body.icon, { required: true });
             const description = String(req.body.description || '').trim() || null;
             const slugInput = String(req.body.slug || '').trim();
-            const slug = slugifyText(slugInput || name);
             const sortOrder = Number.isFinite(Number(req.body.sortOrder)) ? Number(req.body.sortOrder) : 0;
             const isActive = req.body.isActive !== false;
+            const parentId = normalizePlaceCategoryParentId(req.body.parentId ?? req.body.parent_id);
 
             if (!name) {
                 return res.status(400).json({ message: 'name is required' });
             }
 
-            if (!slug) {
-                return res.status(400).json({ message: 'slug is required' });
+            if (Number.isNaN(parentId)) {
+                return res.status(400).json({ message: 'parentId must be a positive integer or null' });
             }
 
             if (iconResult.error) {
@@ -14641,16 +15159,63 @@ async function generateWardIdFromName(name) {
             }
 
             try {
-                const result = await pool.query(
-                    `
-                INSERT INTO place_categories (name, slug, icon, description, sort_order, is_active, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, now())
-                RETURNING id, name, slug, icon, description, sort_order, is_active, created_at, updated_at
-            `,
-                    [name, slug, iconResult.value, description, sortOrder, isActive]
-                );
+                let parentCategory = null;
 
-                return res.status(201).json(result.rows[0]);
+                if (parentId !== null) {
+                    const parentResult = await pool.query(
+                        `
+                            SELECT id, slug
+                            FROM place_categories
+                            WHERE id = $1
+                            LIMIT 1
+                        `,
+                        [parentId]
+                    );
+
+                    if (!parentResult.rows.length) {
+                        return res.status(404).json({ message: 'Parent category not found' });
+                    }
+
+                    parentCategory = parentResult.rows[0];
+                }
+
+                const localSlug = slugifyText(slugInput || name);
+                const slug = parentCategory ? `${parentCategory.slug}-${localSlug}` : localSlug;
+
+                if (!slug) {
+                    return res.status(400).json({ message: 'slug is required' });
+                }
+
+                try {
+                    const result = await pool.query(
+                        `
+                    INSERT INTO place_categories (name, slug, icon, description, sort_order, is_active, parent_id, updated_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+                    RETURNING id, name, slug, icon, description, sort_order, is_active, parent_id, created_at, updated_at
+                `,
+                        [name, slug, iconResult.value, description, sortOrder, isActive, parentId]
+                    );
+
+                    return res.status(201).json(result.rows[0]);
+                } catch (insertError) {
+                    if (!isUndefinedColumnError(insertError)) {
+                        throw insertError;
+                    }
+
+                    const fallbackResult = await pool.query(
+                        `
+                    INSERT INTO place_categories (name, slug, icon, description, sort_order, is_active, updated_at)
+                    VALUES ($1, $2, $3, $4, $5, $6, now())
+                    RETURNING id, name, slug, icon, description, sort_order, is_active, created_at, updated_at
+                `,
+                        [name, slug, iconResult.value, description, sortOrder, isActive]
+                    );
+
+                    return res.status(201).json({
+                        ...fallbackResult.rows[0],
+                        parent_id: parentId
+                    });
+                }
             } catch (error) {
                 if (error.code === '23505') {
                     return res.status(409).json({ message: 'Category slug already exists' });
@@ -14689,6 +15254,8 @@ async function generateWardIdFromName(name) {
                 const hasDescription = Object.prototype.hasOwnProperty.call(req.body, 'description');
                 const hasSortOrder = Object.prototype.hasOwnProperty.call(req.body, 'sortOrder');
                 const hasIsActive = Object.prototype.hasOwnProperty.call(req.body, 'isActive');
+                const hasParentId = Object.prototype.hasOwnProperty.call(req.body, 'parentId')
+                    || Object.prototype.hasOwnProperty.call(req.body, 'parent_id');
 
                 const nextName = hasName ? String(req.body.name || '').trim() : existing.name;
                 const nextDescription = hasDescription
@@ -14708,37 +15275,99 @@ async function generateWardIdFromName(name) {
                         : existing.sort_order
                     : existing.sort_order;
                 const nextIsActive = hasIsActive ? req.body.isActive !== false : existing.is_active;
+                const nextParentId = hasParentId
+                    ? normalizePlaceCategoryParentId(req.body.parentId ?? req.body.parent_id)
+                    : null;
 
                 if (!nextName) {
                     return res.status(400).json({ message: 'name is required' });
                 }
 
-                if (!nextSlug) {
-                    return res.status(400).json({ message: 'slug is required' });
+                if (Number.isNaN(nextParentId)) {
+                    return res.status(400).json({ message: 'parentId must be a positive integer or null' });
                 }
 
                 if (nextIcon.error) {
                     return res.status(400).json({ message: nextIcon.error });
                 }
 
-                const updateResult = await pool.query(
-                    `
-                UPDATE place_categories
-                SET
-                    name = $2,
-                    slug = $3,
-                    icon = $4,
-                    description = $5,
-                    sort_order = $6,
-                    is_active = $7,
-                    updated_at = now()
-                WHERE id = $1
-                RETURNING id, name, slug, icon, description, sort_order, is_active, created_at, updated_at
-            `,
-                    [categoryId, nextName, nextSlug, nextIcon.value, nextDescription, nextSortOrder, nextIsActive]
-                );
+                if (nextParentId === categoryId) {
+                    return res.status(400).json({ message: 'A category cannot be its own parent' });
+                }
 
-                return res.json(updateResult.rows[0]);
+                let parentCategory = null;
+                if (nextParentId !== null) {
+                    const parentResult = await pool.query(
+                        `
+                            SELECT id, slug
+                            FROM place_categories
+                            WHERE id = $1
+                            LIMIT 1
+                        `,
+                        [nextParentId]
+                    );
+
+                    if (!parentResult.rows.length) {
+                        return res.status(404).json({ message: 'Parent category not found' });
+                    }
+
+                    parentCategory = parentResult.rows[0];
+                }
+
+                const localSlug = slugifyText(hasSlug ? String(req.body.slug || '').trim() : nextName);
+                const resolvedSlug = parentCategory ? `${parentCategory.slug}-${localSlug}` : (nextSlug || localSlug);
+
+                if (!resolvedSlug) {
+                    return res.status(400).json({ message: 'slug is required' });
+                }
+
+                try {
+                    const updateResult = await pool.query(
+                        `
+                    UPDATE place_categories
+                    SET
+                        name = $2,
+                        slug = $3,
+                        icon = $4,
+                        description = $5,
+                        sort_order = $6,
+                        is_active = $7,
+                        parent_id = $8,
+                        updated_at = now()
+                    WHERE id = $1
+                    RETURNING id, name, slug, icon, description, sort_order, is_active, parent_id, created_at, updated_at
+                `,
+                        [categoryId, nextName, resolvedSlug, nextIcon.value, nextDescription, nextSortOrder, nextIsActive, nextParentId]
+                    );
+
+                    return res.json(updateResult.rows[0]);
+                } catch (updateError) {
+                    if (!isUndefinedColumnError(updateError)) {
+                        throw updateError;
+                    }
+
+                    const fallbackResult = await pool.query(
+                        `
+                    UPDATE place_categories
+                    SET
+                        name = $2,
+                        slug = $3,
+                        icon = $4,
+                        description = $5,
+                        sort_order = $6,
+                        is_active = $7,
+                        updated_at = now()
+                    WHERE id = $1
+                    RETURNING id, name, slug, icon, description, sort_order, is_active, created_at, updated_at
+                `,
+                        [categoryId, nextName, resolvedSlug, nextIcon.value, nextDescription, nextSortOrder, nextIsActive]
+                    );
+
+                    return res.json({
+                        ...fallbackResult.rows[0],
+                        parent_id: nextParentId
+                    });
+                }
             } catch (error) {
                 if (error.code === '23505') {
                     return res.status(409).json({ message: 'Category slug already exists' });
@@ -14756,6 +15385,52 @@ async function generateWardIdFromName(name) {
             }
 
             try {
+                let childCountResult;
+                try {
+                    childCountResult = await pool.query(
+                        `
+                            SELECT COUNT(*)::int AS child_count
+                            FROM place_categories
+                            WHERE parent_id = $1
+                        `,
+                        [categoryId]
+                    );
+                } catch (childCountError) {
+                    if (!isUndefinedColumnError(childCountError)) {
+                        throw childCountError;
+                    }
+
+                    const categoryResult = await pool.query(
+                        `
+                            SELECT slug
+                            FROM place_categories
+                            WHERE id = $1
+                            LIMIT 1
+                        `,
+                        [categoryId]
+                    );
+
+                    if (!categoryResult.rows.length) {
+                        return res.status(404).json({ message: 'Category not found' });
+                    }
+
+                    childCountResult = await pool.query(
+                        `
+                            SELECT COUNT(*)::int AS child_count
+                            FROM place_categories
+                            WHERE id <> $1
+                              AND slug LIKE $2
+                        `,
+                        [categoryId, `${categoryResult.rows[0].slug}-%`]
+                    );
+                }
+
+                if ((childCountResult.rows[0]?.child_count || 0) > 0) {
+                    return res.status(409).json({
+                        message: 'This main category still has subcategories. Move or delete them first.'
+                    });
+                }
+
                 const usageResult = await pool.query(
                     `
                 SELECT COUNT(*)::int AS usage_count
@@ -17115,20 +17790,43 @@ async function generateWardIdFromName(name) {
                     const reportTypeCode = String(report.feedback_type_code || '').trim().toLowerCase();
                     const metadataMap = parseFeedbackMetadataMap(report.message);
                     const reporterUserId = String(report.reporter_user_id || '').trim();
+                    const contextType = String(metadataMap.contexttype || '').trim().toLowerCase();
 
                     let deletedTarget = false;
                     let deletedTargetId = null;
                     let deletedTargetType = '';
 
                     if (shouldDeleteTarget && reportTypeCode === 'review_report') {
-                        const inferredReviewId =
+                        const inferredContextId =
                             parsePositiveInteger(metadataMap.contextid)
                             || parsePositiveInteger(metadataMap.reviewid)
                             || parsePositiveInteger(String(report.message || '').match(/bình\s*luận\s*#(\d+)/i)?.[1]);
 
                         const inferredVenueId = parsePositiveInteger(metadataMap.venueid);
+                        const inferredParentReviewId = parsePositiveInteger(metadataMap.parentreviewid);
 
-                        if (inferredReviewId) {
+                        if (contextType === 'review_reply' && inferredContextId) {
+                            // Delete from venue_review_replies table
+                            const replyDeleteResult = await client.query(
+                                `
+                                    DELETE FROM venue_review_replies
+                                    WHERE id = $1
+                                    RETURNING id
+                                `,
+                                [inferredContextId]
+                            );
+
+                            if (replyDeleteResult.rows.length) {
+                                deletedTarget = true;
+                                deletedTargetType = 'review_reply';
+                                deletedTargetId = replyDeleteResult.rows[0].id;
+                                // Invalidate cache if venue_id is available
+                                if (inferredVenueId) {
+                                    invalidateVenueCommunityBundleCacheByVenueId(inferredVenueId);
+                                }
+                            }
+                        } else if (inferredContextId) {
+                            // Delete from venue_public_reviews table (original review)
                             const reviewDeleteResult = inferredVenueId
                                 ? await client.query(
                                     `
@@ -17136,7 +17834,7 @@ async function generateWardIdFromName(name) {
                                         WHERE id = $1 AND venue_id = $2
                                         RETURNING id, venue_id
                                     `,
-                                    [inferredReviewId, inferredVenueId]
+                                    [inferredContextId, inferredVenueId]
                                 )
                                 : await client.query(
                                     `
@@ -17144,7 +17842,7 @@ async function generateWardIdFromName(name) {
                                         WHERE id = $1
                                         RETURNING id, venue_id
                                     `,
-                                    [inferredReviewId]
+                                    [inferredContextId]
                                 );
 
                             if (reviewDeleteResult.rows.length) {
@@ -17202,11 +17900,11 @@ async function generateWardIdFromName(name) {
                             userId: reporterUserId,
                             type: 'feedback',
                             title: deletedTarget
-                                ? 'Báo cáo của bạn đã được xử lý'
-                                : 'Báo cáo của bạn đã được tiếp nhận và đóng',
+                                ? 'Your report has been processed'
+                                : 'Your report has been received and closed',
                             content: deletedTarget
-                                ? `Quản trị viên đã xử lý báo cáo #${deletedReport.id} và áp dụng hành động với nội dung bị báo cáo.`
-                                : `Quản trị viên đã xử lý báo cáo #${deletedReport.id}.`,
+                                ? `Administrator has processed report #${deletedReport.id} and taken action on the reported content.`
+                                : `Administrator has processed report #${deletedReport.id}.`,
                             metadata: {
                                 feedbackId: deletedReport.id,
                                 reportTypeCode,
@@ -19641,7 +20339,9 @@ async function generateWardIdFromName(name) {
 
         registerVersionedRoute('get', '/users', authenticateRequest, requireAdminRole, listAdminUsers);
         registerVersionedRoute('get', '/admin/users', authenticateRequest, checkUserStatus, requireAdminRole, listAdminUsers);
+        registerVersionedRoute('get', '/admin/users/search', authenticateRequest, checkUserStatus, requireAdminRole, searchAdminUsers);
         registerVersionedRoute('post', '/admin/users', authenticateRequest, checkUserStatus, requireAdminRole, createAdminUser);
+        registerVersionedRoute('post', '/admin/users/send-contact-email', authenticateRequest, checkUserStatus, requireAdminRole, upload.array('attachments', 5), sendContactEmail);
         registerVersionedRoute('put', '/admin/users/:userId', authenticateRequest, checkUserStatus, requireAdminRole, updateAdminUserRole);
         registerVersionedRoute('delete', '/admin/users/:userId', authenticateRequest, checkUserStatus, requireAdminRole, deleteAdminUserById);
 

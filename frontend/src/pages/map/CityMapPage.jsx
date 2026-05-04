@@ -33,11 +33,15 @@ import {
   normalizeVenues,
   normalizeWards,
   resolveVenueCategoryId,
-  resolveVenueCategoryName,
   resolveVenueName,
   resolveVenueRating,
   resolveWardName,
 } from '../../components/map/cityMapUtils';
+import {
+  buildPlaceCategoryTree,
+  formatCategoryBranchLabel,
+  normalizeCategoryIcon,
+} from '../../utils/placeCategoryTree';
 import translations from '../../constants/translations';
 import './CityMapPage.css';
 
@@ -455,6 +459,7 @@ function CityMapPage() {
 
   const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
   const [selectedCategoryIds, setSelectedCategoryIds] = useState([]);
+  const [expandedCategoryRootIds, setExpandedCategoryRootIds] = useState([]);
   const [selectedWardIds, setSelectedWardIds] = useState([]);
   const [selectedServiceIds, setSelectedServiceIds] = useState([]);
   const [searchInput, setSearchInput] = useState('');
@@ -536,6 +541,19 @@ function CityMapPage() {
       ),
     [categories]
   );
+  const placeCategoryTree = useMemo(() => buildPlaceCategoryTree(categories), [categories]);
+  const rootPlaceCategories = placeCategoryTree.rootCategories;
+  const childCategoriesByParentId = placeCategoryTree.childrenByParentId;
+  const formatVenueCategoryLabel = (venue, fallbackLabel = 'Uncategorized') => {
+    const categoryId = resolveVenueCategoryId(venue);
+    const fallbackCategoryName = String(venue?.category_name || venue?.categoryName || '').trim();
+
+    if (Number.isInteger(categoryId) && categoryId > 0) {
+      return formatCategoryBranchLabel(categoryId, placeCategoryTree, fallbackCategoryName || fallbackLabel);
+    }
+
+    return fallbackCategoryName || fallbackLabel;
+  };
 
   const selectedVenueFromList = useMemo(
     () => venues.find((venue) => Number(venue.id) === Number(selectedVenueId)) || null,
@@ -1106,6 +1124,28 @@ function CityMapPage() {
     setter((current) =>
       current.includes(value) ? current.filter((item) => item !== value) : [...current, value]
     );
+  };
+
+  const toggleCategoryBranchExpansion = (categoryId) => {
+    setExpandedCategoryRootIds((currentIds) =>
+      currentIds.includes(categoryId)
+        ? currentIds.filter((currentId) => currentId !== categoryId)
+        : [...currentIds, categoryId]
+    );
+  };
+
+  const toggleCategoryBranchSelection = (categoryId) => {
+    setExpandedCategoryRootIds((currentIds) => (
+      currentIds.includes(categoryId)
+        ? currentIds
+        : [...currentIds, categoryId]
+    ));
+
+    setSelectedCategoryIds((currentIds) => {
+      return currentIds.includes(categoryId)
+        ? currentIds.filter((currentId) => currentId !== categoryId)
+        : [...currentIds, categoryId];
+    });
   };
 
   const applyFilters = () => {
@@ -2035,7 +2075,7 @@ function CityMapPage() {
                     />
                     <strong>{resolveVenueName(venue)}</strong>
                     <span>{venue.address || 'Address not available'}</span>
-                    <span>{resolveWardName(venue)} | {resolveVenueCategoryName(venue)}</span>
+                    <span>{resolveWardName(venue)} | {formatVenueCategoryLabel(venue)}</span>
                     <span className="city-map-popup-rating">
                       <StarRatingDisplay rating={popupRatingValue} />
                       <span className="city-map-popup-rating-text">
@@ -2125,19 +2165,54 @@ function CityMapPage() {
               <div className="city-map-filter-group">
                 <h3>Place Categories</h3>
                 <div className="city-map-filter-list">
-                  {categories.map((category) => {
+                  {rootPlaceCategories.map((category) => {
                     const categoryId = Number(category.id);
-                    const checked = selectedCategoryIds.includes(categoryId);
+                    const childCategories = childCategoriesByParentId.get(categoryId) || [];
+                    const isChecked = selectedCategoryIds.includes(categoryId);
+                    const isExpanded = expandedCategoryRootIds.includes(categoryId);
 
                     return (
-                      <label key={`category-${categoryId}`}>
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => toggleSelection(setSelectedCategoryIds)(categoryId)}
-                        />
-                        <span>{category.icon || '📍'} {category.name}</span>
-                      </label>
+                      <div key={`category-${categoryId}`} className="city-map-category-branch">
+                        <div className="city-map-category-parent">
+                          <label>
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => toggleCategoryBranchSelection(categoryId)}
+                            />
+                            <span>{normalizeCategoryIcon(category.icon)} {category.name}</span>
+                          </label>
+                          {childCategories.length ? (
+                            <button
+                              type="button"
+                              className="city-map-category-toggle"
+                              onClick={() => toggleCategoryBranchExpansion(categoryId)}
+                              aria-label={isExpanded ? 'Collapse subcategories' : 'Expand subcategories'}
+                            >
+                              {isExpanded ? '-' : '+'}
+                            </button>
+                          ) : null}
+                        </div>
+                        {childCategories.length && isExpanded ? (
+                          <div className="city-map-category-children">
+                            {childCategories.map((subcategory) => {
+                              const subcategoryId = Number(subcategory.id);
+                              const checked = selectedCategoryIds.includes(subcategoryId);
+
+                              return (
+                                <label key={`subcategory-${subcategoryId}`}>
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={() => toggleSelection(setSelectedCategoryIds)(subcategoryId)}
+                                  />
+                                  <span>{normalizeCategoryIcon(subcategory.icon)} {subcategory.name}</span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        ) : null}
+                      </div>
                     );
                   })}
                 </div>
@@ -2294,7 +2369,7 @@ function CityMapPage() {
                     )}
                   </li>
                   <li><strong>Ward</strong><span>{resolveWardName(selectedVenue)}</span></li>
-                  <li><strong>Category</strong><span>{resolveVenueCategoryName(selectedVenue)}</span></li>
+                  <li><strong>Category</strong><span>{formatVenueCategoryLabel(selectedVenue)}</span></li>
                   <li><strong>Phone</strong><span>{selectedVenue.phone || 'Not provided'}</span></li>
                   <li><strong>Email</strong><span>{extractVenueEmail(selectedVenue)}</span></li>
                   <li><strong>Price range</strong><span>{formatPriceRange(selectedVenue)}</span></li>

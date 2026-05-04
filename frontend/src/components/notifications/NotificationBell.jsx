@@ -406,20 +406,20 @@ function NotificationBell() {
     <div className="notification-bell" ref={rootRef}>
       {isOpen && user ? (
         <button
-          type="button"
-          className="notification-bell__backdrop"
-          aria-label="Đóng bảng thông báo"
-          onClick={() => {
-            setIsOpen(false);
-            setShowActionsMenu(false);
-          }}
-        />
+              type="button"
+              className="notification-bell__backdrop"
+              aria-label="Close notifications panel"
+              onClick={() => {
+                setIsOpen(false);
+                setShowActionsMenu(false);
+              }}
+            />
       ) : null}
 
-      <button
+        <button
         type="button"
         className={`notification-bell__trigger ${isRinging ? 'is-ringing' : ''} ${unreadCount > 0 ? 'has-unread' : ''}`}
-        aria-label="Thông báo"
+        aria-label="Notifications"
         aria-expanded={isOpen}
         aria-haspopup="dialog"
         onClick={() => {
