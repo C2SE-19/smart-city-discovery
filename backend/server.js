@@ -107,6 +107,13 @@ const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 const FALLBACK_JWT_SECRET = 'smart-city-discovery-dev-secret-change-me';
 const jwtSecret = process.env.JWT_SECRET || process.env.SUPABASE_JWT_SECRET || FALLBACK_JWT_SECRET;
 const accessTokenTtl = process.env.ACCESS_TOKEN_TTL || '7d';
+const AUTH_DEBUG_LOGS = String(process.env.AUTH_DEBUG_LOGS || '').toLowerCase() === 'true';
+
+function authDebugLog(...args) {
+    if (AUTH_DEBUG_LOGS) {
+        console.log(...args);
+    }
+}
 
 if (jwtSecret === FALLBACK_JWT_SECRET) {
     console.warn('⚠️ JWT_SECRET is not set. Using development fallback secret. Please set JWT_SECRET in production.');
@@ -162,7 +169,7 @@ async function authenticateRequest(req, res, next) {
 
     try {
         const payload = jwt.verify(token, jwtSecret);
-        console.log('authenticateRequest payload:', payload);
+        authDebugLog('authenticateRequest payload:', payload);
         const resolvedUserId = resolveJwtUserId(payload);
 
         if (!resolvedUserId) {
@@ -318,29 +325,29 @@ function buildResolvedVenueOwnerUserSql(venueAlias = 'venues') {
 async function checkUserStatus(req, res, next) {
     try {
         if (!req.user || !req.user.id) {
-            console.log('⚠️ checkUserStatus: User not found in request');
+            authDebugLog('⚠️ checkUserStatus: User not found in request');
             return res.status(401).json({ message: 'User not found in request' });
         }
 
         const userId = req.user.id;
-        console.log('🔍 checkUserStatus: Checking user:', userId);
+        authDebugLog('🔍 checkUserStatus: Checking user:', userId);
         const result = await pool.query(
                 'SELECT status, pause_until, blocked_reason FROM users WHERE id = $1',
             [userId]
         );
 
         if (result.rows.length === 0) {
-            console.log('⚠️ checkUserStatus: User account not found:', userId);
+            authDebugLog('⚠️ checkUserStatus: User account not found:', userId);
             return res.status(404).json({ message: 'User account not found' });
         }
 
         const user = result.rows[0];
         const status = (user.status || 'active').toLowerCase();
-        console.log('📊 checkUserStatus: User status:', status, 'pause_until:', user.pause_until);
+        authDebugLog('📊 checkUserStatus: User status:', status, 'pause_until:', user.pause_until);
 
         if (status === 'blocked') {
             const reason = user.blocked_reason || 'Tài khoản đã bị khóa';
-            console.log('🔴 checkUserStatus: User is BLOCKED -', reason);
+            authDebugLog('🔴 checkUserStatus: User is BLOCKED -', reason);
             return res.status(403).json({ message: `Tài khoản đã bị khóa vĩnh viễn: ${reason}` });
         }
 
@@ -349,21 +356,21 @@ async function checkUserStatus(req, res, next) {
             const now = new Date();
 
             if (pauseUntil && pauseUntil > now) {
-                console.log('🟡 checkUserStatus: User is PAUSED until', pauseUntil.toLocaleString());
+                authDebugLog('🟡 checkUserStatus: User is PAUSED until', pauseUntil.toLocaleString());
                 return res.status(403).json({ 
                     message: `Tài khoản đang bị tạm dừng đến ${pauseUntil.toLocaleString()}. Vui lòng thử lại sau.` 
                 });
             }
 
             // If pause expired, auto-restore to active
-            console.log('✅ checkUserStatus: Pause expired, restoring to active');
+            authDebugLog('✅ checkUserStatus: Pause expired, restoring to active');
             await pool.query(
                 `UPDATE users SET status = 'active', pause_until = NULL WHERE id = $1`,
                 [userId]
             );
         }
 
-        console.log('✅ checkUserStatus: User is ACTIVE, proceeding');
+        authDebugLog('✅ checkUserStatus: User is ACTIVE, proceeding');
         return next();
     } catch (err) {
         console.error('checkUserStatus error:', err);
@@ -439,6 +446,19 @@ function authenticateOptionalLenient(req, _res, next) {
     }
 
     return next();
+}
+
+// Export detection helpers for unit testing and external scripts
+try {
+    module.exports = module.exports || {};
+    module.exports.resolveBridgeVisualCueRule = resolveBridgeVisualCueRule;
+    module.exports.hasBridgeSignal = hasBridgeSignal;
+    module.exports.hasBridgeEvidenceForRule = hasBridgeEvidenceForRule;
+    module.exports.normalizeVisionNoAccent = normalizeVisionNoAccent;
+    module.exports.BRIDGE_VISUAL_CUE_RULES = BRIDGE_VISUAL_CUE_RULES;
+    module.exports.CANONICAL_PLACE_RULES = CANONICAL_PLACE_RULES;
+} catch (e) {
+    // ignore in case module.exports is not writable in some environments
 }
 
 function requireAdminRole(req, res, next) {
@@ -21646,6 +21666,7 @@ async function generateWardIdFromName(name) {
                         hasMustHaveEvidence,
                         cueMatchedCount,
                         preferredAlias,
+                        displayLabel: preferredAlias,
                         aliases: Array.isArray(meta.aliases) ? meta.aliases.filter(Boolean) : []
                     };
                 })
@@ -21663,6 +21684,7 @@ async function generateWardIdFromName(name) {
                     applied: true,
                     matched: false,
                     label: 'unknown',
+                    displayLabel: 'unknown',
                     kind: 'unknown',
                     confidence: 0,
                     topCandidates: []
@@ -21701,13 +21723,15 @@ async function generateWardIdFromName(name) {
                 matched: true,
                 labelId: best.labelId,
                 label: best.preferredAlias,
+                displayLabel: best.displayLabel,
                 kind: best.kind,
                 confidence: blendedConfidence,
                 aliases: best.aliases,
                 topCandidates: ranked.slice(0, 3).map((item) => ({
                     labelId: item.labelId,
                     kind: item.kind,
-                    score: item.score
+                    score: item.score,
+                    displayLabel: item.displayLabel
                 }))
             };
         }
@@ -22010,6 +22034,142 @@ async function generateWardIdFromName(name) {
             }
         ];
 
+        const GENERAL_PLACE_TYPE_RULES = [
+            {
+                key: 'water_park',
+                canonicalVi: 'công viên nước',
+                canonicalEn: 'water park',
+                searchTerms: ['công viên nước', 'cong vien nuoc', 'water park'],
+                pattern: /\b(cong\s*vien\s*nuoc|water\s*park|be\s*boi|ho\s*boi|suoi\s*khoang)\b/
+            },
+            {
+                key: 'amusement_park',
+                canonicalVi: 'khu vui chơi',
+                canonicalEn: 'amusement park',
+                searchTerms: ['khu vui chơi', 'khu giai tri', 'amusement park', 'theme park'],
+                pattern: /\b(khu\s*vui\s*choi|khu\s*giai\s*tri|amusement\s*park|theme\s*park|asia\s*park)\b/
+            },
+            {
+                key: 'beach',
+                canonicalVi: 'bãi biển',
+                canonicalEn: 'beach',
+                searchTerms: ['bãi biển', 'bai bien', 'beach'],
+                pattern: /\b(bai\s*bien|beach|bien\s*my\s*khe|my\s*khe)\b/
+            },
+            {
+                key: 'pagoda_temple',
+                canonicalVi: 'chùa',
+                canonicalEn: 'pagoda',
+                searchTerms: ['chùa', 'chua', 'pagoda', 'temple'],
+                pattern: /\b(chua|pagoda|temple|linh\s*ung)\b/
+            },
+            {
+                key: 'mountain',
+                canonicalVi: 'núi',
+                canonicalEn: 'mountain',
+                searchTerms: ['núi', 'nui', 'mountain', 'marble mountains', 'ngu hanh son'],
+                pattern: /\b(nui|mountain|marble\s*mountains|ngu\s*hanh\s*son|ba\s*na\s*hills)\b/
+            },
+            {
+                key: 'market',
+                canonicalVi: 'chợ',
+                canonicalEn: 'market',
+                searchTerms: ['chợ', 'cho', 'market'],
+                pattern: /\b(cho|market)\b/
+            },
+            {
+                key: 'museum',
+                canonicalVi: 'bảo tàng',
+                canonicalEn: 'museum',
+                searchTerms: ['bảo tàng', 'bao tang', 'museum'],
+                pattern: /\b(bao\s*tang|museum)\b/
+            },
+            {
+                key: 'park',
+                canonicalVi: 'công viên',
+                canonicalEn: 'park',
+                searchTerms: ['công viên', 'cong vien', 'park'],
+                pattern: /\b(cong\s*vien|park)\b/
+            },
+            {
+                key: 'tourist_area',
+                canonicalVi: 'khu du lịch',
+                canonicalEn: 'tourist area',
+                searchTerms: ['khu du lịch', 'khu du lich', 'tourist area', 'tourist attraction'],
+                pattern: /\b(khu\s*du\s*lich|tourist\s*area|tourist\s*attraction|landmark)\b/
+            }
+        ];
+
+        function isBridgeCanonicalText(value) {
+            const normalized = normalizeVisionNoAccent(value);
+            if (!normalized) {
+                return false;
+            }
+
+            return /\bcau\b|\bbridge\b/.test(normalized);
+        }
+
+        function resolveGeneralPlaceType(values = [], language = 'en') {
+            const haystack = normalizeVisionNoAccent(values.join(' '));
+            if (!haystack) {
+                return null;
+            }
+
+            const matched = GENERAL_PLACE_TYPE_RULES.find((rule) => rule.pattern.test(haystack));
+            if (!matched) {
+                return null;
+            }
+
+            const normalizedLanguage = normalizeVisionLanguage(language);
+            return {
+                key: matched.key,
+                canonical: normalizedLanguage === 'vi' ? matched.canonicalVi : matched.canonicalEn,
+                displayLabel: normalizedLanguage === 'vi' ? matched.canonicalVi : matched.canonicalEn,
+                searchTerms: Array.isArray(matched.searchTerms) ? matched.searchTerms : []
+            };
+        }
+
+        function isTransientOpenAiError(error) {
+            const status = Number(error?.response?.status || 0);
+            return [408, 409, 425, 429, 500, 502, 503, 504].includes(status)
+                || /timeout|network|ECONNRESET|ETIMEDOUT|EAI_AGAIN|rate limit|server error/i.test(String(error?.message || ''));
+        }
+
+        async function postOpenAiChatCompletion(payload, timeout = 30000, retries = 1) {
+            const openAiApiKey = String(process.env.OPENAI_API_KEY || '').trim();
+
+            if (!openAiApiKey) {
+                throw new Error('OPENAI_API_KEY is missing on server');
+            }
+
+            let lastError = null;
+
+            for (let attempt = 0; attempt <= retries; attempt += 1) {
+                try {
+                    return await axios.post(
+                        'https://api.openai.com/v1/chat/completions',
+                        payload,
+                        {
+                            headers: {
+                                Authorization: `Bearer ${openAiApiKey}`,
+                                'Content-Type': 'application/json'
+                            },
+                            timeout
+                        }
+                    );
+                } catch (error) {
+                    lastError = error;
+                    if (attempt >= retries || !isTransientOpenAiError(error)) {
+                        break;
+                    }
+
+                    await new Promise((resolve) => setTimeout(resolve, 600 * (attempt + 1)));
+                }
+            }
+
+            throw lastError;
+        }
+
         function resolveCanonicalPlaceFromVision(values = []) {
             const haystack = normalizeVisionNoAccent(values.join(' '));
 
@@ -22030,81 +22190,6 @@ async function generateWardIdFromName(name) {
             return matched || null;
         }
 
-        const DANANG_BRIDGE_CATALOG = [
-            {
-                canonical: 'cầu thuận phước',
-                notes: 'cầu treo dây võng rất dài, nằm ở cửa biển nơi sông Hàn đổ ra vịnh Đà Nẵng'
-            },
-            {
-                canonical: 'cầu sông hàn',
-                notes: 'cầu quay đầu tiên do kỹ sư Việt Nam thiết kế, phần giữa cầu có thể xoay 90 độ'
-            },
-            {
-                canonical: 'cầu rồng',
-                notes: 'hình dáng rồng vươn ra biển, có phun lửa và phun nước vào 21:00 tối thứ 7 và chủ nhật'
-            },
-            {
-                canonical: 'cầu nguyễn văn trỗi',
-                notes: 'cầu có tuổi đời lâu, hiện giữ lại làm cầu đi bộ chụp ảnh và tham quan'
-            },
-            {
-                canonical: 'cầu trần thị lý',
-                notes: 'trụ nghiêng và dây văng kiểu cánh buồm'
-            },
-            {
-                canonical: 'cầu tiên sơn',
-                notes: 'còn gọi cầu tuyên sơn, nối Hải Châu và Ngũ Hành Sơn, trục giao thông quan trọng'
-            },
-            {
-                canonical: 'cầu cẩm lệ',
-                notes: 'bắc qua sông Cẩm Lệ, kết nối trục vào phía nam thành phố'
-            },
-            {
-                canonical: 'cầu nguyễn tri phương',
-                notes: 'bắc qua sông Cẩm Lệ, kết nối các khu đô thị mới về trung tâm'
-            },
-            {
-                canonical: 'cầu hòa xuân',
-                notes: 'bắc qua sông Cẩm Lệ, phục vụ khu đô thị Hòa Xuân'
-            },
-            {
-                canonical: 'cầu đỏ',
-                notes: 'cây cầu lịch sử gần quốc lộ 1a'
-            },
-            {
-                canonical: 'cầu nam ô',
-                notes: 'bắc qua sông Cu Đê, kết nối quốc lộ 1 và đường sắt khu Nam Ô'
-            },
-            {
-                canonical: 'cầu phò nam',
-                notes: 'cầu treo khu thượng nguồn sông cu đê'
-            },
-            {
-                canonical: 'cầu liên chiểu',
-                notes: 'bắc qua khu vực sông Cu Đê, kết nối hướng Liên Chiểu'
-            },
-            {
-                canonical: 'cầu cổ cò',
-                notes: 'bắc qua sông Cổ Cò, tuyến kết nối du lịch ven biển'
-            },
-            {
-                canonical: 'cầu bãi dài',
-                notes: 'khu vực sông Cổ Cò, phục vụ kết nối ven biển và du lịch'
-            },
-            {
-                canonical: 'cầu vàng',
-                notes: 'golden bridge ở bà nà hills, hình bàn tay'
-            },
-            {
-                canonical: 'cầu tình yêu',
-                notes: 'điểm check-in khóa tình yêu ven sông hàn'
-            },
-            {
-                canonical: 'cầu đi bộ nguyễn tất thành',
-                notes: 'cầu đi bộ vươn ra biển khu nguyễn tất thành'
-            }
-        ];
-
         const BRIDGE_VISUAL_CUE_RULES = [
             {
                 canonical: 'cầu rồng',
@@ -22114,8 +22199,14 @@ async function generateWardIdFromName(name) {
                     'rong',
                     'dau rong',
                     'phun lua',
+                    'phun lửa',
                     'phun nuoc',
-                    'fire breathing bridge'
+                    'phun nước',
+                    'phun lửa nước',
+                    'fire breathing bridge',
+                    'phun lua nuoc',
+                    'rồng phun lửa',
+                    'rồng phun nước'
                 ]
             },
             {
@@ -22130,11 +22221,15 @@ async function generateWardIdFromName(name) {
             },
             {
                 canonical: 'cầu sông hàn',
-                cues: ['cau song han', 'song han bridge', 'cau quay', 'han river bridge', 'xoay 90 do']
+                cues: ['cau song han', 'song han bridge', 'cau quay', 'han river bridge', 'xoay 90 do', 'xoay', 'cầu xoay', 'cau xoay']
             },
             {
                 canonical: 'cầu trần thị lý',
                 cues: ['cau tran thi ly', 'tran thi ly bridge', 'day vang', 'tru nghieng', 'canh buom']
+            },
+            {
+                canonical: 'cầu trần thị lý',
+                cues: ['cau tran thi ly', 'tran thi ly bridge', 'day vang', 'tru nghieng', 'canh buom', 'cánh buồm', 'canh buom']
             },
             {
                 canonical: 'cầu nguyễn văn trỗi',
@@ -22177,6 +22272,10 @@ async function generateWardIdFromName(name) {
                 cues: ['cau vang', 'golden bridge', 'ban tay', 'giant hands bridge']
             },
             {
+                canonical: 'cầu vàng',
+                cues: ['cau vang', 'golden bridge', 'ban tay', 'giant hands bridge', 'ba na bridge', 'bà nà', 'ba na hills']
+            },
+            {
                 canonical: 'cầu tình yêu',
                 cues: ['cau tinh yeu', 'love bridge', 'moc khoa tinh yeu', 'lock bridge']
             },
@@ -22185,6 +22284,30 @@ async function generateWardIdFromName(name) {
                 cues: ['cau di bo nguyen tat thanh', 'nguyen tat thanh walking bridge', 'cau di bo moi']
             }
         ];
+
+        // Build a dynamic Da Nang bridge catalog from canonical place rules.
+        // Keep this after BRIDGE_VISUAL_CUE_RULES initialization to avoid TDZ errors.
+        const DANANG_BRIDGE_CATALOG = (function buildDanangBridgeCatalog() {
+            if (!Array.isArray(CANONICAL_PLACE_RULES)) return [];
+
+            const bridges = CANONICAL_PLACE_RULES
+                .filter((rule) => {
+                    const norm = normalizeVisionNoAccent(String(rule.canonical || '')) || '';
+                    return /\bcau\b/.test(norm) || (Array.isArray(rule.variants) && rule.variants.some((v) => /\bcau\b/.test(normalizeVisionNoAccent(String(v || '')) || '')));
+                })
+                .map((rule) => ({ canonical: rule.canonical, notes: (rule.variants || []).slice(0, 5).join(', ') }));
+
+            if (Array.isArray(BRIDGE_VISUAL_CUE_RULES)) {
+                BRIDGE_VISUAL_CUE_RULES.forEach((r) => {
+                    const exists = bridges.some((b) => normalizeVisionNoAccent(b.canonical) === normalizeVisionNoAccent(r.canonical));
+                    if (!exists) {
+                        bridges.push({ canonical: r.canonical, notes: (r.cues || []).slice(0, 5).join(', ') });
+                    }
+                });
+            }
+
+            return bridges;
+        })();
 
         function resolveBridgeVisualCueRule(values = []) {
             const normalizedHaystack = normalizeVisionNoAccent(values.join(' '));
@@ -22211,12 +22334,25 @@ async function generateWardIdFromName(name) {
             const best = ranked[0];
             const second = ranked[1];
 
-            if (!best || best.score < 3) {
+            // Require at least some cue matches; lower threshold to allow shorter cue hits
+            if (!best || best.score < 2) {
                 return null;
             }
 
-            if (second && best.score <= second.score) {
-                return null;
+            // If second best is close, require a clear gap to avoid ambiguous picks
+            if (second && best.score <= second.score + 0) {
+                // if tied, prefer the one whose canonical tokens appear in the haystack
+                const firstRule = CANONICAL_PLACE_RULES.find((rule) => normalizeVisionNoAccent(rule.canonical) === normalizeVisionNoAccent(best.canonical));
+                const secondRule = CANONICAL_PLACE_RULES.find((rule) => normalizeVisionNoAccent(rule.canonical) === normalizeVisionNoAccent(second.canonical));
+                if (firstRule && secondRule) {
+                    const firstEvidence = hasBridgeEvidenceForRule(firstRule, [normalizedHaystack]) ? 1 : 0;
+                    const secondEvidence = hasBridgeEvidenceForRule(secondRule, [normalizedHaystack]) ? 1 : 0;
+                    if (firstEvidence <= secondEvidence) {
+                        return null;
+                    }
+                } else {
+                    return null;
+                }
             }
 
             return CANONICAL_PLACE_RULES.find(
@@ -22306,9 +22442,10 @@ async function generateWardIdFromName(name) {
                 catalogText
             ].join(' ');
 
-            const response = await axios.post(
-                'https://api.openai.com/v1/chat/completions',
-                {
+            let response;
+
+            try {
+                response = await postOpenAiChatCompletion({
                     model,
                     temperature: 0,
                     max_tokens: 220,
@@ -22332,15 +22469,11 @@ async function generateWardIdFromName(name) {
                             ]
                         }
                     ]
-                },
-                {
-                    headers: {
-                        Authorization: `Bearer ${openAiApiKey}`,
-                        'Content-Type': 'application/json'
-                    },
-                    timeout: 30000
-                }
-            );
+                }, 30000, 1);
+            } catch (error) {
+                console.error('Vision bridge verify degraded:', error?.response?.data || error?.message || error);
+                return null;
+            }
 
             const rawContent = response?.data?.choices?.[0]?.message?.content || '{}';
             const parsed = safeParseJsonObject(rawContent);
@@ -22768,11 +22901,22 @@ async function generateWardIdFromName(name) {
             }
         }
 
-        async function detectImageSearchPayload(imageDataUrl, target) {
+        async function detectImageSearchPayload(imageDataUrl, target, language = 'en') {
             const openAiApiKey = String(process.env.OPENAI_API_KEY || '').trim();
 
             if (!openAiApiKey) {
-                throw new Error('OPENAI_API_KEY is missing on server');
+                return {
+                    model: 'fallback-no-key',
+                    label: '',
+                    displayLabel: '',
+                    alternativeLabels: [],
+                    keywords: [],
+                    visualClues: [],
+                    kind: 'unknown',
+                    confidence: 0,
+                    analysisStatus: 'degraded',
+                    analysisReason: 'OPENAI_API_KEY is missing on server'
+                };
             }
 
             const model =
@@ -22782,22 +22926,30 @@ async function generateWardIdFromName(name) {
 
             const normalizedTarget = normalizeVisionText(target);
             const preferredKind = normalizedTarget === 'food' ? 'food' : normalizedTarget === 'place' ? 'place' : 'unknown';
+            const normalizedLanguage = normalizeVisionLanguage(language);
+            const labelLanguageHint = normalizedLanguage === 'vi'
+                ? 'label và alternativeLabels phải viết tiếng Việt có dấu nếu có tên tiếng Việt tự nhiên.'
+                : 'label and alternativeLabels should be written in natural English.';
 
             const systemPrompt = [
                 'Bạn là AI CHÍNH chuyên gia xác minh món ăn/địa điểm từ hình ảnh người dùng gửi lên.',
                 'Mô-đun này là phân tích tổng quát; chuyên gia cầu chỉ là bước phụ khi có tín hiệu cầu.',
-                'Mục tiêu là trả nhãn đúng nhất theo nội dung thật của ảnh người dùng gửi lên.',
+                'Mục tiêu là tự nhận diện trực tiếp từ ảnh, không dựa vào bộ train thủ công hay taxonomy cố định.',
                 'Chỉ trả về JSON object hợp lệ, không thêm markdown.',
                 'Schema JSON:',
-                '{"label":"string","alternativeLabels":["string"],"keywords":["string"],"visualClues":["string"],"kind":"food|place|unknown","confidence":0}',
-                'label là tên CỤ THỂ nhất bạn có thể suy ra trực tiếp từ ảnh.',
-                'alternativeLabels là 1 đến 3 tên thay thế gần nhất nếu label chưa chắc chắn.',
+                '{"label":"string","displayLabel":"string","alternativeLabels":["string"],"keywords":["string"],"visualClues":["string"],"kind":"food|place|unknown","confidence":0}',
+                'Nếu kind=food: label là tên món ăn cụ thể nhất có thể suy ra trực tiếp từ ảnh.',
+                'Nếu kind=place: label phải là LOẠI địa điểm chung (ví dụ: công viên nước, bãi biển, chùa, khu vui chơi, khu du lịch), KHÔNG trả tên riêng cụ thể.',
+                'Ngoại lệ duy nhất cho place: nếu là CẦU và đủ bằng chứng thì label được phép là tên cầu cụ thể.',
+                'displayLabel là tên hiển thị cho người dùng, ưu tiên có dấu nếu language=vi.',
+                'alternativeLabels là 1 đến 3 nhãn thay thế gần nhất nếu label chưa chắc chắn; với place thì vẫn phải là loại chung, trừ trường hợp cầu.',
                 'keywords là tối đa 5 từ khóa tìm kiếm hữu ích để truy vấn database.',
                 'visualClues là các dấu hiệu nhìn thấy rõ trong ảnh, ngắn gọn và không suy diễn quá mức.',
-                'Tránh trả nhãn chung chung như "món ăn Việt Nam" hoặc "địa điểm du lịch".',
+                'Không dùng nhãn quá rộng như "món ăn", "địa điểm", "địa điểm du lịch", "landmark".',
                 'Không được đổi sang món/địa điểm phổ biến hơn nếu ảnh không có đặc trưng rõ ràng của nó.',
                 'Nếu ảnh là món nướng, món cuốn, món bún, món phở, hãy ưu tiên đúng kiểu món đó thay vì suy đoán sang món khác.',
                 'Nếu không chắc thì kind=unknown và confidence thấp.',
+                labelLanguageHint,
                 `Ưu tiên kind=${preferredKind} nếu ảnh phù hợp.`,
                 'Ràng buộc bắt buộc theo target tìm kiếm:',
                 'Nếu target=place thì không được trả label là món ăn; chỉ trả place hoặc unknown.',
@@ -22807,9 +22959,8 @@ async function generateWardIdFromName(name) {
                 'Ví dụ địa danh thường gặp để tham chiếu ngữ cảnh: Cầu Rồng, Cầu Sông Hàn, Cầu Thuận Phước, Cầu Trần Thị Lý, Cầu Nguyễn Văn Trỗi, Bà Nà Hills, Ngũ Hành Sơn, Chùa Linh Ứng, Asia Park.'
             ].join(' ');
 
-            const response = await axios.post(
-                'https://api.openai.com/v1/chat/completions',
-                {
+            try {
+                const response = await postOpenAiChatCompletion({
                     model,
                     temperature: 0,
                     max_tokens: 260,
@@ -22833,41 +22984,51 @@ async function generateWardIdFromName(name) {
                             ]
                         }
                     ]
-                },
-                {
-                    headers: {
-                        Authorization: `Bearer ${openAiApiKey}`,
-                        'Content-Type': 'application/json'
-                    },
-                    timeout: 30000
-                }
-            );
+                }, 30000, 1);
 
-            const rawContent = response?.data?.choices?.[0]?.message?.content || '{}';
-            const parsed = safeParseJsonObject(rawContent);
-            const label = String(parsed.label || '').trim();
-            const alternativeLabels = Array.isArray(parsed.alternativeLabels)
-                ? parsed.alternativeLabels.map((item) => String(item || '').trim()).filter(Boolean)
-                : [];
-            const keywords = Array.isArray(parsed.keywords)
-                ? parsed.keywords.map((item) => String(item || '').trim()).filter(Boolean)
-                : [];
-            const visualClues = Array.isArray(parsed.visualClues)
-                ? parsed.visualClues.map((item) => String(item || '').trim()).filter(Boolean)
-                : [];
-            const kindRaw = normalizeVisionText(parsed.kind);
-            const kind = ['food', 'place', 'unknown'].includes(kindRaw) ? kindRaw : 'unknown';
-            const confidence = Number(parsed.confidence || 0);
+                const rawContent = response?.data?.choices?.[0]?.message?.content || '{}';
+                const parsed = safeParseJsonObject(rawContent);
+                const label = String(parsed.label || '').trim();
+                const displayLabel = String(parsed.displayLabel || label).trim();
+                const alternativeLabels = Array.isArray(parsed.alternativeLabels)
+                    ? parsed.alternativeLabels.map((item) => String(item || '').trim()).filter(Boolean)
+                    : [];
+                const keywords = Array.isArray(parsed.keywords)
+                    ? parsed.keywords.map((item) => String(item || '').trim()).filter(Boolean)
+                    : [];
+                const visualClues = Array.isArray(parsed.visualClues)
+                    ? parsed.visualClues.map((item) => String(item || '').trim()).filter(Boolean)
+                    : [];
+                const kindRaw = normalizeVisionText(parsed.kind);
+                const kind = ['food', 'place', 'unknown'].includes(kindRaw) ? kindRaw : 'unknown';
+                const confidence = Number(parsed.confidence || 0);
 
-            return {
-                model,
-                label,
-                alternativeLabels,
-                keywords,
-                visualClues,
-                kind,
-                confidence: Number.isFinite(confidence) ? confidence : 0
-            };
+                return {
+                    model,
+                    label,
+                    displayLabel,
+                    alternativeLabels,
+                    keywords,
+                    visualClues,
+                    kind,
+                    confidence: Number.isFinite(confidence) ? confidence : 0,
+                    analysisStatus: 'ok'
+                };
+            } catch (error) {
+                console.error('Vision detect degraded:', error?.response?.data || error?.message || error);
+                return {
+                    model,
+                    label: '',
+                    displayLabel: '',
+                    alternativeLabels: [],
+                    keywords: [],
+                    visualClues: [],
+                    kind: 'unknown',
+                    confidence: 0,
+                    analysisStatus: 'degraded',
+                    analysisReason: error?.response?.data?.error?.message || error?.message || 'Vision analysis failed'
+                };
+            }
         }
 
         const searchVenuesByImageVisionHandler = async (req, res) => {
@@ -22884,25 +23045,7 @@ async function generateWardIdFromName(name) {
                     return res.status(413).json({ message: 'Image is too large. Please choose a smaller image.' });
                 }
 
-                let vision = await detectImageSearchPayload(imageDataUrl, target);
-                const taxonomyNormalized = normalizeVisionPayloadWithTaxonomy(vision, target, requestLanguage);
-
-                if (taxonomyNormalized?.applied) {
-                    const normalizedLabel = String(taxonomyNormalized.label || 'unknown').trim();
-                    const normalizedAliases = Array.isArray(taxonomyNormalized.aliases)
-                        ? taxonomyNormalized.aliases
-                        : [];
-
-                    vision = {
-                        ...vision,
-                        label: normalizedLabel,
-                        kind: taxonomyNormalized.kind || 'unknown',
-                        confidence: clampVisionConfidence(taxonomyNormalized.confidence),
-                        alternativeLabels: taxonomyNormalized.matched
-                            ? uniqueVisionValues([...normalizedAliases, ...(vision.alternativeLabels || [])]).slice(0, 4)
-                            : uniqueVisionValues(vision.alternativeLabels || []).slice(0, 4)
-                    };
-                }
+                const vision = await detectImageSearchPayload(imageDataUrl, target, requestLanguage);
 
                 const visionHints = [
                     vision.label,
@@ -22971,14 +23114,32 @@ async function generateWardIdFromName(name) {
 
                 const canonicalRule = canonicalFoodRule || canonicalPlaceRule;
 
+                const isBridgeSpecificPlace = target === 'place'
+                    ? isBridgeCanonicalText(canonicalPlaceRule?.canonical || '')
+                    : false;
+
+                const generalizedPlaceType = target === 'place' && !isBridgeSpecificPlace
+                    ? resolveGeneralPlaceType([
+                        vision.label,
+                        ...(vision.alternativeLabels || []),
+                        ...(vision.keywords || []),
+                        ...(vision.visualClues || []),
+                        ...(terms || [])
+                    ], requestLanguage)
+                    : null;
+
                 const effectiveTerms = canonicalRule
                     ? uniqueVisionValues(canonicalRule.variants)
                     : terms;
 
-                const lexicalVenueResults = await queryVisionVenueMatches(effectiveTerms, target, 40, vision.label);
+                const effectiveTermsForSearch = generalizedPlaceType
+                    ? uniqueVisionValues([...(generalizedPlaceType.searchTerms || []), ...effectiveTerms])
+                    : effectiveTerms;
+
+                const lexicalVenueResults = await queryVisionVenueMatches(effectiveTermsForSearch, target, 40, vision.label);
                 const rerankResult = await rerankVisionVenueMatchesWithAI(
                     vision,
-                    effectiveTerms,
+                    effectiveTermsForSearch,
                     target,
                     lexicalVenueResults
                 );
@@ -22991,8 +23152,18 @@ async function generateWardIdFromName(name) {
                 ]).find((item) => !isGenericVisionLabel(item)) || String(vision.label || '').trim();
                 const specificLabel = hasGenericLabel ? '' : String(vision.label || '').trim();
                 const canonicalText = resolveCanonicalRuleDisplay(canonicalRule, requestLanguage);
-                const rawSearchText = canonicalText || specificLabel || bestGuessLabel || effectiveTerms[0] || '';
-                const fallbackReadableTerm = uniqueVisionValues(effectiveTerms || [])
+                const preferredPlaceTypeLabel = generalizedPlaceType?.displayLabel || '';
+                const preferredDisplayLabel = requestLanguage === 'vi'
+                    ? ((target === 'place' && !isBridgeSpecificPlace)
+                        ? (preferredPlaceTypeLabel || canonicalText || String(vision.displayLabel || '').trim() || specificLabel || bestGuessLabel || effectiveTermsForSearch[0] || '')
+                        : (canonicalText || String(vision.displayLabel || '').trim() || specificLabel || bestGuessLabel || effectiveTermsForSearch[0] || ''))
+                    : ((target === 'place' && !isBridgeSpecificPlace)
+                        ? (preferredPlaceTypeLabel || canonicalText || specificLabel || bestGuessLabel || effectiveTermsForSearch[0] || '')
+                        : (canonicalText || specificLabel || bestGuessLabel || effectiveTermsForSearch[0] || ''));
+                const rawSearchText = (target === 'place' && !isBridgeSpecificPlace)
+                    ? (preferredPlaceTypeLabel || canonicalText || specificLabel || bestGuessLabel || effectiveTermsForSearch[0] || '')
+                    : (canonicalText || specificLabel || bestGuessLabel || effectiveTermsForSearch[0] || '');
+                const fallbackReadableTerm = uniqueVisionValues(effectiveTermsForSearch || [])
                     .find((term) => {
                         const normalized = normalizeVisionNoAccent(term);
                         if (!normalized || normalized === 'unknown') {
@@ -23012,23 +23183,22 @@ async function generateWardIdFromName(name) {
                             ? (requestLanguage === 'en' ? 'food from image' : 'món ăn từ ảnh')
                             : (requestLanguage === 'en' ? 'place from image' : 'địa điểm từ ảnh'))
                     )
-                    : rawSearchText;
+                    : preferredDisplayLabel || rawSearchText;
 
                 writeVisionTaxonomyEvalLog({
                     target,
-                    taxonomyApplied: Boolean(taxonomyNormalized?.applied),
-                    taxonomyMatched: Boolean(taxonomyNormalized?.matched),
-                    taxonomyLabelId: taxonomyNormalized?.labelId || null,
-                    taxonomyConfidence: clampVisionConfidence(taxonomyNormalized?.confidence),
+                    taxonomyApplied: false,
+                    taxonomyMatched: false,
+                    taxonomyLabelId: null,
+                    taxonomyConfidence: 0,
                     modelDetectedLabel: String(vision.label || '').trim(),
+                    modelDetectedDisplayLabel: String(vision.displayLabel || vision.label || '').trim(),
                     modelDetectedKind: String(vision.kind || '').trim(),
                     modelConfidence: clampVisionConfidence(vision.confidence),
                     canonicalFood: canonicalFoodRule?.canonical || null,
                     canonicalPlace: canonicalPlaceRule?.canonical || null,
                     searchTerms: Array.isArray(effectiveTerms) ? effectiveTerms.slice(0, 10) : [],
-                    topTaxonomyCandidates: Array.isArray(taxonomyNormalized?.topCandidates)
-                        ? taxonomyNormalized.topCandidates.slice(0, 3)
-                        : [],
+                    topTaxonomyCandidates: [],
                     venueResultCount: Array.isArray(venueResults) ? venueResults.length : 0,
                     firstVenueId: venueResults?.[0]?.id || null,
                     firstVenueName: venueResults?.[0]?.name || venueResults?.[0]?.title || null,
@@ -23036,27 +23206,26 @@ async function generateWardIdFromName(name) {
                     aiRerankModel: rerankResult?.model || null
                 });
 
+                const detectedLabel = (target === 'place' && !isBridgeSpecificPlace)
+                    ? (preferredPlaceTypeLabel || preferredDisplayLabel)
+                    : (requestLanguage === 'vi'
+                        ? (String(vision.displayLabel || vision.label || '').trim() || preferredDisplayLabel)
+                        : (vision.label || preferredDisplayLabel));
+
                 return res.json({
                     success: true,
                     target,
-                    detectedLabel: vision.label,
-                    bestGuessLabel,
+                    analysisStatus: vision.analysisStatus || 'ok',
+                    analysisReason: vision.analysisReason || '',
+                    detectedLabel,
                     alternativeLabels: vision.alternativeLabels || [],
                     visualClues: vision.visualClues || [],
                     detectedKind: vision.kind,
                     confidence: vision.confidence,
-                    taxonomyNormalization: taxonomyNormalized?.applied
-                        ? {
-                            matched: Boolean(taxonomyNormalized.matched),
-                            labelId: taxonomyNormalized.labelId || '',
-                            confidence: clampVisionConfidence(taxonomyNormalized.confidence),
-                            topCandidates: Array.isArray(taxonomyNormalized.topCandidates)
-                                ? taxonomyNormalized.topCandidates
-                                : []
-                        }
-                        : null,
                     canonicalFood: canonicalFoodRule?.canonical || '',
-                    canonicalPlace: canonicalPlaceRule?.canonical || '',
+                    canonicalPlace: isBridgeSpecificPlace
+                        ? (canonicalPlaceRule?.canonical || '')
+                        : (generalizedPlaceType?.canonical || canonicalPlaceRule?.canonical || ''),
                     bridgeVerification: bridgeVerification
                         ? {
                             selectedCanonical: bridgeVerification.selectedCanonical,
@@ -23071,7 +23240,7 @@ async function generateWardIdFromName(name) {
                             model: rerankResult.model
                         }
                         : null,
-                    searchTerms: effectiveTerms,
+                    searchTerms: effectiveTermsForSearch,
                     searchText,
                     venueResults
                 });
@@ -23386,23 +23555,25 @@ async function generateWardIdFromName(name) {
                     return res.redirect('/api/docs');
                 });
 
-            const PORT = Number(process.env.PORT) || 3000;
+            if (require.main === module) {
+                const PORT = Number(process.env.PORT) || 3000;
 
-            const server = app.listen(PORT, '0.0.0.0', () => {
-                console.log(`🚀 Server running on 0.0.0.0:${PORT}`);
-                console.log(`🌐 Local URL: http://localhost:${PORT}`);
-                console.log(`📚 Swagger UI: http://localhost:${PORT}/api/docs`);
-                if (shouldServeFrontendDist && hasFrontendIndex) {
-                    console.log(`🖥️ Frontend UI: http://localhost:${PORT}`);
-                }
-            });
+                const server = app.listen(PORT, '0.0.0.0', () => {
+                    console.log(`🚀 Server running on 0.0.0.0:${PORT}`);
+                    console.log(`🌐 Local URL: http://localhost:${PORT}`);
+                    console.log(`📚 Swagger UI: http://localhost:${PORT}/api/docs`);
+                    if (shouldServeFrontendDist && hasFrontendIndex) {
+                        console.log(`🖥️ Frontend UI: http://localhost:${PORT}`);
+                    }
+                });
 
-            server.on('error', (error) => {
-                if (error && error.code === 'EADDRINUSE') {
-                    console.error(`❌ Port ${PORT} is already in use.`);
-                } else {
-                    console.error('❌ Failed to start server:', error);
-                }
+                server.on('error', (error) => {
+                    if (error && error.code === 'EADDRINUSE') {
+                        console.error(`❌ Port ${PORT} is already in use.`);
+                    } else {
+                        console.error('❌ Failed to start server:', error);
+                    }
 
-                process.exit(1);
-            });
+                    process.exit(1);
+                });
+            }

@@ -96,6 +96,48 @@ function readFileAsDataUrl(file) {
   });
 }
 
+function loadImageElement(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('Failed to load image for resizing.'));
+    img.src = dataUrl;
+  });
+}
+
+async function createCompressedImageDataUrl(file, maxWidth = 1400, maxHeight = 1400, quality = 0.84) {
+  const originalDataUrl = await readFileAsDataUrl(file);
+
+  if (typeof document === 'undefined') {
+    return originalDataUrl;
+  }
+
+  const image = await loadImageElement(originalDataUrl);
+  const width = Number(image.naturalWidth || image.width || 0);
+  const height = Number(image.naturalHeight || image.height || 0);
+
+  if (!width || !height) {
+    return originalDataUrl;
+  }
+
+  const scale = Math.min(maxWidth / width, maxHeight / height, 1);
+  if (scale >= 1) {
+    return originalDataUrl;
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(width * scale));
+  canvas.height = Math.max(1, Math.round(height * scale));
+
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    return originalDataUrl;
+  }
+
+  ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL('image/jpeg', quality);
+}
+
 function getVenueImage(venue) {
   return (
     venue.cover_image_url ||
@@ -621,6 +663,10 @@ function OverviewPage() {
   const searchInputRef = useRef(null);
   const libraryInputRef = useRef(null);
   const cameraInputRef = useRef(null);
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const streamRef = useRef(null);
+  const [showCameraOverlay, setShowCameraOverlay] = useState(false);
 
   // Carousel state for hero float images
   const [carouselIndex, setCarouselIndex] = useState(0);
@@ -650,6 +696,8 @@ function OverviewPage() {
     setPreviewUrl('');
     setImageError('');
     setImageSearchLoading(false);
+    stopCamera();
+    setShowCameraOverlay(false);
     if (libraryInputRef.current) libraryInputRef.current.value = '';
     if (cameraInputRef.current) cameraInputRef.current.value = '';
   };
@@ -1594,11 +1642,89 @@ function OverviewPage() {
     setImageError('');
 
     if (source === 'camera') {
-      cameraInputRef.current?.click();
+      // Try to open an in-app camera overlay (desktop) first.
+      // If getUserMedia fails, fall back to the native file input (mobile behavior).
+      openCameraOverlay();
       return;
     }
 
     libraryInputRef.current?.click();
+  };
+
+  const openCameraOverlay = async () => {
+    setShowCameraOverlay(true);
+    try {
+      await startCamera();
+    } catch (err) {
+      // Fallback to native file input (useful on mobile where getUserMedia may be restricted)
+      setShowCameraOverlay(false);
+      cameraInputRef.current?.click();
+    }
+  };
+
+  const startCamera = async () => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      throw new Error('Camera not supported');
+    }
+
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    streamRef.current = stream;
+    if (videoRef.current) {
+      videoRef.current.srcObject = stream;
+      await videoRef.current.play();
+    }
+  };
+
+  const stopCamera = () => {
+    try {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+      }
+      if (videoRef.current) {
+        videoRef.current.pause();
+        videoRef.current.srcObject = null;
+      }
+    } catch (e) {
+      // ignore
+    }
+  };
+
+  const closeCameraOverlay = () => {
+    stopCamera();
+    setShowCameraOverlay(false);
+  };
+
+  const capturePhoto = async () => {
+    if (!videoRef.current) return;
+
+    const video = videoRef.current;
+    const w = video.videoWidth || 640;
+    const h = video.videoHeight || 480;
+    if (!canvasRef.current) canvasRef.current = document.createElement('canvas');
+    const canvas = canvasRef.current;
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, w, h);
+
+    return new Promise((resolve, reject) => {
+      canvas.toBlob(async (blob) => {
+        if (!blob) return reject(new Error('Failed to capture'));
+        const file = new File([blob], `capture_${Date.now()}.jpg`, { type: blob.type || 'image/jpeg' });
+        // show preview quickly
+        try {
+          setPreviewUrl(URL.createObjectURL(file));
+        } catch (e) {}
+        closeCameraOverlay();
+        try {
+          await runVisionSearchWithFile(file, imageSearchTarget);
+          resolve();
+        } catch (err) {
+          reject(err);
+        }
+      }, 'image/jpeg');
+    });
   };
 
   const runVisionSearchWithFile = async (file, target) => {
@@ -1606,7 +1732,7 @@ function OverviewPage() {
     setImageError('');
 
     try {
-      const imageDataUrl = await readFileAsDataUrl(file);
+      const imageDataUrl = await createCompressedImageDataUrl(file);
       const response = await searchVenuesByImage({
         imageDataUrl,
         target,
@@ -1619,7 +1745,6 @@ function OverviewPage() {
       const nextSearchText = String(response?.searchText || response?.detectedLabel || '').trim();
       const isUnknownLabel = nextSearchText.toLowerCase() === 'unknown';
       const readableHint = [
-        response?.bestGuessLabel,
         ...(Array.isArray(response?.searchTerms) ? response.searchTerms : [])
       ]
         .map((item) => String(item || '').trim())
@@ -1630,13 +1755,6 @@ function OverviewPage() {
       const resolvedSearchText = (!nextSearchText || isUnknownLabel)
         ? (readableHint || fallbackSearchText)
         : nextSearchText;
-
-      if (!directVenueResults.length && (!nextSearchText || isUnknownLabel)) {
-        setImageError(language === 'en'
-          ? 'AI could not detect a reliable dish or place from this image.'
-          : 'AI chưa nhận diện được món ăn hoặc địa điểm phù hợp từ ảnh này.');
-        return;
-      }
 
       setAiSuggestMode(false);
       setAiSuggestError('');
@@ -2241,6 +2359,22 @@ function OverviewPage() {
                 className="overview-image-input"
                 onChange={handleImageSelected}
               />
+
+              {showCameraOverlay && (
+                <div className="overview-camera-overlay">
+                  <div className="overview-camera-inner">
+                    <video ref={videoRef} className="overview-camera-video" playsInline muted />
+                    <div className="overview-camera-actions">
+                      <button type="button" className="overview-camera-capture" onClick={capturePhoto} disabled={imageSearchLoading}>
+                        {t.hero.takeNewPhoto}
+                      </button>
+                      <button type="button" className="overview-camera-cancel" onClick={closeCameraOverlay} disabled={imageSearchLoading}>
+                        {t.hero.backToSearchMode}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {previewUrl && (
                 <div className="overview-image-preview">
