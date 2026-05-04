@@ -63,7 +63,12 @@ function setCachedMapValue(cacheMap, cacheKey, data) {
 }
 
 const app = express();
-app.use(cors());
+const rawCorsOrigin = String(process.env.CORS_ORIGIN || '').trim();
+const allowedOrigins = rawCorsOrigin
+    ? rawCorsOrigin.split(',').map((origin) => origin.trim()).filter(Boolean)
+    : [];
+const corsOptions = allowedOrigins.length ? { origin: allowedOrigins, credentials: true } : {};
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
