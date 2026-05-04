@@ -1,6 +1,6 @@
 {
   "version": "v1",
-  "updatedAt": "2026-04-15",
+  "updatedAt": "2026-04-29",
   "notes": [
     "This taxonomy is the source of truth for image label normalization.",
     "The vision model should only output labels in this taxonomy or unknown.",
@@ -106,7 +106,7 @@
       "allow_unknown": true,
       "display_names": {
         "vi": "Cao lầu",
-        "en": "Cao Lau Noodles"
+        "en": "Cao Lau"
       }
     },
     "cao_lau_hoi_an": {
