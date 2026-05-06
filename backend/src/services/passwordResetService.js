@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { supabaseClient } = require('../lib/supabase');
+const { supabaseAdmin } = require('../lib/supabase');
 
 // Generate a secure reset token
 const generateResetToken = () => {
@@ -11,7 +11,7 @@ const storeResetToken = async (userId, email, token, expiresIn = 3600) => {
   try {
     const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
 
-    const { data, error } = await supabaseClient
+    const { data, error } = await supabaseAdmin
       .from('password_reset_tokens')
       .insert([
         {
@@ -40,7 +40,7 @@ const storeResetToken = async (userId, email, token, expiresIn = 3600) => {
 // Verify reset token
 const verifyResetToken = async (token) => {
   try {
-    const { data, error } = await supabaseClient
+    const { data, error } = await supabaseAdmin
       .from('password_reset_tokens')
       .select('*')
       .eq('token', token)
@@ -68,7 +68,7 @@ const verifyResetToken = async (token) => {
 // Mark token as used
 const markTokenAsUsed = async (token) => {
   try {
-    const { data, error } = await supabaseClient
+    const { data, error } = await supabaseAdmin
       .from('password_reset_tokens')
       .update({ used: true })
       .eq('token', token)
@@ -91,7 +91,7 @@ const cleanupExpiredTokens = async () => {
   try {
     const now = new Date().toISOString();
 
-    const { error } = await supabaseClient
+    const { error } = await supabaseAdmin
       .from('password_reset_tokens')
       .delete()
       .lt('expires_at', now);

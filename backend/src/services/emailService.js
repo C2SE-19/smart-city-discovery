@@ -4,13 +4,29 @@ const env = require('../config/env');
 // Initialize transporter
 let transporter;
 
+const getMailerConfig = () => {
+  const emailUser = process.env.EMAIL_USER || process.env.FEEDBACK_GMAIL_USER;
+  const emailPassword = process.env.EMAIL_PASSWORD || process.env.FEEDBACK_GMAIL_APP_PASSWORD;
+  const fromName = process.env.FEEDBACK_REPLY_FROM_NAME || 'Smart City Discovery Support';
+  const fromEmail = process.env.FEEDBACK_REPLY_FROM_EMAIL || emailUser;
+
+  return {
+    emailUser,
+    emailPassword,
+    fromName,
+    fromEmail
+  };
+};
+
 const initializeTransporter = () => {
   if (transporter) {
     return transporter;
   }
 
-  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
-    console.warn('⚠️ Email credentials not found in .env. EMAIL_USER or EMAIL_PASSWORD missing.');
+  const { emailUser, emailPassword } = getMailerConfig();
+
+  if (!emailUser || !emailPassword) {
+    console.warn('⚠️ Email credentials not found in .env. EMAIL_USER/EMAIL_PASSWORD or FEEDBACK_GMAIL_USER/FEEDBACK_GMAIL_APP_PASSWORD missing.');
     return null;
   }
 
@@ -18,13 +34,13 @@ const initializeTransporter = () => {
     transporter = nodemailer.createTransport({
       service: process.env.EMAIL_SERVICE || 'gmail',
       auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASSWORD,
+        user: emailUser,
+        pass: emailPassword,
       },
     });
     console.log('✅ Email transporter initialized successfully');
     console.log(`   Service: ${process.env.EMAIL_SERVICE || 'gmail'}`);
-    console.log(`   User: ${process.env.EMAIL_USER}`);
+    console.log(`   User: ${emailUser}`);
     return transporter;
   } catch (error) {
     console.error('❌ Error initializing email transporter:', error.message);
@@ -49,54 +65,54 @@ const sendPasswordResetEmail = async (email, resetToken, resetLink) => {
       return { success: false, message: 'Email service not configured' };
     }
 
+    const { fromName, fromEmail } = getMailerConfig();
+
     const mailOptions = {
-      from: `"Smart City Discovery" <${process.env.EMAIL_USER}>`,
+      from: `"${fromName}" <${fromEmail}>`,
       to: email,
-      subject: 'Đặt lại mật khẩu tài khoản Smart City Discovery',
+      subject: 'Reset your Smart City Discovery password',
       html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; text-align: center; border-radius: 8px 8px 0 0;">
-            <h1 style="color: white; margin: 0;">Smart City Discovery</h1>
-          </div>
-          
-          <div style="background: #f8f9fa; padding: 30px; border-radius: 0 0 8px 8px;">
-            <h2 style="color: #333; margin-top: 0;">Đặt lại mật khẩu của bạn</h2>
-            
-            <p style="color: #555; line-height: 1.6;">
-              Chúng tôi nhận được yêu cầu đặt lại mật khẩu cho tài khoản của bạn. 
-              Nếu đó không phải là bạn, bạn có thể bỏ qua email này.
-            </p>
-            
-            <p style="color: #555; line-height: 1.6;">
-              Để đặt lại mật khẩu của bạn, vui lòng nhấp vào liên kết bên dưới:
-            </p>
-            
-            <div style="text-align: center; margin: 30px 0;">
-              <a href="${resetLink}" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">
-                Đặt lại mật khẩu
-              </a>
+        <div style="background: #f6f8fb; padding: 24px 0;">
+          <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 28px; text-align: center; border-radius: 12px 12px 0 0;">
+              <h1 style="color: #ffffff; margin: 0; font-size: 24px;">Smart City Discovery</h1>
+              <p style="color: rgba(255, 255, 255, 0.85); margin: 8px 0 0; font-size: 13px;">Password reset request</p>
             </div>
-            
-            <p style="color: #999; font-size: 12px; line-height: 1.6;">
-              Hoặc sao chép và dán URL này vào trình duyệt của bạn:<br/>
-              <code style="background: #eee; padding: 5px 10px; border-radius: 3px; color: #333;">
+
+            <div style="background: #ffffff; padding: 28px; border-radius: 0 0 12px 12px; box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);">
+              <h2 style="color: #111827; margin: 0 0 12px; font-size: 20px;">Reset your password</h2>
+
+              <p style="color: #4b5563; line-height: 1.7; margin: 0 0 16px;">
+                We received a request to reset the password for your Smart City Discovery account.
+                If you did not request this, you can safely ignore this email.
+              </p>
+
+              <div style="text-align: center; margin: 24px 0;">
+                <a href="${resetLink}" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #ffffff; padding: 12px 28px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600; font-size: 14px;">
+                  Reset password
+                </a>
+              </div>
+
+              <p style="color: #6b7280; font-size: 12px; line-height: 1.6; margin: 0 0 10px;">
+                Or copy and paste this URL into your browser:
+              </p>
+              <p style="background: #f3f4f6; padding: 10px 12px; border-radius: 8px; font-size: 12px; color: #374151; word-break: break-all; margin: 0 0 18px;">
                 ${resetLink}
-              </code>
-            </p>
-            
-            <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
-            
-            <p style="color: #999; font-size: 12px; line-height: 1.6;">
-              Liên kết này sẽ hết hạn trong 1 giờ vì lý do bảo mật.
-            </p>
-            
-            <p style="color: #999; font-size: 12px; line-height: 1.6;">
-              Nếu bạn có bất kỳ câu hỏi nào, vui lòng liên hệ với chúng tôi.
-            </p>
-          </div>
-          
-          <div style="background: #f0f0f0; padding: 20px; text-align: center; font-size: 12px; color: #999; border-radius: 0 0 8px 8px;">
-            <p style="margin: 0;">© 2026 Smart City Discovery. All rights reserved.</p>
+              </p>
+
+              <div style="border-top: 1px solid #e5e7eb; margin: 20px 0;"></div>
+
+              <p style="color: #6b7280; font-size: 12px; line-height: 1.6; margin: 0;">
+                This link expires in 1 hour for security reasons.
+              </p>
+              <p style="color: #6b7280; font-size: 12px; line-height: 1.6; margin: 8px 0 0;">
+                If you have any questions, please contact our support team.
+              </p>
+            </div>
+
+            <div style="text-align: center; color: #9ca3af; font-size: 11px; margin-top: 16px;">
+              © 2026 Smart City Discovery. All rights reserved.
+            </div>
           </div>
         </div>
       `,
@@ -126,8 +142,10 @@ const sendVerificationEmail = async (email, verificationLink) => {
       return { success: false, message: 'Email service not configured' };
     }
 
+    const { fromName, fromEmail } = getMailerConfig();
+
     const mailOptions = {
-      from: `"Smart City Discovery" <${process.env.EMAIL_USER}>`,
+      from: `"${fromName}" <${fromEmail}>`,
       to: email,
       subject: 'Xác minh email của bạn - Smart City Discovery',
       html: `

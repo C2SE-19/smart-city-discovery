@@ -1,8 +1,10 @@
-const { supabaseClient } = require('../../lib/supabase');
+const { supabaseAdmin } = require('../../lib/supabase');
+
+const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
 
 const getUserById = async (userId) => {
   try {
-    const { data, error } = await supabaseClient
+    const { data, error } = await supabaseAdmin
       .from('users')
       .select('*')
       .eq('id', userId)
@@ -22,7 +24,7 @@ const getUserById = async (userId) => {
 
 const getUserByUsername = async (username) => {
   try {
-    const { data, error } = await supabaseClient
+    const { data, error } = await supabaseAdmin
       .from('users')
       .select('*')
       .eq('username', username)
@@ -42,10 +44,16 @@ const getUserByUsername = async (username) => {
 
 const getUserByEmail = async (email) => {
   try {
-    const { data, error } = await supabaseClient
+    const normalizedEmail = normalizeEmail(email);
+
+    if (!normalizedEmail) {
+      return null;
+    }
+
+    const { data, error } = await supabaseAdmin
       .from('users')
       .select('*')
-      .eq('email', email)
+      .ilike('email', normalizedEmail)
       .single();
 
     if (error && error.code !== 'PGRST116') {
@@ -78,7 +86,7 @@ const updateUser = async (userId, updateData) => {
     if (typeof updateData.blockedReason !== 'undefined') payload.blocked_reason = updateData.blockedReason;
     if (typeof updateData.password !== 'undefined') payload.password_hash = updateData.password;
 
-    const { data, error } = await supabaseClient
+    const { data, error } = await supabaseAdmin
       .from('users')
       .update(payload)
       .eq('id', userId)
@@ -98,7 +106,7 @@ const updateUser = async (userId, updateData) => {
 
 const createUser = async (userData) => {
   try {
-    const { data, error } = await supabaseClient
+    const { data, error } = await supabaseAdmin
       .from('users')
       .insert([{
         username: userData.username,
@@ -126,7 +134,7 @@ const createUser = async (userData) => {
 
 const getAllUsers = async () => {
   try {
-    const { data, error } = await supabaseClient
+    const { data, error } = await supabaseAdmin
       .from('users')
       .select('*')
       .order('updated_at', { ascending: false });
@@ -144,7 +152,7 @@ const getAllUsers = async () => {
 
 const deleteUser = async (userId) => {
   try {
-    const { data, error } = await supabaseClient
+    const { data, error } = await supabaseAdmin
       .from('users')
       .delete()
       .eq('id', userId)

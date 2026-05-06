@@ -3,8 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import './forgot-password.css';
 import vietnamImage from '../../assets/images/vietnam.png';
 import { FaEnvelope, FaArrowLeft, FaCheckCircle } from 'react-icons/fa';
-import { useLanguage } from '../../contexts/LanguageContext';
-import translations from '../../constants/translations';
 import authService from '../../services/authService';
 
 export default function ForgotPasswordPage() {
@@ -15,9 +13,6 @@ export default function ForgotPasswordPage() {
   const [showEmailSent, setShowEmailSent] = useState(false);
   const [sentEmail, setSentEmail] = useState('');
   const navigate = useNavigate();
-  const { language } = useLanguage();
-  const t = translations[language];
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
@@ -25,14 +20,14 @@ export default function ForgotPasswordPage() {
 
     // Validation
     if (!email.trim()) {
-      setError('Vui lòng nhập địa chỉ email');
+      setError('Please enter your email address.');
       return;
     }
 
     // Basic email validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email.trim())) {
-      setError('Vui lòng nhập email hợp lệ');
+      setError('Please enter a valid email address.');
       return;
     }
 
@@ -51,7 +46,7 @@ export default function ForgotPasswordPage() {
         setSuccess(false);
       }, 5000);
     } catch (err) {
-      const errorMsg = err?.response?.data?.message || err?.message || 'Có lỗi xảy ra. Vui lòng thử lại.';
+      const errorMsg = err?.response?.data?.message || err?.message || 'Something went wrong. Please try again.';
       setError(errorMsg);
       setLoading(false);
     }
@@ -69,9 +64,9 @@ export default function ForgotPasswordPage() {
         <div className="forgot-password-box">
           {/* HEADER */}
           <div className="forgot-password-header">
-            <h1 className="forgot-password-title">Quên mật khẩu?</h1>
+            <h1 className="forgot-password-title">Forgot your password?</h1>
             <p className="forgot-password-subtitle">
-              Đừng lo lắng! Chúng tôi sẽ giúp bạn khôi phục tài khoản của mình.
+              No worries. We will help you regain access to your account.
             </p>
           </div>
 
@@ -79,11 +74,11 @@ export default function ForgotPasswordPage() {
           {showEmailSent && (
             <div className="success-message-box">
               <FaCheckCircle className="success-icon" />
-              <h3>Kiểm tra email của bạn</h3>
+              <h3>Check your email</h3>
               <p>
-                Chúng tôi đã gửi một liên kết đặt lại mật khẩu đến <strong>{sentEmail}</strong>
+                We sent a password reset link to <strong>{sentEmail}</strong>
               </p>
-              <p className="small-text">Liên kết này sẽ hết hạn trong 1 giờ.</p>
+              <p className="small-text">This link expires in 1 hour.</p>
             </div>
           )}
 
@@ -100,14 +95,14 @@ export default function ForgotPasswordPage() {
               {/* EMAIL INPUT */}
               <div className="form-group">
                 <label htmlFor="email" className="form-label">
-                  Địa chỉ Email
+                  Email address
                 </label>
                 <div className="input-wrapper">
                   <FaEnvelope className="input-icon" />
                   <input
                     id="email"
                     type="email"
-                    placeholder="Nhập email của bạn"
+                    placeholder="Enter your email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     className="form-input"
@@ -125,16 +120,16 @@ export default function ForgotPasswordPage() {
                 {loading ? (
                   <>
                     <span className="spinner"></span>
-                    Đang gửi...
+                    Sending...
                   </>
                 ) : (
-                  'Gửi liên kết đặt lại mật khẩu'
+                  'Send reset link'
                 )}
               </button>
 
               {/* DIVIDER */}
               <div className="divider">
-                <span>hoặc</span>
+                <span>or</span>
               </div>
 
               {/* BACK TO LOGIN */}
@@ -144,7 +139,7 @@ export default function ForgotPasswordPage() {
                 onClick={() => navigate('/login')}
               >
                 <FaArrowLeft className="arrow-icon" />
-                Quay lại đăng nhập
+                Back to sign in
               </button>
             </form>
           )}
@@ -157,17 +152,17 @@ export default function ForgotPasswordPage() {
               onClick={() => navigate('/login')}
             >
               <FaArrowLeft className="arrow-icon" />
-              Quay lại đăng nhập
+              Back to sign in
             </button>
           )}
 
           {/* HELP TEXT */}
           <div className="help-text">
-            <p>Không nhận được email?</p>
+            <p>Did not receive the email?</p>
             <ul>
-              <li>Kiểm tra thư mục Spam/Junk</li>
-              <li>Đảm bảo bạn nhập đúng email</li>
-              <li>Liên hệ với bộ phận hỗ trợ nếu còn có vấn đề</li>
+              <li>Check your Spam/Junk folder</li>
+              <li>Make sure the email address is correct</li>
+              <li>Contact support if you still need help</li>
             </ul>
           </div>
         </div>
