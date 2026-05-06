@@ -39,6 +39,8 @@ import MerchantAdPackagesSelectionPage from './pages/merchant/MerchantAdPackages
 import MerchantAdCheckoutResultPage from './pages/merchant/MerchantAdCheckoutResultPage';
 import LoginPage from './pages/auth/LoginPage';
 import RegisterPage from './pages/auth/RegisterPage';
+import ForgotPasswordPage from './pages/auth/ForgotPasswordPage';
+import ResetPasswordPage from './pages/auth/ResetPasswordPage';
 import ProfilePage from './pages/profile/ProfilePage';
 import FeedbackSupportPage from './pages/feedback/FeedbackSupportPage';
 import TermsPage from './pages/terms/TermsPage';
@@ -106,6 +108,8 @@ function AppRoutes({ landingStats }) {
 
       <Route path={APP_ROUTES.LOGIN} element={<LoginPage />} />
       <Route path={APP_ROUTES.REGISTER} element={<RegisterPage />} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path={APP_ROUTES.CITY_MAP} element={<CityMapPage />} />
 
       <Route element={<WorkspaceLayout />}>

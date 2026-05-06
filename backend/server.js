@@ -73,6 +73,63 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
+const runtimeStateDir = path.join(__dirname, '.runtime');
+const runtimePortFile = path.join(runtimeStateDir, 'server-port.json');
+
+function persistRuntimePort(port) {
+    try {
+        fs.mkdirSync(runtimeStateDir, { recursive: true });
+        fs.writeFileSync(
+            runtimePortFile,
+            JSON.stringify(
+                {
+                    port,
+                    url: `http://localhost:${port}`,
+                    startedAt: new Date().toISOString()
+                },
+                null,
+                2
+            ),
+            'utf8'
+        );
+    } catch (error) {
+        console.warn('⚠️ Unable to persist runtime port:', error.message);
+    }
+}
+
+function listenOnPort(port) {
+    return new Promise((resolve, reject) => {
+        const server = app.listen(port, '0.0.0.0', () => resolve(server));
+
+        server.once('error', (error) => {
+            reject(error);
+        });
+    });
+}
+
+async function startServerWithFallback(startPort, maxAttempts = 25) {
+    let lastError = null;
+
+    for (let offset = 0; offset < maxAttempts; offset += 1) {
+        const candidatePort = startPort + offset;
+
+        try {
+            const server = await listenOnPort(candidatePort);
+            return { server, port: candidatePort };
+        } catch (error) {
+            lastError = error;
+
+            if (!error || error.code !== 'EADDRINUSE') {
+                throw error;
+            }
+
+            console.warn(`⚠️ Port ${candidatePort} is already in use. Trying ${candidatePort + 1}...`);
+        }
+    }
+
+    throw lastError || new Error('No available port found for the backend server.');
+}
+
 // Setup multer for contact email attachments
 const contactEmailUploadDir = path.join(__dirname, 'uploads', 'contact-emails');
 if (!fs.existsSync(contactEmailUploadDir)) {
@@ -103,6 +160,7 @@ const upload = multer({
 
 const swaggerUi = require('swagger-ui-express');
 const swaggerJsdoc = require('swagger-jsdoc');
+const authRoutes = require('./src/modules/auth/auth.routes');
 
 const swaggerApis = [
     path.join(__dirname, 'src', 'routes', '*.js').replace(/\\/g, '/')
@@ -122,6 +180,8 @@ const options = {
 const specs = swaggerJsdoc(options);
 
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(specs));
+app.use('/api/auth', authRoutes);
+app.use('/api/v1/auth', authRoutes);
 
 // ===== 1. API routes (đặt trước) =====
 let chatV2;
@@ -24278,24 +24338,29 @@ async function generateWardIdFromName(name) {
                 });
 
             if (require.main === module) {
-                const PORT = Number(process.env.PORT) || 3000;
+                (async () => {
+                    const startPort = Number(process.env.SERVER_PORT) || 5001;
+                    const maxAttempts = Number(process.env.PORT_RETRY_LIMIT) || 25;
+                    const { server, port } = await startServerWithFallback(startPort, maxAttempts);
 
-                const server = app.listen(PORT, '0.0.0.0', () => {
-                    console.log(`🚀 Server running on 0.0.0.0:${PORT}`);
-                    console.log(`🌐 Local URL: http://localhost:${PORT}`);
-                    console.log(`📚 Swagger UI: http://localhost:${PORT}/api/docs`);
+                    persistRuntimePort(port);
+
+                    if (port !== startPort) {
+                        console.log(`⚠️ Requested port ${startPort} was busy, switched to ${port}.`);
+                    }
+
+                    console.log(`🚀 Server running on 0.0.0.0:${port}`);
+                    console.log(`🌐 Local URL: http://localhost:${port}`);
+                    console.log(`📚 Swagger UI: http://localhost:${port}/api/docs`);
                     if (shouldServeFrontendDist && hasFrontendIndex) {
-                        console.log(`🖥️ Frontend UI: http://localhost:${PORT}`);
-                    }
-                });
-
-                server.on('error', (error) => {
-                    if (error && error.code === 'EADDRINUSE') {
-                        console.error(`❌ Port ${PORT} is already in use.`);
-                    } else {
-                        console.error('❌ Failed to start server:', error);
+                        console.log(`🖥️ Frontend UI: http://localhost:${port}`);
                     }
 
+                    server.on('error', (error) => {
+                        console.error('❌ Server runtime error:', error);
+                    });
+                })().catch((error) => {
+                    console.error('❌ Failed to start server:', error);
                     process.exit(1);
                 });
             }

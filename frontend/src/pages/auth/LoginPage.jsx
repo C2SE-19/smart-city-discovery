@@ -270,6 +270,24 @@ export default function LoginPage() {
               </span>
             </div>
 
+            <div style={{ textAlign: 'right', marginBottom: '15px' }}>
+              <button
+                type="button"
+                onClick={() => navigate('/forgot-password')}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#667eea',
+                  fontSize: '12px',
+                  cursor: 'pointer',
+                  fontWeight: '500',
+                  textDecoration: 'underline'
+                }}
+              >
+                {t.auth.forgotPassword || 'Forgot Password?'}
+              </button>
+            </div>
+
             <button type="submit" className="login-btn" disabled={loading || oauthLoading}>
               {loading ? t.auth.signingIn || "Signing in..." : t.auth.signIn || "Sign In"}
             </button>

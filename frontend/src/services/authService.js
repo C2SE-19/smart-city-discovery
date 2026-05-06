@@ -1,12 +1,9 @@
-import axios from 'axios';
-import { getApiBaseUrl } from './api/client';
-
-const API_URL = getApiBaseUrl().replace(/\/+v1\/?$/, '');
+import { apiClient } from './api/client';
 
 export const authService = {
   login: async (credentials) => {
     try {
-      const response = await axios.post(`${API_URL}/login`, credentials);
+      const response = await apiClient.post('/login', credentials);
       return response.data;
     } catch (err) {
       throw err.response?.data || { message: 'Failed to login' };
@@ -15,7 +12,7 @@ export const authService = {
 
   register: async (payload) => {
     try {
-      const response = await axios.post(`${API_URL}/register`, payload);
+      const response = await apiClient.post('/register', payload);
       return response.data;
     } catch (err) {
       throw err.response?.data || { message: 'Failed to register' };
@@ -25,7 +22,7 @@ export const authService = {
   // Google OAuth login
   loginWithGoogle: async (token) => {
     try {
-      const response = await axios.post(`${API_URL}/auth/google`, {
+      const response = await apiClient.post('/auth/google', {
         token,
         credential: token
       });
@@ -38,7 +35,7 @@ export const authService = {
   // Facebook OAuth login
   loginWithFacebook: async (accessToken) => {
     try {
-      const response = await axios.post(`${API_URL}/auth/facebook`, {
+      const response = await apiClient.post('/auth/facebook', {
         accessToken
       });
       return response.data;
@@ -50,7 +47,7 @@ export const authService = {
   // Kiểm tra username đã tồn tại
   checkUsernameExists: async (username) => {
     try {
-      const response = await axios.post(`${API_URL}/auth/check-username`, {
+      const response = await apiClient.post('/auth/check-username', {
         username
       });
       return response.data;
@@ -62,12 +59,50 @@ export const authService = {
   // Kiểm tra email đã tồn tại
   checkEmailExists: async (email) => {
     try {
-      const response = await axios.post(`${API_URL}/auth/check-email`, {
+      const response = await apiClient.post('/auth/check-email', {
         email
       });
       return response.data;
     } catch (err) {
       throw err.response?.data || { message: 'Failed to check email' };
+    }
+  },
+
+  // Forgot password - request reset email
+  forgotPassword: async (email) => {
+    try {
+      const response = await apiClient.post('/auth/forgot-password', {
+        email
+      });
+      return response.data;
+    } catch (err) {
+      throw err.response?.data || { message: 'Failed to send password reset email' };
+    }
+  },
+
+  // Verify reset token
+  verifyResetToken: async (token) => {
+    try {
+      const response = await apiClient.post('/auth/verify-reset-token', {
+        token
+      });
+      return response.data;
+    } catch (err) {
+      throw err.response?.data || { message: 'Failed to verify reset token' };
+    }
+  },
+
+  // Reset password with token
+  resetPassword: async (token, password, confirmPassword) => {
+    try {
+      const response = await apiClient.post('/auth/reset-password', {
+        token,
+        password,
+        confirmPassword
+      });
+      return response.data;
+    } catch (err) {
+      throw err.response?.data || { message: 'Failed to reset password' };
     }
   }
 };

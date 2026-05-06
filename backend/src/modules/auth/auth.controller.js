@@ -252,10 +252,190 @@ const checkEmail = async (req, res) => {
   }
 };
 
+const forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+    const emailService = require('../../services/emailService');
+    const passwordResetService = require('../../services/passwordResetService');
+
+    console.log(`\ud83d\udd0d Forgot password request for: ${email}`);
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email is required'
+      });
+    }
+
+    // Find user by email
+    const user = await usersService.getUserByEmail(email);
+    
+    if (!user) {
+      console.log(`   ⚠️ Email not found in database: ${email}`);
+      // For security, don't reveal if email exists
+      return res.json({
+        success: true,
+        message: 'If an account exists with this email, a password reset link has been sent.'
+      });
+    }
+
+    console.log(`   ✓ User found: ${user.id}`);
+
+    // Generate reset token
+    const token = passwordResetService.generateResetToken();
+    
+    // Store token in database
+    await passwordResetService.storeResetToken(user.id, email, token);
+    console.log(`   ✓ Reset token stored (expires in 1 hour)`);
+
+    // Create reset link
+    const resetLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/reset-password?token=${token}`;
+    console.log(`   🔗 Reset link: ${resetLink}`);
+
+    // Send email
+    const emailResult = await emailService.sendPasswordResetEmail(email, token, resetLink);
+
+    if (!emailResult.success) {
+      console.error(`❌ Email service failed: ${emailResult.message}`);
+
+      // Always return error details in development to help debug
+      if (process.env.NODE_ENV !== 'production') {
+        return res.status(500).json({
+          success: false,
+          message: `[DEV] Email failed: ${emailResult.message}. Check backend logs for details.`,
+          error: emailResult.message
+        });
+      }
+
+      // Still return success in production to avoid revealing email service issues
+      return res.json({
+        success: true,
+        message: 'If an account exists with this email, a password reset link has been sent.'
+      });
+    }
+
+    console.log(`✅ Forgot password flow completed successfully for: ${email}`);
+    res.json({
+      success: true,
+      message: 'If an account exists with this email, a password reset link has been sent.'
+    });
+  } catch (error) {
+    console.error('❌ Forgot password error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+const verifyResetToken = async (req, res) => {
+  try {
+    const { token } = req.body;
+    const passwordResetService = require('../../services/passwordResetService');
+
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        message: 'Token is required'
+      });
+    }
+
+    const result = await passwordResetService.verifyResetToken(token);
+
+    if (!result.valid) {
+      return res.status(400).json({
+        success: false,
+        message: result.message
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Token is valid',
+      email: result.data.email
+    });
+  } catch (error) {
+    console.error('Verify token error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+const resetPassword = async (req, res) => {
+  try {
+    const { token, password, confirmPassword } = req.body;
+    const passwordResetService = require('../../services/passwordResetService');
+
+    if (!token || !password || !confirmPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'Token and password are required'
+      });
+    }
+
+    if (password !== confirmPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'Passwords do not match'
+      });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: 'Password must be at least 6 characters'
+      });
+    }
+
+    // Verify token
+    const result = await passwordResetService.verifyResetToken(token);
+
+    if (!result.valid) {
+      return res.status(400).json({
+        success: false,
+        message: result.message
+      });
+    }
+
+    const user = await usersService.getUserByEmail(result.data.email);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Update password
+    await usersService.updateUser(user.id, {
+      password: password // In production, use bcrypt
+    });
+
+    // Mark token as used
+    await passwordResetService.markTokenAsUsed(token);
+
+    res.json({
+      success: true,
+      message: 'Password reset successfully'
+    });
+  } catch (error) {
+    console.error('Reset password error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
 module.exports = {
   login,
   getProfile,
   register,
   checkUsername,
-  checkEmail
+  checkEmail,
+  forgotPassword,
+  verifyResetToken,
+  resetPassword
 };

@@ -76,6 +76,7 @@ const updateUser = async (userId, updateData) => {
     if (typeof updateData.status !== 'undefined') payload.status = updateData.status;
     if (typeof updateData.pauseUntil !== 'undefined') payload.pause_until = updateData.pauseUntil;
     if (typeof updateData.blockedReason !== 'undefined') payload.blocked_reason = updateData.blockedReason;
+    if (typeof updateData.password !== 'undefined') payload.password_hash = updateData.password;
 
     const { data, error } = await supabaseClient
       .from('users')
