@@ -258,9 +258,11 @@ const forgotPassword = async (req, res) => {
     const emailService = require('../../services/emailService');
     const passwordResetService = require('../../services/passwordResetService');
 
-    console.log(`\ud83d\udd0d Forgot password request for: ${email}`);
+    const normalizedEmail = String(email || '').trim();
 
-    if (!email) {
+    console.log(`\ud83d\udd0d Forgot password request for: ${normalizedEmail}`);
+
+    if (!normalizedEmail) {
       return res.status(400).json({
         success: false,
         message: 'Email is required'
@@ -268,14 +270,13 @@ const forgotPassword = async (req, res) => {
     }
 
     // Find user by email
-    const user = await usersService.getUserByEmail(email);
+    const user = await usersService.getUserByEmail(normalizedEmail);
     
     if (!user) {
-      console.log(`   ⚠️ Email not found in database: ${email}`);
-      // For security, don't reveal if email exists
-      return res.json({
-        success: true,
-        message: 'If an account exists with this email, a password reset link has been sent.'
+      console.log(`   ⚠️ Email not found in database: ${normalizedEmail}`);
+      return res.status(404).json({
+        success: false,
+        message: 'No account found with that email address.'
       });
     }
 
@@ -285,7 +286,7 @@ const forgotPassword = async (req, res) => {
     const token = passwordResetService.generateResetToken();
     
     // Store token in database
-    await passwordResetService.storeResetToken(user.id, email, token);
+    await passwordResetService.storeResetToken(user.id, normalizedEmail, token);
     console.log(`   ✓ Reset token stored (expires in 1 hour)`);
 
     // Create reset link
@@ -293,7 +294,7 @@ const forgotPassword = async (req, res) => {
     console.log(`   🔗 Reset link: ${resetLink}`);
 
     // Send email
-    const emailResult = await emailService.sendPasswordResetEmail(email, token, resetLink);
+    const emailResult = await emailService.sendPasswordResetEmail(normalizedEmail, token, resetLink);
 
     if (!emailResult.success) {
       console.error(`❌ Email service failed: ${emailResult.message}`);
@@ -314,7 +315,7 @@ const forgotPassword = async (req, res) => {
       });
     }
 
-    console.log(`✅ Forgot password flow completed successfully for: ${email}`);
+    console.log(`✅ Forgot password flow completed successfully for: ${normalizedEmail}`);
     res.json({
       success: true,
       message: 'If an account exists with this email, a password reset link has been sent.'
