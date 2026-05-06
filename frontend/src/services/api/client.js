@@ -1,6 +1,7 @@
 import axios from 'axios';
 
-const DEV_API_FALLBACK = 'http://localhost:3000/api';
+const DEV_API_FALLBACK = '/api/v1';
+const PROD_API_FALLBACK = '/api/v1';
 
 function normalizeBaseUrl(value) {
   const trimmed = String(value || '').trim();
@@ -14,7 +15,7 @@ export function getApiBaseUrl() {
     return normalizeBaseUrl(envBaseUrl || DEV_API_FALLBACK);
   }
 
-  return '/api';
+  return normalizeBaseUrl(envBaseUrl || PROD_API_FALLBACK);
 }
 
 export function getApiOrigin() {

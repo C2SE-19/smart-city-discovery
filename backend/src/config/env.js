@@ -6,3 +6,15 @@ const database = {
   database: process.env.DB_NAME || 'smartcity_db',
   ssl: false
 };
+
+const appConfig = {
+  port: parseInt(process.env.SERVER_PORT) || 5001,
+  appName: 'Smart City Discovery API',
+  corsOrigin: process.env.CORS_ORIGIN || '*',
+  nodeEnv: process.env.NODE_ENV || 'development'
+};
+
+module.exports = {
+  ...appConfig,
+  database
+};
