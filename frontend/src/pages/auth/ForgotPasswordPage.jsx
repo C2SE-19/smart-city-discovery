@@ -5,11 +5,30 @@ import vietnamImage from '../../assets/images/vietnam.png';
 import { FaEnvelope, FaArrowLeft, FaCheckCircle } from 'react-icons/fa';
 import authService from '../../services/authService';
 
+function getErrorMessage(err) {
+  if (typeof err === 'string' && err.trim()) {
+    return err;
+  }
+
+  if (typeof err?.message === 'string' && err.message.trim()) {
+    return err.message;
+  }
+
+  if (typeof err?.response?.data?.message === 'string' && err.response.data.message.trim()) {
+    return err.response.data.message;
+  }
+
+  if (typeof err?.response?.data === 'string' && err.response.data.trim()) {
+    return err.response.data;
+  }
+
+  return 'Something went wrong. Please try again.';
+}
+
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState(false);
   const [showEmailSent, setShowEmailSent] = useState(false);
   const [sentEmail, setSentEmail] = useState('');
   const navigate = useNavigate();
@@ -34,20 +53,14 @@ export default function ForgotPasswordPage() {
     setLoading(true);
 
     try {
-      const response = await authService.forgotPassword(email.trim());
+      await authService.forgotPassword(email.trim());
 
-      setSuccess(true);
       setShowEmailSent(true);
       setSentEmail(email.trim());
       setEmail('');
-
-      // Auto close after 5 seconds
-      setTimeout(() => {
-        setSuccess(false);
-      }, 5000);
     } catch (err) {
-      const errorMsg = err?.response?.data?.message || err?.message || 'Something went wrong. Please try again.';
-      setError(errorMsg);
+      setError(getErrorMessage(err));
+    } finally {
       setLoading(false);
     }
   };

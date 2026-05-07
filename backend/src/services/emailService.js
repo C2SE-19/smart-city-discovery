@@ -5,8 +5,17 @@ const env = require('../config/env');
 let transporter;
 
 const getMailerConfig = () => {
-  const emailUser = process.env.EMAIL_USER || process.env.FEEDBACK_GMAIL_USER;
-  const emailPassword = process.env.EMAIL_PASSWORD || process.env.FEEDBACK_GMAIL_APP_PASSWORD;
+  const emailUser =
+    process.env.EMAIL_USER ||
+    process.env.FEEDBACK_GMAIL_USER ||
+    process.env.GMAIL_USER ||
+    process.env.MAIL_USER;
+  const emailPassword =
+    process.env.EMAIL_PASSWORD ||
+    process.env.FEEDBACK_GMAIL_APP_PASSWORD ||
+    process.env.GMAIL_APP_PASSWORD ||
+    process.env.GMAIL_PASSWORD ||
+    process.env.MAIL_PASSWORD;
   const fromName = process.env.FEEDBACK_REPLY_FROM_NAME || 'Smart City Discovery Support';
   const fromEmail = process.env.FEEDBACK_REPLY_FROM_EMAIL || emailUser;
 
@@ -50,6 +59,20 @@ const initializeTransporter = () => {
 
 const ensureTransporter = () => {
   return transporter || initializeTransporter();
+};
+
+const isTransportConnectivityError = (error) => {
+  const code = String(error?.code || '').toUpperCase();
+  const message = String(error?.message || '').toLowerCase();
+
+  return [
+    'ENOTFOUND',
+    'ECONNREFUSED',
+    'ECONNRESET',
+    'ETIMEDOUT',
+    'ESOCKET',
+    'EAUTH'
+  ].includes(code) || message.includes('smtp') || message.includes('dns');
 };
 
 // Initialize on module load
@@ -129,7 +152,12 @@ const sendPasswordResetEmail = async (email, resetToken, resetLink) => {
     console.error(`   Error: ${error.message}`);
     console.error(`   To: ${email}`);
     console.error(`   Full error:`, error);
-    return { success: false, message: error.message };
+    return {
+      success: false,
+      message: error.message,
+      code: error?.code || null,
+      transportIssue: isTransportConnectivityError(error)
+    };
   }
 };
 
