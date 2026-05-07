@@ -671,6 +671,7 @@ function OverviewPage() {
   const location = useLocation();
   const { language } = useLanguage();
   const { token, user } = useAuth();
+  const isAuthenticated = Boolean(token && user);
   const t = translations[language] || translations.en;
   const [favoriteKeys, setFavoriteKeys] = useState(new Set());
   const [searchInput, setSearchInput] = useState('');
@@ -781,6 +782,11 @@ function OverviewPage() {
   };
 
   const openImageModal = () => {
+    if (!isAuthenticated) {
+      navigate('/login', { state: { from: `${location.pathname}${location.search || ''}` } });
+      return;
+    }
+
     setShowImageSearch(true);
     setImageSearchTarget('');
     setSelectedImage(null);
@@ -795,6 +801,15 @@ function OverviewPage() {
 
   const handleCarouselNext = () => {
     setCarouselIndex((prev) => (prev + 1) % carouselImages.length);
+  };
+
+  const handleMerchantButtonClick = () => {
+    if (!isAuthenticated) {
+      navigate('/login', { state: { from: `${location.pathname}${location.search || ''}` } });
+      return;
+    }
+
+    navigate('/merchant');
   };
 
   const apiUrl = useMemo(() => getApiBaseUrl(), []);
@@ -2346,7 +2361,7 @@ function OverviewPage() {
               <button 
                 type="button" 
                 className="overview-hero-button overview-hero-button-secondary"
-                onClick={() => navigate('/merchant')}
+                onClick={handleMerchantButtonClick}
               >
                 {t.hero.merchant}
               </button>

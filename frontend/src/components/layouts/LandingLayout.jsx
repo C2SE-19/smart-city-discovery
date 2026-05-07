@@ -315,7 +315,13 @@ function LandingLayout() {
     };
 
     loadThreads();
-    const intervalId = window.setInterval(loadThreads, 5000);
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === 'hidden') {
+        return;
+      }
+
+      loadThreads();
+    }, 20000);
 
     return () => {
       active = false;
@@ -615,7 +621,13 @@ function LandingLayout() {
     };
 
     loadThread(true);
-    const intervalId = window.setInterval(() => loadThread(false), 5000);
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === 'hidden') {
+        return;
+      }
+
+      loadThread(false);
+    }, 15000);
 
     return () => {
       active = false;
