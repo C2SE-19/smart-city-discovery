@@ -4,7 +4,7 @@ const frontendRoot = require('path').resolve(__dirname, '..');
 
 const env = {
 	...process.env,
-	VITE_API_BASE_URL: process.env.VITE_API_BASE_URL || 'http://10.50.1.240:3000/api'
+	VITE_API_BASE_URL: process.env.VITE_API_BASE_URL || 'https://capstone2-backend.nextcore.vn/api'
 };
 
 try {
