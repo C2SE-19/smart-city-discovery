@@ -1,4 +1,27 @@
 const usersService = require('../users/users.service');
+const bcryptjs = require('bcryptjs');
+const SPECIAL_CHARACTER_PATTERN = /[^A-Za-z0-9\s]/;
+
+const PASSWORD_REQUIREMENTS = [
+  {
+    test: (value) => String(value || '').length >= 8,
+    message: 'Password must have at least 8 characters'
+  },
+  {
+    test: (value) => /[A-Z]/.test(String(value || '')),
+    message: 'Password must contain at least 1 uppercase letter (A-Z)'
+  },
+  {
+    test: (value) => SPECIAL_CHARACTER_PATTERN.test(String(value || '')),
+    message: 'Password must contain at least 1 special character (!@#$%^&*...)'
+  }
+];
+
+function getPasswordRequirementErrors(password) {
+  return PASSWORD_REQUIREMENTS
+    .filter((requirement) => !requirement.test(password))
+    .map((requirement) => requirement.message);
+}
 
 const login = async (req, res) => {
   try {
@@ -276,7 +299,7 @@ const forgotPassword = async (req, res) => {
       console.log(`   ⚠️ Email not found in database: ${normalizedEmail}`);
       return res.status(404).json({
         success: false,
-        message: 'No account found with that email address.'
+        message: 'Email của bạn chưa đăng ký trên hệ thống.'
       });
     }
 
@@ -290,7 +313,9 @@ const forgotPassword = async (req, res) => {
     console.log(`   ✓ Reset token stored (expires in 1 hour)`);
 
     // Create reset link
-    const resetLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/reset-password?token=${token}`;
+    const requestOrigin = req.get('origin') || `${req.protocol}://${req.get('host')}`;
+    const frontendBaseUrl = process.env.FRONTEND_URL || requestOrigin || 'http://localhost:5173';
+    const resetLink = `${frontendBaseUrl}/reset-password?token=${token}`;
     console.log(`   🔗 Reset link: ${resetLink}`);
 
     // Send email
@@ -383,10 +408,13 @@ const resetPassword = async (req, res) => {
       });
     }
 
-    if (password.length < 6) {
+    const passwordErrors = getPasswordRequirementErrors(password);
+
+    if (passwordErrors.length > 0) {
       return res.status(400).json({
         success: false,
-        message: 'Password must be at least 6 characters'
+        message: passwordErrors[0],
+        details: passwordErrors
       });
     }
 
@@ -409,10 +437,17 @@ const resetPassword = async (req, res) => {
       });
     }
 
-    // Update password
-    await usersService.updateUser(user.id, {
-      password: password // In production, use bcrypt
-    });
+    const hashedPassword = await bcryptjs.hash(password, 10);
+
+    // Update password using the active users schema.
+    const updatedUser = await usersService.updateUserPassword(user.id, hashedPassword);
+
+    if (!updatedUser) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
 
     // Mark token as used
     await passwordResetService.markTokenAsUsed(token);
