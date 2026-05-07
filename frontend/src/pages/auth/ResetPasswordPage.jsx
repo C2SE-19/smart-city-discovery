@@ -2,9 +2,39 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import './reset-password.css';
 import vietnamImage from '../../assets/images/vietnam.png';
-import logo from '../../assets/images/logo.png';
 import { FaLock, FaArrowLeft, FaEye, FaEyeSlash, FaCheckCircle, FaExclamationCircle } from 'react-icons/fa';
 import authService from '../../services/authService';
+const SPECIAL_CHARACTER_PATTERN = /[^A-Za-z0-9\s]/;
+
+function getErrorMessage(err, fallbackMessage) {
+  if (typeof err?.message === 'string' && err.message.trim()) {
+    return err.message;
+  }
+
+  if (typeof err?.response?.data?.message === 'string' && err.response.data.message.trim()) {
+    return err.response.data.message;
+  }
+
+  return fallbackMessage;
+}
+
+const PASSWORD_REQUIREMENTS = [
+  {
+    key: 'minLength',
+    label: 'Password must have at least 8 characters',
+    test: (value) => String(value || '').length >= 8
+  },
+  {
+    key: 'uppercase',
+    label: 'Password must contain at least 1 uppercase letter (A-Z)',
+    test: (value) => /[A-Z]/.test(String(value || ''))
+  },
+  {
+    key: 'special',
+    label: 'Password must contain at least 1 special character (!@#$%^&*...)',
+    test: (value) => SPECIAL_CHARACTER_PATTERN.test(String(value || ''))
+  }
+];
 
 export default function ResetPasswordPage() {
   const [searchParams] = useSearchParams();
@@ -18,8 +48,16 @@ export default function ResetPasswordPage() {
   const [verifying, setVerifying] = useState(true);
   const [tokenValid, setTokenValid] = useState(false);
   const [userEmail, setUserEmail] = useState('');
+  const [submitAttempted, setSubmitAttempted] = useState(false);
   const navigate = useNavigate();
-  const token = searchParams.get('token');
+  const token = (searchParams.get('token') || '').trim();
+
+  const passwordRequirementStatuses = PASSWORD_REQUIREMENTS.map((requirement) => ({
+    ...requirement,
+    met: requirement.test(password)
+  }));
+  const unmetPasswordRequirements = passwordRequirementStatuses.filter((requirement) => !requirement.met);
+  const shouldHighlightRequirements = submitAttempted || password.length > 0;
 
   // Verify token on component mount
   useEffect(() => {
@@ -40,7 +78,7 @@ export default function ResetPasswordPage() {
           setError(response.message || 'The link is invalid or has expired.');
         }
       } catch (err) {
-        const errorMsg = err?.response?.data?.message || 'The link is invalid or has expired.';
+        const errorMsg = getErrorMessage(err, 'Unable to reach the server. Please try again in a moment.');
         setError(errorMsg);
       } finally {
         setVerifying(false);
@@ -56,8 +94,8 @@ export default function ResetPasswordPage() {
       return false;
     }
 
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters.');
+    if (unmetPasswordRequirements.length > 0) {
+      setError(unmetPasswordRequirements[0].label);
       return false;
     }
 
@@ -72,6 +110,7 @@ export default function ResetPasswordPage() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    setSubmitAttempted(true);
 
     if (!validatePassword()) {
       return;
@@ -95,8 +134,9 @@ export default function ResetPasswordPage() {
         setError(response.message || 'Reset failed. Please try again.');
       }
     } catch (err) {
-      const errorMsg = err?.response?.data?.message || err?.message || 'Something went wrong. Please try again.';
+      const errorMsg = getErrorMessage(err, 'Something went wrong. Please try again.');
       setError(errorMsg);
+    } finally {
       setLoading(false);
     }
   };
@@ -113,10 +153,9 @@ export default function ResetPasswordPage() {
         <div className="reset-password-box">
           {/* HEADER */}
           <div className="reset-password-header">
-            <img src={logo} alt="Logo" className="reset-password-logo" />
-            <h1 className="reset-password-title">Reset your password</h1>
+            <h1 className="reset-password-title">Reset your password?</h1>
             <p className="reset-password-subtitle">
-              Enter a new password for your account.
+              Please enter your new password and confirm it.
             </p>
             {userEmail && (
               <p className="user-email">Email: <strong>{userEmail}</strong></p>
@@ -195,7 +234,24 @@ export default function ResetPasswordPage() {
                     {showPassword ? <FaEyeSlash /> : <FaEye />}
                   </button>
                 </div>
-                <p className="password-hint">At least 6 characters</p>
+                <div className="password-requirements">
+                  <p className="password-requirements-title">Password Requirements:</p>
+                  <ul className="password-requirements-list">
+                    {passwordRequirementStatuses.map((requirement) => {
+                      const itemClassName = requirement.met
+                        ? 'password-requirement met'
+                        : shouldHighlightRequirements
+                          ? 'password-requirement unmet'
+                          : 'password-requirement';
+
+                      return (
+                        <li key={requirement.key} className={itemClassName}>
+                          {requirement.label}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
               </div>
 
               {/* CONFIRM PASSWORD INPUT */}
@@ -227,9 +283,9 @@ export default function ResetPasswordPage() {
 
               {/* PASSWORD STRENGTH INDICATOR */}
               <div className="password-strength">
-                <div className={`strength-bar ${password.length >= 6 ? 'strong' : password.length > 0 ? 'weak' : ''}`}></div>
+                <div className={`strength-bar ${unmetPasswordRequirements.length === 0 && password.length > 0 ? 'strong' : password.length > 0 ? 'weak' : ''}`}></div>
                 <p className="strength-text">
-                  {password.length === 0 ? 'Enter a password' : password.length < 6 ? 'Weak password' : 'Strong password'}
+                  {password.length === 0 ? 'Enter a password' : unmetPasswordRequirements.length > 0 ? 'Weak password' : 'Strong password'}
                 </p>
               </div>
 

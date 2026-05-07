@@ -1,5 +1,21 @@
 import { apiClient } from './api/client';
 
+const normalizeServiceError = (err, fallbackMessage) => {
+  if (typeof err?.response?.data?.message === 'string' && err.response.data.message.trim()) {
+    return { ...err.response.data, message: err.response.data.message };
+  }
+
+  if (typeof err?.response?.data === 'string' && err.response.data.trim()) {
+    return { message: err.response.data };
+  }
+
+  if (typeof err?.message === 'string' && err.message.trim()) {
+    return { message: err.message, code: err.code };
+  }
+
+  return { message: fallbackMessage };
+};
+
 export const authService = {
   login: async (credentials) => {
     try {
@@ -73,10 +89,12 @@ export const authService = {
     try {
       const response = await apiClient.post('/auth/forgot-password', {
         email
+      }, {
+        timeout: 60000
       });
       return response.data;
     } catch (err) {
-      throw err.response?.data || { message: 'Failed to send password reset email' };
+      throw normalizeServiceError(err, 'Failed to send password reset email');
     }
   },
 
@@ -85,10 +103,12 @@ export const authService = {
     try {
       const response = await apiClient.post('/auth/verify-reset-token', {
         token
+      }, {
+        timeout: 30000
       });
       return response.data;
     } catch (err) {
-      throw err.response?.data || { message: 'Failed to verify reset token' };
+      throw normalizeServiceError(err, 'Failed to verify reset token');
     }
   },
 
@@ -99,10 +119,12 @@ export const authService = {
         token,
         password,
         confirmPassword
+      }, {
+        timeout: 30000
       });
       return response.data;
     } catch (err) {
-      throw err.response?.data || { message: 'Failed to reset password' };
+      throw normalizeServiceError(err, 'Failed to reset password');
     }
   }
 };

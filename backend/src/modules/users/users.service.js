@@ -1,9 +1,150 @@
 const { supabaseAdmin } = require('../../lib/supabase');
+const { pool } = require('../../config/database');
 
 const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
+const USE_PG = Boolean(process.env.DB_HOST || process.env.DB_NAME);
+
+function isMissingColumnError(error, columnName) {
+  const haystack = [
+    error?.message,
+    error?.details,
+    error?.hint,
+    error?.code
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  return haystack.includes(String(columnName || '').toLowerCase()) && (
+    haystack.includes('column') ||
+    haystack.includes('schema cache') ||
+    haystack.includes('does not exist') ||
+    haystack.includes('pgrst')
+  );
+}
+
+async function getUserByIdPg(userId) {
+  const result = await pool.query('SELECT * FROM users WHERE id = $1 LIMIT 1', [userId]);
+  return result.rows[0] || null;
+}
+
+async function getUserByUsernamePg(username) {
+  const result = await pool.query('SELECT * FROM users WHERE username = $1 LIMIT 1', [username]);
+  return result.rows[0] || null;
+}
+
+async function getUserByEmailPg(email) {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) {
+    return null;
+  }
+
+  const result = await pool.query(
+    'SELECT * FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1',
+    [normalizedEmail]
+  );
+  return result.rows[0] || null;
+}
+
+async function updateUserPg(userId, updateData) {
+  const fieldMap = {
+    fullname: 'fullname',
+    email: 'email',
+    phone: 'phone',
+    birthDate: 'birth_date',
+    address: 'address',
+    gender: 'gender',
+    bio: 'bio',
+    role: 'role',
+    status: 'status',
+    pauseUntil: 'pause_until',
+    blockedReason: 'blocked_reason',
+    password: 'password_hash'
+  };
+
+  const sets = [];
+  const values = [];
+  let index = 1;
+
+  Object.entries(fieldMap).forEach(([key, column]) => {
+    if (typeof updateData[key] !== 'undefined') {
+      sets.push(`${column} = $${index}`);
+      values.push(updateData[key]);
+      index += 1;
+    }
+  });
+
+  sets.push(`updated_at = NOW()`);
+
+  const query = `UPDATE users SET ${sets.join(', ')} WHERE id = $${index} RETURNING *`;
+  values.push(userId);
+
+  const result = await pool.query(query, values);
+  return result.rows[0] || null;
+}
+
+async function updateUserPasswordPg(userId, passwordValue) {
+  const columnsToTry = ['password_hash', 'password'];
+  let lastError = null;
+
+  for (const column of columnsToTry) {
+    try {
+      const result = await pool.query(
+        `UPDATE users SET ${column} = $1, updated_at = NOW() WHERE id = $2 RETURNING *`,
+        [passwordValue, userId]
+      );
+
+      return result.rows[0] || null;
+    } catch (error) {
+      if (!isMissingColumnError(error, column)) {
+        throw error;
+      }
+
+      lastError = error;
+    }
+  }
+
+  throw lastError || new Error('No supported password column found on users table');
+}
+
+async function createUserPg(userData) {
+  const result = await pool.query(
+    `
+      INSERT INTO users (username, email, fullname, password_hash, role, status, pause_until, blocked_reason)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      RETURNING *
+    `,
+    [
+      userData.username,
+      userData.email,
+      userData.fullname,
+      userData.password_hash,
+      userData.role || 'user',
+      userData.status || 'active',
+      userData.pauseUntil || null,
+      userData.blockedReason || null
+    ]
+  );
+
+  return result.rows[0] || null;
+}
+
+async function getAllUsersPg() {
+  const result = await pool.query('SELECT * FROM users ORDER BY updated_at DESC');
+  return result.rows || [];
+}
+
+async function deleteUserPg(userId) {
+  const result = await pool.query('DELETE FROM users WHERE id = $1 RETURNING *', [userId]);
+  return result.rows[0] || null;
+}
 
 const getUserById = async (userId) => {
   try {
+    if (USE_PG) {
+      return await getUserByIdPg(userId);
+    }
+
     const { data, error } = await supabaseAdmin
       .from('users')
       .select('*')
@@ -24,6 +165,10 @@ const getUserById = async (userId) => {
 
 const getUserByUsername = async (username) => {
   try {
+    if (USE_PG) {
+      return await getUserByUsernamePg(username);
+    }
+
     const { data, error } = await supabaseAdmin
       .from('users')
       .select('*')
@@ -44,6 +189,10 @@ const getUserByUsername = async (username) => {
 
 const getUserByEmail = async (email) => {
   try {
+    if (USE_PG) {
+      return await getUserByEmailPg(email);
+    }
+
     const normalizedEmail = normalizeEmail(email);
 
     if (!normalizedEmail) {
@@ -69,6 +218,10 @@ const getUserByEmail = async (email) => {
 
 const updateUser = async (userId, updateData) => {
   try {
+    if (USE_PG) {
+      return await updateUserPg(userId, updateData);
+    }
+
     const payload = {
       updated_at: new Date().toISOString(),
     };
@@ -104,8 +257,52 @@ const updateUser = async (userId, updateData) => {
   }
 };
 
+const updateUserPassword = async (userId, passwordValue) => {
+  try {
+    if (USE_PG) {
+      return await updateUserPasswordPg(userId, passwordValue);
+    }
+
+    const columnsToTry = ['password_hash', 'password'];
+    let lastError = null;
+
+    for (const column of columnsToTry) {
+      const payload = {
+        updated_at: new Date().toISOString(),
+        [column]: passwordValue
+      };
+
+      const { data, error } = await supabaseAdmin
+        .from('users')
+        .update(payload)
+        .eq('id', userId)
+        .select()
+        .single();
+
+      if (!error) {
+        return data;
+      }
+
+      if (!isMissingColumnError(error, column)) {
+        throw error;
+      }
+
+      lastError = error;
+    }
+
+    throw lastError || new Error('No supported password column found on users table');
+  } catch (error) {
+    console.error('Database error:', error);
+    throw new Error('Failed to update user password');
+  }
+};
+
 const createUser = async (userData) => {
   try {
+    if (USE_PG) {
+      return await createUserPg(userData);
+    }
+
     const { data, error } = await supabaseAdmin
       .from('users')
       .insert([{
@@ -134,6 +331,10 @@ const createUser = async (userData) => {
 
 const getAllUsers = async () => {
   try {
+    if (USE_PG) {
+      return await getAllUsersPg();
+    }
+
     const { data, error } = await supabaseAdmin
       .from('users')
       .select('*')
@@ -152,6 +353,10 @@ const getAllUsers = async () => {
 
 const deleteUser = async (userId) => {
   try {
+    if (USE_PG) {
+      return await deleteUserPg(userId);
+    }
+
     const { data, error } = await supabaseAdmin
       .from('users')
       .delete()
@@ -175,6 +380,7 @@ module.exports = {
   getUserByUsername,
   getUserByEmail,
   updateUser,
+  updateUserPassword,
   createUser,
   getAllUsers,
   deleteUser
