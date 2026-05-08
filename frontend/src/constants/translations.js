@@ -120,6 +120,25 @@ const translations = {
       switchToLight: 'Switch to light mode',
       switchToDark: 'Switch to dark mode'
     },
+    admin: {
+      title: 'Admin',
+      controlTower: 'Control Tower',
+      role: 'Administrator',
+      navigation: {
+        dashboard: 'Dashboard',
+        users: 'User Management',
+        map: 'Map Management',
+        forum: 'Forum Management',
+        reports: 'Reports & Revenue',
+        packages: 'Ad Packages',
+        feedback: 'Feedback & Support'
+      },
+      logout: 'Log out',
+      language: 'Language',
+      badges: {
+        newItems: 'new items'
+      }
+    },
     landingInfo: {
       stats: {
         labels: {
@@ -494,6 +513,25 @@ const translations = {
       dark: 'Tối',
       switchToLight: 'Chuyển sang chế độ sáng',
       switchToDark: 'Chuyển sang chế độ tối'
+    },
+    admin: {
+      title: 'Admin',
+      controlTower: 'Trung tâm điều hành',
+      role: 'Quản trị viên',
+      navigation: {
+        dashboard: 'Bảng điều khiển',
+        users: 'Quản lý người dùng',
+        map: 'Quản lý bản đồ',
+        forum: 'Quản lý diễn đàn',
+        reports: 'Báo cáo & doanh thu',
+        packages: 'Gói quảng cáo',
+        feedback: 'Góp ý & hỗ trợ'
+      },
+      logout: 'Đăng xuất',
+      language: 'Ngôn ngữ',
+      badges: {
+        newItems: 'mục mới'
+      }
     },
     landingInfo: {
       stats: {

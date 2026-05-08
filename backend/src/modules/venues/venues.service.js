@@ -2,6 +2,19 @@ const gisService = require('../gis/gis.service');
 const { createHttpError } = require('../../shared/http-errors');
 const venuesRepository = require('./venues.repository');
 
+function parseBoolean(value) {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  return String(value || '').trim().toLowerCase() === 'true';
+}
+
+function parsePositiveInteger(value) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
 function normalizeVenueMetadata(metadata) {
   if (metadata && typeof metadata === 'object' && !Array.isArray(metadata)) {
     return metadata;
@@ -54,8 +67,13 @@ function normalizeVenuePayload(payload) {
   };
 }
 
-async function listVenues() {
-  const venues = await venuesRepository.findAllVenues();
+async function listVenues(query = {}) {
+  const venues = await venuesRepository.findVenues({
+    status: String(query.status || '').trim() || null,
+    compact: parseBoolean(query.compact),
+    limit: parsePositiveInteger(query.limit)
+  });
+
   if (!Array.isArray(venues)) {
     return [];
   }
