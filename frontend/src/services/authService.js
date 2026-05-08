@@ -48,18 +48,6 @@ export const authService = {
     }
   },
 
-  // Facebook OAuth login
-  loginWithFacebook: async (accessToken) => {
-    try {
-      const response = await apiClient.post('/auth/facebook', {
-        accessToken
-      });
-      return response.data;
-    } catch (err) {
-      throw err.response?.data || { message: 'Failed to login with Facebook' };
-    }
-  },
-
   // Kiểm tra username đã tồn tại
   checkUsernameExists: async (username) => {
     try {
