@@ -146,6 +146,7 @@ function AdminForumManagementPage() {
       await deleteAdminForumPost(postId);
       setPosts((current) => current.filter((post) => String(post.id) !== String(postId)));
       setActionSuccess('Post deleted successfully.');
+        window.dispatchEvent(new Event('admin-badges-refresh'));
     } catch (apiError) {
       const message = String(apiError?.response?.data?.message || apiError?.message || '').trim();
       setActionError(message || 'Unable to delete post at this time. Please try again.');
@@ -183,6 +184,7 @@ function AdminForumManagementPage() {
       );
 
       setActionSuccess('Comment deleted successfully.');
+        window.dispatchEvent(new Event('admin-badges-refresh'));
     } catch (apiError) {
       const message = String(apiError?.response?.data?.message || apiError?.message || '').trim();
       setActionError(message || 'Unable to delete comment at this time. Please try again.');
@@ -220,6 +222,7 @@ function AdminForumManagementPage() {
       );
 
       setActionSuccess('Post reports dismissed successfully.');
+        window.dispatchEvent(new Event('admin-badges-refresh'));
     } catch (apiError) {
       const message = String(apiError?.response?.data?.message || apiError?.message || '').trim();
       setActionError(message || 'Unable to dismiss post reports right now. Please try again.');
@@ -269,6 +272,7 @@ function AdminForumManagementPage() {
       );
 
       setActionSuccess('Comment reports dismissed.');
+        window.dispatchEvent(new Event('admin-badges-refresh'));
     } catch (apiError) {
       const message = String(apiError?.response?.data?.message || apiError?.message || '').trim();
       setActionError(message || 'Unable to dismiss comment reports at this time. Please try again.');

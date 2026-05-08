@@ -172,6 +172,35 @@
 
 .admin-nav-label {
   letter-spacing: 0.01em;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.admin-nav-badge {
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #ff836b, #ff4f7a);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  box-shadow: 0 8px 18px rgba(255, 99, 120, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-nav-link.is-active .admin-nav-badge,
+.admin-nav-link:hover .admin-nav-badge {
+  background: linear-gradient(135deg, #ff9b5c, #ff6c8c);
+  box-shadow: 0 10px 20px rgba(255, 115, 120, 0.4);
 }
 
 .admin-sidebar-footer {

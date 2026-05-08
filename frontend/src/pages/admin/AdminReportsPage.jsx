@@ -7,6 +7,8 @@ const RANGE_OPTIONS = [3, 6, 12];
 const CHART_WIDTH = 760;
 const CHART_HEIGHT = 280;
 const CHART_PADDING = 28;
+const REPORTS_LAST_SEEN_KEY = 'adminReportsLastSeen';
+const BADGE_REFRESH_EVENT = 'admin-badges-refresh';
 
 function formatMonthLabel(value) {
   const [rawYear, rawMonth] = String(value || '').split('-');
@@ -113,6 +115,12 @@ function AdminReportsPage() {
   useEffect(() => {
     loadReport();
   }, [loadReport]);
+
+  useEffect(() => {
+    const now = Date.now();
+    window.localStorage.setItem(REPORTS_LAST_SEEN_KEY, String(now));
+    window.dispatchEvent(new Event(BADGE_REFRESH_EVENT));
+  }, []);
 
   const overview = useMemo(() => reportPayload?.overview || {}, [reportPayload]);
   const revenueSeries = useMemo(

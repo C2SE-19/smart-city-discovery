@@ -786,7 +786,7 @@ function LandingLayout() {
               aria-label="Select language"
             >
               <option value="en">English</option>
-              <option value="vi">Vietnamese</option>
+              <option value="vi">Tiếng Việt</option>
             </select>
             <NotificationBell />
               <div className="landing-chat-menu" ref={chatMenuRef}>

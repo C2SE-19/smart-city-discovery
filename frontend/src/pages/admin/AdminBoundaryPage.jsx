@@ -2437,6 +2437,7 @@ function AdminBoundaryPage() {
       }
 
       setOperationMessage(response.message || 'Moderation status updated.');
+      window.dispatchEvent(new Event('admin-badges-refresh'));
     } catch (moderateError) {
       setError(moderateError.response?.data?.message || 'Could not update moderation status.');
     } finally {
@@ -2507,6 +2508,7 @@ function AdminBoundaryPage() {
       }
 
       setOperationMessage(response?.message || 'Update request moderation completed.');
+      window.dispatchEvent(new Event('admin-badges-refresh'));
     } catch (moderateError) {
       setError(moderateError.response?.data?.message || 'Could not moderate update request.');
     } finally {
