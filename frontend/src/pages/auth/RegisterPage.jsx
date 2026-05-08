@@ -21,6 +21,7 @@ export default function RegisterPage() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [passwordErrors, setPasswordErrors] = useState([]);
   const [confirmPasswordError, setConfirmPasswordError] = useState("");
   const [generalError, setGeneralError] = useState("");
@@ -128,10 +129,8 @@ export default function RegisterPage() {
         })
       );
 
-      alert(res.message || t.auth.registerSuccess);
-
-      // Redirect to login page after successful registration
-      navigate("/login");
+      // Show translated success modal and wait for user to confirm
+      setShowSuccessModal(true);
 
     } catch (err) {
       // Lỗi từ authService đã được extract từ response
@@ -163,7 +162,24 @@ export default function RegisterPage() {
       <div className="register-left">
         <img src={logo} alt="logo" className="register-logo"/>
       </div>
-
+      {showSuccessModal && (
+        <div className="scd-modal-overlay">
+          <div className="scd-modal">
+            <h3>{t.auth.registerSuccess}</h3>
+            <div className="scd-modal-actions">
+              <button
+                className="scd-modal-ok"
+                onClick={() => {
+                  setShowSuccessModal(false);
+                  navigate("/login");
+                }}
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="register-right">
 
         <form className="register-form" onSubmit={handleRegister}>
