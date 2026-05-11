@@ -249,10 +249,7 @@ function OverviewCityMapCard() {
   return (
     <div className="overview-city-shell">
       <div className="overview-city-toolbar">
-        <span>{wards.length} wards</span>
-        <span>{venues.length} approved venues</span>
-        <span>Previewing {previewVenues.length} markers for fast load</span>
-        <span>Read-only city map</span>
+        
       </div>
 
       <div className="overview-city-canvas">

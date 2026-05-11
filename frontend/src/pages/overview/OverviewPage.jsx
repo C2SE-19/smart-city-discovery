@@ -1007,7 +1007,6 @@ function OverviewPage() {
     [aiSuggestedVenues, aiVisibleCount]
   );
   const hasMoreAiVenues = aiSuggestedVenues.length > 8 && visibleAiVenues.length < aiSuggestedVenues.length;
-
   const userPreferenceSignal = useMemo(() => {
     if (!userPreference) {
       return '';
@@ -1617,10 +1616,16 @@ function OverviewPage() {
 
       const payload = {
         query: refineText,
-        scope: 'global',
+        scope: aiBaseVenues.length ? 'base' : 'global',
         limit: 24,
         currentTimeIso: new Date().toISOString()
       };
+
+      if (aiBaseVenues.length) {
+        payload.baseVenueIds = aiBaseVenues
+          .map((venue) => Number(venue?.id))
+          .filter((venueId) => Number.isFinite(venueId) && venueId > 0);
+      }
 
       const latitude = Number(latestCoordinates.latitude);
       const longitude = Number(latestCoordinates.longitude);
@@ -2774,7 +2779,7 @@ function OverviewPage() {
                     }
                   }
                 }}
-                placeholder='Try: "I want hotpot under 100k, open now"'
+                placeholder='Try: "toi muon uong nuoc gan day"'
               />
               <button
                 type="button"
@@ -2807,11 +2812,6 @@ function OverviewPage() {
               <p className="overview-ai-refine-progress">Analyzing venue services and descriptions...</p>
             ) : null}
 
-            {aiRefineMeta?.summary ? (
-              <p className="overview-ai-refine-summary">
-                Refine analysis: {aiRefineMeta.summary}
-              </p>
-            ) : null}
             {aiRefineError ? <p className="overview-inline-error">{aiRefineError}</p> : null}
           </div>
 
