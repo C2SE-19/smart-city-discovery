@@ -194,7 +194,7 @@ try {
 
     const chatLimiter = _maybeRateLimit ? _maybeRateLimit({
         windowMs: 1 * 60 * 1000, // 1 minute
-        max: 10, 
+        max: 5, 
         standardHeaders: true,
         legacyHeaders: false
     }) : null;
