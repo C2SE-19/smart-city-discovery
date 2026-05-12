@@ -1,5 +1,9 @@
 import apiClient from './client';
 
+const trendingVenuesCache = new Map();
+const trendingVenuesInFlight = new Map();
+const TRENDING_VENUES_CACHE_TTL_MS = 60 * 1000;
+
 export async function fetchPublicAdPackages() {
   const response = await apiClient.get('/ad-packages');
 
@@ -108,11 +112,33 @@ export async function fetchAdminDashboardOverview(months = 6) {
 }
 
 export async function fetchTrendingVenues(limit = 10) {
-  const response = await apiClient.get('/ad-packages/trending/venues', {
-    params: { limit },
-  });
+  const normalizedLimit = Number.isFinite(Number(limit)) ? Number(limit) : 10;
+  const cacheKey = `limit:${normalizedLimit}`;
+  const now = Date.now();
+  const cached = trendingVenuesCache.get(cacheKey);
 
-  return Array.isArray(response.data?.venues) ? response.data.venues : [];
+  if (cached && now - cached.timestamp < TRENDING_VENUES_CACHE_TTL_MS) {
+    return cached.data;
+  }
+
+  if (trendingVenuesInFlight.has(cacheKey)) {
+    return trendingVenuesInFlight.get(cacheKey);
+  }
+
+  const request = apiClient.get('/ad-packages/trending/venues', {
+    params: { limit: normalizedLimit },
+  })
+    .then((response) => {
+      const rows = Array.isArray(response.data?.venues) ? response.data.venues : [];
+      trendingVenuesCache.set(cacheKey, { data: rows, timestamp: Date.now() });
+      return rows;
+    })
+    .finally(() => {
+      trendingVenuesInFlight.delete(cacheKey);
+    });
+
+  trendingVenuesInFlight.set(cacheKey, request);
+  return request;
 }
 
 export async function trackTrendingAssignmentClick(assignmentId, source = 'overview', clickToken = '') {

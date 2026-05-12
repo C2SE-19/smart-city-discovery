@@ -125,6 +125,10 @@ export function AuthProvider({ children }) {
     const fetchSelfAndStartPolling = async () => {
       await fetchProfile();
       const intervalId = setInterval(async () => {
+        if (document.visibilityState === 'hidden') {
+          return;
+        }
+
         try {
           await axios.get(`${apiUrl}/auth/verify`, {
             headers: { Authorization: `Bearer ${token}` }
@@ -139,7 +143,7 @@ export function AuthProvider({ children }) {
             window.location.assign('/login');
           }
         }
-      }, 2000); 
+      }, 60000); 
 
       return intervalId;
     };

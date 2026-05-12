@@ -96,7 +96,6 @@ const translations = {
       signUp: 'Sign Up',
       orContinueWith: 'Or continue with',
       loginWithGoogle: 'Login with Google',
-      loginWithFacebook: 'Login with Facebook',
       passwordRequirements: 'Password Requirements:',
       minLength: 'At least 8 characters',
       hasUpperCase: 'At least 1 uppercase letter (A-Z)',
@@ -120,6 +119,25 @@ const translations = {
       dark: 'Dark',
       switchToLight: 'Switch to light mode',
       switchToDark: 'Switch to dark mode'
+    },
+    admin: {
+      title: 'Admin',
+      controlTower: 'Control Tower',
+      role: 'Administrator',
+      navigation: {
+        dashboard: 'Dashboard',
+        users: 'User Management',
+        map: 'Map Management',
+        forum: 'Forum Management',
+        reports: 'Reports & Revenue',
+        packages: 'Ad Packages',
+        feedback: 'Feedback & Support'
+      },
+      logout: 'Log out',
+      language: 'Language',
+      badges: {
+        newItems: 'new items'
+      }
     },
     landingInfo: {
       stats: {
@@ -472,7 +490,6 @@ const translations = {
       signUp: 'Đăng ký',
       orContinueWith: 'Hoặc tiếp tục với',
       loginWithGoogle: 'Đăng nhập bằng Google',
-      loginWithFacebook: 'Đăng nhập bằng Facebook',
       passwordRequirements: 'Yêu cầu mật khẩu:',
       minLength: 'Ít nhất 8 ký tự',
       hasUpperCase: 'Ít nhất 1 chữ cái viết hoa (A-Z)',
@@ -496,6 +513,25 @@ const translations = {
       dark: 'Tối',
       switchToLight: 'Chuyển sang chế độ sáng',
       switchToDark: 'Chuyển sang chế độ tối'
+    },
+    admin: {
+      title: 'Admin',
+      controlTower: 'Trung tâm điều hành',
+      role: 'Quản trị viên',
+      navigation: {
+        dashboard: 'Bảng điều khiển',
+        users: 'Quản lý người dùng',
+        map: 'Quản lý bản đồ',
+        forum: 'Quản lý diễn đàn',
+        reports: 'Báo cáo & doanh thu',
+        packages: 'Gói quảng cáo',
+        feedback: 'Góp ý & hỗ trợ'
+      },
+      logout: 'Đăng xuất',
+      language: 'Ngôn ngữ',
+      badges: {
+        newItems: 'mục mới'
+      }
     },
     landingInfo: {
       stats: {

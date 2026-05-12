@@ -6,6 +6,306 @@ const { pool } = require('../config/database');
 
 const router = express.Router();
 
+const fs = require('fs');
+const path = require('path');
+const SYSTEM_FEATURES_PATH = path.resolve(__dirname, '..', '..', 'system_features.json');
+let SYSTEM_FEATURES_CACHE = null;
+
+function loadSystemFeatures() {
+  if (SYSTEM_FEATURES_CACHE) return SYSTEM_FEATURES_CACHE;
+  try {
+    const raw = fs.readFileSync(SYSTEM_FEATURES_PATH, 'utf8');
+    SYSTEM_FEATURES_CACHE = JSON.parse(raw);
+    return SYSTEM_FEATURES_CACHE;
+  } catch (e) {
+    console.error('Failed to load system_features.json:', e && e.stack ? e.stack : e);
+    SYSTEM_FEATURES_CACHE = [];
+    return [];
+  }
+}
+
+function isAssistantQuestionMessage(message) {
+  const norm = normalizeText(message || '');
+  if (!norm) return false;
+
+  // Treat explicit question punctuation as assistant intent
+  if (String(message || '').trim().endsWith('?')) return true;
+
+  const indicators = [
+    'lam sao','lam the nao','cach','huong dan','how to','what is','what are','where','o dau','la gi','giai thich','chinh sach','policy','làm sao','là gì','thế nào','the nao'
+  ];
+
+  for (const ind of indicators) {
+    if (!ind) continue;
+    if (containsTerm(norm, ind) || norm.includes(ind)) return true;
+  }
+
+  return false;
+}
+
+function findBestFeatureGuide(message) {
+  const features = Array.isArray(loadSystemFeatures()) ? loadSystemFeatures() : [];
+  if (!features.length) return null;
+  const norm = normalizeText(message || '');
+  if (!norm) return null;
+
+  const msgTokens = norm.split(/\s+/).filter(Boolean);
+  if (!msgTokens.length) return null;
+
+  const WEIGHTS = {
+    exactPhrase: 10,
+    multiPhrase: 8,
+    fullKeyword: 6,
+    tokenOverlap: 1,
+    partialOverlap: 0.5,
+    negativeMismatch: 3,
+    intentBoost: 5
+  };
+
+  // Intent-category boosting rules (normalized phrases)
+  const BOOST_RULES = [
+    { phrases: ['merchant','merchant dashboard','merchant workbench','dang bai','gui dia diem','post venue'], category: 'merchant' },
+    { phrases: ['ban do','map','kham pha','kham pha'], category: 'map' },
+    { phrases: ['danh gia','đánh giá','review','binh luan'], category: 'reviews' },
+    { phrases: ['thanh toan','thanh toán','payment','payos','checkout'], category: 'payments' },
+    { phrases: ['upload','them anh','thêm ảnh','upload anh','upload image'], category: 'uploads' },
+    { phrases: ['anh','hinh','hinh anh','tim bang anh','tim anh','image','tìm bằng ảnh'], category: 'vision' },
+    { phrases: ['bao cao','báo cáo','report'], category: 'reporting' },
+    { phrases: ['quang cao','quảng cáo','ads','ad','advert'], category: 'ads' },
+    { phrases: ['nhan tin','nhắn tin','chat voi chu quan','chat voi quan','chat quán'], category: 'chat' }
+  ];
+
+  const boostedCategories = new Set();
+  for (const rule of BOOST_RULES) {
+    for (const p of rule.phrases) {
+      if (!p) continue;
+      const np = normalizeText(p);
+      if (!np) continue;
+      if (containsTerm(norm, np) || norm.includes(np)) {
+        boostedCategories.add(rule.category);
+        break;
+      }
+    }
+  }
+
+  let best = null;
+  let bestScore = -Infinity;
+
+  for (const f of features) {
+    if (!f) continue;
+
+    const keys = Array.isArray(f.keywords) ? f.keywords.slice() : [];
+    if (f.feature) keys.push(f.feature);
+
+    let featureBestKeyScore = -Infinity;
+
+    for (const rawKey of keys) {
+      if (!rawKey) continue;
+      const nk = normalizeText(String(rawKey));
+      if (!nk) continue;
+
+      const keyTokens = nk.split(/\s+/).filter(Boolean);
+      if (!keyTokens.length) continue;
+
+      // Base phrase/exact/full-key scoring
+      let base = 0;
+      if (nk === norm) {
+        base += WEIGHTS.exactPhrase;
+      } else if (nk.includes(norm) || norm.includes(nk)) {
+        base += WEIGHTS.multiPhrase;
+      } else if (keyTokens.every((t) => msgTokens.includes(t))) {
+        base += WEIGHTS.fullKeyword;
+      }
+
+      // Token-level scoring and negative mismatches
+      let exactMatches = 0;
+      let partialMatches = 0;
+      let unmatched = 0;
+
+      for (const kt of keyTokens) {
+        if (!kt) continue;
+        let matched = false;
+        // exact token match
+        for (const mt of msgTokens) {
+          if (kt === mt) { exactMatches++; matched = true; break; }
+        }
+        if (matched) continue;
+
+        // partial fuzzy
+        for (const mt of msgTokens) {
+          if (!mt) continue;
+          if (kt.includes(mt) || mt.includes(kt)) { partialMatches++; matched = true; break; }
+        }
+        if (!matched) unmatched++;
+      }
+
+      const keyScore = base + (exactMatches * WEIGHTS.tokenOverlap) + (partialMatches * WEIGHTS.partialOverlap) - (unmatched * WEIGHTS.negativeMismatch);
+
+      if (keyScore > featureBestKeyScore) featureBestKeyScore = keyScore;
+    }
+
+    if (featureBestKeyScore === -Infinity) continue;
+
+    // category boost
+    let featureScore = featureBestKeyScore;
+    try {
+      if (f.category && boostedCategories.has(String(f.category).toLowerCase())) featureScore += WEIGHTS.intentBoost;
+    } catch (e) {
+      // ignore
+    }
+
+    if (featureScore > bestScore) {
+      bestScore = featureScore;
+      best = f;
+    }
+  }
+
+  const MIN_SCORE_THRESHOLD = 4; // conservative: avoid noisy matches
+  if (bestScore >= MIN_SCORE_THRESHOLD) return best;
+  return null;
+}
+
+function hasExactFeatureKeywordMatch(message, feature) {
+  if (!feature) return false;
+
+  const normalizedMessage = normalizeText(message || '');
+  if (!normalizedMessage) return false;
+
+  const candidates = [
+    ...(Array.isArray(feature.keywords) ? feature.keywords : []),
+    feature.feature
+  ];
+
+  return candidates.some((candidate) => {
+    const normalizedCandidate = normalizeText(String(candidate || ''));
+    return normalizedCandidate && normalizedCandidate === normalizedMessage;
+  });
+}
+
+function shouldReplyWithFeatureGuide(message, matchedFeature, allowSuggest) {
+  if (!matchedFeature || !matchedFeature.guide) return false;
+
+  const normalizedMessage = normalizeText(message || '');
+  if (!normalizedMessage) return false;
+
+  if (isAssistantQuestionMessage(message)) {
+    return true;
+  }
+
+  const looksLikeSuggestionQuery = [
+    'tim quan',
+    'tim dia diem',
+    'an gi',
+    'an o dau',
+    'o dau',
+    'gan toi',
+    'gan day',
+    'goi y',
+    'de xuat',
+    'recommend',
+    'suggest'
+  ].some((term) => containsTerm(normalizedMessage, term));
+
+  if (looksLikeSuggestionQuery) {
+    return false;
+  }
+
+  if (hasExactFeatureKeywordMatch(normalizedMessage, matchedFeature)) {
+    return true;
+  }
+
+  const tokenCount = normalizedMessage.split(/\s+/).filter(Boolean).length;
+  if (!allowSuggest && tokenCount <= 4) {
+    return true;
+  }
+
+  return false;
+}
+
+function looksLikeSystemAssistantRequest(message = '') {
+  const normalizedMessage = normalizeText(message || '');
+  if (!normalizedMessage) return false;
+
+  const systemSignals = [
+    'merchant',
+    'dashboard',
+    'map',
+    'ban do',
+    'upload',
+    'tai anh',
+    'up anh',
+    'favorite',
+    'yeu thich',
+    'save',
+    'review',
+    'danh gia',
+    'notification',
+    'thong bao',
+    'avatar',
+    'profile',
+    'tai khoan',
+    'permission',
+    'role',
+    'payment',
+    'thanh toan',
+    'report',
+    'bao cao',
+    'forum',
+    'feedback',
+    'dang bai',
+    'dang dia diem',
+    'gui duyet',
+    'duyet bai',
+    'ai chatbot',
+    'chatbot',
+    'tro ly'
+  ];
+
+  return systemSignals.some((signal) => containsTerm(normalizedMessage, signal));
+}
+
+function detectCasualIntent(message = '') {
+  const normalizedMessage = normalizeText(message || '');
+  if (!normalizedMessage) return null;
+
+  const greetingTerms = ['hi', 'hello', 'hey', 'chao', 'xin chao'];
+  const thanksTerms = ['cam on', 'thanks', 'thank you', 'tks'];
+  const byeTerms = ['bye', 'tam biet', 'bai bai', 'goodbye'];
+  const lightTerms = ['hehe', 'hihi', 'haha', 'ok', 'oke', 'okela'];
+
+  if (greetingTerms.some((term) => containsTerm(normalizedMessage, term) || normalizedMessage === term)) {
+    return 'greeting';
+  }
+  if (thanksTerms.some((term) => containsTerm(normalizedMessage, term) || normalizedMessage === term)) {
+    return 'thanks';
+  }
+  if (byeTerms.some((term) => containsTerm(normalizedMessage, term) || normalizedMessage === term)) {
+    return 'bye';
+  }
+  if (lightTerms.some((term) => containsTerm(normalizedMessage, term) || normalizedMessage === term)) {
+    return 'light';
+  }
+
+  return null;
+}
+
+function buildCasualReply(message = '') {
+  const intent = detectCasualIntent(message);
+
+  switch (intent) {
+    case 'greeting':
+      return 'Chào bạn, mình có thể hỗ trợ tìm địa điểm hoặc giải thích tính năng hệ thống.';
+    case 'thanks':
+      return 'Không có gì, cần gì cứ hỏi tiếp.';
+    case 'bye':
+      return 'Ok, khi nào cần thì nhắn mình tiếp.';
+    case 'light':
+      return 'Mình đây, bạn cứ hỏi tiếp.';
+    default:
+      return 'Mình đang nghe đây.';
+  }
+}
+
 const OPENAI_MODEL = process.env.OPENAI_CHAT_MODEL || 'gpt-4o-mini';
 const RESULT_LIMIT = 5;
 // Common stop words (English + Vietnamese) used to filter weak tokens from user queries
@@ -517,10 +817,7 @@ function expandKeywords(message) {
 
 // Lightweight casual-message detector for greetings/acknowledgements
 function isCasualMessage(message) {
-  const norm = normalizeText(message || '');
-  if (!norm) return false;
-  const casual = ['hi', 'hello', 'chao', 'chào', 'ok', 'oke', 'okela', 'thanks', 'thank', 'tks', 'cam on', 'cảm ơn', 'camon'];
-  return casual.some((tok) => containsTerm(norm, tok) || norm === tok);
+  return Boolean(detectCasualIntent(message));
 }
 
 // ------------------ Price / Weather / Related helpers ------------------
@@ -1013,6 +1310,286 @@ function buildRuntimeContextPromptFromProject(runtimeContext = null) {
 
   if (!parts.length) return '';
   return `\nCONTEXT THỜI GIAN/VỊ TRÍ/THỜI TIẾT (LẤY TỪ DỮ LIỆU SẴN CÓ CỦA HỆ THỐNG):\n${parts.join('\n')}`;
+}
+
+function tryResolveAuthenticatedUserId(req) {
+  try {
+    const token = extractBearerToken(req);
+    if (!token) return '';
+    const payload = jwt.verify(token, JWT_SECRET);
+    return resolveJwtUserId(payload);
+  } catch (_err) {
+    return '';
+  }
+}
+
+function detectUserContextIntent(message = '') {
+  const normalizedMessage = normalizeText(message || '');
+  if (!normalizedMessage) return null;
+
+  const rules = [
+    {
+      intent: 'identity',
+      phrases: ['toi la ai', 'tai khoan toi', 'profile toi', 'thong tin cua toi', 'ai dang dang nhap', 'tai khoan cua minh']
+    },
+    {
+      intent: 'favorites',
+      phrases: ['yeu thich cua toi', 'quan yeu thich cua toi', 'dia diem yeu thich cua toi', 'favorites cua toi', 'save cua toi']
+    },
+    {
+      intent: 'notifications',
+      phrases: ['thong bao cua toi', 'notification cua toi', 'thong bao moi cua toi']
+    },
+    {
+      intent: 'venues',
+      phrases: ['quan toi dang', 'dia diem toi dang', 'bai dang cua toi', 'venue cua toi', 'quan cua toi', 'bai toi dang']
+    },
+    {
+      intent: 'reviews',
+      phrases: ['review cua toi', 'danh gia cua toi', 'binh luan cua toi']
+    }
+  ];
+
+  for (const rule of rules) {
+    if (rule.phrases.some((phrase) => containsTerm(normalizedMessage, phrase) || normalizedMessage === phrase)) {
+      return rule.intent;
+    }
+  }
+
+  return null;
+}
+
+async function resolveUserContextPayload(req, intent) {
+  const userId = tryResolveAuthenticatedUserId(req);
+  if (!userId) {
+    return { intent, requiresAuth: true, exists: false, data: null };
+  }
+
+  try {
+    if (intent === 'identity') {
+      const result = await pool.query(
+        `
+          SELECT id::text AS id, fullname, username, email, role
+          FROM users
+          WHERE id = $1
+          LIMIT 1
+        `,
+        [userId]
+      );
+
+      const row = result.rows[0] || null;
+      return { intent, requiresAuth: false, exists: Boolean(row), data: row };
+    }
+
+    if (intent === 'favorites') {
+      const result = await pool.query(
+        `
+          SELECT item_id AS "itemId", item_type AS "itemType", name, created_at AS "createdAt"
+          FROM user_favorites
+          WHERE user_id = $1
+          ORDER BY created_at DESC
+          LIMIT 5
+        `,
+        [userId]
+      );
+
+      return {
+        intent,
+        requiresAuth: false,
+        exists: true,
+        data: {
+          total: result.rows.length,
+          items: result.rows
+        }
+      };
+    }
+
+    if (intent === 'notifications') {
+      const result = await pool.query(
+        `
+          SELECT type, title, content, is_read AS "isRead", created_at AS "createdAt"
+          FROM user_notifications
+          WHERE user_id = $1
+          ORDER BY created_at DESC
+          LIMIT 5
+        `,
+        [userId]
+      );
+
+      const unreadResult = await pool.query(
+        `
+          SELECT COUNT(*)::int AS unread_count
+          FROM user_notifications
+          WHERE user_id = $1 AND is_read = FALSE
+        `,
+        [userId]
+      );
+
+      return {
+        intent,
+        requiresAuth: false,
+        exists: true,
+        data: {
+          unreadCount: Number(unreadResult.rows[0]?.unread_count || 0),
+          items: result.rows
+        }
+      };
+    }
+
+    if (intent === 'venues') {
+      const result = await pool.query(
+        `
+          SELECT
+            id,
+            COALESCE(NULLIF(name, ''), title) AS name,
+            status::text AS status,
+            address,
+            created_at AS "createdAt",
+            updated_at AS "updatedAt"
+          FROM venues
+          WHERE submitted_by_user_id = $1
+          ORDER BY updated_at DESC NULLS LAST, created_at DESC
+          LIMIT 5
+        `,
+        [userId]
+      );
+
+      return {
+        intent,
+        requiresAuth: false,
+        exists: true,
+        data: {
+          total: result.rows.length,
+          items: result.rows
+        }
+      };
+    }
+
+    if (intent === 'reviews') {
+      const result = await pool.query(
+        `
+          SELECT
+            r.id,
+            COALESCE(NULLIF(v.name, ''), v.title, 'Địa điểm') AS "venueName",
+            r.rating,
+            r.title,
+            r.comment,
+            r.created_at AS "createdAt"
+          FROM venue_public_reviews AS r
+          LEFT JOIN venues AS v ON v.id = r.venue_id
+          WHERE r.user_id = $1
+          ORDER BY r.created_at DESC
+          LIMIT 5
+        `,
+        [userId]
+      );
+
+      return {
+        intent,
+        requiresAuth: false,
+        exists: true,
+        data: {
+          total: result.rows.length,
+          items: result.rows
+        }
+      };
+    }
+  } catch (error) {
+    if (error?.code === '42P01') {
+      return { intent, requiresAuth: false, exists: false, data: null };
+    }
+    throw error;
+  }
+
+  return { intent, requiresAuth: false, exists: false, data: null };
+}
+
+function buildConversationMemoryPrompt(chatHistory = []) {
+  const history = buildChatHistory(chatHistory).slice(-6);
+  if (!history.length) return '';
+
+  const recentTurns = history.map((item) => `${item.role === 'user' ? 'User' : 'Assistant'}: ${String(item.content || '').slice(0, 160)}`);
+  const recentUserModes = history
+    .filter((item) => item.role === 'user')
+    .slice(-3)
+    .map((item) => {
+      if (shouldSuggest(item.content, [])) return 'venue_recommendation';
+      if (findBestFeatureGuide(item.content)) return 'system_assistant';
+      if (detectUserContextIntent(item.content)) return 'user_context';
+      if (detectCasualIntent(item.content)) return 'casual';
+      return 'general';
+    });
+
+  return `
+MEMORY NHẸ TỪ ĐOẠN CHAT GẦN ĐÂY:
+- Recent turns:
+${recentTurns.map((line) => `  ${line}`).join('\n')}
+- Recent inferred user modes: ${recentUserModes.join(', ') || 'general'}
+`.trim();
+}
+
+function buildUserContextPrompt(userContextPayload) {
+  if (!userContextPayload || userContextPayload.requiresAuth || !userContextPayload.exists || !userContextPayload.data) {
+    return '';
+  }
+
+  return `
+USER_CONTEXT (DỮ LIỆU THẬT TỪ BACKEND, KHÔNG ĐƯỢC BỊA THÊM):
+${JSON.stringify(userContextPayload.data, null, 2)}
+`.trim();
+}
+
+async function generateHybridAssistantReply(client, message, chatHistory = [], options = {}) {
+  const {
+    runtimeContextPrompt = '',
+    userContextPayload = null,
+    mode = 'general'
+  } = options || {};
+
+  if (!client) {
+    return 'Hiện tại mình chưa dùng được AI để trả lời câu này.';
+  }
+
+  const memoryPrompt = buildConversationMemoryPrompt(chatHistory);
+  const userContextPrompt = buildUserContextPrompt(userContextPayload);
+  const modeLabel = mode === 'user_context' ? 'user-context mode' : 'general GPT mode';
+
+  const promptSections = [
+    'Bạn là Smart City Discovery AI Assistant.',
+    `Mode hiện tại: ${modeLabel}.`,
+    'Mục tiêu: trả lời tự nhiên như ChatGPT, ngắn gọn, rõ ý, tiếng Việt hiện đại, không dùng giọng chatbot support cứng.',
+    'Quy tắc bắt buộc:',
+    '- Không bịa địa điểm, không tạo tên quán, không gợi ý venue ngoài dữ liệu nội bộ.',
+    '- Nếu câu hỏi có xu hướng xin gợi ý quán/địa điểm/món ăn thì không tự chuyển sang sáng tác; chỉ nói ngắn rằng phần đó dùng dữ liệu nội bộ của hệ thống.',
+    '- Nếu dùng USER_CONTEXT thì chỉ được nói dựa trên dữ liệu đã cung cấp. Thiếu dữ liệu thì nói là chưa có thông tin tương ứng.',
+    '- Không bịa profile, review, thông báo, quán đã đăng, hay dữ liệu cá nhân.',
+    '- Hạn chế emoji. Mặc định không cần emoji.',
+    '- Trả lời ngắn gọn, ưu tiên 1-4 câu tùy độ phức tạp.',
+    runtimeContextPrompt || '',
+    memoryPrompt || '',
+    userContextPrompt || ''
+  ].filter(Boolean);
+
+  const messages = [
+    { role: 'system', content: promptSections.join('\n\n') },
+    ...buildChatHistory(chatHistory).slice(-6),
+    { role: 'user', content: String(message || '') }
+  ];
+
+  try {
+    const response = await client.chat.completions.create({
+      model: OPENAI_MODEL,
+      temperature: 0.4,
+      top_p: 0.9,
+      max_tokens: 500,
+      messages
+    });
+
+    return cleanReplyText(response.choices?.[0]?.message?.content?.trim() || '');
+  } catch (err) {
+    console.error('HYBRID CHAT OPENAI ERROR:', err && err.stack ? err.stack : err);
+    return 'Hiện tại mình chưa trả lời được câu này. Bạn thử lại sau nhé.';
+  }
 }
 
 function findVenuesByNames(names = [], venues = []) {
@@ -1695,10 +2272,51 @@ router.post('/', async (req, res) => {
     const client = getOpenAIClient();
     console.log('CHAT: OpenAI client present?', !!client);
 
+    // Assistant detection removed from here — will run after suggestion-detection
+
     const runtimeContext = await resolveProjectRuntimeContext(req);
     const runtimeContextPrompt = buildRuntimeContextPromptFromProject(runtimeContext);
     const allowSuggest = shouldSuggest(message, chatHistory);
+    const matchedFeatureGuide = findBestFeatureGuide(message);
     console.log('CHAT: allowSuggest =', allowSuggest);
+
+    // --------- Assistant / Casual detection (runs only when NOT recommendation) ---------
+    try {
+      // Casual greeting quick replies (local only). Only match short greetings to avoid hijacking suggestion queries.
+      const msgLen = String(message || '').trim().split(/\s+/).filter(Boolean).length;
+      if (isCasualMessage(message) && msgLen <= 3) {
+        return res.json({
+          reply: buildCasualReply(message),
+          venueResults: [],
+          aiSuggestedNames: [],
+          detectedCategory: null
+        });
+      }
+
+      if (shouldReplyWithFeatureGuide(message, matchedFeatureGuide, allowSuggest)) {
+        return res.json({
+          reply: String(matchedFeatureGuide.guide),
+          venueResults: [],
+          aiSuggestedNames: [],
+          detectedCategory: null
+        });
+      }
+
+      // Only use deterministic system fallback when the message looks like a system-help request.
+      if (!allowSuggest && looksLikeSystemAssistantRequest(message) && isAssistantQuestionMessage(message)) {
+        // Generic assistant fallback (deterministic, local)
+        return res.json({
+          reply: 'Mình chưa hiểu rõ chức năng bạn muốn hỏi. Bạn nói cụ thể hơn như: đăng bài, merchant, map, upload ảnh, review, thông báo.',
+          venueResults: [],
+          aiSuggestedNames: [],
+          detectedCategory: null
+        });
+      }
+    } catch (e) {
+      console.error('Assistant detection error:', e && e.stack ? e.stack : e);
+      // fall through to existing behavior (do not block recommendations)
+    }
+    // ---------------------------------------------------------------------------
 
     if (allowSuggest) {
       const category = detectCategory(message, chatHistory);
@@ -1776,10 +2394,65 @@ router.post('/', async (req, res) => {
       });
     }
 
-    const gen = await generateReply(client, message, [], chatHistory, runtimeContextPrompt);
-    console.log('CHAT: generateReply returned', JSON.stringify(gen).slice(0,400));
+    const userContextIntent = detectUserContextIntent(message);
+    if (userContextIntent) {
+      const userContextPayload = await resolveUserContextPayload(req, userContextIntent);
 
-    const replyText = gen && typeof gen.reply === 'string' ? gen.reply : String(gen || '');
+      if (userContextPayload.requiresAuth) {
+        return res.json({
+          reply: 'Mình cần bạn đăng nhập trước để xem thông tin cá nhân này.',
+          venueResults: [],
+          aiSuggestedNames: [],
+          detectedCategory: null
+        });
+      }
+
+      const itemCount = Array.isArray(userContextPayload.data?.items)
+        ? userContextPayload.data.items.length
+        : 0;
+      if (!userContextPayload.exists || (!userContextPayload.data && userContextIntent !== 'identity')) {
+        return res.json({
+          reply: 'Hiện tại mình chưa lấy được dữ liệu tương ứng trong hệ thống.',
+          venueResults: [],
+          aiSuggestedNames: [],
+          detectedCategory: null
+        });
+      }
+
+      if (['favorites', 'notifications', 'venues', 'reviews'].includes(userContextIntent) && itemCount === 0) {
+        const emptyReplies = {
+          favorites: 'Bạn chưa có mục yêu thích nào trong hệ thống.',
+          notifications: 'Hiện tại bạn chưa có thông báo nào.',
+          venues: 'Hiện tại bạn chưa có bài đăng địa điểm nào.',
+          reviews: 'Hiện tại bạn chưa có review nào trong hệ thống.'
+        };
+        return res.json({
+          reply: emptyReplies[userContextIntent] || 'Hiện tại chưa có dữ liệu tương ứng.',
+          venueResults: [],
+          aiSuggestedNames: [],
+          detectedCategory: null
+        });
+      }
+
+      const replyText = await generateHybridAssistantReply(client, message, chatHistory, {
+        runtimeContextPrompt,
+        userContextPayload,
+        mode: 'user_context'
+      });
+
+      return res.json({
+        reply: replyText,
+        venueResults: [],
+        aiSuggestedNames: [],
+        detectedCategory: null
+      });
+    }
+
+    const replyText = await generateHybridAssistantReply(client, message, chatHistory, {
+      runtimeContextPrompt,
+      mode: 'general'
+    });
+    console.log('CHAT: hybrid general reply ->', String(replyText).slice(0, 400));
 
     return res.json({
       reply: replyText,

@@ -2,8 +2,9 @@
 .chat-widget {
   position: fixed;
   top: 100px;
-  left: calc(100vw - 400px);
-  width: 380px;
+  left: calc(100vw - 460px);
+  width: 440px;
+  max-width: calc(100vw - 32px);
   height: 600px;
   background: white;
   border-radius: 12px;
@@ -185,7 +186,7 @@
 }
 
 .message-bubble {
-  max-width: 70%;
+  max-width: 78%;
   padding: 12px 14px;
   border-radius: 12px;
   word-wrap: break-word;

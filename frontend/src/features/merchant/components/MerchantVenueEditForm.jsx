@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import ImageUploader from './ImageUploader';
 import ServiceSelector from './ServiceSelector';
 import BusinessLicenseUploader from './BusinessLicenseUploader';
@@ -491,6 +491,7 @@ function MerchantVenueEditForm({ editVenueId = null }) {
   const [draftLoadError, setDraftLoadError] = useState('');
   const [pendingUpdateRequest, setPendingUpdateRequest] = useState(null);
   const [initialComparableState, setInitialComparableState] = useState(null);
+  const submitInFlightRef = useRef(false);
   const existingImageCount = Math.min(Array.isArray(formData.existingGalleryImageUrls) ? formData.existingGalleryImageUrls.length : 0, 6);
   const remainingUploadSlots = Math.max(0, 6 - existingImageCount);
   const placeCategoryTree = useMemo(() => buildPlaceCategoryTree(placeCategories), [placeCategories]);
@@ -1262,6 +1263,10 @@ function MerchantVenueEditForm({ editVenueId = null }) {
   const handleReviewSubmit = async (e) => {
     e.preventDefault();
 
+    if (submitInFlightRef.current) {
+      return;
+    }
+
     if (!isEditMode && isResubmitLocked) {
       setSubmitStatus({
         type: 'error',
@@ -1290,6 +1295,7 @@ function MerchantVenueEditForm({ editVenueId = null }) {
       return;
     }
 
+    submitInFlightRef.current = true;
     setIsSubmitting(true);
     setSubmitStatus(null);
 
@@ -1464,12 +1470,17 @@ function MerchantVenueEditForm({ editVenueId = null }) {
         message: error.response?.data?.message || 'Failed to submit venue. Please try again.'
       });
     } finally {
+      submitInFlightRef.current = false;
       setIsSubmitting(false);
     }
   };
 
   const handleSimpleSubmit = async (e) => {
     e.preventDefault();
+
+    if (submitInFlightRef.current) {
+      return;
+    }
 
     if (!isEditMode) {
       return;
@@ -1491,6 +1502,7 @@ function MerchantVenueEditForm({ editVenueId = null }) {
       return;
     }
 
+    submitInFlightRef.current = true;
     setIsSubmitting(true);
     setSubmitStatus(null);
 
@@ -1526,6 +1538,7 @@ function MerchantVenueEditForm({ editVenueId = null }) {
         message: error.response?.data?.message || 'Failed to save simple information. Please try again.'
       });
     } finally {
+      submitInFlightRef.current = false;
       setIsSubmitting(false);
     }
   };

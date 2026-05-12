@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { GoogleOAuthProvider } from '@react-oauth/google';
 import { LanguageProvider } from './contexts/LanguageContext';
 import { ThemeProvider } from './contexts/ThemeContext';
@@ -151,6 +151,16 @@ function AppRoutes({ landingStats }) {
   );
 }
 
+function ChatWidgetGate() {
+  const location = useLocation();
+
+  if (location.pathname.startsWith('/admin')) {
+    return null;
+  }
+
+  return <ChatWidget />;
+}
+
 function App() {
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
   const [landingStats, setLandingStats] = useState(null);
@@ -198,16 +208,13 @@ function App() {
     <ErrorBoundary>
       <AuthProvider>
         <ThemeProvider>
-          <CompareProvider>
-            <LanguageProvider>
-              <BrowserRouter>
-                <AppRoutes landingStats={landingStats} />
-                <VenueCompareBar />
-                <ChatWidget />
-                <AppOnboarding />
-              </BrowserRouter>
-            </LanguageProvider>
-          </CompareProvider>
+          <LanguageProvider>
+            <BrowserRouter>
+              <AppRoutes landingStats={landingStats} />
+              <ChatWidgetGate />
+              <AppOnboarding />
+            </BrowserRouter>
+          </LanguageProvider>
         </ThemeProvider>
       </AuthProvider>
     </ErrorBoundary>

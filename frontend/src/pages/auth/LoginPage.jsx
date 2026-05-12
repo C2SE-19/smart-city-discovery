@@ -4,7 +4,7 @@ import { GoogleLogin } from "@react-oauth/google";
 import "./login.css";
 import vietnamImage from "../../assets/images/vietnam.png";
 import logo from "../../assets/images/logo.png";
-import { FaUser, FaLock, FaFacebookF, FaGoogle } from "react-icons/fa";
+import { FaUser, FaLock, FaGoogle } from "react-icons/fa";
 import { IoEye, IoEyeOff } from "react-icons/io5";
 import { useNavigate } from "react-router-dom";
 import { useLanguage } from "../../contexts/LanguageContext";
@@ -21,7 +21,6 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [oauthLoading, setOauthLoading] = useState(false);
-  const [fbReady, setFbReady] = useState(false);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const navigate = useNavigate();
@@ -49,42 +48,7 @@ export default function LoginPage() {
     }
   }, []);
 
-  // Load Facebook SDK
-  useEffect(() => {
-    // Define window.fbAsyncInit BEFORE loading the script
-    window.fbAsyncInit = function () {
-      window.FB.init({
-        appId: import.meta.env.VITE_FACEBOOK_APP_ID || '900343549537260',
-        xfbml: false,
-        version: 'v18.0'
-      });
-      console.log('Facebook SDK initialized successfully');
-      setFbReady(true);
-    };
-
-    // Load the Facebook SDK
-    if (!window.FB) {
-      const script = document.createElement('script');
-      script.async = true;
-      script.defer = true;
-      script.crossOrigin = 'anonymous';
-      script.src = 'https://connect.facebook.net/vi_VN/sdk.js';
-      script.onload = () => {
-        console.log('Facebook SDK script loaded');
-      };
-      script.onerror = () => {
-        console.error('Failed to load Facebook SDK');
-        setFbReady(false);
-      };
-      document.body.appendChild(script);
-    } else {
-      setFbReady(true);
-    }
-
-    return () => {
-      // Cleanup if needed
-    };
-  }, []);
+  
 
   // Check auth status on component mount - verify user is still active
   useEffect(() => {
@@ -178,43 +142,7 @@ export default function LoginPage() {
     }
   };
 
-  // Facebook OAuth Handler  
-  const handleFacebookLogin = () => {
-    if (!fbReady) {
-      alert("Đang tải Facebook SDK, vui lòng đợi...");
-      return;
-    }
-
-    if (!window.FB) {
-      alert("Facebook SDK chưa sẵn sàng. Vui lòng tải lại trang.");
-      return;
-    }
-
-    setOauthLoading(true);
-    
-    window.FB.login(function(response) {
-      if (response.authResponse) {
-        console.log('Facebook login response:', response);
-        const accessToken = response.authResponse.accessToken;
-        
-        authService.loginWithFacebook(accessToken)
-          .then(result => {
-            console.log('Facebook auth result:', result);
-            authLogin(result.user, result.token);
-            navigate(getRedirectPathByRole(result?.user?.role));
-          })
-          .catch(err => {
-            console.error('Facebook login error:', err);
-            alert(err.message || "Đăng nhập Facebook thất bại. Vui lòng thử lại.");
-            setOauthLoading(false);
-          });
-      } else {
-        console.log('Facebook login cancelled or failed');
-        alert("Đăng nhập Facebook bị hủy. Vui lòng thử lại.");
-        setOauthLoading(false);
-      }
-    }, { scope: 'public_profile,email' });
-  };
+  
 
   return (
     <div className="login-container">
@@ -301,16 +229,6 @@ export default function LoginPage() {
           <div className="divider-text">{t.auth.orContinueWith || "Or continue with"}</div>
 
           <div className="social-login">
-            <button 
-              type="button"
-              className="social-btn facebook-btn"
-              onClick={handleFacebookLogin}
-              disabled={oauthLoading}
-              title={t.auth.loginWithFacebook || "Login with Facebook"}
-            >
-              <FaFacebookF />
-            </button>
-
             <button 
               type="button"
               className="social-btn google-btn"

@@ -500,6 +500,7 @@ function AdminFeedbackManagementPage() {
         loadReports({ silent: true }),
         loadReportDetail(selectedReport.id, { silent: true }),
       ]);
+      window.dispatchEvent(new Event('admin-badges-refresh'));
     } catch (error) {
       setReplyNoticeType('error');
       setReplyNotice(error?.response?.data?.message || 'Failed to send reply.');
@@ -558,6 +559,7 @@ function AdminFeedbackManagementPage() {
       }
 
       await loadReports();
+      window.dispatchEvent(new Event('admin-badges-refresh'));
     } catch (error) {
       setDetailError(error?.response?.data?.message || 'Failed to delete report.');
     }
