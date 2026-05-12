@@ -111,7 +111,6 @@
 
 /* Menu */
 .merchant-menu {
-  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -158,6 +157,7 @@
 .merchant-sidebar-footer {
   border-top: 1px solid rgba(0, 0, 0, 0.1);
   padding-top: 15px;
+  margin-bottom: 18px;
 }
 
 .merchant-logout-btn {
