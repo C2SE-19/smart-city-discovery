@@ -22,13 +22,6 @@ const FALLBACK_OPTIONS = {
     { key: 'female', label: 'Female' },
     { key: 'other', label: 'Other' }
   ],
-  visitTimes: [
-    { key: 'morning', label: 'Morning' },
-    { key: 'noon', label: 'Noon' },
-    { key: 'afternoon', label: 'Afternoon' },
-    { key: 'evening', label: 'Evening' },
-    { key: 'late_night', label: 'Late night' }
-  ],
   interestsByAgeRange: {
     '13_17': [
       { key: 'street_food', label: 'Street food' },
@@ -91,10 +84,6 @@ function normalizeOptionGroups(rawOptions) {
     ? rawOptions.genders
     : FALLBACK_OPTIONS.genders;
 
-  const visitTimes = Array.isArray(rawOptions.visitTimes) && rawOptions.visitTimes.length
-    ? rawOptions.visitTimes
-    : FALLBACK_OPTIONS.visitTimes;
-
   const interestsByAgeRange =
     rawOptions.interestsByAgeRange && typeof rawOptions.interestsByAgeRange === 'object'
       ? rawOptions.interestsByAgeRange
@@ -103,7 +92,6 @@ function normalizeOptionGroups(rawOptions) {
   return {
     ageRanges,
     genders,
-    visitTimes,
     interestsByAgeRange
   };
 }
@@ -119,7 +107,6 @@ function normalizeSelectionList(value) {
 function buildInitialForm(preference, options) {
   const validAgeKeys = new Set(options.ageRanges.map((item) => item.key));
   const validGenderKeys = new Set(options.genders.map((item) => item.key));
-  const validTimeKeys = new Set(options.visitTimes.map((item) => item.key));
 
   const ageRangeKey = validAgeKeys.has(preference?.ageRangeKey)
     ? preference.ageRangeKey
@@ -128,9 +115,6 @@ function buildInitialForm(preference, options) {
   const preferredGender = validGenderKeys.has(preference?.preferredGender)
     ? preference.preferredGender
     : options.genders[0]?.key || '';
-
-  const preferredTimes = normalizeSelectionList(preference?.preferredTimes)
-    .filter((item) => validTimeKeys.has(item));
 
   const allowedInterests = new Set(
     (options.interestsByAgeRange[ageRangeKey] || []).map((item) => item.key)
@@ -142,7 +126,7 @@ function buildInitialForm(preference, options) {
   return {
     ageRangeKey,
     preferredGender,
-    preferredTimes,
+    preferredTimes: [],
     interests
   };
 }
@@ -224,7 +208,6 @@ export default function UserPreferenceWizard({
             loading: 'Đang tải tùy chọn...',
             ageRange: 'Độ tuổi phù hợp',
             gender: 'Giới tính',
-            visitTimes: 'Thời gian bạn thường ra ngoài',
             interests: 'Sở thích',
             closeLabel: 'Đóng biểu mẫu sở thích',
             next: 'Tiếp theo',
@@ -232,7 +215,7 @@ export default function UserPreferenceWizard({
             cancel: 'Hủy',
             save: 'Lưu sở thích',
             saving: 'Đang lưu...',
-            stepOneError: 'Vui lòng chọn độ tuổi, giới tính và ít nhất một khung giờ.',
+            stepOneError: 'Vui lòng chọn độ tuổi và giới tính.',
             stepTwoError: 'Vui lòng chọn ít nhất một sở thích.',
             saveError: 'Hiện chưa thể lưu sở thích. Vui lòng thử lại.'
           }
@@ -242,7 +225,6 @@ export default function UserPreferenceWizard({
             loading: 'Loading options...',
             ageRange: 'Suitable age range',
             gender: 'Gender',
-            visitTimes: 'Time you usually go out',
             interests: 'Interests',
             closeLabel: 'Close preference form',
             next: 'Next',
@@ -250,7 +232,7 @@ export default function UserPreferenceWizard({
             cancel: 'Cancel',
             save: 'Save preferences',
             saving: 'Saving...',
-            stepOneError: 'Please select age range, gender, and at least one preferred time.',
+            stepOneError: 'Please select age range and gender.',
             stepTwoError: 'Please choose at least one interest.',
             saveError: 'Unable to save preferences right now.'
           },
@@ -261,7 +243,7 @@ export default function UserPreferenceWizard({
     return null;
   }
 
-  const stepOneValid = Boolean(form.ageRangeKey) && Boolean(form.preferredGender) && form.preferredTimes.length > 0;
+  const stepOneValid = Boolean(form.ageRangeKey) && Boolean(form.preferredGender);
   const stepTwoValid = form.interests.length > 0;
 
   const toggleFromList = (key, fieldName) => {
@@ -314,7 +296,7 @@ export default function UserPreferenceWizard({
       const payload = {
         ageRangeKey: form.ageRangeKey,
         preferredGender: form.preferredGender,
-        preferredTimes: form.preferredTimes,
+        preferredTimes: [],
         interests: form.interests
       };
 
@@ -413,28 +395,6 @@ export default function UserPreferenceWizard({
                     ))}
                   </select>
                 </label>
-
-                <fieldset className="preference-wizard-fieldset">
-                  <legend>{copy.visitTimes}</legend>
-                  <div className="preference-wizard-chip-grid">
-                    {options.visitTimes.map((timeOption) => {
-                      const checked = form.preferredTimes.includes(timeOption.key);
-                      return (
-                        <label
-                          key={timeOption.key}
-                          className={`preference-wizard-chip ${checked ? 'is-selected' : ''}`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => toggleFromList(timeOption.key, 'preferredTimes')}
-                          />
-                          <span>{timeOption.label}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </fieldset>
               </div>
             ) : (
               <div className="preference-wizard-step">
