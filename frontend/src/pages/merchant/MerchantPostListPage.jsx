@@ -380,8 +380,9 @@ function MerchantPostListPage() {
   return (
   <div className={`merchant-posts-wrapper theme-${theme}`}>
       {/* Sidebar */}
-      <aside className="merchant-sidebar" data-onboarding="merchant-sidebar">
-        <div className="merchant-sidebar-header">
+      <aside className="merchant-sidebar">
+        <div data-onboarding="merchant-sidebar">
+          <div className="merchant-sidebar-header">
           <div className="merchant-user-info">
             <div className="merchant-user-avatar">{getUserInitial()}</div>
             <div className="merchant-user-details">
@@ -406,10 +407,10 @@ function MerchantPostListPage() {
           >
             Advertise
           </button>
-        </div>
+          </div>
 
-        {/* Menu Items */}
-        <nav className="merchant-menu" data-onboarding="merchant-menu">
+          {/* Menu Items */}
+          <nav className="merchant-menu" data-onboarding="merchant-menu">
           {MenuItems.map(item => (
             <button
               key={item.id}
@@ -420,13 +421,12 @@ function MerchantPostListPage() {
               <span className="merchant-menu-label">{t.merchant[item.translationKey]}</span>
             </button>
           ))}
-        </nav>
-
-        {/* Footer */}
-        <div className="merchant-sidebar-footer">
-          <button className="merchant-logout-btn" onClick={handleLogout}>
-            {t.merchant.logout}
-          </button>
+          </nav>
+          <div className="merchant-sidebar-footer">
+            <button className="merchant-logout-btn" onClick={handleLogout}>
+              {t.merchant.logout}
+            </button>
+          </div>
         </div>
       </aside>
 
