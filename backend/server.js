@@ -341,6 +341,10 @@ const venueOwnerColumnState = {
     exists: null,
     checkedAt: 0
 };
+const venueOpeningHoursColumnState = {
+    exists: null,
+    checkedAt: 0
+};
 
 const MAX_INLINE_IMAGE_URL_LENGTH = 2000000;
 const MAX_METADATA_JSON_LENGTH = 300000;
@@ -421,6 +425,38 @@ async function hasVenueOwnerUserColumn() {
 
     venueOwnerColumnState.checkedAt = now;
     return venueOwnerColumnState.exists;
+}
+
+async function hasVenueOpeningHoursColumn() {
+    const now = Date.now();
+
+    if (typeof venueOpeningHoursColumnState.exists === 'boolean' && now - venueOpeningHoursColumnState.checkedAt < 30000) {
+        return venueOpeningHoursColumnState.exists;
+    }
+
+    try {
+        const result = await pool.query(
+            `
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'venues'
+                  AND column_name = 'opening_hours'
+                LIMIT 1
+            `
+        );
+
+        venueOpeningHoursColumnState.exists = Boolean(result.rows.length);
+    } catch {
+        venueOpeningHoursColumnState.exists = false;
+    }
+
+    venueOpeningHoursColumnState.checkedAt = now;
+    return venueOpeningHoursColumnState.exists;
+}
+
+function buildOpeningHoursSelect(hasColumn) {
+    return hasColumn ? 'venues.opening_hours AS opening_hours' : 'NULL::jsonb AS opening_hours';
 }
 
 function buildResolvedVenueOwnerUserSql(venueAlias = 'venues') {
@@ -4771,26 +4807,26 @@ async function updateAdminUserRole(req, res) {
 
         if (nextStatus && previousStatus && nextStatus !== previousStatus) {
             const statusTitleByKey = {
-                active: 'Tài khoản của bạn đã được kích hoạt lại',
-                paused: 'Tài khoản của bạn đang bị tạm dừng',
-                blocked: 'Tài khoản của bạn đã bị khóa'
+                active: 'Your account has been reactivated',
+                paused: 'Your account is temporarily paused',
+                blocked: 'Your account has been blocked'
             };
 
             const statusContentByKey = {
-                active: 'Bạn có thể tiếp tục sử dụng các tính năng bình thường.',
+                active: 'You can continue using the service normally.',
                 paused: updatedUser.pause_until
-                    ? `Tài khoản tạm dừng đến ${new Date(updatedUser.pause_until).toLocaleString('vi-VN')}.`
-                    : 'Vui lòng liên hệ quản trị viên để biết thêm chi tiết về thời gian tạm dừng.',
+                    ? `Paused until ${new Date(updatedUser.pause_until).toLocaleString('en-US')}.`
+                    : 'Please contact an administrator for more details about the pause.',
                 blocked: updatedUser.blocked_reason
-                    ? `Lý do: ${String(updatedUser.blocked_reason).trim()}`
-                    : 'Vui lòng liên hệ quản trị viên để biết thêm chi tiết.'
+                    ? `Reason: ${String(updatedUser.blocked_reason).trim()}`
+                    : 'Please contact an administrator for more details.'
             };
 
             await createUserNotification({
                 userId: updatedUser.id,
                 type: 'general',
-                title: statusTitleByKey[nextStatus] || 'Trạng thái tài khoản của bạn đã thay đổi',
-                content: statusContentByKey[nextStatus] || 'Vui lòng kiểm tra trạng thái tài khoản mới nhất của bạn.',
+                title: statusTitleByKey[nextStatus] || 'Your account status has changed',
+                content: statusContentByKey[nextStatus] || 'Please review your latest account status.',
                 metadata: {
                     previousStatus,
                     nextStatus,
@@ -5130,7 +5166,7 @@ async function resolveVenueOwnerUserIdByVenueId(venueId) {
     return extractVenueOwnerCandidateIds(result.rows[0])[0] || '';
 }
 
-async function resolveNotificationActorName(userId, fallback = 'Người dùng') {
+async function resolveNotificationActorName(userId, fallback = 'User') {
     const normalizedUserId = String(userId || '').trim();
 
     if (!normalizedUserId) {
@@ -5990,6 +6026,155 @@ function toMinutesFromHHmm(value) {
     return hour * 60 + minute;
 }
 
+function buildVenueScheduleWindow(scheduleItem) {
+    const startMinutes = toMinutesFromHHmm(scheduleItem?.open);
+    const endMinutes = toMinutesFromHHmm(scheduleItem?.close);
+    const isValid = !scheduleItem?.off && startMinutes !== null && endMinutes !== null;
+
+    return {
+        ...scheduleItem,
+        startMinutes,
+        endMinutes,
+        isValid,
+        isOvernight: isValid && endMinutes <= startMinutes
+    };
+}
+
+function isVenueScheduleWindowOpen(nowMinutes, window) {
+    if (!window?.isValid) {
+        return false;
+    }
+
+    if (!window.isOvernight) {
+        return nowMinutes >= window.startMinutes && nowMinutes < window.endMinutes;
+    }
+
+    return nowMinutes >= window.startMinutes || nowMinutes < window.endMinutes;
+}
+
+function resolveMinutesUntilWindowClose(nowMinutes, window) {
+    if (!window?.isValid) {
+        return null;
+    }
+
+    if (!window.isOvernight) {
+        return window.endMinutes - nowMinutes;
+    }
+
+    if (nowMinutes < window.endMinutes) {
+        return window.endMinutes - nowMinutes;
+    }
+
+    return (24 * 60 - nowMinutes) + window.endMinutes;
+}
+
+function formatVenueDurationCompact(totalMinutes) {
+    const normalized = Math.max(1, Math.floor(Number(totalMinutes) || 0));
+    const hours = Math.floor(normalized / 60);
+    const minutes = normalized % 60;
+
+    if (hours && minutes) {
+        return `${hours}h ${minutes}m`;
+    }
+
+    if (hours) {
+        return `${hours}h`;
+    }
+
+    return `${minutes}m`;
+}
+
+function formatVenueDurationWords(totalMinutes) {
+    const normalized = Math.max(1, Math.floor(Number(totalMinutes) || 0));
+    const hours = Math.floor(normalized / 60);
+    const minutes = normalized % 60;
+    const parts = [];
+
+    if (hours) {
+        parts.push(`${hours} hour${hours === 1 ? '' : 's'}`);
+    }
+
+    if (minutes) {
+        parts.push(`${minutes} minute${minutes === 1 ? '' : 's'}`);
+    }
+
+    return parts.join(' ');
+}
+
+function findNextVenueOpeningWindow(windows, todayIndex, nowMinutes) {
+    for (let offset = 0; offset < windows.length; offset += 1) {
+        const index = (todayIndex + offset) % windows.length;
+        const window = windows[index];
+
+        if (!window?.isValid) {
+            continue;
+        }
+
+        if (offset === 0) {
+            if (nowMinutes < window.startMinutes) {
+                return {
+                    ...window,
+                    daysAway: 0,
+                    relativeDay: 'today',
+                    totalMinutesAway: window.startMinutes - nowMinutes
+                };
+            }
+
+            if (window.isOvernight && nowMinutes >= window.endMinutes && nowMinutes < window.startMinutes) {
+                return {
+                    ...window,
+                    daysAway: 0,
+                    relativeDay: 'today',
+                    totalMinutesAway: window.startMinutes - nowMinutes
+                };
+            }
+
+            continue;
+        }
+
+        return {
+            ...window,
+            daysAway: offset,
+            relativeDay: offset === 1 ? 'tomorrow' : 'later',
+            totalMinutesAway: (24 * 60 - nowMinutes) + ((offset - 1) * 24 * 60) + window.startMinutes
+        };
+    }
+
+    return null;
+}
+
+function buildVenueClosedPrimaryLabel(nextOpen) {
+    if (!nextOpen) {
+        return 'Closed';
+    }
+
+    if (nextOpen.daysAway === 0) {
+        return `Closed · Opens at ${nextOpen.open}`;
+    }
+
+    if (nextOpen.daysAway === 1) {
+        return `Closed · Opens at ${nextOpen.open} tomorrow`;
+    }
+
+    return `Closed · Opens ${nextOpen.label} at ${nextOpen.open}`;
+}
+
+function buildVenueClosedSecondaryLabel(nextOpen) {
+    if (!nextOpen) {
+        return '';
+    }
+
+    if (nextOpen.daysAway === 0) {
+        return `Opens in ${formatVenueDurationWords(nextOpen.totalMinutesAway)}`;
+    }
+
+    if (nextOpen.daysAway === 1) {
+        return `Opens at ${nextOpen.open} tomorrow`;
+    }
+
+    return `Opens ${nextOpen.label} at ${nextOpen.open}`;
+}
+
 function extractVenueWeeklySchedule(metadata) {
     const normalizedMetadata = normalizeVenueMetadataObject(metadata);
     const source = resolveWeeklyScheduleSource(normalizedMetadata);
@@ -6031,7 +6216,17 @@ function buildVenueRealtimeOpeningPayload(metadata, now = new Date()) {
                 dayLabel: null,
                 isOpen: false,
                 start: 'N/A',
-                end: 'N/A'
+                end: 'N/A',
+                status: 'no_data',
+                minutesUntilClose: null,
+                minutesUntilOpen: null,
+                nextOpen: null,
+                badge: {
+                    tone: 'unknown',
+                    pulse: 'none',
+                    primaryLabel: 'Hours unavailable',
+                    secondaryLabel: ''
+                }
             },
             weeklySchedule: []
         };
@@ -6041,30 +6236,100 @@ function buildVenueRealtimeOpeningPayload(metadata, now = new Date()) {
     const todayKey = zonedNow.todayKey;
     const nowMinutes = zonedNow.nowMinutes;
 
-    const weeklyScheduleWithFlags = weeklySchedule.map((item) => ({
+    const todayIndex = Math.max(0, WEEKLY_SCHEDULE_DAYS.findIndex((item) => item.key === todayKey));
+    const weeklyScheduleWithFlags = weeklySchedule.map((item, index) => ({
         ...item,
-        isToday: item.key === todayKey
+        isToday: index === todayIndex
     }));
+    const windows = weeklyScheduleWithFlags.map((item) => buildVenueScheduleWindow(item));
+    const todayWindow = windows[todayIndex] || windows[0];
+    const previousWindow = windows[(todayIndex - 1 + windows.length) % windows.length] || null;
 
-    const todaySchedule = weeklyScheduleWithFlags.find((item) => item.key === todayKey) || weeklyScheduleWithFlags[0];
-    const startMinutes = toMinutesFromHHmm(todaySchedule.open);
-    const endMinutes = toMinutesFromHHmm(todaySchedule.close);
-    const isOpenNow =
-        !todaySchedule.off &&
-        startMinutes !== null &&
-        endMinutes !== null &&
-        nowMinutes >= startMinutes &&
-        nowMinutes < endMinutes;
+    let activeWindow = null;
+    if (previousWindow?.isValid && previousWindow.isOvernight && nowMinutes < previousWindow.endMinutes) {
+        activeWindow = previousWindow;
+    } else if (isVenueScheduleWindowOpen(nowMinutes, todayWindow)) {
+        activeWindow = todayWindow;
+    }
+
+    const nextOpen = findNextVenueOpeningWindow(windows, todayIndex, nowMinutes);
+    const defaultCurrentWindow = activeWindow || todayWindow || weeklyScheduleWithFlags[0];
+    let badge = {
+        tone: 'closed',
+        pulse: 'none',
+        primaryLabel: 'Closed',
+        secondaryLabel: ''
+    };
+    let status = 'closed';
+    let minutesUntilClose = null;
+    let minutesUntilOpen = nextOpen?.totalMinutesAway ?? null;
+
+    if (activeWindow) {
+        minutesUntilClose = resolveMinutesUntilWindowClose(nowMinutes, activeWindow);
+        const isClosingSoon = Number.isFinite(minutesUntilClose) && minutesUntilClose <= 30;
+        status = isClosingSoon ? 'closing_soon' : 'open';
+        badge = {
+            tone: isClosingSoon ? 'closing-soon' : 'open',
+            pulse: isClosingSoon ? 'fast' : 'slow',
+            primaryLabel: isClosingSoon
+                ? `Closing soon · ${Math.max(1, Math.floor(minutesUntilClose))} minutes left`
+                : `Open · Closes at ${activeWindow.close}`,
+            secondaryLabel: isClosingSoon
+                ? `Closes at ${activeWindow.close}`
+                : `${formatVenueDurationCompact(minutesUntilClose)} left`
+        };
+        minutesUntilOpen = null;
+    } else if (todayWindow?.isValid && nowMinutes < todayWindow.startMinutes) {
+        status = 'opens_later_today';
+        minutesUntilOpen = todayWindow.startMinutes - nowMinutes;
+        badge = {
+            tone: 'closed',
+            pulse: 'none',
+            primaryLabel: `Closed · Opens at ${todayWindow.open}`,
+            secondaryLabel: `Opens in ${formatVenueDurationWords(minutesUntilOpen)}`
+        };
+    } else if (!todayWindow?.isValid) {
+        status = 'closed_today';
+        badge = {
+            tone: 'closed',
+            pulse: 'none',
+            primaryLabel: 'Closed today',
+            secondaryLabel: buildVenueClosedSecondaryLabel(nextOpen)
+        };
+    } else {
+        status = 'closed';
+        badge = {
+            tone: 'closed',
+            pulse: 'none',
+            primaryLabel: buildVenueClosedPrimaryLabel(nextOpen),
+            secondaryLabel: buildVenueClosedSecondaryLabel(nextOpen)
+        };
+    }
 
     return {
         timezone: VENUE_OPENING_TIMEZONE,
         serverTime: now.toISOString(),
         current: {
-            dayKey: todaySchedule.key,
-            dayLabel: todaySchedule.label,
-            isOpen: isOpenNow,
-            start: todaySchedule.open,
-            end: todaySchedule.close
+            dayKey: defaultCurrentWindow?.key || null,
+            dayLabel: defaultCurrentWindow?.label || null,
+            isOpen: Boolean(activeWindow),
+            start: defaultCurrentWindow?.open || 'N/A',
+            end: defaultCurrentWindow?.close || 'N/A',
+            status,
+            minutesUntilClose,
+            minutesUntilOpen,
+            nextOpen: nextOpen
+                ? {
+                    dayKey: nextOpen.key,
+                    dayLabel: nextOpen.label,
+                    start: nextOpen.open,
+                    end: nextOpen.close,
+                    daysAway: nextOpen.daysAway,
+                    relativeDay: nextOpen.relativeDay,
+                    totalMinutesAway: nextOpen.totalMinutesAway
+                }
+                : null,
+            badge
         },
         weeklySchedule: weeklyScheduleWithFlags
     };
@@ -6913,7 +7178,7 @@ async function generateWardIdFromName(name) {
                 await pool.query(
                     `
                         UPDATE user_notifications
-                        SET title = COALESCE(NULLIF(BTRIM(title), ''), 'Thông báo')
+                        SET title = COALESCE(NULLIF(BTRIM(title), ''), 'Notification')
                         WHERE title IS NULL OR BTRIM(title) = ''
                     `
                 );
@@ -11598,6 +11863,7 @@ async function generateWardIdFromName(name) {
         async function listPublicVenues(req, res) {
             try {
                 const venueHasOwnerUserColumn = await hasVenueOwnerUserColumn();
+                const venueHasOpeningHoursColumn = await hasVenueOpeningHoursColumn();
                 const statusFilter = normalizeStatusList(req.query.status);
                 const isMineRequest = String(req.query.mine || '').trim().toLowerCase() === 'true';
                 const requesterId = req.authUser?.id ? String(req.authUser.id).trim() : '';
@@ -11797,6 +12063,7 @@ async function generateWardIdFromName(name) {
                 const ownerJoin = venueHasOwnerUserColumn
                     ? `LEFT JOIN users AS owner_users ON owner_users.id = ${resolvedOwnerUserSql}`
                     : '';
+                const openingHoursSelect = buildOpeningHoursSelect(venueHasOpeningHoursColumn);
 
                 const result = await pool.query(
                     `
@@ -11808,6 +12075,7 @@ async function generateWardIdFromName(name) {
                     venues.address,
                     venues.description,
                     venues.phone,
+                    ${openingHoursSelect},
                     venues.latitude,
                     venues.longitude,
                     venues.ward_id,
@@ -11908,6 +12176,7 @@ async function generateWardIdFromName(name) {
 
             try {
                 const venueHasOwnerUserColumn = await hasVenueOwnerUserColumn();
+                const venueHasOpeningHoursColumn = await hasVenueOpeningHoursColumn();
                 const resolvedOwnerUserSql = buildResolvedVenueOwnerUserSql('venues');
                 const coverImageSelect = buildSanitizedInlineAssetSql('venues.cover_image_url', 'cover_image_url');
                 const businessLicenseSelect = buildSanitizedInlineAssetSql('venues.business_license_image_url', 'business_license_image_url');
@@ -11924,6 +12193,7 @@ async function generateWardIdFromName(name) {
                 const ownerJoin = venueHasOwnerUserColumn
                     ? `LEFT JOIN users AS owner_users ON owner_users.id = ${resolvedOwnerUserSql}`
                     : '';
+                const openingHoursSelect = buildOpeningHoursSelect(venueHasOpeningHoursColumn);
                 const isAdmin = normalizeRole(req.authUser?.role) === 'admin';
                 const cacheKey = `${isAdmin ? 'admin' : 'public'}:${venueId}`;
                 const cachedPayload = getCachedMapValue(
@@ -11946,6 +12216,7 @@ async function generateWardIdFromName(name) {
                     venues.address,
                     venues.description,
                     venues.phone,
+                    ${openingHoursSelect},
                     venues.latitude,
                     venues.longitude,
                     venues.ward_id,
@@ -12017,6 +12288,7 @@ async function generateWardIdFromName(name) {
 
         async function getPublicVenueForDetail(venueId, isAdmin) {
             const venueHasOwnerUserColumn = await hasVenueOwnerUserColumn();
+            const venueHasOpeningHoursColumn = await hasVenueOpeningHoursColumn();
             const resolvedOwnerUserSql = buildResolvedVenueOwnerUserSql('venues');
             const coverImageSelect = buildSanitizedInlineAssetSql('venues.cover_image_url', 'cover_image_url');
             const metadataSelect = buildSanitizedMetadataSql('venues.metadata', 'metadata');
@@ -12032,6 +12304,7 @@ async function generateWardIdFromName(name) {
             const ownerJoin = venueHasOwnerUserColumn
                 ? `LEFT JOIN users AS owner_users ON owner_users.id = ${resolvedOwnerUserSql}`
                 : '';
+            const openingHoursSelect = buildOpeningHoursSelect(venueHasOpeningHoursColumn);
             const cacheKey = `${isAdmin ? 'admin' : 'public'}:${venueId}`;
             const cachedVenue = getCachedMapValue(
                 publicVenueForDetailCache,
@@ -12053,6 +12326,7 @@ async function generateWardIdFromName(name) {
                     venues.address,
                     venues.description,
                     venues.phone,
+                    ${openingHoursSelect},
                     venues.latitude,
                     venues.longitude,
                     venues.ward_id,
@@ -12377,6 +12651,46 @@ async function generateWardIdFromName(name) {
             }
         }
 
+        async function compareVenuesHandler(req, res) {
+            const rawIds = String(req.query?.ids || '').trim();
+            const normalizedIds = [...new Set(
+                rawIds
+                    .split(',')
+                    .map((value) => Number(String(value || '').trim()))
+                    .filter((value) => Number.isFinite(value) && value > 0)
+            )].slice(0, 2);
+
+            if (normalizedIds.length !== 2) {
+                return res.status(400).json({ message: 'Please provide exactly 2 venue ids.' });
+            }
+
+            try {
+                const isAdmin = normalizeRole(req.authUser?.role) === 'admin';
+                const venues = await Promise.all(
+                    normalizedIds.map(async (venueId) => {
+                        const venue = await getPublicVenueForDetail(venueId, isAdmin);
+                        if (!venue) {
+                            return null;
+                        }
+
+                        const metadata = normalizeVenueMetadataObject(venue.metadata);
+                        const openingRealtime = buildVenueRealtimeOpeningPayload(metadata, new Date());
+
+                        return {
+                            ...venue,
+                            openingRealtime
+                        };
+                    })
+                );
+
+                return res.json({
+                    venues: venues.filter(Boolean)
+                });
+            } catch (error) {
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
         async function getVenueServices(req, res) {
             const venueId = Number(req.params.venueId);
 
@@ -12510,7 +12824,7 @@ async function generateWardIdFromName(name) {
                     );
 
                     const authorName =
-                        userResult.rows[0]?.fullname || userResult.rows[0]?.username || req.authUser?.email || 'Người dùng';
+                        userResult.rows[0]?.fullname || userResult.rows[0]?.username || req.authUser?.email || 'User';
                     const imageUrls = uploadedFiles.map((file) => `/uploads/reviews/${file.filename}`);
 
                     const insertResult = await pool.query(
@@ -12549,8 +12863,8 @@ async function generateWardIdFromName(name) {
                         await createUserNotification({
                             userId: venueOwnerUserId,
                             type: 'venue_review',
-                            title: 'Bài đăng của bạn có bình luận mới',
-                            content: `${authorName} đã bình luận về bài đăng của bạn.`,
+                            title: 'Your venue has a new review',
+                            content: `${authorName} left a review on your venue.`,
                             metadata: {
                                 venueId,
                                 reviewId: Number(created.id),
@@ -12754,7 +13068,7 @@ async function generateWardIdFromName(name) {
                         [userId]
                     );
 
-                    const authorName = userResult.rows[0]?.fullname || userResult.rows[0]?.username || req.authUser?.email || 'Người dùng';
+                    const authorName = userResult.rows[0]?.fullname || userResult.rows[0]?.username || req.authUser?.email || 'User';
                     const imageUrls = uploadedFiles.map((file) => `/uploads/reviews/${file.filename}`);
 
                     const insertResult = await pool.query(
@@ -12782,8 +13096,8 @@ async function generateWardIdFromName(name) {
                         await createUserNotification({
                             userId: reviewOwnerUserId,
                             type: 'venue_reply',
-                            title: 'Bình luận của bạn có phản hồi mới',
-                            content: `${authorName} đã phản hồi bình luận của bạn.`,
+                            title: 'Your review has a new reply',
+                            content: `${authorName} replied to your review.`,
                             metadata: {
                                 venueId,
                                 reviewId,
@@ -13734,11 +14048,11 @@ async function generateWardIdFromName(name) {
                     [insertResult.rows[0].id]
                 );
 
-                await createUserNotification({
-                    userId: submitterUserId,
-                    type: 'venue_submission',
-                    title: 'Đăng bài thành công',
-                    content: `${normalizedName} đang chờ quản trị viên duyệt.`,
+                    await createUserNotification({
+                        userId: submitterUserId,
+                        type: 'venue_submission',
+                        title: 'Venue submission received',
+                        content: `${normalizedName} is pending admin approval.`,
                     metadata: {
                         venueId: Number(insertResult.rows[0].id),
                         status: 'pending'
@@ -14919,8 +15233,8 @@ async function generateWardIdFromName(name) {
                         await createUserNotification({
                             userId: submitterUserId,
                             type: 'venue_submission',
-                            title: 'Yêu cầu cập nhật quán đã bị từ chối',
-                            content: normalizedRejectionReason || 'Vui lòng kiểm tra lại thông tin và gửi yêu cầu mới.',
+                            title: 'Venue update request rejected',
+                            content: normalizedRejectionReason || 'Please review the info and submit a new request.',
                             metadata: {
                                 action: 'reject',
                                 venueId: Number(updateRequest.venue_id) || null,
@@ -15097,14 +15411,14 @@ async function generateWardIdFromName(name) {
                         details.rows[0]?.name
                         || details.rows[0]?.title
                         || proposedSnapshot.name
-                        || 'Quán của bạn'
+                        || 'Your venue'
                     ).trim();
 
                     await createUserNotification({
                         userId: submitterUserId,
                         type: 'venue_submission',
-                        title: 'Yêu cầu cập nhật quán đã được duyệt',
-                        content: `${venueNameForNotification} đã được cập nhật thành công.`,
+                        title: 'Venue update request approved',
+                        content: `${venueNameForNotification} has been updated successfully.`,
                         metadata: {
                             action: 'approve',
                             venueId: targetVenueId,
@@ -16691,12 +17005,12 @@ async function generateWardIdFromName(name) {
                     const rejectedVenue = result.rows[0] || {};
                     const submitterUserId = String(rejectedVenue.submitted_by_user_id || '').trim();
                     if (submitterUserId) {
-                        const venueNameForNotification = String(rejectedVenue.name || rejectedVenue.title || `Quán #${venueId}`).trim();
+                        const venueNameForNotification = String(rejectedVenue.name || rejectedVenue.title || `Venue #${venueId}`).trim();
                         await createUserNotification({
                             userId: submitterUserId,
                             type: 'venue_submission',
-                            title: 'Bài đăng quán của bạn đã bị từ chối',
-                            content: normalizedRejectionReason || `${venueNameForNotification} chưa đủ điều kiện phê duyệt.`,
+                            title: 'Your venue submission was rejected',
+                            content: normalizedRejectionReason || `${venueNameForNotification} does not meet approval criteria.`,
                             metadata: {
                                 action: 'reject',
                                 venueId,
@@ -16774,14 +17088,14 @@ async function generateWardIdFromName(name) {
                 invalidateVenueCommunityBundleCacheByVenueId(venueId);
 
                 const approvedVenue = result.rows[0] || {};
-                const submitterUserId = String(approvedVenue.submitted_by_user_id || '').trim();
+                    const submitterUserId = String(approvedVenue.submitted_by_user_id || '').trim();
                 if (submitterUserId) {
-                    const venueNameForNotification = String(approvedVenue.name || approvedVenue.title || `Quán #${venueId}`).trim();
+                        const venueNameForNotification = String(approvedVenue.name || approvedVenue.title || `Venue #${venueId}`).trim();
                     await createUserNotification({
                         userId: submitterUserId,
                         type: 'venue_submission',
-                        title: 'Bài đăng quán của bạn đã được duyệt',
-                        content: `${venueNameForNotification} hiện đã hiển thị công khai cho người dùng.`,
+                            title: 'Your venue submission was approved',
+                            content: `${venueNameForNotification} is now publicly visible.`,
                         metadata: {
                             action: 'approve',
                             venueId
@@ -17254,8 +17568,8 @@ async function generateWardIdFromName(name) {
                         await createUserNotification({
                             userId: req.authUser.id,
                             type: 'feedback',
-                            title: 'Gửi phản hồi thành công',
-                            content: `Loại phản hồi: ${resolvedTypeName}`,
+                            title: 'Feedback submitted successfully',
+                            content: `Feedback type: ${resolvedTypeName}`,
                             metadata: {
                                 feedbackId: Number(rows?.[0]?.id || 0) || null,
                                 feedbackTypeCode: resolvedTypeCode
@@ -17297,8 +17611,8 @@ async function generateWardIdFromName(name) {
                             await createUserNotification({
                                 userId: req.authUser.id,
                                 type: 'feedback',
-                                title: 'Gửi phản hồi thành công',
-                                content: `Loại phản hồi: ${resolvedTypeName}`,
+                                title: 'Feedback submitted successfully',
+                                content: `Feedback type: ${resolvedTypeName}`,
                                 metadata: {
                                     feedbackId: Number(fallbackResult.rows?.[0]?.id || 0) || null,
                                     feedbackTypeCode: resolvedTypeCode
@@ -17741,8 +18055,8 @@ async function generateWardIdFromName(name) {
                         await createUserNotification({
                             userId: reporterUserId,
                             type: 'feedback',
-                            title: 'Báo cáo của bạn đã có phản hồi từ quản trị viên',
-                            content: `Báo cáo #${feedback.id} đã được cập nhật trạng thái ${normalizeFeedbackStatusLabel(nextStatus)}.`,
+                            title: 'Your report has an admin response',
+                            content: `Report #${feedback.id} was updated to ${normalizeFeedbackStatusLabel(nextStatus)}.`,
                             metadata: {
                                 feedbackId: feedback.id,
                                 nextStatus,
@@ -18496,7 +18810,7 @@ async function generateWardIdFromName(name) {
                 }
 
                 if (!resolvedThreadId || !recipientUserId) {
-                    return res.status(400).json({ message: 'Không thể xác định người nhận tin nhắn.' });
+                    return res.status(400).json({ message: 'Unable to resolve message recipient.' });
                 }
 
                 const customerUserId = currentUserId === ownerUserId ? recipientUserId : currentUserId;
@@ -18511,7 +18825,7 @@ async function generateWardIdFromName(name) {
                     const selectedVenueOwnerUserId = String(selectedVenueContext?.owner_user_id || '').trim();
 
                     if (!selectedVenueContext || selectedVenueOwnerUserId !== ownerUserId) {
-                        return res.status(400).json({ message: 'QuÃ¡n Ä‘Æ°á»£c chá»n khÃ´ng há»£p lá»‡ cho Ä‘oáº¡n chat nÃ y.' });
+                        return res.status(400).json({ message: 'Selected venue is not valid for this chat.' });
                     }
 
                     messageVenueId = requestedContextVenueId;
@@ -18565,20 +18879,20 @@ async function generateWardIdFromName(name) {
                         req.authUser?.fullname
                         || req.authUser?.username
                         || req.authUser?.email
-                        || 'Người dùng'
+                        || 'User'
                     ).trim();
                     const venueLabel = String(
                         venue.name
                         || venue.title
                         || messageContextLabel
-                        || 'quán'
+                        || 'venue'
                     ).trim();
 
                     await createUserNotification({
                         userId: recipientUserId,
                         type: 'general',
-                        title: 'Bạn có tin nhắn mới',
-                        content: `${senderDisplayName} vừa gửi tin nhắn về ${venueLabel}.`,
+                        title: 'You have a new message',
+                        content: `${senderDisplayName} sent a message about ${venueLabel}.`,
                         metadata: {
                             threadId: resolvedThreadId,
                             venueId: messageVenueId || venueId,
@@ -18603,7 +18917,7 @@ async function generateWardIdFromName(name) {
             const threadId = Number(req.params.threadId);
 
             if (!currentUserId) {
-                return res.status(401).json({ message: 'Bạn cần đăng nhập để đọc tin nhắn.' });
+                return res.status(401).json({ message: 'Please sign in to read messages.' });
             }
 
             if (!Number.isFinite(threadId)) {
@@ -18623,7 +18937,7 @@ async function generateWardIdFromName(name) {
                 );
 
                 if (!participantCheck.rows.length) {
-                    return res.status(404).json({ message: 'Không tìm thấy cuộc trò chuyện.' });
+                    return res.status(404).json({ message: 'Chat thread not found.' });
                 }
 
                 const ownerUserId = String(participantCheck.rows[0].owner_user_id || '').trim();
@@ -18692,7 +19006,7 @@ async function generateWardIdFromName(name) {
             const threadId = Number(req.params.threadId);
 
             if (!currentUserId) {
-                return res.status(401).json({ message: 'Báº¡n cáº§n Ä‘Äƒng nháº­p Ä‘á»ƒ xÃ³a tin nháº¯n.' });
+                return res.status(401).json({ message: 'Please sign in to delete messages.' });
             }
 
             if (!Number.isFinite(threadId)) {
@@ -18712,7 +19026,7 @@ async function generateWardIdFromName(name) {
                 );
 
                 if (!participantCheck.rows.length) {
-                    return res.status(404).json({ message: 'KhÃ´ng tÃ¬m tháº¥y cuá»™c trÃ² chuyá»‡n.' });
+                    return res.status(404).json({ message: 'Chat thread not found.' });
                 }
 
                 const ownerUserId = String(participantCheck.rows[0].owner_user_id || '').trim();
@@ -18816,6 +19130,71 @@ async function generateWardIdFromName(name) {
             }
         }
 
+        function normalizeLegacyNotificationText(value = '', replacements = []) {
+            return replacements.reduce(
+                (currentValue, [pattern, replacement]) => currentValue.replace(pattern, replacement),
+                String(value || '')
+            );
+        }
+
+        function normalizeNotificationRecordForResponse(notification) {
+            const source = notification && typeof notification === 'object' ? notification : {};
+            const metadata = source.metadata && typeof source.metadata === 'object' && !Array.isArray(source.metadata)
+                ? source.metadata
+                : {};
+            let title = String(source.title || '').trim();
+            let content = source.content == null ? null : String(source.content || '').trim();
+
+            const titleByExactMatch = new Map([
+                ['Đã bỏ khỏi yêu thích', 'Removed from favorites'],
+                ['Đã thêm vào yêu thích', 'Added to favorites'],
+                ['Bài đăng của bạn có lượt yêu thích mới', 'Your venue received a new favorite'],
+                ['Bạn có tin nhắn mới', 'You have a new message'],
+                ['Bạn đã cập nhật thông tin cá nhân thành công', 'Profile updated successfully'],
+                ['Bạn đã cập nhật sở thích thành công', 'Preferences updated successfully']
+            ]);
+
+            if (titleByExactMatch.has(title)) {
+                title = titleByExactMatch.get(title);
+            }
+
+            content = normalizeLegacyNotificationText(content, [
+                [/^(.*)\s+đã yêu thích bài đăng của bạn\.$/i, '$1 favorited your venue.'],
+                [/^(.*)\s+vừa gửi tin nhắn về\s+(.*)\.$/i, '$1 sent a message about $2.']
+            ]);
+
+            if (content === 'Hồ sơ của bạn vừa được lưu với thông tin mới nhất.') {
+                content = 'Your profile has been saved with the latest information.';
+            } else if (content === 'Hệ thống sẽ dùng sở thích mới để gợi ý địa điểm phù hợp hơn.') {
+                content = 'Your latest preferences will be used to improve venue recommendations.';
+            }
+
+            if (String(source.type || '').trim().toLowerCase() === 'favorite') {
+                if (metadata?.action === 'removed') {
+                    title = 'Removed from favorites';
+                } else if (metadata?.action === 'added') {
+                    title = 'Added to favorites';
+                }
+            }
+
+            if (String(source.type || '').trim().toLowerCase() === 'venue_favorite') {
+                title = 'Your venue received a new favorite';
+            }
+
+            if (String(source.type || '').trim().toLowerCase() === 'general' && metadata?.threadId) {
+                title = 'You have a new message';
+                content = normalizeLegacyNotificationText(content, [
+                    [/^(.*)\s+vừa gửi tin nhắn về\s+(.*)\.$/i, '$1 sent a message about $2.']
+                ]);
+            }
+
+            return {
+                ...source,
+                title,
+                content
+            };
+        }
+
         async function loadUserNotificationsPayload(userId, limit = 20) {
             const normalizedUserId = normalizeNotificationUserId(userId);
             const normalizedLimit = Math.min(Math.max(Number(limit) || 20, 1), 50);
@@ -18860,7 +19239,7 @@ async function generateWardIdFromName(name) {
 
             return {
                 success: true,
-                notifications: notificationsResult.rows,
+                notifications: notificationsResult.rows.map((item) => normalizeNotificationRecordForResponse(item)),
                 unreadCount: Number(unreadCountResult.rows?.[0]?.unread_count || 0)
             };
         }
@@ -18926,7 +19305,7 @@ async function generateWardIdFromName(name) {
 
                 const createdNotification = insertResult.rows[0] || null;
                 scheduleUserNotificationsRefresh(normalizedUserId);
-                return createdNotification;
+                return normalizeNotificationRecordForResponse(createdNotification);
             } catch (error) {
                 console.warn('createUserNotification warning:', error.message);
                 return null;
@@ -18947,7 +19326,7 @@ async function generateWardIdFromName(name) {
                     return res.json({ success: true, notifications: [], unreadCount: 0 });
                 }
                 console.error('listUserNotificationsHandler error:', error);
-                return res.status(500).json({ message: 'Không thể tải thông báo lúc này.' });
+                return res.status(500).json({ message: 'Unable to load notifications right now.' });
             }
         }
 
@@ -18955,7 +19334,7 @@ async function generateWardIdFromName(name) {
             const userId = normalizeNotificationUserId(req.user?.id);
 
             if (!userId) {
-                return res.status(401).json({ message: 'Thiếu thông tin người dùng.' });
+                return res.status(401).json({ message: 'Missing user information.' });
             }
 
             res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
@@ -19040,7 +19419,7 @@ async function generateWardIdFromName(name) {
                 return res.json({ success: true, updatedCount });
             } catch (error) {
                 console.error('markUserNotificationsReadHandler error:', error);
-                return res.status(500).json({ message: 'Không thể cập nhật thông báo lúc này.' });
+                return res.status(500).json({ message: 'Unable to update notifications right now.' });
             }
         }
 
@@ -19591,11 +19970,11 @@ async function generateWardIdFromName(name) {
                 );
 
                 if (creatorUserId) {
-                    await createUserNotification({
-                        userId: creatorUserId,
-                        type: 'forum_post',
-                        title: 'Đăng bài diễn đàn thành công',
-                        content: title,
+                        await createUserNotification({
+                            userId: creatorUserId,
+                            type: 'forum_post',
+                            title: 'Forum post published',
+                            content: title,
                         metadata: {
                             postId: Number(insertResult.rows?.[0]?.id || 0) || null,
                             category
@@ -19704,7 +20083,7 @@ async function generateWardIdFromName(name) {
                     await createUserNotification({
                         userId: creatorUserId,
                         type: 'forum_comment',
-                        title: 'Bình luận diễn đàn đã được đăng',
+                        title: 'Forum comment posted',
                         content: content.slice(0, 140),
                         metadata: {
                             postId,
@@ -19719,7 +20098,7 @@ async function generateWardIdFromName(name) {
                     await createUserNotification({
                         userId: postCreatorUserId,
                         type: 'forum_comment',
-                        title: 'Bài viết diễn đàn của bạn có bình luận mới',
+                        title: 'Your forum post has a new comment',
                         content: content.slice(0, 140),
                         metadata: {
                             postId,
@@ -19790,8 +20169,8 @@ async function generateWardIdFromName(name) {
                     await createUserNotification({
                         userId: postCreatorUserId,
                         type: 'forum_post',
-                        title: 'Bài viết diễn đàn của bạn có lượt thích mới',
-                        content: String(postCheck.rows[0]?.title || '').trim() || `Bài viết #${postId}`,
+                        title: 'Your forum post has a new like',
+                        content: String(postCheck.rows[0]?.title || '').trim() || `Post #${postId}`,
                         metadata: {
                             postId,
                             actorKey
@@ -20230,8 +20609,8 @@ async function generateWardIdFromName(name) {
                             createUserNotification({
                                 userId: row.id,
                                 type: 'forum_post',
-                                title: 'Báo cáo bài viết diễn đàn của bạn đã được xử lý',
-                                content: `Báo cáo liên quan đến bài viết #${postId} đã được quản trị viên xem xét.`,
+                                title: 'Your forum post report was processed',
+                                content: `Reports related to post #${postId} have been reviewed by an admin.`,
                                 metadata: {
                                     postId,
                                     dismissedCount: Number(deletedResult.rowCount || 0)
@@ -20301,8 +20680,8 @@ async function generateWardIdFromName(name) {
                             createUserNotification({
                                 userId: row.id,
                                 type: 'forum_comment',
-                                title: 'Báo cáo bình luận diễn đàn của bạn đã được xử lý',
-                                content: `Báo cáo liên quan đến bình luận #${commentId} đã được quản trị viên xem xét.`,
+                                title: 'Your forum comment report was processed',
+                                content: `Reports related to comment #${commentId} have been reviewed by an admin.`,
                                 metadata: {
                                     postId,
                                     commentId,
@@ -20338,9 +20717,11 @@ async function generateWardIdFromName(name) {
         registerVersionedRoute('get', '/merchant-services', listPublicMerchantServices);
         registerVersionedRoute('get', '/feedback/types', listPublicFeedbackTypes);
         registerVersionedRoute('get', '/venues', authenticateOptional, listPublicVenues);
+        registerVersionedRoute('get', '/venues/compare', authenticateOptional, compareVenuesHandler);
         registerVersionedRoute('get', '/venues/update-requests', authenticateRequest, checkUserStatus, listMerchantVenueUpdateRequests);
         registerVersionedRoute('get', '/venues/:venueId', authenticateOptional, getVenueDetails);
     registerVersionedRoute('get', '/venues/:venueId/reviews', authenticateOptional, listPublicVenueReviews);
+        app.get('/venues/compare', authenticateOptional, compareVenuesHandler);
         registerVersionedRoute('get', '/venues/:venueId', getVenueDetails);
         registerVersionedRoute('post', '/venues', authenticateRequest, createVenueSubmission);
         registerVersionedRoute('get', '/venues/:venueId/reviews', listPublicVenueReviews);
@@ -20731,8 +21112,8 @@ async function generateWardIdFromName(name) {
                 await createUserNotification({
                     userId,
                     type: 'general',
-                    title: 'Bạn đã cập nhật thông tin cá nhân thành công',
-                    content: 'Hồ sơ của bạn vừa được lưu với thông tin mới nhất.',
+                    title: 'Profile updated successfully',
+                    content: 'Your profile has been saved with the latest information.',
                     metadata: {
                         section: 'profile',
                         action: 'updated'
@@ -20925,8 +21306,8 @@ async function generateWardIdFromName(name) {
                 await createUserNotification({
                     userId,
                     type: 'general',
-                    title: 'Bạn đã cập nhật sở thích thành công',
-                    content: 'Hệ thống sẽ dùng sở thích mới để gợi ý địa điểm phù hợp hơn.',
+                    title: 'Preferences updated successfully',
+                    content: 'Your latest preferences will be used to improve venue recommendations.',
                     metadata: {
                         section: 'preferences',
                         action: 'updated',
@@ -21826,7 +22207,7 @@ async function generateWardIdFromName(name) {
                     await createUserNotification({
                         userId,
                         type: 'favorite',
-                        title: 'Đã bỏ khỏi yêu thích',
+                        title: 'Removed from favorites',
                         content: String(name || normalizedItemId),
                         metadata: {
                             itemId: normalizedItemId,
@@ -21854,7 +22235,7 @@ async function generateWardIdFromName(name) {
                 await createUserNotification({
                     userId,
                     type: 'favorite',
-                    title: 'Đã thêm vào yêu thích',
+                    title: 'Added to favorites',
                     content: String(name || normalizedItemId),
                     metadata: {
                         itemId: normalizedItemId,
@@ -21871,8 +22252,8 @@ async function generateWardIdFromName(name) {
                         await createUserNotification({
                             userId: venueOwnerUserId,
                             type: 'venue_favorite',
-                            title: 'Bài đăng của bạn có lượt yêu thích mới',
-                            content: `${actorName} đã yêu thích bài đăng của bạn.`,
+                            title: 'Your venue received a new favorite',
+                            content: `${actorName} favorited your venue.`,
                             metadata: {
                                 itemId: normalizedItemId,
                                 itemType: normalizedItemType,

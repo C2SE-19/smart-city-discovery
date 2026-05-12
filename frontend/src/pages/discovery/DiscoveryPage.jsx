@@ -1,13 +1,19 @@
 import { useDeferredValue, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 import SectionCard from '../../components/common/SectionCard';
 import TagPill from '../../components/common/TagPill';
+import VenueCard from '../../components/discovery/VenueCard';
+import { useCompareVenues } from '../../contexts/CompareContext';
 import useWardMapData from '../../hooks/useWardMapData';
 import InteractiveWardMap from '../../components/map/InteractiveWardMap';
 import { fetchPlaceCategories } from '../../services/api/placeCategoriesApi';
+import './DiscoveryPage.css';
 
 function DiscoveryPage() {
+  const navigate = useNavigate();
   const { wards, venues, loading, error } = useWardMapData();
+  const { compareVenues, maxItems, isCompared, toggleVenue } = useCompareVenues();
   const [selectedWardName, setSelectedWardName] = useState('');
   const [selectedCategoryId, setSelectedCategoryId] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
@@ -36,6 +42,15 @@ function DiscoveryPage() {
 
     return matchesWard && matchesCategory && haystack.includes(deferredSearchTerm.trim().toLowerCase());
   });
+
+  const handleOpenVenueDetail = (venue) => {
+    const venueId = String(venue?.id || '').trim();
+    if (!venueId) {
+      return;
+    }
+
+    navigate(`/venues/${venueId}`);
+  };
 
   return (
     <div className="page page-with-panels">
@@ -118,18 +133,28 @@ function DiscoveryPage() {
           title={`${visibleVenues.length} venues in the current view`}
           description={error || 'This list is filtered by ward, category, and search keyword.'}
         >
-          <div className="venue-list" data-onboarding="discovery-list">
-            {visibleVenues.slice(0, 8).map((venue) => (
-              <article key={venue.id || `${venue.name}-${venue.latitude}`} className="venue-row">
-                <div>
-                  <h3 className="venue-title">{venue.name}</h3>
-                  <p className="venue-meta">{venue.address}</p>
-                </div>
-                <TagPill muted>
-                  {venue.category_name || venue.categoryName || venue.ward_name || venue.wardName || 'Uncategorized'}
-                </TagPill>
-              </article>
-            ))}
+          <div className="venue-list venue-list--cards" data-onboarding="discovery-list">
+            {visibleVenues.map((venue) => {
+              const active = isCompared(venue?.id);
+              const disabled = !active && compareVenues.length >= maxItems;
+              const compareTooltip = active
+                ? 'Remove from compare'
+                : disabled
+                  ? 'You can compare up to 2 venues'
+                  : 'Add to compare';
+
+              return (
+                <VenueCard
+                  key={venue.id || `${venue.name}-${venue.latitude}`}
+                  venue={venue}
+                  onClick={() => handleOpenVenueDetail(venue)}
+                  onCompareToggle={toggleVenue}
+                  isCompared={active}
+                  isCompareDisabled={disabled}
+                  compareTooltip={compareTooltip}
+                />
+              );
+            })}
 
             {!visibleVenues.length ? <p className="empty-copy">No venues match the current filters.</p> : null}
           </div>
