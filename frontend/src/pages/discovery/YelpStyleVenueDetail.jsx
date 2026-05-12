@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
+import OpenStatusBadge from '../../components/discovery/OpenStatusBadge';
 import './YelpStyleVenueDetail.css';
 
 /**
@@ -23,13 +24,13 @@ function YelpStyleVenueDetail({
   onShare = () => {},
   onSave = () => {},
   isSaved = false,
-  isOpen = false,
   rating = 0,
   reviews = 0,
   category = 'Dining',
   priceRange = '$$',
   description = '',
   openingHours = '',
+  openingStatusSource = null,
   isClaimed = false,
   totalPhotos = 0
 }) {
@@ -172,12 +173,10 @@ function YelpStyleVenueDetail({
 
           {/* Status & Hours */}
           <div className="yelp-status-section">
-            <div className={`yelp-status-badge ${isOpen ? 'open' : 'closed'}`}>
-              {isOpen ? '🟢 Open now' : '🔴 Closed'}
-            </div>
-            <span className="yelp-hours-text">
-              {openingHours || 'Hours: TBD'}
-            </span>
+            <OpenStatusBadge scheduleSource={openingStatusSource || venue} />
+            {openingHours ? (
+              <span className="yelp-hours-text">{openingHours}</span>
+            ) : null}
           </div>
 
           {/* Price Range */}

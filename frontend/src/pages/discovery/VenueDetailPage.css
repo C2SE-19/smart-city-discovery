@@ -1451,15 +1451,11 @@
   display: flex;
   gap: 10px;
   align-items: center;
+  flex-wrap: wrap;
 }
 
-.venue-comment-hero-opening span.is-open {
-  color: #09a43e;
-  font-weight: 700;
-}
-
-.venue-comment-hero-opening span.is-close {
-  color: #cc2f2f;
+.venue-comment-hero-hours {
+  color: #526071;
   font-weight: 700;
 }
 

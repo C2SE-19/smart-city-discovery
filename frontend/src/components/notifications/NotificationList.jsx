@@ -8,6 +8,7 @@ function NotificationList({
   isLoadingMore = false,
   showActionsMenu = false,
   hasMore = false,
+  copy,
   onFilterChange,
   onItemClick,
   onLoadMore,
@@ -15,24 +16,25 @@ function NotificationList({
   onMarkAllRead,
   formatTimestamp,
 }) {
+  const ui = copy || {};
   const visibleNotifications =
     activeFilter === 'unread'
       ? notifications.filter((item) => !item?.isRead)
       : notifications;
 
   return (
-    <div className="notification-bell__dropdown" role="dialog" aria-label="Notifications">
+    <div className="notification-bell__dropdown" role="dialog" aria-label={ui.panelAriaLabel || 'Notifications'}>
       <div className="notification-bell__panel-header">
         <div>
-          <h2>Notifications</h2>
-          <p>{unreadCount > 0 ? `${unreadCount} unread` : 'All read'}</p>
+          <h2>{ui.title || 'Notifications'}</h2>
+          <p>{unreadCount > 0 ? ui.unreadCount?.(unreadCount) : (ui.allRead || 'All read')}</p>
         </div>
 
         <div className="notification-bell__actions">
             <button
               type="button"
               className="notification-bell__icon-btn"
-              aria-label="Notification options"
+              aria-label={ui.optionsAriaLabel || 'Notification options'}
               onClick={onToggleActionsMenu}
             >
             <FiMoreHorizontal />
@@ -47,7 +49,7 @@ function NotificationList({
                 disabled={unreadCount <= 0}
               >
                 <FiCheck />
-                <span>Mark all as read</span>
+                <span>{ui.markAllAsRead || 'Mark all as read'}</span>
               </button>
             </div>
           ) : null}
@@ -60,24 +62,24 @@ function NotificationList({
           className={`notification-bell__filter ${activeFilter === 'all' ? 'is-active' : ''}`}
           onClick={() => onFilterChange?.('all')}
         >
-          All
+          {ui.allFilter || 'All'}
         </button>
         <button
           type="button"
           className={`notification-bell__filter ${activeFilter === 'unread' ? 'is-active' : ''}`}
           onClick={() => onFilterChange?.('unread')}
         >
-          Unread
+          {ui.unreadFilter || 'Unread'}
         </button>
       </div>
 
       <div className="notification-bell__content">
         <div className="notification-bell__section-head">
-          <strong>New</strong>
+          <strong>{ui.sectionTitle || 'New'}</strong>
         </div>
 
         {isLoading ? (
-          <p className="notification-bell__empty">Loading notifications...</p>
+          <p className="notification-bell__empty">{ui.loading || 'Loading notifications...'}</p>
         ) : visibleNotifications.length ? (
           <div className="notification-bell__list">
             {visibleNotifications.map((item) => (
@@ -89,10 +91,10 @@ function NotificationList({
               >
                 <div className="notification-bell__item-copy">
                   <div className="notification-bell__item-title-row">
-                    <strong>{item?.title || 'Notification'}</strong>
+                    <strong>{item?.title || ui.fallbackTitle || 'Notification'}</strong>
                     {!item?.isRead ? <span className="notification-bell__item-dot" aria-hidden="true" /> : null}
                   </div>
-                  <p>{item?.content || 'You have a new update.'}</p>
+                  <p>{item?.content || ui.fallbackContent || 'You have a new update.'}</p>
                   <span>{formatTimestamp?.(item?.createdAt)}</span>
                 </div>
               </button>
@@ -106,14 +108,14 @@ function NotificationList({
                   onClick={() => onLoadMore?.()}
                   disabled={isLoadingMore}
                 >
-                      {isLoadingMore ? 'Loading more...' : 'Load earlier notifications'}
+                      {isLoadingMore ? (ui.loadingMore || 'Loading more...') : (ui.loadMore || 'Load earlier notifications')}
                 </button>
               </div>
             ) : null}
           </div>
         ) : (
           <p className="notification-bell__empty">
-            {activeFilter === 'unread' ? 'No unread notifications.' : 'No notifications yet.'}
+            {activeFilter === 'unread' ? (ui.emptyUnread || 'No unread notifications.') : (ui.emptyAll || 'No notifications yet.')}
           </p>
         )}
       </div>

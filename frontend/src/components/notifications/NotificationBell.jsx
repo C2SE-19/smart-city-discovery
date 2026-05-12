@@ -2,35 +2,23 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FiBell } from 'react-icons/fi';
 import { useAuth } from '../../contexts/AuthContext';
+import { useLanguage } from '../../contexts/LanguageContext';
 import {
   fetchUserNotifications,
   markUserNotificationsRead,
   resolveNotificationsStreamUrl,
 } from '../../services/api/notificationsApi';
 import NotificationList from './NotificationList';
+import {
+  formatNotificationTime,
+  getNotificationCopy,
+  localizeNotification,
+} from './notificationI18n';
 import './NotificationBell.css';
 
 const INITIAL_NOTIFICATIONS_LIMIT = 5;
 const NOTIFICATIONS_LOAD_MORE_STEP = 10;
 const NOTIFICATIONS_MAX_LIMIT = 50;
-
-function formatNotificationTime(value) {
-  if (!value) {
-    return '';
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return '';
-  }
-
-  return date.toLocaleString('vi-VN', {
-    hour: '2-digit',
-    minute: '2-digit',
-    day: '2-digit',
-    month: '2-digit',
-  });
-}
 
 function resolveNotificationDestination(item) {
   const type = String(item?.type || '').trim().toLowerCase();
@@ -127,7 +115,14 @@ function resolveNotificationDestination(item) {
   }
 
   // Profile update notification - go to profile
-  if (type === 'general' && item?.title?.includes('cập nhật')) {
+  if (
+    type === 'general'
+    && (
+      metadata?.section === 'profile'
+      || metadata?.section === 'preferences'
+      || item?.title?.toLowerCase?.().includes('updated')
+    )
+  ) {
     return '/profile';
   }
 
@@ -137,6 +132,7 @@ function resolveNotificationDestination(item) {
 function NotificationBell() {
   const navigate = useNavigate();
   const { user, token } = useAuth();
+  const { language } = useLanguage();
   const rootRef = useRef(null);
   const previousUnreadRef = useRef(0);
   const ringTimeoutRef = useRef(null);
@@ -150,9 +146,16 @@ function NotificationBell() {
   const [isRinging, setIsRinging] = useState(false);
   const [fetchLimit, setFetchLimit] = useState(INITIAL_NOTIFICATIONS_LIMIT);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const notificationCopy = useMemo(() => getNotificationCopy(language), [language]);
+  const localizedNotifications = useMemo(
+    () => notifications.map((item) => localizeNotification(item, language)),
+    [language, notifications]
+  );
 
   const applyNotificationsPayload = useCallback((payload) => {
-    const nextNotifications = Array.isArray(payload?.notifications) ? payload.notifications : [];
+    const nextNotifications = Array.isArray(payload?.notifications)
+      ? payload.notifications
+      : [];
     const nextUnreadCount = Number(payload?.unreadCount || 0);
 
     setNotifications(nextNotifications);
@@ -408,7 +411,7 @@ function NotificationBell() {
         <button
               type="button"
               className="notification-bell__backdrop"
-              aria-label="Close notifications panel"
+              aria-label={notificationCopy.closePanelAriaLabel}
               onClick={() => {
                 setIsOpen(false);
                 setShowActionsMenu(false);
@@ -419,7 +422,7 @@ function NotificationBell() {
         <button
         type="button"
         className={`notification-bell__trigger ${isRinging ? 'is-ringing' : ''} ${unreadCount > 0 ? 'has-unread' : ''}`}
-        aria-label="Notifications"
+        aria-label={notificationCopy.triggerAriaLabel}
         aria-expanded={isOpen}
         aria-haspopup="dialog"
         onClick={() => {
@@ -443,16 +446,17 @@ function NotificationBell() {
 
       {isOpen && user ? (
         <NotificationList
-          notifications={notifications}
+          notifications={localizedNotifications}
           unreadCount={unreadCount}
           activeFilter={activeFilter}
           isLoading={isLoading}
+          copy={notificationCopy}
           showActionsMenu={showActionsMenu}
           onFilterChange={setActiveFilter}
           onItemClick={handleNotificationClick}
           onToggleActionsMenu={() => setShowActionsMenu((current) => !current)}
           onMarkAllRead={handleMarkAllRead}
-          formatTimestamp={formatNotificationTime}
+          formatTimestamp={(value) => formatNotificationTime(value, language)}
           hasMore={canLoadMore}
           isLoadingMore={isLoadingMore}
           onLoadMore={handleLoadMore}

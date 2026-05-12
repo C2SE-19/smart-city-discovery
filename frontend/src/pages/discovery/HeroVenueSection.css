@@ -197,6 +197,20 @@
   color: white;
 }
 
+.hero-venue-name-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.hero-venue-name-row .open-status-badge {
+  font-size: 0.95rem;
+  max-width: min(100%, 360px);
+  padding: 10px 14px;
+  backdrop-filter: blur(12px);
+}
+
 .hero-featured-hot-badge {
   align-self: flex-start;
   margin-bottom: 1rem;
@@ -262,6 +276,11 @@
   flex-wrap: wrap;
 }
 
+.hero-meta-row .open-status-badge {
+  max-width: min(100%, 360px);
+  backdrop-filter: blur(12px);
+}
+
 .hero-category-badge {
   background: rgba(255, 255, 255, 0.25);
   color: white;
@@ -271,28 +290,6 @@
   font-weight: 600;
   backdrop-filter: blur(10px);
   border: 1px solid rgba(255, 255, 255, 0.5);
-}
-
-.hero-status-badge {
-  padding: 0.5rem 1rem;
-  border-radius: 20px;
-  font-size: 0.95rem;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.5);
-}
-
-.hero-status-badge.open {
-  background: rgba(76, 175, 80, 0.6);
-  color: white;
-}
-
-.hero-status-badge.closed {
-  background: rgba(244, 67, 54, 0.6);
-  color: white;
 }
 
 .hero-hours {
@@ -309,6 +306,11 @@
 
 .hero-hours-text {
   font-weight: 500;
+}
+
+.hero-venue-name-row .open-status-sublabel {
+  color: inherit;
+  opacity: 0.88;
 }
 
 /* Action Buttons */
@@ -351,6 +353,13 @@
   box-shadow: 0 8px 16px rgba(183, 28, 54, 0.2);
 }
 
+.hero-action-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+  transform: none;
+  box-shadow: 0 6px 12px rgba(83, 50, 58, 0.12);
+}
+
 .hero-action-btn::after {
   content: '';
   position: absolute;
@@ -383,6 +392,30 @@
 
 .hero-action-btn.hero-action-saved:active {
   box-shadow: 0 8px 16px rgba(183, 28, 54, 0.2);
+}
+
+.hero-action-btn.hero-action-compare {
+  border-color: rgba(183, 28, 54, 0.26);
+  background: linear-gradient(145deg, #ffffff 0%, #fff7f9 100%);
+  color: #7d1630;
+  box-shadow: 0 8px 18px rgba(183, 28, 54, 0.12);
+}
+
+.hero-action-btn.hero-action-compare:hover:not(:disabled) {
+  border-color: rgba(183, 28, 54, 0.4);
+  background: linear-gradient(145deg, #ffffff 0%, #ffeef2 100%);
+  box-shadow: 0 12px 24px rgba(183, 28, 54, 0.16);
+}
+
+.hero-action-btn.hero-action-compare:active:not(:disabled) {
+  box-shadow: 0 8px 16px rgba(183, 28, 54, 0.2);
+}
+
+.hero-action-btn.hero-action-compare-active {
+  border-color: rgba(183, 28, 54, 0.44);
+  background: linear-gradient(145deg, #ffffff 0%, #ffe7ee 100%);
+  color: #7d1630;
+  box-shadow: 0 10px 20px rgba(183, 28, 54, 0.15);
 }
 
 .hero-action-icon {
