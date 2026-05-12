@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import ImageUploader from './ImageUploader';
 import ServiceSelector from './ServiceSelector';
 import BusinessLicenseUploader from './BusinessLicenseUploader';
@@ -276,6 +276,7 @@ function MerchantVenueForm({ editVenueId = null }) {
   const [loadingDraft, setLoadingDraft] = useState(false);
   const [draftLoadError, setDraftLoadError] = useState('');
   const [pendingUpdateRequest, setPendingUpdateRequest] = useState(null);
+  const submitInFlightRef = useRef(false);
   const placeCategoryTree = useMemo(() => buildPlaceCategoryTree(placeCategories), [placeCategories]);
   const mainCategories = placeCategoryTree.rootCategories;
   const selectedMainCategoryChildren = useMemo(
@@ -967,6 +968,10 @@ function MerchantVenueForm({ editVenueId = null }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
+    if (submitInFlightRef.current) {
+      return;
+    }
+
     if (!isEditMode && isResubmitLocked) {
       setSubmitStatus({
         type: 'error',
@@ -983,6 +988,7 @@ function MerchantVenueForm({ editVenueId = null }) {
       return;
     }
 
+    submitInFlightRef.current = true;
     setIsSubmitting(true);
     setSubmitStatus(null);
 
@@ -1129,6 +1135,7 @@ function MerchantVenueForm({ editVenueId = null }) {
         message: error.response?.data?.message || 'Failed to submit venue. Please try again.'
       });
     } finally {
+      submitInFlightRef.current = false;
       setIsSubmitting(false);
     }
   };

@@ -23,6 +23,8 @@ const publicVenueDetailCache = new Map();
 const publicVenueForDetailCache = new Map();
 const publicVenueCommunityBundleCache = new Map();
 const openWeatherCache = new Map();
+const publicTrendingVenuesCache = new Map();
+const aiSuggestionResponseCache = new Map();
 let publicWardsSummaryCache = { timestamp: 0, data: null };
 let publicWardsFullCache = { timestamp: 0, data: null };
 
@@ -366,9 +368,50 @@ function sanitizeVenueRecord(venue) {
 
     return {
         ...venue,
+        metadata: compactVenueMetadataForResponse(venue.metadata),
         cover_image_url: sanitizeLargeInlineAssetUrl(venue.cover_image_url),
         business_license_image_url: sanitizeLargeInlineAssetUrl(venue.business_license_image_url)
     };
+}
+
+function compactVenueMetadataForResponse(metadata) {
+    const source = normalizeVenueMetadataObject(metadata);
+    const galleryImages = extractGalleryImageUrlsFromMetadata(source)
+        .filter((imageUrl) => !/^data:image\//i.test(String(imageUrl || '').trim()));
+
+    const nextMetadata = {
+        category: source.category ?? null,
+        categoryName: source.categoryName ?? null,
+        categoryId: source.categoryId ?? null,
+        wardId: source.wardId ?? null,
+        wardName: source.wardName ?? null,
+        minPrice: source.minPrice ?? source.min_price ?? null,
+        maxPrice: source.maxPrice ?? source.max_price ?? null,
+        startTime: source.startTime ?? null,
+        endTime: source.endTime ?? null,
+        weeklyOpenHours: source.weeklyOpenHours ?? null,
+        weeklySchedule: source.weeklySchedule ?? null,
+        selectedServices: Array.isArray(source.selectedServices) ? source.selectedServices : [],
+        selectedServiceNames: Array.isArray(source.selectedServiceNames) ? source.selectedServiceNames : [],
+        contactEmail: source.contactEmail ?? null,
+        imagesCount: Number.isFinite(Number(source.imagesCount))
+            ? Math.max(0, Math.min(6, Number(source.imagesCount)))
+            : galleryImages.length,
+        galleryImages
+    };
+
+    return Object.entries(nextMetadata).reduce((result, [key, value]) => {
+        if (value === null || value === undefined) {
+            return result;
+        }
+
+        if (Array.isArray(value) && value.length === 0) {
+            return result;
+        }
+
+        result[key] = value;
+        return result;
+    }, {});
 }
 
 function buildSanitizedInlineAssetSql(columnSql, alias) {
@@ -3241,6 +3284,16 @@ async function listPublicTrendingVenues(req, res) {
     const limit = Number.isFinite(requestedLimit)
         ? Math.max(1, Math.min(24, requestedLimit))
         : 10;
+    const cacheKey = `limit:${limit}`;
+
+    const cachedPayload = getCachedMapValue(
+        publicTrendingVenuesCache,
+        cacheKey,
+        PUBLIC_TRENDING_VENUES_CACHE_TTL_MS
+    );
+    if (cachedPayload) {
+        return res.json(cachedPayload);
+    }
 
     try {
         const trendingResult = await pool.query(
@@ -3348,7 +3401,9 @@ async function listPublicTrendingVenues(req, res) {
             });
         }
 
-        return res.json({ venues });
+        const payload = { venues };
+        setCachedMapValue(publicTrendingVenuesCache, cacheKey, payload);
+        return res.json(payload);
     } catch (error) {
         console.error('List public trending venues error:', error);
         return res.status(500).json({ message: 'Could not load trending venues right now.' });
@@ -5311,13 +5366,13 @@ const USER_PREFERENCE_INTEREST_SET_BY_AGE = Object.entries(USER_PREFERENCE_INTER
 );
 
 const USER_PREFERENCE_INTEREST_KEYWORDS = {
-    street_food: ['street food', 'food market', 'food court', 'hawker', 'am thuc duong pho', 'an vat', 'quan an vat', 'cho dem'],
+    street_food: ['street food', 'food market', 'food court', 'hawker', 'am thuc duong pho', 'an vat', 'quan an vat', 'cho dem', 'cho', 'market an uong', 'food alley', 'street snack'],
     bubble_tea: ['bubble tea', 'milk tea', 'tea shop', 'tra sua'],
     instagram_spots: ['instagram', 'photo spot', 'check-in', 'scenic', 'viewpoint', 'check in', 'song ao', 'view dep'],
     arcades: ['arcade', 'game center', 'bowling', 'vr game', 'khu vui choi', 'choi game'],
     parks: ['park', 'green space', 'playground', 'cong vien'],
     cinema: ['cinema', 'movie', 'theater', 'rap phim', 'rap chieu phim'],
-    sports: ['sport', 'stadium', 'court', 'climbing', 'the thao', 'san bong', 'gym'],
+    sports: ['sport', 'stadium', 'court', 'climbing', 'the thao', 'san bong', 'gym', 'tennis', 'pickleball', 'skate', 'swim', 'pool', 'running', 'cycling', 'workout', 'ho boi', 'san tap'],
     nightlife: ['bar', 'club', 'nightlife', 'cocktail', 'pub', 'quan nhau', 'beer club', 'karaoke'],
     live_music: ['live music', 'acoustic', 'dj', 'concert', 'nhac song', 'music lounge'],
     cafes: ['cafe', 'coffee', 'espresso', 'tea room', 'ca phe', 'quan cafe'],
@@ -5360,13 +5415,13 @@ const USER_PREFERENCE_INTEREST_CATEGORY_AFFINITY = {
     arcades: ['entertainment'],
     parks: ['travel_attractions'],
     cinema: ['entertainment'],
-    sports: ['entertainment', 'travel_attractions'],
+    sports: ['travel_attractions'],
     nightlife: ['lounge', 'entertainment'],
     live_music: ['entertainment', 'lounge'],
     cafes: ['coffee_drinks'],
     adventure: ['travel_attractions', 'entertainment'],
     photography: ['travel_attractions', 'coffee_drinks'],
-    fitness: ['entertainment'],
+    fitness: ['travel_attractions'],
     specialty_coffee: ['coffee_drinks'],
     fine_dining: ['dining'],
     family_spots: ['dining', 'travel_attractions'],
@@ -5388,12 +5443,87 @@ const USER_PREFERENCE_INTEREST_CATEGORY_AFFINITY = {
     gardens: ['travel_attractions']
 };
 
-const USER_PREFERENCE_TIME_CATEGORY_AFFINITY = {
-    morning: ['coffee_drinks', 'dining', 'travel_attractions'],
-    noon: ['dining', 'coffee_drinks'],
-    afternoon: ['coffee_drinks', 'shopping', 'travel_attractions'],
-    evening: ['dining', 'entertainment', 'coffee_drinks'],
-    late_night: ['entertainment', 'lounge', 'coffee_drinks']
+const VENUE_SEMANTIC_SIGNAL_KEYWORDS = {
+    aesthetic: ['aesthetic', 'decor', 'photogenic', 'instagrammable', 'check in', 'check-in', 'song ao', 'xinh', 'view dep', 'rooftop'],
+    chill: ['chill', 'cozy', 'relax', 'thu gian', 'hangout', 'laid back', 'am cung'],
+    quiet: ['quiet', 'calm', 'peaceful', 'yen tinh', 'private', 'study'],
+    outdoor: ['outdoor', 'open air', 'garden', 'park', 'beach', 'riverside', 'ngoai troi', 'san vuon', 'di bo'],
+    sporty: ['sport', 'gym', 'court', 'football', 'badminton', 'climbing', 'workout', 'the thao'],
+    cinematic: ['cinema', 'movie', 'screen', 'theater', 'rap phim'],
+    street_food: ['street food', 'food stall', 'food court', 'hawker', 'an vat', 'quan coc', 'via he', 'cho', 'cho dem', 'market', 'street snack'],
+    nightlife: ['bar', 'pub', 'club', 'cocktail', 'karaoke', 'late night', 'nightlife', 'beer club'],
+    family: ['family', 'kids', 'child friendly', 'playground', 'gia dinh', 'tre em'],
+    work_friendly: ['wifi', 'free wifi', 'workspace', 'study', 'meeting', 'coworking', 'plug', 'lam viec', 'hoc tap'],
+    scenic: ['scenic', 'view', 'sunset', 'landmark', 'panorama', 'beachfront', 'song ao', 'canh dep'],
+    premium: ['premium', 'luxury', 'fine dining', 'private room', 'chef', 'sang trong', 'cao cap'],
+    quick_stop: ['take away', 'grab and go', 'fast service', 'quick bite', 'mang di'],
+    long_stay: ['parking', 'valet', 'reservation', 'large group', 'private room', 'ban rong', 'dau xe'],
+    acoustic: ['acoustic', 'live music', 'band', 'dj', 'music night', 'nhac song'],
+    beverage_focused: ['coffee', 'cafe', 'milk tea', 'tra sua', 'juice', 'smoothie', 'tea', 'drink', 'beverage'],
+    dining_focused: ['restaurant', 'food', 'dining', 'nha hang', 'am thuc', 'mon an', 'seafood', 'bbq', 'lau', 'nuong'],
+    entertainment_focused: ['entertainment', 'arcade', 'game', 'bowling', 'billiard', 'concert', 'giai tri'],
+    romantic: ['romantic', 'date night', 'couple', 'hen ho'],
+    wellness: ['spa', 'massage', 'wellness', 'healthy', 'vegan', 'yoga', 'thu gian'],
+    budget_friendly: ['budget', 'affordable', 'cheap', 'gia re', 'binh dan', 'student']
+};
+
+const USER_PREFERENCE_INTEREST_SEMANTIC_SIGNALS = {
+    street_food: ['street_food', 'dining_focused', 'budget_friendly', 'quick_stop'],
+    bubble_tea: ['beverage_focused', 'chill', 'aesthetic', 'quick_stop'],
+    instagram_spots: ['aesthetic', 'scenic', 'romantic', 'chill'],
+    arcades: ['entertainment_focused', 'nightlife', 'chill'],
+    parks: ['outdoor', 'scenic', 'family', 'quiet'],
+    cinema: ['cinematic', 'entertainment_focused', 'nightlife'],
+    sports: ['sporty', 'outdoor', 'long_stay'],
+    nightlife: ['nightlife', 'acoustic', 'premium', 'long_stay'],
+    live_music: ['acoustic', 'nightlife', 'chill', 'entertainment_focused'],
+    cafes: ['beverage_focused', 'chill', 'work_friendly', 'quiet'],
+    adventure: ['outdoor', 'sporty', 'scenic'],
+    photography: ['aesthetic', 'scenic', 'romantic'],
+    fitness: ['sporty', 'outdoor', 'long_stay'],
+    specialty_coffee: ['beverage_focused', 'quiet', 'work_friendly', 'premium'],
+    fine_dining: ['dining_focused', 'premium', 'romantic'],
+    family_spots: ['family', 'long_stay', 'dining_focused'],
+    wellness: ['wellness', 'quiet', 'premium'],
+    networking: ['work_friendly', 'quiet', 'premium'],
+    cultural_sites: ['scenic', 'quiet', 'outdoor'],
+    weekend_getaways: ['long_stay', 'premium', 'scenic'],
+    family_friendly: ['family', 'long_stay', 'dining_focused'],
+    local_cuisine: ['dining_focused', 'street_food', 'budget_friendly'],
+    heritage: ['scenic', 'quiet', 'outdoor'],
+    business_lunch: ['dining_focused', 'work_friendly', 'premium'],
+    shopping: ['long_stay', 'premium', 'aesthetic'],
+    nature_walks: ['outdoor', 'scenic', 'quiet'],
+    quiet_cafes: ['quiet', 'beverage_focused', 'work_friendly'],
+    traditional_food: ['dining_focused', 'street_food', 'budget_friendly'],
+    scenic_walks: ['scenic', 'outdoor', 'quiet'],
+    spiritual_sites: ['quiet', 'scenic'],
+    health_friendly: ['wellness', 'beverage_focused', 'dining_focused'],
+    gardens: ['outdoor', 'scenic', 'quiet']
+};
+
+const VENUE_SEMANTIC_SIGNAL_LABELS = {
+    aesthetic: 'aesthetic vibe',
+    chill: 'chill vibe',
+    quiet: 'quiet atmosphere',
+    outdoor: 'outdoor setting',
+    sporty: 'activity-focused',
+    cinematic: 'cinema vibe',
+    street_food: 'street-food style',
+    nightlife: 'nightlife vibe',
+    family: 'family-friendly atmosphere',
+    work_friendly: 'study/work-friendly setup',
+    scenic: 'scenic/check-in vibe',
+    premium: 'premium atmosphere',
+    quick_stop: 'quick-stop convenience',
+    long_stay: 'long-stay comfort',
+    acoustic: 'music/acoustic vibe',
+    beverage_focused: 'drinks-focused',
+    dining_focused: 'food-focused',
+    entertainment_focused: 'entertainment-focused',
+    romantic: 'romantic vibe',
+    wellness: 'wellness atmosphere',
+    budget_friendly: 'budget-friendly feel'
 };
 
 const USER_PREFERENCE_ADULT_KEYWORDS = [
@@ -5555,6 +5685,45 @@ function scoreVenueByCurrentTimeContext(fields, currentTimeWindowKey, isOpenNow)
     return { score, reasons };
 }
 
+function resolveVenueSemanticSignals(fields) {
+    const matchedSignals = new Set();
+
+    Object.entries(VENUE_SEMANTIC_SIGNAL_KEYWORDS).forEach(([signalKey, keywords]) => {
+        const fieldHits = scoreKeywordHitsByVenueFields(fields, keywords);
+        const weightedScore = resolveWeightedFieldHitScore(fieldHits);
+        const decisiveHits = fieldHits.nameHits + fieldHits.categoryHits + fieldHits.serviceHits;
+
+        if (weightedScore >= 1.1 || decisiveHits > 0) {
+            matchedSignals.add(signalKey);
+        }
+    });
+
+    const matchedCategories = resolveVenueBroadCategoryMatchesFromFields(fields);
+    if (matchedCategories.includes('coffee_drinks')) {
+        matchedSignals.add('beverage_focused');
+        matchedSignals.add('chill');
+    }
+    if (matchedCategories.includes('dining')) {
+        matchedSignals.add('dining_focused');
+    }
+    if (matchedCategories.includes('entertainment')) {
+        matchedSignals.add('entertainment_focused');
+    }
+    if (matchedCategories.includes('travel_attractions')) {
+        matchedSignals.add('outdoor');
+        matchedSignals.add('scenic');
+    }
+    if (matchedCategories.includes('lounge')) {
+        matchedSignals.add('nightlife');
+        matchedSignals.add('chill');
+    }
+    if (matchedCategories.includes('accommodation')) {
+        matchedSignals.add('long_stay');
+    }
+
+    return [...matchedSignals];
+}
+
 function scoreVenueByServiceAffinity(fields, preference) {
     const preferredGender = String(preference?.preferredGender || '').trim().toLowerCase();
     const interestKeys = Array.isArray(preference?.interests) ? preference.interests : [];
@@ -5581,19 +5750,30 @@ function scoreVenueByServiceAffinity(fields, preference) {
     }, 0);
 
     if (serviceInterestHits > 0) {
-        score += Math.min(1.9, 0.7 + serviceInterestHits * 0.24);
+        score += Math.min(2.4, 0.95 + serviceInterestHits * 0.26);
         reasons.push('Services align with your interests');
+    }
+
+    const semanticServiceHits = interestKeys.reduce((total, interestKey) => {
+        const semanticKeywords = (USER_PREFERENCE_INTEREST_SEMANTIC_SIGNALS[interestKey] || [])
+            .flatMap((signalKey) => VENUE_SEMANTIC_SIGNAL_KEYWORDS[signalKey] || []);
+        return total + countKeywordHits(serviceText, semanticKeywords);
+    }, 0);
+
+    if (semanticServiceHits > 0) {
+        score += Math.min(2.7, 0.85 + semanticServiceHits * 0.24);
+        reasons.push('Services match your lifestyle');
     }
 
     if (preferredGender === 'female') {
         const comfortHits = countKeywordHits(serviceText, ['wellness', 'spa', 'quiet', 'family', 'kid friendly', 'an toan', 'yen tinh']);
         if (comfortHits > 0) {
-            score += Math.min(0.8, comfortHits * 0.18);
+            score += Math.min(0.5, comfortHits * 0.12);
         }
     } else if (preferredGender === 'male') {
         const activeHits = countKeywordHits(serviceText, ['sports', 'gym', 'billiard', 'football', 'parking', 'outdoor']);
         if (activeHits > 0) {
-            score += Math.min(0.6, activeHits * 0.15);
+            score += Math.min(0.45, activeHits * 0.1);
         }
     }
 
@@ -5626,8 +5806,118 @@ function scoreVenueByHotPromotion(venue) {
     }
 
     return {
-        score: 1.35,
+        score: 0.85,
         reason: 'HOT venue bonus'
+    };
+}
+
+function scoreVenueByInterestSemanticAffinity(fields, interestKeys = []) {
+    const matchedSignals = resolveVenueSemanticSignals(fields);
+    let score = 0;
+    const matchedInterestLabels = [];
+    const matchedSignalLabels = [];
+
+    interestKeys.forEach((interestKey) => {
+        const preferredSignals = USER_PREFERENCE_INTEREST_SEMANTIC_SIGNALS[interestKey] || [];
+        const signalHits = preferredSignals.filter((signalKey) => matchedSignals.includes(signalKey));
+
+        if (signalHits.length) {
+            signalHits.forEach((signalKey, index) => {
+                score += Math.max(0.95, 2.05 - index * 0.24);
+                if (index < 2) {
+                    matchedSignalLabels.push(VENUE_SEMANTIC_SIGNAL_LABELS[signalKey] || signalKey);
+                }
+            });
+            matchedInterestLabels.push(USER_PREFERENCE_INTEREST_MAP[interestKey] || interestKey);
+        }
+
+        const semanticKeywords = preferredSignals.flatMap((signalKey) => VENUE_SEMANTIC_SIGNAL_KEYWORDS[signalKey] || []);
+        if (semanticKeywords.length) {
+            const fieldHits = scoreKeywordHitsByVenueFields(fields, semanticKeywords);
+            const weightedFieldScore = resolveWeightedFieldHitScore(fieldHits);
+            if (weightedFieldScore > 0) {
+                score += Math.min(3.1, weightedFieldScore * 0.42);
+            }
+        }
+    });
+
+    return {
+        score,
+        matchedSignals,
+        reasons: matchedInterestLabels.length
+            ? [`Lifestyle fit: ${[...new Set(matchedSignalLabels)].slice(0, 2).join(', ')}`]
+            : []
+    };
+}
+
+function buildUserProfileCategoryWeightMap(preference) {
+    const weights = new Map();
+    const addWeight = (categoryKey, value) => {
+        if (!categoryKey || !Number.isFinite(Number(value)) || Number(value) <= 0) {
+            return;
+        }
+
+        weights.set(categoryKey, Number((Number(weights.get(categoryKey) || 0) + Number(value)).toFixed(4)));
+    };
+
+    const agePriority = AI_SUGGEST_AGE_CATEGORY_POLICY[String(preference?.ageRangeKey || '').trim()]?.priority || [];
+    agePriority.forEach((categoryKey, index) => {
+        addWeight(categoryKey, Math.max(0.45, 1.2 - index * 0.18));
+    });
+
+    const interestKeys = Array.isArray(preference?.interests) ? preference.interests : [];
+    interestKeys.forEach((interestKey) => {
+        const preferredCategories = USER_PREFERENCE_INTEREST_CATEGORY_AFFINITY[interestKey] || [];
+        preferredCategories.forEach((categoryKey, index) => {
+            addWeight(categoryKey, Math.max(1.2, 3.1 - index * 0.45));
+        });
+    });
+
+    return weights;
+}
+
+function scoreVenueByProfileCategoryRelevance(fields, preference) {
+    const matchedCategories = resolveVenueBroadCategoryMatchesFromFields(fields);
+    const categoryWeightMap = buildUserProfileCategoryWeightMap(preference);
+    const weightedMatches = matchedCategories
+        .map((categoryKey) => ({
+            categoryKey,
+            weight: Number(categoryWeightMap.get(categoryKey) || 0)
+        }))
+        .sort((first, second) => second.weight - first.weight);
+
+    let score = 0;
+    let penalty = 0;
+
+    weightedMatches.forEach((match, index) => {
+        if (match.weight <= 0) {
+            return;
+        }
+
+        const multiplier = index === 0 ? 1.18 : index === 1 ? 0.82 : 0.55;
+        score += match.weight * multiplier;
+    });
+
+    const dominantMatches = weightedMatches.filter((match) => match.weight >= 1.35);
+    if (dominantMatches.length >= 2) {
+        score += 0.9;
+    }
+
+    const strongestMatchWeight = Number(weightedMatches[0]?.weight || 0);
+    const strongestProfileWeight = Math.max(0, ...Array.from(categoryWeightMap.values()));
+
+    if (matchedCategories.length && strongestProfileWeight >= 1.75 && strongestMatchWeight < 0.95) {
+        penalty = Math.min(2.4, 1.15 + matchedCategories.length * 0.28);
+    }
+
+    return {
+        score: Number(score.toFixed(4)),
+        penalty: Number(penalty.toFixed(4)),
+        matchedCategories,
+        dominantCategories: dominantMatches.map((match) => match.categoryKey),
+        reasons: dominantMatches.length
+            ? [`Profile fit: ${dominantMatches.slice(0, 2).map((match) => AI_SUGGEST_BROAD_CATEGORY_LABELS[match.categoryKey] || match.categoryKey).join(', ')}`]
+            : []
     };
 }
 
@@ -5638,9 +5928,11 @@ function scoreVenueByInterestCategoryAffinity(fields, interestKeys = []) {
 
     interestKeys.forEach((interestKey) => {
         const preferredCategories = USER_PREFERENCE_INTEREST_CATEGORY_AFFINITY[interestKey] || [];
-        const hasAffinityHit = preferredCategories.some((categoryKey) => matchedCategories.includes(categoryKey));
-        if (hasAffinityHit) {
-            score += 1.55;
+        const affinityHits = preferredCategories.filter((categoryKey) => matchedCategories.includes(categoryKey));
+        if (affinityHits.length) {
+            affinityHits.forEach((_, index) => {
+                score += Math.max(1.1, 2.15 - index * 0.38);
+            });
             matchedInterestLabels.push(USER_PREFERENCE_INTEREST_MAP[interestKey] || interestKey);
         }
     });
@@ -5649,28 +5941,6 @@ function scoreVenueByInterestCategoryAffinity(fields, interestKeys = []) {
         score,
         reasons: matchedInterestLabels.length
             ? [`Interest affinity: ${[...new Set(matchedInterestLabels)].slice(0, 2).join(', ')}`]
-            : []
-    };
-}
-
-function scoreVenueByTimeHabitAffinity(fields, preferredTimes = []) {
-    const matchedCategories = resolveVenueBroadCategoryMatchesFromFields(fields);
-    let score = 0;
-    const matchedTimes = [];
-
-    preferredTimes.forEach((timeWindowKey) => {
-        const preferredCategories = USER_PREFERENCE_TIME_CATEGORY_AFFINITY[timeWindowKey] || [];
-        const hasAffinityHit = preferredCategories.some((categoryKey) => matchedCategories.includes(categoryKey));
-        if (hasAffinityHit) {
-            score += 1.1;
-            matchedTimes.push(resolveTimeWindowLabel(timeWindowKey));
-        }
-    });
-
-    return {
-        score,
-        reasons: matchedTimes.length
-            ? [`Time habit affinity: ${[...new Set(matchedTimes)].slice(0, 2).join(', ')}`]
             : []
     };
 }
@@ -5690,9 +5960,9 @@ function logAiSuggestionDebugSnapshot(scope, preference, venues = []) {
 
     const snapshot = {
         scope,
+        userId: String(preference?.userId || ''),
         ageRangeKey: String(preference?.ageRangeKey || ''),
         preferredGender: String(preference?.preferredGender || ''),
-        preferredTimes: Array.isArray(preference?.preferredTimes) ? preference.preferredTimes : [],
         interests: Array.isArray(preference?.interests) ? preference.interests : [],
         topVenues: (Array.isArray(venues) ? venues : []).slice(0, 6).map((venue) => ({
             id: venue?.id,
@@ -5705,6 +5975,62 @@ function logAiSuggestionDebugSnapshot(scope, preference, venues = []) {
     };
 
     console.log(`[AI_SUGGEST_DEBUG] ${JSON.stringify(snapshot)}`);
+}
+
+function buildAiSuggestionProfileSignature(preference) {
+    const payload = {
+        ageRangeKey: String(preference?.ageRangeKey || '').trim(),
+        preferredGender: String(preference?.preferredGender || '').trim(),
+        interests: normalizePreferenceStringList(preference?.interests).sort(),
+        onboardingCompleted: Boolean(preference?.onboardingCompleted),
+        updatedAt: String(preference?.updatedAt || '').trim(),
+        lastKnownLatitude: Number.isFinite(Number(preference?.lastKnownLatitude))
+            ? Number(preference.lastKnownLatitude).toFixed(3)
+            : '',
+        lastKnownLongitude: Number.isFinite(Number(preference?.lastKnownLongitude))
+            ? Number(preference.lastKnownLongitude).toFixed(3)
+            : ''
+    };
+
+    return crypto.createHash('sha1').update(JSON.stringify(payload)).digest('hex');
+}
+
+function buildAiSuggestionResponseCacheKey(options = {}) {
+    const normalizedPayload = {
+        scope: String(options.scope || 'base').trim(),
+        userId: String(options.userId || '').trim(),
+        profileSignature: String(options.profileSignature || '').trim(),
+        limit: Number(options.limit) || 0,
+        latitude: Number.isFinite(Number(options.latitude)) ? Number(options.latitude).toFixed(3) : '',
+        longitude: Number.isFinite(Number(options.longitude)) ? Number(options.longitude).toFixed(3) : '',
+        weatherMain: normalizeRecommendationText(options.weatherMain),
+        currentTimeWindowKey: String(options.currentTimeWindowKey || '').trim(),
+        preferOpenNow: Boolean(options.preferOpenNow),
+        query: normalizeRecommendationText(options.query),
+        baseVenueIds: Array.isArray(options.baseVenueIds)
+            ? [...new Set(
+                options.baseVenueIds
+                    .map((value) => Number(value))
+                    .filter((value) => Number.isFinite(value) && value > 0)
+            )].sort((first, second) => first - second)
+            : []
+    };
+
+    const digest = crypto.createHash('sha1').update(JSON.stringify(normalizedPayload)).digest('hex');
+    return `${normalizedPayload.scope}:${normalizedPayload.userId}:${digest}`;
+}
+
+function invalidateAiSuggestionResponseCacheByUserId(userId) {
+    const normalizedUserId = String(userId || '').trim();
+    if (!normalizedUserId) {
+        return;
+    }
+
+    Array.from(aiSuggestionResponseCache.keys()).forEach((cacheKey) => {
+        if (String(cacheKey || '').includes(`:${normalizedUserId}:`)) {
+            aiSuggestionResponseCache.delete(cacheKey);
+        }
+    });
 }
 
 function normalizePreferenceStringList(input) {
@@ -6008,6 +6334,34 @@ function resolveVenueMetadataImageCandidates(metadata) {
     ];
 }
 
+function extractGalleryImageUrlsFromMetadata(metadata) {
+    const normalizedMetadata = normalizeVenueMetadataObject(metadata);
+    return mergeUniqueVenueImages(resolveVenueMetadataImageCandidates(normalizedMetadata)).slice(0, 6);
+}
+
+function buildPersistedVenueMetadata(metadata) {
+    const source = normalizeVenueMetadataObject(metadata);
+    const galleryImageUrls = extractGalleryImageUrlsFromMetadata(source);
+    const nextMetadata = {
+        ...source,
+        imagesCount: galleryImageUrls.length
+    };
+
+    delete nextMetadata.galleryImages;
+    delete nextMetadata.images;
+    delete nextMetadata.imageUrls;
+    delete nextMetadata.photos;
+    delete nextMetadata.photoUrls;
+    delete nextMetadata.mapImages;
+    delete nextMetadata.mapImageUrls;
+    delete nextMetadata.map_images;
+    delete nextMetadata.map_image_urls;
+    delete nextMetadata.mapImage;
+    delete nextMetadata.map_image;
+
+    return nextMetadata;
+}
+
 function mergeUniqueVenueImages(candidates = []) {
     const imageByKey = new Map();
 
@@ -6127,6 +6481,45 @@ async function loadVenueGalleryImageUrls(venueId) {
     } catch (error) {
         if (error?.code === '42P01') {
             return [];
+        }
+
+        throw error;
+    }
+}
+
+async function syncVenueGalleryImages(dbClient, venueId, imageUrls = []) {
+    const normalizedVenueId = Number(venueId);
+    if (!Number.isFinite(normalizedVenueId)) {
+        return;
+    }
+
+    const normalizedImageUrls = mergeUniqueVenueImages(normalizeStringArray(imageUrls)).slice(0, 6);
+
+    try {
+        await dbClient.query(
+            `
+                DELETE FROM venue_images
+                WHERE venue_id = $1
+            `,
+            [normalizedVenueId]
+        );
+
+        if (!normalizedImageUrls.length) {
+            return;
+        }
+
+        for (let index = 0; index < normalizedImageUrls.length; index += 1) {
+            await dbClient.query(
+                `
+                    INSERT INTO venue_images (venue_id, image_url, image_type, display_order)
+                    VALUES ($1, $2, 'gallery', $3)
+                `,
+                [normalizedVenueId, normalizedImageUrls[index], index]
+            );
+        }
+    } catch (error) {
+        if (error?.code === '42P01') {
+            return;
         }
 
         throw error;
@@ -8069,10 +8462,12 @@ async function generateWardIdFromName(name) {
         const PUBLIC_WARDS_CACHE_TTL_MS = 30000;
         const PUBLIC_VENUES_COMPACT_CACHE_TTL_MS = 3000;
         const PUBLIC_VENUE_DETAIL_CACHE_TTL_MS = 8000;
-    const PUBLIC_VENUE_COMMUNITY_CACHE_TTL_MS = 5000;
+        const PUBLIC_VENUE_COMMUNITY_CACHE_TTL_MS = 5000;
+        const PUBLIC_TRENDING_VENUES_CACHE_TTL_MS = 60 * 1000;
         const OPEN_WEATHER_ENDPOINT = 'https://api.openweathermap.org/data/2.5/weather';
         const OPEN_WEATHER_TIMEOUT_MS = 7000;
         const OPEN_WEATHER_CACHE_TTL_MS = 5 * 60 * 1000;
+        const AI_SUGGESTION_RESPONSE_CACHE_TTL_MS = 90 * 1000;
         const OPEN_WEATHER_DEFAULT_LATITUDE = 16.0544;
         const OPEN_WEATHER_DEFAULT_LONGITUDE = 108.2022;
         const RECOMMENDATION_REFINE_AI_ENDPOINT = 'https://api.openai.com/v1/chat/completions';
@@ -8312,14 +8707,13 @@ async function generateWardIdFromName(name) {
             return statsByVenueId.get(Number(venueId)) || null;
         }
 
-        function buildUserPreferenceOptionsPayload() {
-            return {
-                ageRanges: USER_PREFERENCE_AGE_RANGES,
-                genders: USER_PREFERENCE_GENDERS,
-                visitTimes: USER_PREFERENCE_TIME_WINDOWS,
-                interestsByAgeRange: USER_PREFERENCE_INTERESTS_BY_AGE
-            };
-        }
+function buildUserPreferenceOptionsPayload() {
+    return {
+        ageRanges: USER_PREFERENCE_AGE_RANGES,
+        genders: USER_PREFERENCE_GENDERS,
+        interestsByAgeRange: USER_PREFERENCE_INTERESTS_BY_AGE
+    };
+}
 
         function mapUserPreferenceRow(row) {
             if (!row) {
@@ -8537,7 +8931,6 @@ async function generateWardIdFromName(name) {
             const text = venueSearchFields.fullText || buildVenueRecommendationText(venue);
             const ageRangeKey = preference.ageRangeKey;
             const interestKeys = preference.interests;
-            const visitTimes = preference.preferredTimes;
             const currentTime = context.currentTime instanceof Date ? context.currentTime : new Date();
             const currentTimeWindowKey =
                 String(context.currentTimeWindowKey || '').trim() || resolveCurrentPreferenceTimeWindowKey(currentTime);
@@ -8553,7 +8946,7 @@ async function generateWardIdFromName(name) {
                     : 'N/A - N/A';
 
             let interestScore = 0;
-            let timeScore = 0;
+            let interestSemanticScore = 0;
             let ageScore = 0;
             let genderScore = 0;
             let nearbyScore = 0;
@@ -8562,10 +8955,10 @@ async function generateWardIdFromName(name) {
             let contextualTimeScore = 0;
             let serviceAffinityScore = 0;
             let interestAffinityScore = 0;
-            let timeHabitAffinityScore = 0;
+            let profileRelevanceScore = 0;
+            let profileMismatchPenalty = 0;
 
             const matchedInterestLabels = [];
-            const matchedTimeLabels = [];
             let ageReason = '';
 
             interestKeys.forEach((interestKey) => {
@@ -8573,28 +8966,14 @@ async function generateWardIdFromName(name) {
                     ...(USER_PREFERENCE_INTEREST_KEYWORDS[interestKey] || []),
                     USER_PREFERENCE_INTEREST_MAP[interestKey] || interestKey
                 ];
-                const hits = countKeywordHits(text, interestKeywords);
+                const interestFieldHits = scoreKeywordHitsByVenueFields(venueSearchFields, interestKeywords);
+                const weightedInterestHits = resolveWeightedFieldHitScore(interestFieldHits);
 
-                if (hits > 0) {
-                    interestScore += 1 + Math.min(hits, 2) * 0.2;
+                if (weightedInterestHits > 0) {
+                    interestScore += Math.min(5.4, 0.9 + weightedInterestHits * 0.92);
                     matchedInterestLabels.push(USER_PREFERENCE_INTEREST_MAP[interestKey] || interestKey);
                 }
             });
-
-            visitTimes.forEach((timeWindowKey) => {
-                const timeKeywords = USER_PREFERENCE_TIME_KEYWORDS[timeWindowKey] || [];
-                const hits = countKeywordHits(text, timeKeywords);
-                if (hits > 0) {
-                    timeScore += 0.6 + Math.min(hits, 2) * 0.15;
-                    const label = resolveTimeWindowLabel(timeWindowKey);
-                    matchedTimeLabels.push(label);
-                }
-            });
-
-            if (currentTimeWindowKey && visitTimes.includes(currentTimeWindowKey)) {
-                timeScore += 0.95;
-                matchedTimeLabels.push(`Now (${resolveTimeWindowLabel(currentTimeWindowKey)})`);
-            }
 
             const adultHits = countKeywordHits(text, USER_PREFERENCE_ADULT_KEYWORDS);
             const familyHits = countKeywordHits(text, USER_PREFERENCE_FAMILY_KEYWORDS);
@@ -8660,12 +9039,15 @@ async function generateWardIdFromName(name) {
             serviceAffinityScore += serviceAffinity.score;
             const interestCategoryAffinity = scoreVenueByInterestCategoryAffinity(venueSearchFields, interestKeys);
             interestAffinityScore += interestCategoryAffinity.score;
-            const timeHabitAffinity = scoreVenueByTimeHabitAffinity(venueSearchFields, visitTimes);
-            timeHabitAffinityScore += timeHabitAffinity.score;
+            const interestSemanticAffinity = scoreVenueByInterestSemanticAffinity(venueSearchFields, interestKeys);
+            interestSemanticScore += interestSemanticAffinity.score;
+            const profileCategoryRelevance = scoreVenueByProfileCategoryRelevance(venueSearchFields, preference);
+            profileRelevanceScore += profileCategoryRelevance.score;
+            profileMismatchPenalty += profileCategoryRelevance.penalty;
 
             const distanceKm = computeDistanceKm(userLatitude, userLongitude, venue.latitude, venue.longitude);
             if (Number.isFinite(distanceKm)) {
-                nearbyScore = Math.max(0, 1.2 - distanceKm / 12);
+                nearbyScore = Math.max(0, 1.25 - distanceKm / 12);
             }
 
             if (hasRealtimeSchedule) {
@@ -8685,27 +9067,31 @@ async function generateWardIdFromName(name) {
             // Weighted recommendation score keeps the existing profile logic, then adds
             // category policy, service affinity, live context, popularity, and HOT boost.
             const score =
-                interestScore * 2.2
-                + timeScore * 1.3
-                + interestAffinityScore * 1.45
-                + timeHabitAffinityScore * 1.2
-                + ageScore
-                + categoryScore * 1.2
-                + genderScore
-                + serviceAffinityScore * 1.1
-                + nearbyScore * 2.1
-                + openingScore * 1.6
+                interestScore * 3.15
+                + interestSemanticScore * 2.35
+                + interestAffinityScore * 1.7
+                + profileRelevanceScore * 1.95
+                + ageScore * 0.7
+                + categoryScore * 0.78
+                + genderScore * 0.85
+                + serviceAffinityScore * 1.45
+                + nearbyScore * 1.9
+                + openingScore * 1.55
                 + contextualTimeScore * 1.2
                 + weatherScoring.score * 1.25
-                + popularityScoring.score
-                + hotScoring.score;
+                + popularityScoring.score * 0.58
+                + hotScoring.score
+                - profileMismatchPenalty * 1.65;
+            const interestCoreScore =
+                interestScore * 3.15
+                + interestSemanticScore * 2.35
+                + interestAffinityScore * 1.7
+                + serviceAffinityScore * 1.45
+                - profileMismatchPenalty * 1.65;
 
             const reasons = [];
             if (matchedInterestLabels.length) {
                 reasons.push(`Matches interests: ${[...new Set(matchedInterestLabels)].slice(0, 2).join(', ')}`);
-            }
-            if (matchedTimeLabels.length) {
-                reasons.push(`Fits your time: ${[...new Set(matchedTimeLabels)].slice(0, 2).join(', ')}`);
             }
             if (ageReason) {
                 reasons.push(ageReason);
@@ -8728,8 +9114,11 @@ async function generateWardIdFromName(name) {
             if (interestCategoryAffinity.reasons.length) {
                 reasons.push(...interestCategoryAffinity.reasons);
             }
-            if (timeHabitAffinity.reasons.length) {
-                reasons.push(...timeHabitAffinity.reasons);
+            if (interestSemanticAffinity.reasons.length) {
+                reasons.push(...interestSemanticAffinity.reasons);
+            }
+            if (profileCategoryRelevance.reasons.length) {
+                reasons.push(...profileCategoryRelevance.reasons);
             }
             if (timeContextScoring.reasons.length) {
                 reasons.push(...timeContextScoring.reasons);
@@ -8748,21 +9137,28 @@ async function generateWardIdFromName(name) {
                 openingTimeRange,
                 hasRealtimeSchedule,
                 currentTimeWindowKey,
+                primaryBroadCategory:
+                    profileCategoryRelevance.dominantCategories[0]
+                    || profileCategoryRelevance.matchedCategories[0]
+                    || null,
+                matchedBroadCategories: profileCategoryRelevance.matchedCategories,
                 reasons,
                 breakdown: {
-                    interestScore: Number((interestScore * 2.2).toFixed(4)),
-                    timeScore: Number((timeScore * 1.3).toFixed(4)),
-                    interestAffinityScore: Number((interestAffinityScore * 1.45).toFixed(4)),
-                    timeHabitAffinityScore: Number((timeHabitAffinityScore * 1.2).toFixed(4)),
-                    ageScore: Number(ageScore.toFixed(4)),
-                    categoryScore: Number((categoryScore * 1.2).toFixed(4)),
-                    genderScore: Number(genderScore.toFixed(4)),
-                    serviceAffinityScore: Number((serviceAffinityScore * 1.1).toFixed(4)),
-                    distanceScore: Number((nearbyScore * 2.1).toFixed(4)),
-                    openingScore: Number((openingScore * 1.6).toFixed(4)),
+                    interestScore: Number((interestScore * 3.15).toFixed(4)),
+                    interestSemanticScore: Number((interestSemanticScore * 2.35).toFixed(4)),
+                    interestAffinityScore: Number((interestAffinityScore * 1.7).toFixed(4)),
+                    interestCoreScore: Number(interestCoreScore.toFixed(4)),
+                    profileRelevanceScore: Number((profileRelevanceScore * 1.95).toFixed(4)),
+                    profileMismatchPenalty: Number((profileMismatchPenalty * 1.65).toFixed(4)),
+                    ageScore: Number((ageScore * 0.7).toFixed(4)),
+                    categoryScore: Number((categoryScore * 0.78).toFixed(4)),
+                    genderScore: Number((genderScore * 0.85).toFixed(4)),
+                    serviceAffinityScore: Number((serviceAffinityScore * 1.45).toFixed(4)),
+                    distanceScore: Number((nearbyScore * 1.9).toFixed(4)),
+                    openingScore: Number((openingScore * 1.55).toFixed(4)),
                     currentTimeContextScore: Number((contextualTimeScore * 1.2).toFixed(4)),
                     weatherScore: Number((weatherScoring.score * 1.25).toFixed(4)),
-                    popularityScore: Number(popularityScoring.score.toFixed(4)),
+                    popularityScore: Number((popularityScoring.score * 0.58).toFixed(4)),
                     hotBonus: Number(hotScoring.score.toFixed(4))
                 }
             };
@@ -10792,7 +11188,9 @@ async function generateWardIdFromName(name) {
             const groupedByCategory = new Map();
 
             scoredVenues.forEach((item) => {
-                const categoryKey = item.category_id ? String(item.category_id) : 'uncategorized';
+                const categoryKey =
+                    String(item?.recommendationPrimaryBroadCategory || '').trim()
+                    || (item.category_id ? String(item.category_id) : 'uncategorized');
                 if (!groupedByCategory.has(categoryKey)) {
                     groupedByCategory.set(categoryKey, []);
                 }
@@ -10833,8 +11231,18 @@ async function generateWardIdFromName(name) {
 
         function prioritizeHotVenueRecommendations(scoredVenues, limit, scoreField = 'recommendationScore') {
             const normalizedVenues = Array.isArray(scoredVenues) ? scoredVenues : [];
+            const topScore = Number(normalizedVenues[0]?.[scoreField] || 0);
+            const topInterestCore = Number(normalizedVenues[0]?.recommendationBreakdown?.interestCoreScore || 0);
             const hotVenues = normalizedVenues
-                .filter((venue) => Boolean(venue?.featuredPromotion?.isHot))
+                .filter((venue) => {
+                    if (!Boolean(venue?.featuredPromotion?.isHot)) {
+                        return false;
+                    }
+
+                    const venueScore = Number(venue?.[scoreField] || 0);
+                    const venueInterestCore = Number(venue?.recommendationBreakdown?.interestCoreScore || 0);
+                    return venueScore >= topScore - 2.75 && venueInterestCore >= topInterestCore - 2.2;
+                })
                 .sort((first, second) => {
                     const secondScore = Number(second?.[scoreField] || 0);
                     const firstScore = Number(first?.[scoreField] || 0);
@@ -12281,7 +12689,7 @@ async function generateWardIdFromName(name) {
                 const compactMetadataSelect = 'NULL::jsonb AS metadata';
                 const fullMetadataSelect = isMineRequest
                     ? 'venues.metadata AS metadata'
-                    : buildSanitizedMetadataSql('venues.metadata', 'metadata');
+                    : 'venues.metadata AS metadata';
                 const metadataSelect = compactMode ? compactMetadataSelect : fullMetadataSelect;
                 const fullBusinessLicenseSelect = isMineRequest
                     ? 'venues.business_license_image_url AS business_license_image_url'
@@ -12432,7 +12840,7 @@ async function generateWardIdFromName(name) {
                 const resolvedOwnerUserSql = buildResolvedVenueOwnerUserSql('venues');
                 const coverImageSelect = buildSanitizedInlineAssetSql('venues.cover_image_url', 'cover_image_url');
                 const businessLicenseSelect = buildSanitizedInlineAssetSql('venues.business_license_image_url', 'business_license_image_url');
-                const metadataSelect = buildSanitizedMetadataSql('venues.metadata', 'metadata');
+                const metadataSelect = 'venues.metadata AS metadata';
                 const ownerSelect = venueHasOwnerUserColumn
                     ? `
                     ${resolvedOwnerUserSql} AS owner_user_id,
@@ -12540,7 +12948,7 @@ async function generateWardIdFromName(name) {
             const venueHasOwnerUserColumn = await hasVenueOwnerUserColumn();
             const resolvedOwnerUserSql = buildResolvedVenueOwnerUserSql('venues');
             const coverImageSelect = buildSanitizedInlineAssetSql('venues.cover_image_url', 'cover_image_url');
-            const metadataSelect = buildSanitizedMetadataSql('venues.metadata', 'metadata');
+            const metadataSelect = 'venues.metadata AS metadata';
             const ownerSelect = venueHasOwnerUserColumn
                 ? `
                     ${resolvedOwnerUserSql} AS owner_user_id,
@@ -14008,7 +14416,19 @@ async function generateWardIdFromName(name) {
                 return res.status(400).json({ message: 'categoryId must be a positive integer' });
             }
 
+            let client = null;
+
             try {
+                client = await pool.connect();
+                const submissionLockKey = [
+                    'venue_submission',
+                    submitterUserId,
+                    normalizedName.toLowerCase(),
+                    normalizedLatitude.toFixed(5),
+                    normalizedLongitude.toFixed(5)
+                ].join(':');
+                await client.query('SELECT pg_advisory_lock(hashtext($1))', [submissionLockKey]);
+
                 const venueHasOwnerUserColumn = await hasVenueOwnerUserColumn();
                 let resolvedCategoryId = normalizedCategoryId;
                 const activePurchase = await getLatestActiveUserAdPackagePurchase(submitterUserId);
@@ -14016,7 +14436,7 @@ async function generateWardIdFromName(name) {
                 const isPostLimitEnabled = Boolean(activePackageFeatures.postLimitEnabled);
                 const postLimit = Number(activePackageFeatures.postLimit);
 
-                const existingVenueCountResult = await pool.query(
+                const existingVenueCountResult = await client.query(
                     `
                         SELECT COUNT(*)::int AS total
                         FROM venues
@@ -14042,7 +14462,7 @@ async function generateWardIdFromName(name) {
 
                 if (resolvedCategoryId === null && normalizedCategoryName) {
                     const inferredSlug = slugifyText(normalizedCategoryName);
-                    const categoryLookup = await pool.query(
+                    const categoryLookup = await client.query(
                         `
                     SELECT id
                     FROM place_categories
@@ -14057,7 +14477,7 @@ async function generateWardIdFromName(name) {
                 }
 
                 if (resolvedCategoryId !== null) {
-                    const categoryCheck = await pool.query(
+                    const categoryCheck = await client.query(
                         `
                     SELECT id
                     FROM place_categories
@@ -14074,7 +14494,7 @@ async function generateWardIdFromName(name) {
                 }
 
                 if (requestedServiceIds.length) {
-                    const servicesResult = await pool.query(
+                    const servicesResult = await client.query(
                         `
                         SELECT id, name
                         FROM merchant_services
@@ -14132,7 +14552,10 @@ async function generateWardIdFromName(name) {
                     normalizedMetadata.weeklySchedule = normalizedScheduleResult.value;
                 }
 
-                const duplicateLocationResult = await pool.query(
+                const submittedGalleryImageUrls = extractGalleryImageUrlsFromMetadata(normalizedMetadata);
+                const persistedMetadata = buildPersistedVenueMetadata(normalizedMetadata);
+
+                const duplicateLocationResult = await client.query(
                     `
                     SELECT id, status::text AS status
                     FROM venues
@@ -14192,11 +14615,11 @@ async function generateWardIdFromName(name) {
                     resolvedCategoryId,
                     String(coverImageUrl || '').trim() || null,
                     String(businessLicenseImageUrl || '').trim() || null,
-                    normalizedMetadata
+                    persistedMetadata
                 ];
                 const insertPlaceholders = insertValues.map((_, index) => `$${index + 1}`);
 
-                const insertResult = await pool.query(
+                const insertResult = await client.query(
                     `
                 INSERT INTO venues (
                     ${insertColumns.join(',\n                    ')}
@@ -14213,6 +14636,12 @@ async function generateWardIdFromName(name) {
                 );
 
                 try {
+                    await syncVenueGalleryImages(client, insertResult.rows[0].id, submittedGalleryImageUrls);
+                } catch (gallerySyncError) {
+                    console.error('Sync venue gallery images on create error:', gallerySyncError);
+                }
+
+                try {
                     if (activePurchase?.packageId) {
                         await syncUserAdPackageAssignments(submitterUserId, activePurchase.packageId, pool, {
                             specificVenueIds: [insertResult.rows[0].id]
@@ -14222,7 +14651,7 @@ async function generateWardIdFromName(name) {
                     console.error('Sync account ad package for new venue error:', assignmentSyncError);
                 }
 
-                const venueDetails = await pool.query(
+                const venueDetails = await client.query(
                     `
                 SELECT
                     venues.id,
@@ -14276,6 +14705,23 @@ async function generateWardIdFromName(name) {
             } catch (err) {
                 console.error('API error:', err);
                 res.status(500).json({ error: 'Server error' });
+            } finally {
+                if (client) {
+                    try {
+                        const submissionLockKey = [
+                            'venue_submission',
+                            submitterUserId,
+                            normalizedName.toLowerCase(),
+                            normalizedLatitude.toFixed(5),
+                            normalizedLongitude.toFixed(5)
+                        ].join(':');
+                        await client.query('SELECT pg_advisory_unlock(hashtext($1))', [submissionLockKey]);
+                    } catch (unlockError) {
+                        console.error('Release venue submission advisory lock error:', unlockError);
+                    }
+
+                    client.release();
+                }
             }
         }
 
@@ -15510,6 +15956,8 @@ async function generateWardIdFromName(name) {
                     currentVenueResult.rows[0].metadata,
                     proposedSnapshot.metadata
                 );
+                const approvedGalleryImageUrls = extractGalleryImageUrlsFromMetadata(proposedSnapshot.metadata);
+                const persistedReviewMetadata = buildPersistedVenueMetadata(mergedReviewMetadata);
 
                 const venueUpdateResult = await client.query(
                     `
@@ -15544,13 +15992,19 @@ async function generateWardIdFromName(name) {
                         Number.isNaN(proposedSnapshot.categoryId) ? null : proposedSnapshot.categoryId,
                         proposedSnapshot.coverImageUrl,
                         proposedSnapshot.businessLicenseImageUrl,
-                        mergedReviewMetadata,
+                        persistedReviewMetadata,
                     ]
                 );
 
                 if (!venueUpdateResult.rows.length) {
                     await client.query('ROLLBACK');
                     return res.status(404).json({ message: 'Venue not found for this update request' });
+                }
+
+                try {
+                    await syncVenueGalleryImages(client, targetVenueId, approvedGalleryImageUrls);
+                } catch (gallerySyncError) {
+                    console.error('Sync venue gallery images on approval error:', gallerySyncError);
                 }
 
                 const requestUpdateResult = await client.query(
@@ -21359,7 +21813,8 @@ async function generateWardIdFromName(name) {
             const userId = String(req.user?.id || '').trim();
             const ageRangeKey = String(req.body?.ageRangeKey || '').trim();
             const preferredGender = String(req.body?.preferredGender || '').trim();
-            const preferredTimes = normalizePreferenceStringList(req.body?.preferredTimes);
+            const preferredTimes = normalizePreferenceStringList(req.body?.preferredTimes)
+                .filter((item) => USER_PREFERENCE_TIME_WINDOW_SET.has(item));
             const interests = normalizePreferenceStringList(req.body?.interests);
             const latitudeInput = req.body?.latitude;
             const longitudeInput = req.body?.longitude;
@@ -21374,10 +21829,6 @@ async function generateWardIdFromName(name) {
 
             if (!USER_PREFERENCE_GENDER_SET.has(preferredGender)) {
                 return res.status(400).json({ message: 'Invalid preferred gender.' });
-            }
-
-            if (!preferredTimes.length || preferredTimes.some((item) => !USER_PREFERENCE_TIME_WINDOW_SET.has(item))) {
-                return res.status(400).json({ message: 'Please select at least one valid preferred time.' });
             }
 
             const allowedInterestSet = USER_PREFERENCE_INTEREST_SET_BY_AGE[ageRangeKey] || new Set();
@@ -21453,10 +21904,11 @@ async function generateWardIdFromName(name) {
                         action: 'updated',
                         ageRangeKey,
                         preferredGender,
-                        preferredTimes,
                         interests
                     }
                 });
+
+                invalidateAiSuggestionResponseCacheByUserId(userId);
 
                 return res.json({
                     success: true,
@@ -21554,6 +22006,31 @@ async function generateWardIdFromName(name) {
                     );
                 }
 
+                const profileSignature = buildAiSuggestionProfileSignature(preference);
+                const recommendationCacheKey = buildAiSuggestionResponseCacheKey({
+                    scope: 'base',
+                    userId,
+                    profileSignature,
+                    limit,
+                    latitude: effectiveLatitude,
+                    longitude: effectiveLongitude,
+                    weatherMain,
+                    currentTimeWindowKey,
+                    preferOpenNow
+                });
+                const cachedRecommendationPayload = getCachedMapValue(
+                    aiSuggestionResponseCache,
+                    recommendationCacheKey,
+                    AI_SUGGESTION_RESPONSE_CACHE_TTL_MS
+                );
+                if (cachedRecommendationPayload) {
+                    if (shouldLogAiSuggestDebug()) {
+                        console.log(`[AI_SUGGEST_DEBUG] cache_hit ${recommendationCacheKey}`);
+                    }
+
+                    return res.json(cachedRecommendationPayload);
+                }
+
                 const venueResult = await pool.query(
                     `
                         SELECT
@@ -21616,12 +22093,20 @@ async function generateWardIdFromName(name) {
                             isOpenNow: scoring.isOpenNow,
                             openingTimeRange: scoring.openingTimeRange,
                             hasRealtimeSchedule: scoring.hasRealtimeSchedule,
+                            recommendationPrimaryBroadCategory: scoring.primaryBroadCategory,
+                            recommendationBroadCategories: scoring.matchedBroadCategories,
                             recommendationReasons: scoring.reasons,
                             recommendationBreakdown: scoring.breakdown
                         };
                     })
                     .filter((venue) => venue.recommendationScore > -25)
                     .sort((first, second) => {
+                        const secondInterestCore = Number(second?.recommendationBreakdown?.interestCoreScore || 0);
+                        const firstInterestCore = Number(first?.recommendationBreakdown?.interestCoreScore || 0);
+                        if (secondInterestCore !== firstInterestCore) {
+                            return secondInterestCore - firstInterestCore;
+                        }
+
                         const firstOpenRank = first.isOpenNow === true ? 1 : 0;
                         const secondOpenRank = second.isOpenNow === true ? 1 : 0;
                         if (secondOpenRank !== firstOpenRank) {
@@ -21630,6 +22115,20 @@ async function generateWardIdFromName(name) {
 
                         if (second.recommendationScore !== first.recommendationScore) {
                             return second.recommendationScore - first.recommendationScore;
+                        }
+
+                        const secondPersonalization =
+                            Number(second?.recommendationBreakdown?.profileRelevanceScore || 0)
+                            + Number(second?.recommendationBreakdown?.interestScore || 0)
+                            + Number(second?.recommendationBreakdown?.interestSemanticScore || 0)
+                            + Number(second?.recommendationBreakdown?.serviceAffinityScore || 0);
+                        const firstPersonalization =
+                            Number(first?.recommendationBreakdown?.profileRelevanceScore || 0)
+                            + Number(first?.recommendationBreakdown?.interestScore || 0)
+                            + Number(first?.recommendationBreakdown?.interestSemanticScore || 0)
+                            + Number(first?.recommendationBreakdown?.serviceAffinityScore || 0);
+                        if (secondPersonalization !== firstPersonalization) {
+                            return secondPersonalization - firstPersonalization;
                         }
 
                         const firstDistance = Number(first.distanceKm);
@@ -21668,11 +22167,36 @@ async function generateWardIdFromName(name) {
                                 isOpenNow: scoring.isOpenNow,
                                 openingTimeRange: scoring.openingTimeRange,
                                 hasRealtimeSchedule: scoring.hasRealtimeSchedule,
+                                recommendationPrimaryBroadCategory: scoring.primaryBroadCategory,
+                                recommendationBroadCategories: scoring.matchedBroadCategories,
                                 recommendationReasons: scoring.reasons,
                                 recommendationBreakdown: scoring.breakdown
                             };
                         })
-                        .sort((first, second) => Number(second.recommendationScore || 0) - Number(first.recommendationScore || 0));
+                        .sort((first, second) => {
+                            const secondInterestCore = Number(second?.recommendationBreakdown?.interestCoreScore || 0);
+                            const firstInterestCore = Number(first?.recommendationBreakdown?.interestCoreScore || 0);
+                            if (secondInterestCore !== firstInterestCore) {
+                                return secondInterestCore - firstInterestCore;
+                            }
+
+                            const scoreDelta = Number(second.recommendationScore || 0) - Number(first.recommendationScore || 0);
+                            if (scoreDelta !== 0) {
+                                return scoreDelta;
+                            }
+
+                            const secondPersonalization =
+                                Number(second?.recommendationBreakdown?.profileRelevanceScore || 0)
+                                + Number(second?.recommendationBreakdown?.interestScore || 0)
+                                + Number(second?.recommendationBreakdown?.interestSemanticScore || 0)
+                                + Number(second?.recommendationBreakdown?.serviceAffinityScore || 0);
+                            const firstPersonalization =
+                                Number(first?.recommendationBreakdown?.profileRelevanceScore || 0)
+                                + Number(first?.recommendationBreakdown?.interestScore || 0)
+                                + Number(first?.recommendationBreakdown?.interestSemanticScore || 0)
+                                + Number(first?.recommendationBreakdown?.serviceAffinityScore || 0);
+                            return secondPersonalization - firstPersonalization;
+                        });
 
                 const prioritizedVenues = prioritizeHotVenueRecommendations(effectiveScoredVenues, limit, 'recommendationScore');
                 logAiSuggestionDebugSnapshot('ai_suggest', preference, prioritizedVenues);
@@ -21704,7 +22228,7 @@ async function generateWardIdFromName(name) {
                     };
                 });
 
-                return res.json({
+                const responsePayload = {
                     success: true,
                     preferencesCompleted: true,
                     preference,
@@ -21716,7 +22240,10 @@ async function generateWardIdFromName(name) {
                         preferOpenNow
                     },
                     recommendations: recommendationPayload
-                });
+                };
+
+                setCachedMapValue(aiSuggestionResponseCache, recommendationCacheKey, responsePayload);
+                return res.json(responsePayload);
             } catch (error) {
                 if (isUndefinedTableError(error)) {
                     return res.status(500).json({
@@ -21982,6 +22509,8 @@ async function generateWardIdFromName(name) {
                                 isOpenNow: refineEvaluation.isOpenNow,
                                 openingTimeRange: refineEvaluation.openingTimeRange,
                                 hasRealtimeSchedule: scoring.hasRealtimeSchedule,
+                                recommendationPrimaryBroadCategory: scoring.primaryBroadCategory,
+                                recommendationBroadCategories: scoring.matchedBroadCategories,
                                 passesRefine: refineEvaluation.passes,
                                 hardFailures: refineEvaluation.hardFailures,
                                 matchedRefineDimensions: refineEvaluation.matchedDimensions,

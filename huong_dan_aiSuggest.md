@@ -1,267 +1,256 @@
-Tiếp tục nâng cấp AI Suggest personalization vì hiện tại recommendation giữa nhiều user khác nhau vẫn gần như giống nhau.
+Tiếp tục sửa AI Suggest personalization.
 
-Đây là vấn đề lớn vì AI Suggest hiện chưa thật sự cá nhân hóa theo profile user.
+Hiện tại mình đã bỏ :
 
-==================================================
-PROBLEM HIỆN TẠI
-================
-
-Hiện tại:
-
-* 2 account khác nhau
-* cùng age range
-* nhưng:
-
-  * khác Gender
-  * khác Time you usually go out
-  * khác Interests
-
-=> khi bấm AI Suggest vẫn trả gần như cùng một danh sách.
-
-Điều này làm AI Suggest cảm giác chưa “personalized”.
-
-==================================================
-YÊU CẦU MỚI
-===========
-
-Recommendation phải thay đổi RÕ RÀNG giữa các user khác nhau.
-
-AI Suggest phải thật sự dùng:
-
-* Gender
 * Time you usually go out
-* Interests
-* user behavior/context
 
-để tạo recommendation khác nhau.
+Nên recommendation KHÔNG cần dựa vào field này nữa.
+
+AI Suggest hiện tại đang chủ yếu dựa:
+
+* thời tiết hiện tại
+* thời gian hiện tại
+* độ tuổi
+* HOT/popularity
+
+Nên dù:
+
+* khác Gender
+* khác Interests
+
+thì nhiều account vẫn ra gần giống nhau.
+
+Điều này làm AI Suggest chưa thật sự personalized.
+
+AI Suggest phải cá nhân hóa mạnh hơn dựa vào:
+
+1. Gender
+2. Interests
+3. venue semantic context
+4. services offered
+5. venue description
+6. venue atmosphere/style
+7. realtime weather/time
+8. distance
+9. opening status
 
 ==================================================
 
-1. INTERESTS PHẢI CÓ WEIGHT CAO HƠN
+1. INTERESTS PHẢI LÀ CORE PERSONALIZATION
    ==================================================
 
-Hiện tại Interests có vẻ weight quá thấp hoặc gần như không ảnh hưởng đủ mạnh.
-
-Cần tăng mạnh score impact của Interests.
+Interests phải là yếu tố personalization mạnh nhất.
 
 Ví dụ:
-
-User A:
-
-* Bubble tea
-* Street food
-* Cinema
-
-THÌ top results nên ưu tiên:
-
-* trà sữa
-* ăn vặt
-* rạp phim
-* dining/snacks
-
----
-
-User B:
-
-* Parks
-* Instagram spots
-* Sports activities
-
-THÌ top results nên ưu tiên:
-
-* công viên
-* check-in spots
-* outdoor places
-* sports venues
-
-==================================================
-2. TIME YOU USUALLY GO OUT PHẢI ẢNH HƯỞNG THẬT
-==============================================
-
-Ví dụ:
-
-User A:
-
-* Morning
-
-=> ưu tiên:
-
-* breakfast
-* cafe sáng
-* parks
-* brunch
-
----
-
-User B:
-
-* Evening
-* Late night
-
-=> ưu tiên:
-
-* entertainment
-* nightlife
-* lounge
-* open-late venues
-
----
-
-User C:
-
-* Afternoon
-
-=> ưu tiên:
-
-* cafe
-* shopping
-* relax places
-
-Hiện tại logic này chưa rõ ràng.
-
-==================================================
-3. GENDER CONTEXT
-=================
-
-KHÔNG bias vô lý.
-
-Nhưng có thể dùng soft preference nhẹ.
-
-Ví dụ:
-
-* safety
-* comfort
-* suitable atmosphere
-* venue style
-
-Gender chỉ là soft signal.
-KHÔNG override interests hoặc semantic intent.
-
-==================================================
-4. PERSONALIZATION DIVERSITY
-============================
-
-Recommendation list không được:
-
-* y chang giữa nhiều user
-* cùng thứ tự
-* cùng top results
-
-Cần diversify theo:
-
-* profile
-* interests
-* time habits
-* refine context
-
-==================================================
-5. PERSONALIZED SCORING
-=======================
-
-Scoring nên tách rõ:
-
-semantic_intent_score
-+
-interest_match_score
-+
-time_habit_score
-+
-distance_score
-+
-weather_score
-+
-opening_score
-+
-HOT_bonus
-+
-popularity
-
-==================================================
-6. INTEREST MATCH LOGIC
-=======================
-
-Map interests vào categories/tags thực tế.
-
-Ví dụ:
-
-Bubble tea
-=> drinks
-=> milk tea
-=> cafe
-
----
-
-Cinema
-=> entertainment
-=> movies
-
----
-
-Instagram spots
-=> attractions
-=> aesthetic cafe
-=> check-in locations
-
----
-
-Sports activities
-=> outdoor
-=> sports
-=> parks
-
-==================================================
-7. EXPECTED RESULT
-==================
-
-Ví dụ:
-
-2 user cùng age 18-24
-NHƯNG:
 
 USER A:
 
 * Bubble tea
-* Afternoon
+* Instagram spots
 
-=> top:
+=> ưu tiên:
 
-* trà sữa
-* cafe
-* snacks
+* milk tea
+* aesthetic cafe
+* checkin places
+* drinks
+* chill cafe
 
 ---
 
 USER B:
 
-* Sports
-* Evening
+* Sports activities
+* Parks
+
+=> ưu tiên:
+
+* parks
+* outdoor places
+* activity venues
+* sports locations
+
+---
+
+USER C:
+
+* Cinema
+* Street food
+
+=> ưu tiên:
+
+* cinema
+* dining
+* food
+* entertainment
+
+Gender KHÔNG được bias vô lý.
+
+Nhưng có thể dùng như:
+
+* soft preference
+* comfort/safety signal
+* atmosphere preference
+
+Ví dụ:
+
+* chill cafe
+* aesthetic places
+* sports venues
+* nightlife
+* family-friendly
+
+Gender chỉ là:
+SOFT SIGNAL.
+
+KHÔNG override Interests.
+
+Hiện tại recommendation vẫn quá generic theo category.
+
+Cần phân tích venue dựa vào:
+
+* venue name
+* description
+* services offered
+* tags
+* atmosphere
+* semantic meaning
+
+Services Offered phải trở thành core recommendation signal.
+
+Ví dụ:
+
+Live Music
+=> nightlife
+=> chill
+=> entertainment
+
+---
+
+Free WiFi
+=> cafe work
+=> study
+=> relax
+
+---
+
+Parking
+=> family
+=> long stay
+
+---
+
+Take away
+=> quick food
+=> drinks/snacks
+
+Parse venue description để hiểu atmosphere.
+
+Ví dụ:
+
+* chill
+* yên tĩnh
+* sang trọng
+* acoustic
+* romantic
+* family
+* outdoor
+
+=> convert thành semantic tags.
+
+Venue name cũng phải được semantic analyzed.
+
+Ví dụ:
+
+* Coffee
+* Lounge
+* BBQ
+* Seafood
+* Cinema
+* Retreat
+* Homestay
+
+=> infer venue style/type đúng hơn.
+
+2 user:
+
+* cùng age
+* cùng weather/time context
+
+NHƯNG:
+
+* khác Gender
+* khác Interests
+
+=> recommendation PHẢI khác rõ ràng.
+
+Không được:
+
+* cùng top results
+* cùng ranking
+* cùng order
+
+1. interest relevance
+2. venue semantic relevance
+3. services offered match
+4. realtime weather/time
+5. distance
+6. opening status
+7. gender soft signal
+8. HOT boost
+9. popularity
+
+HOT chỉ là bonus nhỏ.
+
+KHÔNG được:
+
+* override interests
+* override semantic relevance
+* override personalization
+
+USER A:
+
+* Bubble tea
+* Instagram spots
 
 => top:
 
-* sports venues
+* aesthetic cafe
+* milk tea
+* checkin cafe
+
+---
+
+USER B:
+
+* Sports activities
+* Parks
+
+=> top:
+
 * parks
+* outdoor
+* activity venues
+
+---
+
+USER C:
+
+* Cinema
+* Street food
+
+=> top:
+
+* cinema
+* street food
+* dining
 * entertainment
 
-==================================================
-8. IMPORTANT
-============
+Recommendation hiện tại đang:
+“recommend categories”
+
+Nhưng thứ mình cần là:
+“recommend venues matching user lifestyle & interests”.
 
 AI Suggest phải tạo cảm giác:
-“đây là recommendation riêng cho user này”
-
-KHÔNG phải:
-“1 danh sách chung cho tất cả user”.
-
-==================================================
-9. DEBUG & VERIFY
-=================
-
-Sau khi sửa:
-hãy log/debug thử:
-
-* score breakdown
-* interest contribution
-* time contribution
-* personalization contribution
-
-để verify rằng mỗi user thật sự có ranking khác nhau.
+“đây là danh sách dành riêng cho user này”.

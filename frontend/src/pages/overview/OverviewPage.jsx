@@ -366,24 +366,58 @@ const WEEK_DAYS = [
 
 function resolveWeeklySchedule(venue) {
   const metadata = normalizeVenueMetadata(venue?.metadata);
-  const canonicalSource =
+  const canonicalSourceObject =
     metadata.weeklySchedule && typeof metadata.weeklySchedule === 'object' && !Array.isArray(metadata.weeklySchedule)
       ? metadata.weeklySchedule
       : null;
+  const canonicalSourceArray = Array.isArray(metadata.weeklySchedule)
+    ? metadata.weeklySchedule.reduce((accumulator, item) => {
+      const itemKey = String(item?.key || item?.day || '').trim().toLowerCase();
+      if (!itemKey) {
+        return accumulator;
+      }
+
+      accumulator[itemKey] = {
+        start: String(item?.start || item?.open || item?.openTime || '').trim(),
+        end: String(item?.end || item?.close || item?.closeTime || '').trim(),
+        off: Boolean(item?.off || item?.isClosed)
+      };
+
+      return accumulator;
+    }, {})
+    : null;
+  const legacySource =
+    metadata.weeklyOpenHours && typeof metadata.weeklyOpenHours === 'object' && !Array.isArray(metadata.weeklyOpenHours)
+      ? WEEK_DAYS.reduce((accumulator, day) => {
+        const legacyDay = metadata.weeklyOpenHours?.[day.key] || {};
+        const openTime = String(legacyDay.openTime || '').trim();
+        const closeTime = String(legacyDay.closeTime || '').trim();
+        const isOff = Boolean(legacyDay.isClosed) || openTime.toUpperCase() === 'OFF' || closeTime.toUpperCase() === 'OFF';
+
+        accumulator[day.key] = {
+          start: isOff ? 'OFF' : openTime,
+          end: isOff ? 'OFF' : closeTime,
+          off: isOff
+        };
+
+        return accumulator;
+      }, {})
+      : null;
+  const source = canonicalSourceObject || canonicalSourceArray || legacySource;
 
   const fallbackStart = String(metadata.startTime || '').trim();
   const fallbackEnd = String(metadata.endTime || '').trim();
   const hasFallbackRange =
     /^\d{2}:\d{2}$/.test(fallbackStart) && /^\d{2}:\d{2}$/.test(fallbackEnd) && fallbackStart < fallbackEnd;
 
-  if (!canonicalSource && !hasFallbackRange) {
+  if (!source && !hasFallbackRange) {
     return [];
   }
 
   return WEEK_DAYS.map((day) => {
-    const item = canonicalSource?.[day.key] || {};
-    const start = String(item.start || '').trim() || (hasFallbackRange ? fallbackStart : '');
-    const end = String(item.end || '').trim() || (hasFallbackRange ? fallbackEnd : '');
+    const item = source?.[day.key] || source?.[day.label] || source?.[day.label.toLowerCase()] || {};
+    const start = String(item.start || item.open || item.openTime || '').trim() || (hasFallbackRange ? fallbackStart : '');
+    const end = String(item.end || item.close || item.closeTime || '').trim() || (hasFallbackRange ? fallbackEnd : '');
     const off = Boolean(item.off) || start === 'OFF' || end === 'OFF';
 
     return {
@@ -1012,18 +1046,18 @@ function OverviewPage() {
       return '';
     }
 
-    const preferredTimes = Array.isArray(userPreference.preferredTimes)
-      ? [...userPreference.preferredTimes].sort().join('|')
-      : '';
     const interests = Array.isArray(userPreference.interests)
       ? [...userPreference.interests].sort().join('|')
       : '';
+    const lastKnownLatitude = Number(userPreference.lastKnownLatitude);
+    const lastKnownLongitude = Number(userPreference.lastKnownLongitude);
 
     return [
       userPreference.ageRangeKey || '',
       userPreference.preferredGender || '',
-      preferredTimes,
       interests,
+      Number.isFinite(lastKnownLatitude) ? lastKnownLatitude.toFixed(3) : '',
+      Number.isFinite(lastKnownLongitude) ? lastKnownLongitude.toFixed(3) : '',
       userPreference.updatedAt || '',
       userPreference.onboardingCompleted ? '1' : '0'
     ].join('::');
@@ -1112,8 +1146,8 @@ function OverviewPage() {
 
       try {
         const params = { limit: 12 };
-        const latitude = Number(geoCoordinates.latitude);
-        const longitude = Number(geoCoordinates.longitude);
+        const latitude = Number(userPreference?.lastKnownLatitude);
+        const longitude = Number(userPreference?.lastKnownLongitude);
 
         if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
           params.latitude = latitude;
@@ -1146,7 +1180,7 @@ function OverviewPage() {
     return () => {
       isMounted = false;
     };
-  }, [token, userPreferenceSignal, geoCoordinates.latitude, geoCoordinates.longitude]);
+  }, [token, userPreferenceSignal]);
 
   useEffect(() => {
     let isMounted = true;
