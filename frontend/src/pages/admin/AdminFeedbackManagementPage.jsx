@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import useAdminI18n from '../../hooks/useAdminI18n';
 import {
   createAdminFeedbackType,
   deleteAdminFeedbackReport,
@@ -80,20 +81,8 @@ function isImageAttachmentUrl(rawUrl) {
   return /\.(png|jpg|jpeg|webp|gif|bmp|svg)$/.test(sanitizedUrl);
 }
 
-function formatDateTime(value) {
-  if (!value) {
-    return 'N/A';
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return 'N/A';
-  }
-
-  return date.toLocaleString();
-}
-
 function AdminFeedbackManagementPage() {
+  const { tx, formatDateTime, formatNumber } = useAdminI18n();
   const [activeView, setActiveView] = useState('types');
 
   const [statusFilter, setStatusFilter] = useState('all');
@@ -367,7 +356,7 @@ function AdminFeedbackManagementPage() {
 
   const handleCreateType = async () => {
     if (!typeNameInput.trim()) {
-      setTypesError('Feedback type name is required.');
+      setTypesError(tx('Feedback type name is required.'));
       return;
     }
 
@@ -398,7 +387,7 @@ function AdminFeedbackManagementPage() {
     }
 
     if (!typeNameInput.trim()) {
-      setTypesError('Feedback type name is required.');
+      setTypesError(tx('Feedback type name is required.'));
       return;
     }
 
@@ -463,7 +452,7 @@ function AdminFeedbackManagementPage() {
 
     if (!replyMessage.trim()) {
       setReplyNoticeType('error');
-      setReplyNotice('Reply message is required.');
+      setReplyNotice(tx('Reply message is required.'));
       return;
     }
 
@@ -569,7 +558,7 @@ function AdminFeedbackManagementPage() {
     <section className="admin-feedback-split">
       <article className="admin-feedback-card admin-feedback-list-panel">
         <div className="admin-feedback-card-head">
-          <h2>Feedback Types</h2>
+          <h2>{tx('Feedback Types')}</h2>
           <p>Left panel shows current type names used in the user dropdown.</p>
         </div>
 
@@ -577,8 +566,8 @@ function AdminFeedbackManagementPage() {
         {typesNotice ? <p className="admin-feedback-success">{typesNotice}</p> : null}
 
         <div className="admin-feedback-simple-list">
-          {typesLoading ? <p>Loading feedback types...</p> : null}
-          {!typesLoading && !typeRows.length ? <p>No feedback types found.</p> : null}
+          {typesLoading ? <p>{tx('Loading feedback types...')}</p> : null}
+          {!typesLoading && !typeRows.length ? <p>{tx('No feedback types found.')}</p> : null}
           {!typesLoading
             ? typeRows.map((row) => (
                 <button
@@ -598,23 +587,23 @@ function AdminFeedbackManagementPage() {
 
       <article className="admin-feedback-card admin-feedback-detail-panel">
         <div className="admin-feedback-card-head">
-          <h2>Type Editor</h2>
+          <h2>{tx('Type Editor')}</h2>
           <p>Use one input box to add, edit, or delete feedback types.</p>
         </div>
 
         <div className="admin-feedback-type-editor">
-          <label htmlFor="feedback-type-name">Choose a feedback type</label>
+          <label htmlFor="feedback-type-name">{tx('Choose a feedback type')}</label>
           <input
             id="feedback-type-name"
             type="text"
             value={typeNameInput}
             onChange={(event) => setTypeNameInput(event.target.value)}
-            placeholder="Enter feedback type name"
+            placeholder={tx('Enter feedback type name')}
           />
 
           <div className="admin-feedback-type-editor-actions">
             <button type="button" onClick={handleCreateType} disabled={typeSubmitting}>
-              {typeSubmitting ? 'Saving...' : 'Add'}
+              {typeSubmitting ? tx('Saving...') : tx('Add')}
             </button>
             <button
               type="button"
@@ -622,7 +611,7 @@ function AdminFeedbackManagementPage() {
               onClick={handleUpdateType}
               disabled={typeSubmitting || !selectedTypeId}
             >
-              Update
+              {tx('Update')}
             </button>
             <button
               type="button"
@@ -630,10 +619,10 @@ function AdminFeedbackManagementPage() {
               onClick={handleDeleteType}
               disabled={typeSubmitting || !selectedTypeId}
             >
-              Delete
+              {tx('Delete')}
             </button>
             <button type="button" className="secondary" onClick={handleClearTypeInput}>
-              Clear
+              {tx('Clear')}
             </button>
           </div>
         </div>
@@ -657,7 +646,7 @@ function AdminFeedbackManagementPage() {
     <section className="admin-feedback-workspace">
       <article className="admin-feedback-card admin-feedback-list-panel">
         <div className="admin-feedback-card-head">
-          <h2>Feedback Reports</h2>
+          <h2>{tx('Feedback Reports')}</h2>
           <p>Incoming reports created by users. Auto-refresh every 7 seconds.</p>
         </div>
 
@@ -665,14 +654,14 @@ function AdminFeedbackManagementPage() {
           <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
             {REPORT_STATUS_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
-                {option.label}
+                {tx(option.label)}
               </option>
             ))}
           </select>
           <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)}>
             {REPORT_TYPE_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
-                {option.label}
+                {tx(option.label)}
               </option>
             ))}
           </select>
@@ -680,16 +669,16 @@ function AdminFeedbackManagementPage() {
             type="search"
             value={searchInput}
             onChange={(event) => setSearchInput(event.target.value)}
-            placeholder="Search message, email, or type"
+            placeholder={tx('Search message, email, or type')}
           />
-          <button type="submit">Apply</button>
+          <button type="submit">{tx('Apply')}</button>
         </form>
 
         {reportsError ? <p className="admin-feedback-error">{reportsError}</p> : null}
 
         <div className="admin-feedback-report-list">
-          {reportsLoading ? <p>Loading reports...</p> : null}
-          {!reportsLoading && !reports.length ? <p>No feedback reports found.</p> : null}
+          {reportsLoading ? <p>{tx('Loading reports...')}</p> : null}
+          {!reportsLoading && !reports.length ? <p>{tx('No feedback reports found.')}</p> : null}
           {!reportsLoading
             ? reports.map((report) => (
                 <button
@@ -701,9 +690,9 @@ function AdminFeedbackManagementPage() {
                   onClick={() => setSelectedReportId(report.id)}
                 >
                   <div className="admin-feedback-report-item-head">
-                    <strong>#{report.id} - {report.feedback_type_name || 'Other'}</strong>
+                    <strong>#{report.id} - {report.feedback_type_name || tx('Other')}</strong>
                     <span className={`status ${report.status || 'new'}`}>
-                      {STATUS_LABELS[report.status] || report.status || 'New'}
+                      {tx(STATUS_LABELS[report.status] || report.status || 'New')}
                     </span>
                   </div>
                   <p>{report.message}</p>
@@ -716,47 +705,47 @@ function AdminFeedbackManagementPage() {
 
       <article className="admin-feedback-card admin-feedback-detail-panel">
         <div className="admin-feedback-card-head">
-          <h2>Report Detail</h2>
+          <h2>{tx('Report Detail')}</h2>
           <p>Review full report and reply with image attachment.</p>
         </div>
 
         {detailError ? <p className="admin-feedback-error">{detailError}</p> : null}
-        {detailLoading ? <p>Loading report detail...</p> : null}
+        {detailLoading ? <p>{tx('Loading report detail...')}</p> : null}
         {!detailLoading && !selectedReport && !selectedSummary ? (
-          <p>Select a report to view details.</p>
+          <p>{tx('Select a report to view details.')}</p>
         ) : null}
 
         {!detailLoading && activeReport ? (
           <>
             <div className="admin-feedback-detail-grid">
               <div>
-                <span>Report ID</span>
+                <span>{tx('Report ID')}</span>
                 <strong>#{activeReport?.id}</strong>
               </div>
               <div>
-                <span>Status</span>
-                <strong>{STATUS_LABELS[activeReport?.status] || activeReport?.status || 'New'}</strong>
+                <span>{tx('Status')}</span>
+                <strong>{tx(STATUS_LABELS[activeReport?.status] || activeReport?.status || 'New')}</strong>
               </div>
               <div>
-                <span>Feedback Type</span>
-                <strong>{activeReport?.feedback_type_name || 'Other'}</strong>
+                <span>{tx('Feedback Type')}</span>
+                <strong>{activeReport?.feedback_type_name || tx('Other')}</strong>
               </div>
               <div>
-                <span>Submitted At</span>
+                <span>{tx('Submitted At')}</span>
                 <strong>{formatDateTime(activeReport?.created_at)}</strong>
               </div>
               <div>
-                <span>Contact Email</span>
-                <strong>{activeReport?.contact_email || 'N/A'}</strong>
+                <span>{tx('Contact Email')}</span>
+                <strong>{activeReport?.contact_email || tx('N/A')}</strong>
               </div>
               <div>
-                <span>Contact Phone</span>
-                <strong>{activeReport?.contact_phone || 'N/A'}</strong>
+                <span>{tx('Contact Phone')}</span>
+                <strong>{activeReport?.contact_phone || tx('N/A')}</strong>
               </div>
             </div>
 
             <div className="admin-feedback-message-block">
-              <h3>User Message</h3>
+              <h3>{tx('User Message')}</h3>
               <p>{activeReport?.message || ''}</p>
               {userAttachmentRawUrl ? (
                 <>
@@ -778,28 +767,28 @@ function AdminFeedbackManagementPage() {
                     target="_blank"
                     rel="noreferrer"
                   >
-                    Open user attachment
+                    {tx('Open user attachment')}
                   </a>
                 </>
               ) : (
-                <span>No user attachment</span>
+                <span>{tx('No user attachment')}</span>
               )}
             </div>
 
             <form className="admin-feedback-reply-form" onSubmit={handleReplySubmit}>
-              <h3>Admin Reply</h3>
+              <h3>{tx('Admin Reply')}</h3>
               <textarea
                 value={replyMessage}
                 onChange={(event) => setReplyMessage(event.target.value)}
                 rows={5}
-                placeholder="Write your support reply..."
+                placeholder={tx('Write your support reply...')}
                 required
               />
 
               <div className="admin-feedback-reply-row">
                 <div className="admin-feedback-upload-tools">
                   <label className="admin-feedback-upload">
-                    <span>{replyAttachment ? replyAttachment.name : 'Attach image'}</span>
+                    <span>{replyAttachment ? replyAttachment.name : tx('Attach image')}</span>
                     <input
                       id="admin-reply-attachment"
                       type="file"
@@ -813,7 +802,7 @@ function AdminFeedbackManagementPage() {
                     onClick={handleClearReplyAttachment}
                     disabled={!replyAttachment}
                   >
-                    Remove image
+                    {tx('Remove image')}
                   </button>
                 </div>
               </div>
@@ -821,7 +810,7 @@ function AdminFeedbackManagementPage() {
               <div className="admin-feedback-reply-footer">
                 <div className="admin-feedback-reply-actions">
                   <button type="submit" disabled={replySubmitting}>
-                    {replySubmitting ? 'Sending...' : 'Reply Report'}
+                    {replySubmitting ? tx('Sending...') : tx('Reply Report')}
                   </button>
                   <button type="button" className="danger" onClick={handleDeleteReport}>
                     {deleteReportButtonLabel}
@@ -936,22 +925,22 @@ function AdminFeedbackManagementPage() {
       <section className="admin-feedback-split">
         <article className="admin-feedback-card admin-contact-search-panel">
           <div className="admin-feedback-card-head">
-            <h2>Search User</h2>
+            <h2>{tx('Search User')}</h2>
             <p>Enter username, email, phone, or full name to find user contact</p>
           </div>
 
           <form className="admin-contact-search-form" onSubmit={handleUserSearch}>
             <label>
-              Search
+              {tx('Search')}
               <input
                 type="text"
-                placeholder="Username, email, phone, or full name..."
+                placeholder={tx('Username, email, phone, or full name...')}
                 value={contactUserSearchInput}
                 onChange={(e) => setContactUserSearchInput(e.target.value)}
               />
             </label>
             <button type="submit" disabled={contactUserSearching || !contactUserSearchInput.trim()}>
-              {contactUserSearching ? 'Searching...' : 'Search'}
+              {contactUserSearching ? tx('Searching...') : tx('Search')}
             </button>
           </form>
 
@@ -959,11 +948,11 @@ function AdminFeedbackManagementPage() {
 
           {selectedContactUser ? (
             <div className="admin-contact-selected-user">
-              <h3>Selected User</h3>
+              <h3>{tx('Selected User')}</h3>
               <div className="admin-contact-user-info">
-                <p><strong>Name:</strong> {selectedContactUser.fullName || selectedContactUser.username || 'N/A'}</p>
-                <p><strong>Email:</strong> {selectedContactUser.email || 'No email'}</p>
-                <p><strong>Phone:</strong> {selectedContactUser.phone || 'No phone'}</p>
+                <p><strong>{tx('Name:')}</strong> {selectedContactUser.fullName || selectedContactUser.username || tx('N/A')}</p>
+                <p><strong>{tx('Email:')}</strong> {selectedContactUser.email || tx('No email')}</p>
+                <p><strong>{tx('Phone:')}</strong> {selectedContactUser.phone || tx('No phone')}</p>
               </div>
               <button 
                 type="button" 
@@ -973,14 +962,14 @@ function AdminFeedbackManagementPage() {
                   setContactFormData({ title: '', content: '', images: [] });
                 }}
               >
-                Change User
+                  {tx('Change User')}
               </button>
             </div>
           ) : null}
 
           {contactUserSearchResults.length > 0 ? (
             <div className="admin-contact-search-results">
-              <h3>Search Results</h3>
+              <h3>{tx('Search Results')}</h3>
               {contactUserSearchResults.map((user) => (
                 <button
                   key={user.id}
@@ -988,7 +977,7 @@ function AdminFeedbackManagementPage() {
                   className="admin-contact-user-result"
                   onClick={() => handleSelectUser(user)}
                 >
-                  <strong>{user.fullName || user.username || 'Anonymous'}</strong>
+                  <strong>{user.fullName || user.username || tx('Anonymous')}</strong>
                   <span>{user.email}</span>
                 </button>
               ))}
@@ -998,17 +987,17 @@ function AdminFeedbackManagementPage() {
 
         <article className="admin-feedback-card admin-contact-form-panel">
           <div className="admin-feedback-card-head">
-            <h2>Compose Email</h2>
+            <h2>{tx('Compose Email')}</h2>
             <p>Enter email details and optional images</p>
           </div>
 
           {selectedContactUser ? (
             <form className="admin-contact-compose-form" onSubmit={handleSendEmail}>
               <label>
-                Email Title
+                {tx('Email Title')}
                 <input
                   type="text"
-                  placeholder="Subject line..."
+                  placeholder={tx('Subject line...')}
                   value={contactFormData.title}
                   onChange={(e) => setContactFormData((prev) => ({ ...prev, title: e.target.value }))}
                   required
@@ -1016,10 +1005,10 @@ function AdminFeedbackManagementPage() {
               </label>
 
               <label>
-                Email Content
+                {tx('Email Content')}
                 <textarea
                   rows="6"
-                  placeholder="Write your message here..."
+                  placeholder={tx('Write your message here...')}
                   value={contactFormData.content}
                   onChange={(e) => setContactFormData((prev) => ({ ...prev, content: e.target.value }))}
                   required
@@ -1028,7 +1017,7 @@ function AdminFeedbackManagementPage() {
 
               <div className="admin-contact-images-section">
                 <label>
-                  Attach Images (Max 5)
+                  {tx('Attach Images (Max 5)')}
                   <input
                     type="file"
                     multiple
@@ -1046,7 +1035,7 @@ function AdminFeedbackManagementPage() {
                         <button
                           type="button"
                           onClick={() => handleRemoveImage(preview.id)}
-                          aria-label="Remove image"
+                          aria-label={tx('Remove image')}
                         >
                           ×
                         </button>
@@ -1066,12 +1055,12 @@ function AdminFeedbackManagementPage() {
 
               <div className="admin-contact-form-actions">
                 <button type="submit" disabled={contactSending || !selectedContactUser}>
-                  {contactSending ? 'Sending...' : 'Send Email'}
+                  {contactSending ? tx('Sending...') : tx('Send Email')}
                 </button>
               </div>
             </form>
           ) : (
-            <p className="admin-feedback-placeholder">Please select a user from the search results to compose email</p>
+            <p className="admin-feedback-placeholder">{tx('Please select a user from the search results to compose email')}</p>
           )}
         </article>
       </section>
@@ -1082,16 +1071,16 @@ function AdminFeedbackManagementPage() {
     <div className="admin-feedback-page">
       <section className="admin-feedback-hero">
         <div>
-          <p className="admin-feedback-kicker">Support Operations</p>
-          <h1>Feedback & Support Management</h1>
+          <p className="admin-feedback-kicker">{tx('Support Operations')}</p>
+          <h1>{tx('Feedback & Support Management')}</h1>
           <p>
             Review user feedback reports, manage feedback type options used by the public form,
             and send reply emails with optional image attachments.
           </p>
         </div>
         <div className="admin-feedback-hero-badge">
-          <span>Total reports</span>
-          <strong>{pagination.total || reports.length}</strong>
+          <span>{tx('Total reports')}</span>
+          <strong>{formatNumber(pagination.total || reports.length)}</strong>
         </div>
       </section>
 
@@ -1101,21 +1090,21 @@ function AdminFeedbackManagementPage() {
           className={activeView === 'types' ? 'is-active' : ''}
           onClick={() => setActiveView('types')}
         >
-          Feedback Types
+          {tx('Feedback Types')}
         </button>
         <button
           type="button"
           className={activeView === 'reports' ? 'is-active' : ''}
           onClick={() => setActiveView('reports')}
         >
-          Manage Feedback Reports
+          {tx('Manage Feedback Reports')}
         </button>
         <button
           type="button"
           className={activeView === 'contact' ? 'is-active' : ''}
           onClick={() => setActiveView('contact')}
         >
-          Contact
+          {tx('Contact')}
         </button>
       </section>
 
@@ -1126,7 +1115,7 @@ function AdminFeedbackManagementPage() {
           className="admin-feedback-lightbox"
           role="dialog"
           aria-modal="true"
-          aria-label="Attachment preview"
+          aria-label={tx('Attachment preview')}
           onClick={() => setLightboxImageUrl('')}
         >
           <button
@@ -1134,11 +1123,11 @@ function AdminFeedbackManagementPage() {
             className="admin-feedback-lightbox-close"
             onClick={() => setLightboxImageUrl('')}
           >
-            Close
+            {tx('Close')}
           </button>
           <img
             src={lightboxImageUrl}
-            alt="Attachment preview"
+            alt={tx('Attachment preview')}
             className="admin-feedback-lightbox-image"
             onClick={(event) => event.stopPropagation()}
           />

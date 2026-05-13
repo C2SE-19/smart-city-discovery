@@ -1,27 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import useAdminI18n from '../../hooks/useAdminI18n';
 import { fetchAdminDashboardOverview } from '../../services/api/adPackagesApi';
 import { formatCurrencyVnd } from '../../services/adPackageStorage';
 import './AdminDashboardPage.css';
 
 const MONTH_OPTIONS = [3, 6, 12];
 const PIE_COLORS = ['#2f66dc', '#23a27b', '#f28c28', '#d94a5a', '#7c5de2', '#18a3b7'];
-
-function formatCompactNumber(value) {
-  return Number(value || 0).toLocaleString('en-US');
-}
-
-function formatMonthLabel(monthKey) {
-  const [yearRaw, monthRaw] = String(monthKey || '').split('-');
-  const year = Number.parseInt(yearRaw, 10);
-  const month = Number.parseInt(monthRaw, 10);
-
-  if (!Number.isFinite(year) || !Number.isFinite(month)) {
-    return monthKey || 'N/A';
-  }
-
-  const parsed = new Date(Date.UTC(year, month - 1, 1));
-  return parsed.toLocaleDateString('en-US', { month: 'short' });
-}
 
 function formatDelta(deltaValue) {
   const value = Number(deltaValue || 0);
@@ -66,6 +50,7 @@ function buildPieGradient(series) {
 }
 
 function AdminDashboardPage() {
+  const { tx, formatDateTime, formatMonthLabel, formatNumber } = useAdminI18n();
   const [monthWindow, setMonthWindow] = useState(6);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -79,12 +64,12 @@ function AdminDashboardPage() {
       const payload = await fetchAdminDashboardOverview(monthWindow);
       setDashboardPayload(payload || null);
     } catch (requestError) {
-      setError(requestError?.response?.data?.message || 'Could not load dashboard metrics right now.');
+      setError(requestError?.response?.data?.message || tx('Could not load dashboard metrics right now.'));
       setDashboardPayload(null);
     } finally {
       setLoading(false);
     }
-  }, [monthWindow]);
+  }, [monthWindow, tx]);
 
   useEffect(() => {
     loadDashboard();
@@ -119,17 +104,17 @@ function AdminDashboardPage() {
   const metricCards = [
     {
       label: 'Total users',
-      value: formatCompactNumber(overview.totalUsers),
+      value: formatNumber(overview.totalUsers),
       delta: deltas.usersPercent,
     },
     {
       label: 'Total packages',
-      value: formatCompactNumber(overview.totalPackages),
+      value: formatNumber(overview.totalPackages),
       delta: deltas.packagesPercent,
     },
     {
       label: 'Total venues',
-      value: formatCompactNumber(overview.totalVenues),
+      value: formatNumber(overview.totalVenues),
       delta: deltas.venuesPercent,
     },
     {
@@ -143,15 +128,15 @@ function AdminDashboardPage() {
     <div className="admin-dashboard-page">
       <section className="admin-dashboard-hero" data-onboarding="admin-hero">
         <div>
-          <p className="admin-dashboard-kicker">Administrative Overview</p>
-          <h1>City growth and monetization at a glance</h1>
+          <p className="admin-dashboard-kicker">{tx('Administrative Overview')}</p>
+          <h1>{tx('City growth and monetization at a glance')}</h1>
           <p className="admin-dashboard-description">
-            Track user growth, package inventory, venue volume, and monthly ad revenue in one operational dashboard.
+            {tx('Track user growth, package inventory, venue volume, and monthly ad revenue in one operational dashboard.')}
           </p>
         </div>
 
         <div className="admin-dashboard-hero-side">
-          <div className="admin-dashboard-range-switch" role="tablist" aria-label="Dashboard month window">
+          <div className="admin-dashboard-range-switch" role="tablist" aria-label={tx('Dashboard month window')}>
             {MONTH_OPTIONS.map((option) => (
               <button
                 key={option}
@@ -165,16 +150,16 @@ function AdminDashboardPage() {
           </div>
 
           <div className="admin-dashboard-badge">
-            <span>Data sync</span>
+            <span>{tx('Data sync')}</span>
             <strong>
               {dashboardPayload?.generatedAt
-                ? new Date(dashboardPayload.generatedAt).toLocaleString('en-US', {
+                ? formatDateTime(dashboardPayload.generatedAt, {
                     month: 'short',
                     day: 'numeric',
                     hour: '2-digit',
                     minute: '2-digit',
                   })
-                : 'Live'}
+                : tx('Live')}
             </strong>
           </div>
         </div>
@@ -182,17 +167,17 @@ function AdminDashboardPage() {
 
       {loading ? (
         <section className="admin-dashboard-empty">
-          <h3>Loading dashboard...</h3>
-          <p>Fetching latest admin metrics and trends.</p>
+          <h3>{tx('Loading dashboard...')}</h3>
+          <p>{tx('Fetching latest admin metrics and trends.')}</p>
         </section>
       ) : null}
 
       {!loading && error ? (
         <section className="admin-dashboard-empty">
-          <h3>Unable to load dashboard</h3>
+          <h3>{tx('Unable to load dashboard')}</h3>
           <p>{error}</p>
           <button type="button" className="admin-dashboard-retry" onClick={loadDashboard}>
-            Retry
+            {tx('Retry')}
           </button>
         </section>
       ) : null}
@@ -203,9 +188,9 @@ function AdminDashboardPage() {
             {metricCards.map((card) => (
               <article key={card.label} className="admin-metric-card">
                 <strong>{card.value}</strong>
-                <span>{card.label}</span>
+                <span>{tx(card.label)}</span>
                 <em className={`delta-${getDeltaTone(card.delta)}`.trim()}>
-                  {formatDelta(card.delta)} vs previous month
+                  {formatDelta(card.delta)} {tx('vs previous month')}
                 </em>
               </article>
             ))}
@@ -214,8 +199,8 @@ function AdminDashboardPage() {
           <section className="admin-dashboard-grid">
             <article className="admin-panel admin-panel-bars">
               <div className="admin-panel-head">
-                <h3>Revenue by month</h3>
-                <p>Paid package transactions in the selected window.</p>
+                <h3>{tx('Revenue by month')}</h3>
+                <p>{tx('Paid package transactions in the selected window.')}</p>
               </div>
 
               {revenueSeries.length ? (
@@ -226,7 +211,7 @@ function AdminDashboardPage() {
 
                     return (
                       <div key={row.month} className="admin-bar-column">
-                        <div className="admin-bar-value">{Math.round(value / 1000).toLocaleString('en-US')}k</div>
+                        <div className="admin-bar-value">{formatNumber(Math.round(value / 1000))}k</div>
                         <div className="admin-bar-track">
                           <div className="admin-bar-fill" style={{ height: `${heightPercent}%` }} />
                         </div>
@@ -236,22 +221,22 @@ function AdminDashboardPage() {
                   })}
                 </div>
               ) : (
-                <p className="admin-inline-empty">No paid transactions yet.</p>
+                <p className="admin-inline-empty">{tx('No paid transactions yet.')}</p>
               )}
             </article>
 
             <article className="admin-panel admin-panel-donut">
               <div className="admin-panel-head">
-                <h3>Venue status distribution</h3>
-                <p>Current moderation distribution across active venue statuses.</p>
+                <h3>{tx('Venue status distribution')}</h3>
+                <p>{tx('Current moderation distribution across active venue statuses.')}</p>
               </div>
 
               {venueStatusBreakdown.length ? (
                 <div className="admin-donut-layout">
                   <div className="admin-donut-visual" style={{ '--pie-gradient': buildPieGradient(venueStatusBreakdown) }}>
                     <div className="admin-donut-core">
-                      <strong>{formatCompactNumber(totalPieCount)}</strong>
-                      <span>venues</span>
+                      <strong>{formatNumber(totalPieCount)}</strong>
+                      <span>{tx('venues')}</span>
                     </div>
                   </div>
 
@@ -266,8 +251,8 @@ function AdminDashboardPage() {
                             style={{ backgroundColor: PIE_COLORS[index % PIE_COLORS.length] }}
                           />
                           <div>
-                            <p>{item.label}</p>
-                            <strong>{formatCompactNumber(item.total)} ({share.toFixed(1)}%)</strong>
+                            <p>{tx(item.label || item.status || '')}</p>
+                            <strong>{formatNumber(item.total)} ({share.toFixed(1)}%)</strong>
                           </div>
                         </div>
                       );
@@ -275,7 +260,7 @@ function AdminDashboardPage() {
                   </div>
                 </div>
               ) : (
-                <p className="admin-inline-empty">No venue status data available.</p>
+                <p className="admin-inline-empty">{tx('No venue status data available.')}</p>
               )}
             </article>
           </section>
@@ -283,16 +268,16 @@ function AdminDashboardPage() {
           <section className="admin-dashboard-insights">
             <article className="admin-panel">
               <div className="admin-panel-head">
-                <h3>Peak revenue month</h3>
-                <p>Highest monthly collection from successful package payments.</p>
+                <h3>{tx('Peak revenue month')}</h3>
+                <p>{tx('Highest monthly collection from successful package payments.')}</p>
               </div>
               <strong className="admin-insight-value">
-                {strongestMonth ? formatMonthLabel(strongestMonth.month) : 'N/A'}
+                {strongestMonth ? formatMonthLabel(strongestMonth.month) : tx('N/A')}
               </strong>
               <p className="admin-insight-subtext">
                 {strongestMonth
-                  ? `${formatCurrencyVnd(strongestMonth.revenue || 0)} with ${Number(strongestMonth.transactions || 0).toLocaleString('en-US')} paid transaction(s)`
-                  : 'No revenue has been recorded in the selected period.'}
+                  ? `${formatCurrencyVnd(strongestMonth.revenue || 0)} • ${formatNumber(strongestMonth.transactions || 0)} ${tx('payment(s)')}`
+                  : tx('No revenue has been recorded in the selected period.')}
               </p>
             </article>
           </section>

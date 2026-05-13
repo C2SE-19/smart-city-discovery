@@ -4,6 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { APP_ROUTES } from '../../constants/routes';
 import translations from '../../constants/translations';
+import { translateAdminText } from '../../hooks/useAdminI18n';
 import { fetchAdminVenues, fetchAdminVenueUpdateRequests } from '../../services/api/adminMapApi';
 import { fetchAdminForumPosts } from '../../services/api/adminForumApi';
 import { fetchAdminFeedbackReports } from '../../services/api/adminFeedbackApi';
@@ -97,6 +98,7 @@ function AdminLayout() {
   const { user, logout } = useAuth();
   const { language, changeLanguage } = useLanguage();
   const t = translations[language]?.admin || translations.en.admin;
+  const tx = (text, variables) => translateAdminText(language, text, variables);
   const [badgeCounts, setBadgeCounts] = useState({ map: 0, forum: 0, reports: 0, feedback: 0 });
   const adminNavigation = useMemo(
     () => [
@@ -297,8 +299,8 @@ function AdminLayout() {
             <label className="admin-lang-wrap">
               <span>{t.language}</span>
               <select value={language} onChange={(event) => changeLanguage(event.target.value)}>
-                <option value="en">English</option>
-                <option value="vi">Tiếng Việt</option>
+                <option value="en">{tx('English')}</option>
+                <option value="vi">{tx('Vietnamese')}</option>
               </select>
             </label>
             <div className="admin-avatar-block">

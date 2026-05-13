@@ -1,15 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { APP_ROUTES } from '../../constants/routes';
+import useAdminI18n from '../../hooks/useAdminI18n';
 import { deleteAdminForumComment, deleteAdminForumPost, fetchAdminForumPosts } from '../../services/api/adminForumApi';
 import './AdminForumOverviewPage.css';
-
-function formatTime(value) {
-  if (!value) return 'N/A';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'N/A';
-  return date.toLocaleString('en-US');
-}
 
 function collectDescendantCommentIds(comments, rootCommentId) {
   const rootKey = String(rootCommentId);
@@ -61,6 +55,7 @@ function resolveRootSelectedComments(comments, selectedCommentIds) {
 }
 
 function AdminForumOverviewPage() {
+  const { language, tx, formatDateTime, formatNumber } = useAdminI18n();
   const [searchInput, setSearchInput] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [posts, setPosts] = useState([]);
@@ -86,7 +81,7 @@ function AdminForumOverviewPage() {
       } catch (apiError) {
         if (isMounted) {
           const message = String(apiError?.response?.data?.message || apiError?.message || '').trim();
-          setError(message || 'Unable to load forum data.');
+          setError(message || tx('Unable to load forum data.'));
         }
       } finally {
         if (isMounted) {
@@ -100,7 +95,7 @@ function AdminForumOverviewPage() {
     return () => {
       isMounted = false;
     };
-  }, [searchTerm]);
+  }, [searchTerm, tx]);
 
   const summary = useMemo(() => {
     const totalPosts = posts.length;
@@ -123,7 +118,7 @@ function AdminForumOverviewPage() {
   };
 
   const handleDeletePost = async (postId) => {
-    const accepted = window.confirm('Are you sure you want to delete this post?');
+    const accepted = window.confirm(tx('Are you sure you want to delete this post?'));
     if (!accepted) return;
 
     setActionError('');
@@ -133,10 +128,10 @@ function AdminForumOverviewPage() {
     try {
       await deleteAdminForumPost(postId);
       setPosts((current) => current.filter((post) => String(post.id) !== String(postId)));
-      setActionSuccess('Post deleted successfully.');
+      setActionSuccess(tx('Post deleted successfully.'));
     } catch (apiError) {
       const message = String(apiError?.response?.data?.message || apiError?.message || '').trim();
-      setActionError(message || 'Unable to delete this post right now. Please try again.');
+      setActionError(message || tx('Unable to delete this post right now. Please try again.'));
     } finally {
       setDeletingPostId(null);
     }
@@ -167,12 +162,12 @@ function AdminForumOverviewPage() {
     const selectedIds = selectedCommentsByPost[String(postId)] || [];
 
     if (!selectedIds.length) {
-      setActionError('Select at least one comment to delete.');
+      setActionError(tx('Select at least one comment to delete.'));
       setActionSuccess('');
       return;
     }
 
-    const accepted = window.confirm('Are you sure you want to delete the selected comments? If a root comment is selected, its entire reply thread will be removed.');
+    const accepted = window.confirm(tx('Are you sure you want to delete the selected comments? If a root comment is selected, its entire reply thread will be removed.'));
     if (!accepted) return;
 
     setActionError('');
@@ -208,10 +203,10 @@ function AdminForumOverviewPage() {
       );
 
       setSelectedCommentsByPost((current) => ({ ...current, [String(postId)]: [] }));
-      setActionSuccess(`Deleted ${toRemove.size} comment(s).`);
+      setActionSuccess(language === 'vi' ? `Đã xóa ${formatNumber(toRemove.size)} bình luận.` : `Deleted ${toRemove.size} comment(s).`);
     } catch (apiError) {
       const message = String(apiError?.response?.data?.message || apiError?.message || '').trim();
-      setActionError(message || 'Unable to delete the selected comments. Please try again.');
+      setActionError(message || tx('Unable to delete the selected comments. Please try again.'));
     } finally {
       setDeletingCommentsPostId(null);
     }
@@ -221,36 +216,36 @@ function AdminForumOverviewPage() {
     <section className="admin-forum-overview-page">
       <header className="admin-forum-overview-header">
         <div>
-          <p className="admin-forum-overview-eyebrow">Forum moderation workspace</p>
-          <h2>Forum Overview</h2>
-          <p>Review all posts and comments. Reported content is prioritized and highlighted for faster moderation.</p>
+          <p className="admin-forum-overview-eyebrow">{tx('Forum moderation workspace')}</p>
+          <h2>{tx('Forum Overview')}</h2>
+          <p>{tx('Review all posts and comments. Reported content is prioritized and highlighted for faster moderation.')}</p>
         </div>
       </header>
 
-      <nav className="admin-forum-section-switch" aria-label="Forum moderation navigation">
+      <nav className="admin-forum-section-switch" aria-label={tx('Forum moderation navigation')}>
         <NavLink to={APP_ROUTES.ADMIN_FORUM_REPORTS} className={({ isActive }) => `admin-forum-switch-link ${isActive ? 'is-active' : ''}`}>
-          Reports
+          {tx('Reports')}
         </NavLink>
         <NavLink to={APP_ROUTES.ADMIN_FORUM_VIEW} className={({ isActive }) => `admin-forum-switch-link ${isActive ? 'is-active' : ''}`}>
-          Forum
+          {tx('Forum')}
         </NavLink>
         <NavLink to={APP_ROUTES.ADMIN_FORUM_KEYWORDS} className={({ isActive }) => `admin-forum-switch-link ${isActive ? 'is-active' : ''}`}>
-          Banned Keywords
+          {tx('Banned Keywords')}
         </NavLink>
       </nav>
 
       <section className="admin-forum-overview-stats">
         <article>
-          <strong>{summary.totalPosts}</strong>
-          <span>Total Posts</span>
+          <strong>{formatNumber(summary.totalPosts)}</strong>
+          <span>{tx('Total Posts')}</span>
         </article>
         <article className="is-warning">
-          <strong>{summary.reportedPosts}</strong>
-          <span>Reported Posts</span>
+          <strong>{formatNumber(summary.reportedPosts)}</strong>
+          <span>{tx('Reported Posts')}</span>
         </article>
         <article className="is-warning">
-          <strong>{summary.reportedComments}</strong>
-          <span>Reported Comments</span>
+          <strong>{formatNumber(summary.reportedComments)}</strong>
+          <span>{tx('Reported Comments')}</span>
         </article>
       </section>
 
@@ -265,16 +260,16 @@ function AdminForumOverviewPage() {
               setSearchTerm('');
             }
           }}
-          placeholder="Search by title, content, author, or comment..."
-          aria-label="Search forum content"
+          placeholder={tx('Search by title, content, author, or comment...')}
+          aria-label={tx('Search forum content')}
         />
-        <button type="submit">Search</button>
+        <button type="submit">{tx('Search')}</button>
       </form>
 
       {error ? <p className="admin-forum-overview-error">{error}</p> : null}
       {actionError ? <p className="admin-forum-overview-error">{actionError}</p> : null}
       {actionSuccess ? <p className="admin-forum-overview-loading">{actionSuccess}</p> : null}
-      {loading ? <p className="admin-forum-overview-loading">Loading forum data...</p> : null}
+      {loading ? <p className="admin-forum-overview-loading">{tx('Loading forum data...')}</p> : null}
 
       <div className="admin-forum-overview-list">
         {posts.map((post) => {
@@ -292,15 +287,15 @@ function AdminForumOverviewPage() {
                 <div>
                   <h3>{post.title}</h3>
                   <p>
-                    Author: <strong>{post.author}</strong> · Topic: <strong>{post.category}</strong>
+                    {tx('Author:')} <strong>{post.author}</strong> • {tx('Topic:')} <strong>{post.category}</strong>
                   </p>
                 </div>
                 <div className="admin-forum-overview-meta">
-                  {postIsReported ? <span className="admin-forum-overview-badge is-post">Reported Post</span> : null}
+                  {postIsReported ? <span className="admin-forum-overview-badge is-post">{tx('Reported Post')}</span> : null}
                   {!postIsReported && reportedCommentsCount > 0 ? (
-                    <span className="admin-forum-overview-badge is-comment">Reported Comments</span>
+                    <span className="admin-forum-overview-badge is-comment">{tx('Reported Comments')}</span>
                   ) : null}
-                  <span>{formatTime(post.lastReportedAt || post.createdAt)}</span>
+                  <span>{formatDateTime(post.lastReportedAt || post.createdAt)}</span>
                 </div>
               </div>
 
@@ -315,10 +310,10 @@ function AdminForumOverviewPage() {
               ) : null}
 
               <div className="admin-forum-overview-chips">
-                <span>Likes: {Number(post.likesCount || 0)}</span>
-                <span>Comments: {comments.length}</span>
-                <span className={postIsReported ? 'is-highlight' : ''}>Post reports: {Number(post.reportCount || 0)}</span>
-                <span className={reportedCommentsCount > 0 ? 'is-highlight' : ''}>Comment reports: {reportedCommentsCount}</span>
+                <span>{tx('Likes')}: {formatNumber(post.likesCount || 0)}</span>
+                <span>{tx('Comments')}: {formatNumber(comments.length)}</span>
+                <span className={postIsReported ? 'is-highlight' : ''}>{tx('Post reports:')} {formatNumber(post.reportCount || 0)}</span>
+                <span className={reportedCommentsCount > 0 ? 'is-highlight' : ''}>{tx('Comment reports:')} {formatNumber(reportedCommentsCount)}</span>
               </div>
 
               <div className="admin-forum-overview-actions">
@@ -329,8 +324,8 @@ function AdminForumOverviewPage() {
                   disabled={deletingCommentsPostId === post.id || deletingPostId === post.id}
                 >
                   {deletingCommentsPostId === post.id
-                    ? 'Deleting comments...'
-                    : `Delete selected comments${selectedCommentIds.length ? ` (${selectedCommentIds.length})` : ''}`}
+                    ? tx('Deleting comments...')
+                    : `${tx('Delete selected comments')}${selectedCommentIds.length ? ` (${formatNumber(selectedCommentIds.length)})` : ''}`}
                 </button>
                 <button
                   type="button"
@@ -338,12 +333,12 @@ function AdminForumOverviewPage() {
                   onClick={() => handleDeletePost(post.id)}
                   disabled={deletingPostId === post.id || deletingCommentsPostId === post.id}
                 >
-                  {deletingPostId === post.id ? 'Deleting...' : 'Delete post'}
+                  {deletingPostId === post.id ? tx('Deleting...') : tx('Delete post')}
                 </button>
               </div>
 
               <section className="admin-forum-overview-comments">
-                <h4>Comments ({comments.length})</h4>
+                <h4>{tx('Comments ({count})', { count: formatNumber(comments.length) })}</h4>
                 <ul>
                   {comments.map((comment) => {
                     const commentIsReported = Number(comment.reportCount || 0) > 0;
@@ -357,11 +352,11 @@ function AdminForumOverviewPage() {
                             onChange={() => handleToggleCommentSelection(post.id, comment.id)}
                             disabled={deletingCommentsPostId === post.id || deletingPostId === post.id}
                           />
-                          <span>Select</span>
+                          <span>{tx('Select')}</span>
                         </label>
                         <div className="admin-forum-overview-comment-head">
                           <strong>{comment.author}</strong>
-                          <span>{formatTime(comment.lastReportedAt || comment.createdAt)}</span>
+                          <span>{formatDateTime(comment.lastReportedAt || comment.createdAt)}</span>
                         </div>
                         <p>{comment.content}</p>
 
@@ -374,20 +369,20 @@ function AdminForumOverviewPage() {
                         ) : null}
 
                         {commentIsReported ? (
-                          <small className="admin-forum-overview-comment-flag">Reported comments: {Number(comment.reportCount || 0)}</small>
+                          <small className="admin-forum-overview-comment-flag">{tx('Reported comments:')} {formatNumber(comment.reportCount || 0)}</small>
                         ) : null}
                       </li>
                     );
                   })}
 
-                  {!comments.length ? <li className="is-empty">No comments yet.</li> : null}
+                  {!comments.length ? <li className="is-empty">{tx('No comments yet.')}</li> : null}
                 </ul>
               </section>
             </article>
           );
         })}
 
-        {!loading && !posts.length ? <p className="admin-forum-overview-empty">No forum posts match the current search.</p> : null}
+        {!loading && !posts.length ? <p className="admin-forum-overview-empty">{tx('No forum posts match the current search.')}</p> : null}
       </div>
     </section>
   );

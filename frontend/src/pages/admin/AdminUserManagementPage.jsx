@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import useAdminI18n from '../../hooks/useAdminI18n';
 import {
   fetchAdminUsers,
   updateAdminUser,
@@ -13,13 +14,6 @@ const ROLE_OPTIONS = [
   { value: 'user', label: 'User' }
 ];
 
-function formatDate(value) {
-  if (!value) return 'N/A';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'N/A';
-  return date.toLocaleDateString();
-}
-
 function normalizeGenderValue(value) {
   const normalized = String(value || '').trim().toLowerCase();
 
@@ -31,6 +25,7 @@ function normalizeGenderValue(value) {
 }
 
 function AdminUserManagementPage() {
+  const { language, tx, formatDate, formatDateTime, formatNumber } = useAdminI18n();
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -57,6 +52,26 @@ function AdminUserManagementPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 10;
 
+  const roleOptions = useMemo(
+    () => ROLE_OPTIONS.map((item) => ({ ...item, label: tx(item.label) })),
+    [tx]
+  );
+
+  const formatRoleLabel = (role) => tx(role === 'admin' ? 'Admin' : 'User');
+  const formatStatusLabel = (status) => {
+    const normalizedStatus = String(status || 'active').toLowerCase();
+
+    if (normalizedStatus === 'blocked') {
+      return language === 'vi' ? 'Đã khóa' : 'BLOCKED';
+    }
+
+    if (normalizedStatus === 'paused') {
+      return language === 'vi' ? 'Tạm dừng' : 'PAUSED';
+    }
+
+    return language === 'vi' ? 'Hoạt động' : 'ACTIVE';
+  };
+
 
   const loadUsers = async () => {
     setLoading(true);
@@ -67,7 +82,7 @@ function AdminUserManagementPage() {
       setUsers(fetchedUsers);
     } catch (err) {
       console.error('Failed to load users', err);
-      setError(err?.response?.data?.message || err.message || 'Unable to load users');
+      setError(err?.response?.data?.message || err.message || tx('Unable to load users'));
     } finally {
       setLoading(false);
     }
@@ -114,11 +129,13 @@ function AdminUserManagementPage() {
 
   const handleBulkDelete = async () => {
     if (selectedUserIds.length === 0) {
-      setSubmitStatus('No accounts selected for deletion.');
+      setSubmitStatus(tx('No accounts selected for deletion.'));
       return;
     }
 
-    if (!window.confirm(`Delete ${selectedUserIds.length} selected account(s)?`)) {
+    if (!window.confirm(language === 'vi'
+      ? `Xóa ${formatNumber(selectedUserIds.length)} tài khoản đã chọn?`
+      : `Delete ${selectedUserIds.length} selected account(s)?`)) {
       return;
     }
 
@@ -128,11 +145,13 @@ function AdminUserManagementPage() {
         await deleteAdminUser(id);
       }
       setUsers((prev) => prev.filter((user) => !selectedUserIds.includes(String(user.id))));
-      setSubmitStatus(`${selectedUserIds.length} account(s) deleted.`);
+      setSubmitStatus(language === 'vi'
+        ? `Đã xóa ${formatNumber(selectedUserIds.length)} tài khoản.`
+        : `${selectedUserIds.length} account(s) deleted.`);
       setSelectedUserIds([]);
     } catch (err) {
       console.error('Failed bulk delete', err);
-      setSubmitStatus(err?.response?.data?.message || 'Bulk delete failed.');
+      setSubmitStatus(err?.response?.data?.message || tx('Bulk delete failed.'));
     } finally {
       setLoading(false);
     }
@@ -189,27 +208,27 @@ function AdminUserManagementPage() {
 
     if (!fullname.trim() || !email.trim() || !username.trim() || (!password && !isEditMode)) {
       setSubmitStatus('');
-      setAddFormError('Enter full name, email, username, and password.');
+      setAddFormError(tx('Enter full name, email, username, and password.'));
       return;
     }
 
     const emailRegex = /^[\w.-]+@([\w-]+\.)+[\w-]{2,4}$/;
     if (!emailRegex.test(email)) {
       setSubmitStatus('');
-      setAddFormError('Invalid email address.');
+      setAddFormError(tx('Invalid email address.'));
       return;
     }
 
     const phoneRegex = /^\d{9,15}$/;
     if (newUserData.phone && !phoneRegex.test(newUserData.phone)) {
       setSubmitStatus('');
-      setAddFormError('Phone number must contain 9 to 15 digits.');
+      setAddFormError(tx('Phone number must contain 9 to 15 digits.'));
       return;
     }
 
     if (!newUserData.address.trim() || newUserData.address.trim().length < 5) {
       setSubmitStatus('');
-      setAddFormError('Address must be at least 5 characters long.');
+      setAddFormError(tx('Address must be at least 5 characters long.'));
       return;
     }
 
@@ -217,7 +236,7 @@ function AdminUserManagementPage() {
     const usernameRegex = /^[a-zA-Z0-9._-]{3,30}$/;
     if (!usernameRegex.test(username)) {
       setSubmitStatus('');
-      setAddFormError('Username must be 3-30 characters and only include letters, numbers, ., _, or -.');
+      setAddFormError(tx('Username must be 3-30 characters and only include letters, numbers, ., _, or -.'));
       return;
     }
 
@@ -245,25 +264,25 @@ function AdminUserManagementPage() {
 
     if (sameEmail) {
       setSubmitStatus('');
-      setAddFormError('This email already exists.');
+      setAddFormError(tx('This email already exists.'));
       return;
     }
 
     if (sameUsername) {
       setSubmitStatus('');
-      setAddFormError('This username already exists.');
+      setAddFormError(tx('This username already exists.'));
       return;
     }
 
     if (samePhone) {
       setSubmitStatus('');
-      setAddFormError('This phone number already exists.');
+      setAddFormError(tx('This phone number already exists.'));
       return;
     }
 
     if (sameAddress) {
       setSubmitStatus('');
-      setAddFormError('This address already exists.');
+      setAddFormError(tx('This address already exists.'));
       return;
     }
 
@@ -277,14 +296,18 @@ function AdminUserManagementPage() {
 
       if (passwordErrors.length > 0) {
         setSubmitStatus('');
-        setAddFormError(`Password must include ${passwordErrors.join(', ')}.`);
+        setAddFormError(
+          language === 'vi'
+            ? `Mật khẩu phải có ${passwordErrors.join(', ')}.`
+            : `Password must include ${passwordErrors.join(', ')}.`
+        );
         return;
       }
     }
 
     setAddFormError('');
     setLoading(true);
-    setSubmitStatus(isEditMode ? 'Updating account...' : 'Creating new account...');
+    setSubmitStatus(isEditMode ? tx('Updating account...') : tx('Creating new account...'));
 
     try {
       let response;
@@ -304,7 +327,7 @@ function AdminUserManagementPage() {
 
         resultUser = response.user || response;
         setUsers((prev) => prev.map((u) => (String(u.id) === String(editingUserId) ? { ...u, ...resultUser } : u)));
-        setSubmitStatus('User updated successfully.');
+        setSubmitStatus(tx('User updated successfully.'));
       } else {
         response = await createAdminUser(newUserData);
         resultUser = response.user || response;
@@ -326,7 +349,7 @@ function AdminUserManagementPage() {
           setUsers((prev) => [fakeNewUser, ...prev]);
         }
 
-        setSubmitStatus('New user created successfully.');
+        setSubmitStatus(tx('New user created successfully.'));
       }
 
       setAddFormError('');
@@ -334,7 +357,7 @@ function AdminUserManagementPage() {
       setSelectedUserIds([]);
     } catch (err) {
       console.error('Failed to create user', err);
-      const errMsg = err?.response?.data?.message || 'Failed to create user.';
+      const errMsg = err?.response?.data?.message || tx('Failed to create user.');
       setSubmitStatus('');
       setAddFormError(errMsg);
     } finally {
@@ -343,7 +366,7 @@ function AdminUserManagementPage() {
   };
 
   const handleDelete = async (userId) => {
-    const confirmDelete = window.confirm('Are you sure you want to delete this user?');
+    const confirmDelete = window.confirm(tx('Are you sure you want to delete this user?'));
     if (!confirmDelete) {
       return;
     }
@@ -353,10 +376,10 @@ function AdminUserManagementPage() {
     try {
       await deleteAdminUser(userId);
       setUsers((prev) => prev.filter((u) => String(u.id) !== String(userId)));
-      setSubmitStatus('User deleted.');
+      setSubmitStatus(tx('User deleted.'));
     } catch (err) {
       console.error('Failed to delete user', err);
-      setSubmitStatus(err?.response?.data?.message || 'Failed to delete user.');
+      setSubmitStatus(err?.response?.data?.message || tx('Failed to delete user.'));
     }
   };
 
@@ -420,16 +443,16 @@ function AdminUserManagementPage() {
     }
 
     if (action === 'block') {
-      const reason = window.prompt('Reason for permanent block:', 'Policy violation');
+      const reason = window.prompt(tx('Reason for permanent block:'), tx('Policy violation'));
       try {
         const resp = await updateAdminUser(userId, {
           status: 'blocked',
-          blocked_reason: reason || 'Terms violation'
+          blocked_reason: reason || tx('Terms violation')
         });
         setUsers((prev) => prev.map((u) => (String(u.id) === String(userId) ? { ...u, ...resp.user } : u)));
-        setSubmitStatus('Account permanently blocked.');
+        setSubmitStatus(tx('Account permanently blocked.'));
       } catch (err) {
-        setSubmitStatus(err?.response?.data?.message || 'Failed to block account.');
+        setSubmitStatus(err?.response?.data?.message || tx('Failed to block account.'));
       }
       return;
     }
@@ -442,9 +465,9 @@ function AdminUserManagementPage() {
           blocked_reason: null
         });
         setUsers((prev) => prev.map((u) => (String(u.id) === String(userId) ? { ...u, ...resp.user } : u)));
-        setSubmitStatus('Account unblocked.');
+        setSubmitStatus(tx('Account unblocked.'));
       } catch (err) {
-        setSubmitStatus(err?.response?.data?.message || 'Failed to unblock account.');
+        setSubmitStatus(err?.response?.data?.message || tx('Failed to unblock account.'));
       }
       return;
     }
@@ -464,11 +487,13 @@ function AdminUserManagementPage() {
         setUsers((prev) => prev.map((u) => (String(u.id) === String(userId) ? { ...u, ...resp.user } : u)));
         setSubmitStatus(
           isPaused
-            ? 'Account reactivated from paused status.'
-            : `Account paused until ${new Date(pauseUntil).toLocaleString('en-US')}`
+            ? tx('Account reactivated from paused status.')
+            : language === 'vi'
+              ? `Tài khoản tạm dừng đến ${formatDateTime(pauseUntil)}`
+              : `Account paused until ${formatDateTime(pauseUntil)}`
         );
       } catch (err) {
-        setSubmitStatus(err?.response?.data?.message || 'Failed to update account status.');
+        setSubmitStatus(err?.response?.data?.message || tx('Failed to update account status.'));
       }
       return;
     }
@@ -478,13 +503,13 @@ function AdminUserManagementPage() {
     <div className="admin-user-management-page">
       <header className="admin-user-management-header">
         <div>
-          <h1>User Management</h1>
-          <p>Manage user accounts, roles, and account removal.</p>
+          <h1>{tx('User Management')}</h1>
+          <p>{tx('Manage user accounts, roles, and account removal.')}</p>
         </div>
         <form className="admin-user-management-toolbar" onSubmit={applySearch}>
           <input
             type="search"
-            placeholder="Search by name, email, or username"
+            placeholder={tx('Search by name, email, or username')}
             value={search}
             onChange={handleSearch}
             className="admin-user-search"
@@ -494,14 +519,14 @@ function AdminUserManagementPage() {
             onChange={(e) => setRoleFilter(e.target.value)}
             className="admin-user-role-filter"
           >
-            {ROLE_OPTIONS.map((item) => (
+            {roleOptions.map((item) => (
               <option key={item.value} value={item.value}>
                 {item.label}
               </option>
             ))}
           </select>
           <button type="submit" className="admin-user-search-btn" disabled={loading}>
-            Search
+            {tx('Search')}
           </button>
           <button
             type="button"
@@ -509,7 +534,7 @@ function AdminUserManagementPage() {
             onClick={openAddUserModal}
             disabled={loading}
           >
-            Add user
+            {tx('Add user')}
           </button>
           <button
             type="button"
@@ -517,14 +542,14 @@ function AdminUserManagementPage() {
             onClick={loadUsers}
             disabled={loading}
           >
-            Refresh
+            {tx('Refresh')}
           </button>
         </form>
         {selectedUserIds.length > 0 && (
           <div className="admin-user-bulk-bar">
-            <span>{selectedUserIds.length} selected user(s)</span>
+            <span>{formatNumber(selectedUserIds.length)} {tx('selected user(s)')}</span>
             <button type="button" className="admin-user-delete-btn" onClick={handleBulkDelete} disabled={loading}>
-              Delete selected
+              {tx('Delete selected')}
             </button>
           </div>
         )}
@@ -536,11 +561,11 @@ function AdminUserManagementPage() {
       {isAddModalOpen && (
         <div className="modal-overlay">
           <div className="add-user-modal">
-            <h2>{isEditMode ? 'Edit User' : 'Add User'}</h2>
+            <h2>{isEditMode ? tx('Edit User') : tx('Add User')}</h2>
             <form onSubmit={handleAddUserSubmit}>
               <div className="modal-grid">
                 <label>
-                  Full Name
+                  {tx('Full Name')}
                   <input
                     value={newUserData.fullname}
                     onChange={(e) => setNewUserData((prev) => ({ ...prev, fullname: e.target.value }))}
@@ -548,7 +573,7 @@ function AdminUserManagementPage() {
                   />
                 </label>
                 <label>
-                  Email
+                  {tx('Email')}
                   <input
                     type="email"
                     value={newUserData.email}
@@ -557,7 +582,7 @@ function AdminUserManagementPage() {
                   />
                 </label>
                 <label>
-                  Username
+                  {tx('Username')}
                   <input
                     value={newUserData.username}
                     onChange={(e) => setNewUserData((prev) => ({ ...prev, username: e.target.value }))}
@@ -565,58 +590,58 @@ function AdminUserManagementPage() {
                   />
                 </label>
                 <label>
-                  Password
+                  {tx('Password')}
                   <div className="password-input-wrap">
                     <input
                       type={showPassword ? 'text' : 'password'}
                       value={newUserData.password}
                       onChange={(e) => setNewUserData((prev) => ({ ...prev, password: e.target.value }))}
                       required={!isEditMode}
-                      placeholder={isEditMode ? 'Leave blank to keep the current password' : ''}
+                      placeholder={isEditMode ? tx('Leave blank to keep the current password') : ''}
                     />
                     <button
                       type="button"
                       className="password-toggle-btn"
                       onClick={() => setShowPassword((prev) => !prev)}
                     >
-                      {showPassword ? 'Hide' : 'Show'}
+                      {showPassword ? tx('Hide') : tx('Show')}
                     </button>
                   </div>
                 </label>
                 <label>
-                  Phone
+                  {tx('Phone')}
                   <input
                     value={newUserData.phone}
                     onChange={(e) => setNewUserData((prev) => ({ ...prev, phone: e.target.value }))}
                   />
                 </label>
                 <label>
-                  Address
+                  {tx('Address')}
                   <input
                     value={newUserData.address}
                     onChange={(e) => setNewUserData((prev) => ({ ...prev, address: e.target.value }))}
                   />
                 </label>
                 <label>
-                  Role
+                  {tx('Role')}
                   <select
                     value={newUserData.role}
                     onChange={(e) => setNewUserData((prev) => ({ ...prev, role: e.target.value }))}
                   >
-                    <option value="user">User</option>
-                    <option value="admin">Admin</option>
+                    <option value="user">{tx('User')}</option>
+                    <option value="admin">{tx('Admin')}</option>
                   </select>
                 </label>
                 <label>
-                  Gender
+                  {tx('Gender')}
                   <select
                     value={newUserData.gender}
                     onChange={(e) => setNewUserData((prev) => ({ ...prev, gender: e.target.value }))}
                   >
-                    <option value="">Not selected</option>
-                    <option value="male">Male</option>
-                    <option value="female">Female</option>
-                    <option value="other">Other</option>
+                    <option value="">{tx('Not selected')}</option>
+                    <option value="male">{tx('Male')}</option>
+                    <option value="female">{tx('Female')}</option>
+                    <option value="other">{tx('Other')}</option>
                   </select>
                 </label>
               </div>
@@ -624,10 +649,10 @@ function AdminUserManagementPage() {
               {addFormError && <div className="add-user-error">{addFormError}</div>}
               <div className="modal-actions">
                 <button type="submit" className="admin-user-add-btn" disabled={loading}>
-                  Save
+                  {tx('Save')}
                 </button>
                 <button type="button" className="admin-user-refresh-btn" onClick={closeAddUserModal}>
-                  Cancel
+                  {tx('Cancel')}
                 </button>
               </div>
             </form>
@@ -644,30 +669,30 @@ function AdminUserManagementPage() {
                   type="checkbox"
                   checked={isAllSelected()}
                   onChange={(e) => toggleSelectAll(e.target.checked)}
-                  aria-label="Select all"
+                  aria-label={tx('Select all')}
                 />
               </th>
-              <th>Full name</th>
-              <th>Email</th>
-              <th>Username</th>
-              <th>Role</th>
-              <th>Status</th>
-              <th>Pause until</th>
-              <th>Joined at</th>
-              <th>Actions</th>
+              <th>{tx('Full name')}</th>
+              <th>{tx('Email')}</th>
+              <th>{tx('Username')}</th>
+              <th>{tx('Role')}</th>
+              <th>{tx('Status')}</th>
+              <th>{tx('Pause until')}</th>
+              <th>{tx('Joined at')}</th>
+              <th>{tx('Actions')}</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
                 <td colSpan="9" className="admin-user-loading">
-                  Loading data...
+                  {tx('Loading data...')}
                 </td>
               </tr>
             ) : filteredUsers.length === 0 ? (
               <tr>
                 <td colSpan="9" className="admin-user-empty">
-                  No users found.
+                  {tx('No users found.')}
                 </td>
               </tr>
             ) : (
@@ -678,21 +703,21 @@ function AdminUserManagementPage() {
                       type="checkbox"
                       checked={selectedUserIds.includes(String(user.id))}
                       onChange={(e) => toggleSelectOne(user.id, e.target.checked)}
-                      aria-label={`Select ${user.fullname || user.username || user.email}`}
+                      aria-label={`${tx('Select')} ${user.fullname || user.username || user.email}`}
                     />
                   </td>
-                  <td>{user.fullname || 'N/A'}</td>
-                  <td>{user.email || 'N/A'}</td>
-                  <td>{user.username || 'N/A'}</td>
-                  <td>{String(user.role || 'user').toUpperCase()}</td>
+                  <td>{user.fullname || tx('N/A')}</td>
+                  <td>{user.email || tx('N/A')}</td>
+                  <td>{user.username || tx('N/A')}</td>
+                  <td>{formatRoleLabel(user.role)}</td>
                   <td>
                     <span
                       className={`status-badge status-${(user.status || 'active').toLowerCase()}`}
                     >
-                      {String(user.status || 'active').toUpperCase()}
+                      {formatStatusLabel(user.status)}
                     </span>
                   </td>
-                  <td>{user.pause_until ? formatDate(user.pause_until) : 'N/A'}</td>
+                  <td>{user.pause_until ? formatDate(user.pause_until) : tx('N/A')}</td>
                   <td>{formatDate(user.created_at)}</td>
                   <td className="admin-user-action-cell">
                     <div className="admin-action-dropdown">
@@ -706,17 +731,17 @@ function AdminUserManagementPage() {
 
                       {expandedRow === user.id ? (
                         <ul className="admin-action-menu">
-                          <li onClick={() => handleAction(user.id, 'edit')}>Edit</li>
+                          <li onClick={() => handleAction(user.id, 'edit')}>{tx('Edit')}</li>
                           <li onClick={() => handleAction(user.id, 'delete')}>
-                            Delete
+                            {tx('Delete')}
                           </li>
                           {user.status === 'blocked' ? (
-                            <li onClick={() => handleAction(user.id, 'unblock')}>Unblock</li>
+                            <li onClick={() => handleAction(user.id, 'unblock')}>{tx('Unblock')}</li>
                           ) : (
-                            <li onClick={() => handleAction(user.id, 'block')}>Block permanently</li>
+                            <li onClick={() => handleAction(user.id, 'block')}>{tx('Block permanently')}</li>
                           )}
                           <li onClick={() => handleAction(user.id, 'pause')}>
-                            {user.status === 'paused' ? 'Resume' : 'Pause'}
+                            {user.status === 'paused' ? tx('Resume') : tx('Pause')}
                           </li>
                         </ul>
                       ) : null}
@@ -731,7 +756,7 @@ function AdminUserManagementPage() {
 
       <div className="admin-user-pagination">
         <div>
-          <strong>Page {currentPage}/{totalPages}</strong> (Total {sortedUsers.length} users)
+          <strong>{tx('Page')} {currentPage}/{totalPages}</strong> ({tx('Total')} {formatNumber(sortedUsers.length)} {language === 'vi' ? 'người dùng' : 'users'})
         </div>
         <div className="admin-user-pagination-controls">
           <button
@@ -739,14 +764,14 @@ function AdminUserManagementPage() {
             onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
             disabled={currentPage <= 1}
           >
-            « Prev
+            « {tx('Prev')}
           </button>
           <button
             type="button"
             onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
             disabled={currentPage >= totalPages}
           >
-            Next »
+            {tx('Next')} »
           </button>
         </div>
       </div>

@@ -666,7 +666,7 @@ function requireAdminRole(req, res, next) {
 
 function requireAuth(req, res, next) {
     if (!req.user?.id) {
-        return res.status(401).json({ message: 'Bạn cần đăng nhập để thực hiện thao tác này.' });
+        return res.status(401).json({ message: 'Please log in to continue.' });
     }
 
     return next();
