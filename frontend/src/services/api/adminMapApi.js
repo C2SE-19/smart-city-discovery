@@ -31,7 +31,7 @@ export async function fetchAdminVenueDetail(venueId) {
     timeout: 30000,
   });
 
-  return response.data;
+  return response.data?.venue || response.data;
 }
 
 export async function fetchAdminVenueReviews(venueId, params = {}) {

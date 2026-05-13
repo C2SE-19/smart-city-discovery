@@ -531,7 +531,20 @@ function normalizeImageUrls(value) {
   }
 
   return value
-    .map((item) => (typeof item === 'string' ? item.trim() : ''))
+    .flatMap((item) => {
+      if (typeof item === 'string') {
+        return [item];
+      }
+
+      if (item && typeof item === 'object') {
+        return [item.url, item.image_url, item.imageUrl, item.src, item.path].filter(
+          (candidate) => typeof candidate === 'string'
+        );
+      }
+
+      return [];
+    })
+    .map((item) => item.trim())
     .filter(Boolean);
 }
 
@@ -559,12 +572,23 @@ function extractVenueGalleryImages(venue) {
   const metadata = normalizeVenueMetadata(venue?.metadata);
   const galleryImages = normalizeImageUrls(metadata.galleryImages);
   const fallbackImages = normalizeImageUrls(metadata.images || metadata.imageUrls || metadata.photos);
+  const tableImages = normalizeImageUrls(venue?.venue_images);
   const coverImage = typeof venue?.cover_image_url === 'string' ? venue.cover_image_url.trim() : '';
+  const alternateCoverImage = typeof venue?.coverImageUrl === 'string' ? venue.coverImageUrl.trim() : '';
+  const primaryImage = typeof venue?.venue_primary_image_url === 'string' ? venue.venue_primary_image_url.trim() : '';
 
-  const merged = [...galleryImages, ...fallbackImages];
+  const merged = [...galleryImages, ...fallbackImages, ...tableImages];
 
   if (coverImage) {
     merged.unshift(coverImage);
+  }
+
+  if (alternateCoverImage) {
+    merged.unshift(alternateCoverImage);
+  }
+
+  if (primaryImage) {
+    merged.unshift(primaryImage);
   }
 
   return [...new Set(merged)];
@@ -1089,7 +1113,7 @@ function AdminBoundaryPage() {
     }
 
     if (Number(selectedVenueDetail?.id) === Number(selectedVenueSummary.id)) {
-      return { ...selectedVenueDetail, ...selectedVenueSummary };
+      return { ...selectedVenueSummary, ...selectedVenueDetail };
     }
 
     return selectedVenueSummary;

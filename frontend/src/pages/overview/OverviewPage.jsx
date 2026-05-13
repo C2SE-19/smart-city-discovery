@@ -145,6 +145,8 @@ async function createCompressedImageDataUrl(file, maxWidth = 1024, maxHeight = 1
 
 function getVenueImage(venue) {
   return (
+    venue.venue_primary_image_url ||
+    venue?.venue_images?.[0] ||
     venue.cover_image_url ||
     venue.coverImageUrl ||
     venue.image ||

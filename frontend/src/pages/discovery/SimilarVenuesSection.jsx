@@ -141,7 +141,7 @@ export default function SimilarVenuesSection({
                 <div
                   className="similar-venue-image"
                   style={{
-                    backgroundImage: `url('${venue.cover_image_url || venue.coverImageUrl || 'https://via.placeholder.com/250x250?text=No+Image'}')`
+                    backgroundImage: `url('${venue.venue_primary_image_url || venue?.venue_images?.[0] || venue.cover_image_url || venue.coverImageUrl || 'https://via.placeholder.com/250x250?text=No+Image'}')`
                   }}
                 >
                   {featuredPromotionLabel ? (
