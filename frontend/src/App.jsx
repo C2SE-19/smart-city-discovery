@@ -208,13 +208,16 @@ function App() {
     <ErrorBoundary>
       <AuthProvider>
         <ThemeProvider>
-          <LanguageProvider>
-            <BrowserRouter>
-              <AppRoutes landingStats={landingStats} />
-              <ChatWidgetGate />
-              <AppOnboarding />
-            </BrowserRouter>
-          </LanguageProvider>
+          <CompareProvider>
+            <LanguageProvider>
+              <BrowserRouter>
+                <AppRoutes landingStats={landingStats} />
+                <VenueCompareBar />
+                <ChatWidgetGate />
+                <AppOnboarding />
+              </BrowserRouter>
+            </LanguageProvider>
+          </CompareProvider>
         </ThemeProvider>
       </AuthProvider>
     </ErrorBoundary>
