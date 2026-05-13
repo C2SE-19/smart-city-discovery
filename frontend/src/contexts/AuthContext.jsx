@@ -1,8 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { ROLES } from '../constants/roles';
-import axios from 'axios';
-import { getApiBaseUrl } from '../services/api/client';
+import { apiClient } from '../services/api/client';
 
 const AuthContext = createContext(null);
 const AUTH_STORAGE_KEY = 'auth';
@@ -87,10 +86,9 @@ export function AuthProvider({ children }) {
       return;
     }
 
-    const apiUrl = getApiBaseUrl();
     const fetchProfile = async () => {
       try {
-        const response = await axios.get(`${apiUrl}/users/profile`, {
+        const response = await apiClient.get('/users/profile', {
           headers: { Authorization: `Bearer ${token}` }
         });
         const nextUser = normalizeUser(response.data?.user || null);
@@ -130,7 +128,7 @@ export function AuthProvider({ children }) {
         }
 
         try {
-          await axios.get(`${apiUrl}/auth/verify`, {
+          await apiClient.get('/auth/verify', {
             headers: { Authorization: `Bearer ${token}` }
           });
         } catch (error) {
