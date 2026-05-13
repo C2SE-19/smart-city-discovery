@@ -1,5 +1,5 @@
 ﻿import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { sendAiChatMessage } from '../../services/api/chatBotApi';
 import './ChatWidget.css';
@@ -103,6 +103,7 @@ const loadSavedPosition = (storageKey) => {
 
 const ChatWidget = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { isAuthenticated, user } = useAuth();
   const chatContainerRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -156,6 +157,26 @@ const ChatWidget = () => {
   useEffect(() => {
     setPosition(loadSavedPosition(positionStorageKey));
   }, [positionStorageKey]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const shouldOpen = params.get('openChat') === '1';
+
+    if (!shouldOpen) {
+      return;
+    }
+
+    if (isAuthenticated) {
+      setIsOpen(true);
+    }
+
+    params.delete('openChat');
+    const nextSearch = params.toString();
+    navigate(
+      { pathname: location.pathname, search: nextSearch ? `?${nextSearch}` : '' },
+      { replace: true }
+    );
+  }, [isAuthenticated, location.pathname, location.search, navigate]);
 
   useEffect(() => {
     if (!messageStorageKey) {

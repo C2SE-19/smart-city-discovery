@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { GeoJSON, MapContainer, Marker, Popup, TileLayer } from 'react-leaflet';
 import { useNavigate } from 'react-router-dom';
 import L from 'leaflet';
@@ -86,6 +86,56 @@ function resolveVenuePopupImage(venue) {
   return FALLBACK_VENUE_IMAGE;
 }
 
+const OverviewWardLayer = memo(function OverviewWardLayer({ wards }) {
+  return wards.map((ward) => (
+    <GeoJSON
+      key={ward.ward_id}
+      data={ward.boundary}
+      style={{ color: '#2f6e79', weight: 1.6, fillColor: '#70a4ac', fillOpacity: 0.08 }}
+    />
+  ));
+});
+
+const OverviewVenueLayer = memo(function OverviewVenueLayer({ venues, categoryIconById, currentPosition }) {
+  return (
+    <>
+      {venues.map((venue) => {
+        const categoryId = resolveVenueCategoryId(venue);
+        const icon = buildCategoryIcon(categoryId || venue.id, categoryIconById.get(categoryId));
+
+        return (
+          <Marker key={`overview-map-${venue.id}`} position={[venue.latitude, venue.longitude]} icon={icon}>
+            <Popup>
+              <div className="overview-city-popup">
+                <img
+                  src={resolveVenuePopupImage(venue)}
+                  alt={resolveVenueName(venue)}
+                  className="overview-city-popup-image"
+                  loading="lazy"
+                />
+                <strong>{resolveVenueName(venue)}</strong>
+                <span>{venue.address || 'Address not available'}</span>
+                <span>{resolveWardName(venue)} • {resolveVenueCategoryName(venue)}</span>
+                <span>{renderStars(resolveVenueRating(venue))}</span>
+              </div>
+            </Popup>
+          </Marker>
+        );
+      })}
+
+      {currentPosition ? (
+        <Marker position={currentPosition} icon={userLocationIcon}>
+          <Popup>
+            <div className="overview-city-popup">
+              <strong>Your current location</strong>
+            </div>
+          </Popup>
+        </Marker>
+      ) : null}
+    </>
+  );
+});
+
 function OverviewCityMapCard() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
@@ -105,7 +155,7 @@ function OverviewCityMapCard() {
       try {
         const [wardData, venueData] = await Promise.all([
           fetchWards(),
-          fetchVenues({ status: 'approved', compact: 'true' }),
+          fetchVenues({ status: 'approved', compact: 'true', limit: 200 }),
         ]);
 
         if (!mounted) {
@@ -133,32 +183,6 @@ function OverviewCityMapCard() {
 
     return () => {
       mounted = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    let pollingInFlight = false;
-
-    const intervalId = window.setInterval(async () => {
-      if (pollingInFlight) {
-        return;
-      }
-
-      pollingInFlight = true;
-
-      try {
-        const liveVenues = await fetchVenues({ status: 'approved', compact: 'true', live: 'true' });
-        setVenues(normalizeVenues(liveVenues));
-        setError('');
-      } catch {
-        // Keep existing markers when a polling cycle fails.
-      } finally {
-        pollingInFlight = false;
-      }
-    }, 8000);
-
-    return () => {
-      window.clearInterval(intervalId);
     };
   }, []);
 
@@ -213,7 +237,7 @@ function OverviewCityMapCard() {
   );
 
   const mapCenter = useMemo(() => mapCenterFromWards(wards), [wards]);
-  const previewVenues = useMemo(() => venues.slice(0, 320), [venues]);
+  const previewVenues = useMemo(() => venues.slice(0, 200), [venues]);
   const handleOpenLargeMap = () => {
     const params = new URLSearchParams();
     params.set('lat', String(Number(DEFAULT_CITY_CENTER[0])));
@@ -225,10 +249,7 @@ function OverviewCityMapCard() {
   return (
     <div className="overview-city-shell">
       <div className="overview-city-toolbar">
-        <span>{wards.length} wards</span>
-        <span>{venues.length} approved venues</span>
-        <span>Previewing {previewVenues.length} markers for fast load</span>
-        <span>Read-only city map</span>
+        
       </div>
 
       <div className="overview-city-canvas">
@@ -243,47 +264,12 @@ function OverviewCityMapCard() {
             url="https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png"
           />
 
-          {wards.map((ward) => (
-            <GeoJSON
-              key={ward.ward_id}
-              data={ward.boundary}
-              style={{ color: '#2f6e79', weight: 1.6, fillColor: '#70a4ac', fillOpacity: 0.08 }}
-            />
-          ))}
-
-          {previewVenues.map((venue) => {
-            const categoryId = resolveVenueCategoryId(venue);
-            const icon = buildCategoryIcon(categoryId || venue.id, categoryIconById.get(categoryId));
-
-            return (
-              <Marker key={`overview-map-${venue.id}`} position={[venue.latitude, venue.longitude]} icon={icon}>
-                <Popup>
-                  <div className="overview-city-popup">
-                    <img
-                      src={resolveVenuePopupImage(venue)}
-                      alt={resolveVenueName(venue)}
-                      className="overview-city-popup-image"
-                      loading="lazy"
-                    />
-                    <strong>{resolveVenueName(venue)}</strong>
-                    <span>{venue.address || 'Address not available'}</span>
-                    <span>{resolveWardName(venue)} • {resolveVenueCategoryName(venue)}</span>
-                    <span>{renderStars(resolveVenueRating(venue))}</span>
-                  </div>
-                </Popup>
-              </Marker>
-            );
-          })}
-
-          {currentPosition ? (
-            <Marker position={currentPosition} icon={userLocationIcon}>
-              <Popup>
-                <div className="overview-city-popup">
-                  <strong>Your current location</strong>
-                </div>
-              </Popup>
-            </Marker>
-          ) : null}
+          <OverviewWardLayer wards={wards} />
+          <OverviewVenueLayer
+            venues={previewVenues}
+            categoryIconById={categoryIconById}
+            currentPosition={currentPosition}
+          />
         </MapContainer>
 
         {loading ? <div className="overview-city-overlay">Loading city map...</div> : null}
@@ -301,4 +287,4 @@ function OverviewCityMapCard() {
   );
 }
 
-export default OverviewCityMapCard;
+export default memo(OverviewCityMapCard);

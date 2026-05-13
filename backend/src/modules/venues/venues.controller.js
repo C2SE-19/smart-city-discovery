@@ -1,7 +1,7 @@
 const venuesService = require('./venues.service');
 
 async function listVenues(req, res) {
-  const venues = await venuesService.listVenues();
+  const venues = await venuesService.listVenues(req.query);
   res.json(venues);
 }
 

@@ -1,0 +1,137 @@
+.open-status-badge {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: 100%;
+  padding: 10px 14px;
+  border-radius: 18px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.2;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.14);
+  backdrop-filter: blur(14px);
+}
+
+.open-status-badge.is-open {
+  background: linear-gradient(135deg, rgba(232, 255, 240, 0.92), rgba(208, 246, 222, 0.9));
+  color: #0f7d38;
+}
+
+.open-status-badge.is-closing-soon {
+  background: linear-gradient(135deg, rgba(255, 246, 215, 0.94), rgba(255, 232, 176, 0.9));
+  color: #a35c00;
+}
+
+.open-status-badge.is-closed {
+  background: linear-gradient(135deg, rgba(255, 236, 236, 0.94), rgba(255, 214, 214, 0.9));
+  color: #b42323;
+}
+
+.open-status-badge.is-unknown {
+  background: linear-gradient(135deg, rgba(246, 248, 252, 0.94), rgba(227, 232, 240, 0.9));
+  color: #536070;
+}
+
+.open-status-dot {
+  width: 9px;
+  height: 9px;
+  margin-top: 4px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+}
+
+.open-status-badge.is-open .open-status-dot {
+  background: #22c55e;
+  box-shadow: 0 0 0 5px rgba(34, 197, 94, 0.18);
+}
+
+.open-status-badge.is-closing-soon .open-status-dot {
+  background: #f59e0b;
+  box-shadow: 0 0 0 5px rgba(245, 158, 11, 0.16);
+}
+
+.open-status-badge.is-closed .open-status-dot {
+  background: #ef4444;
+  box-shadow: 0 0 0 5px rgba(239, 68, 68, 0.14);
+}
+
+.open-status-badge.is-unknown .open-status-dot {
+  background: #6b7280;
+  box-shadow: 0 0 0 5px rgba(107, 114, 128, 0.12);
+}
+
+.open-status-dot.is-slow {
+  animation: open-status-pulse-slow 1.8s ease-in-out infinite;
+}
+
+.open-status-dot.is-fast {
+  animation: open-status-pulse-fast 0.9s ease-in-out infinite;
+}
+
+.open-status-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.open-status-label,
+.open-status-sublabel {
+  overflow-wrap: anywhere;
+}
+
+.open-status-sublabel {
+  font-size: 0.74rem;
+  font-weight: 600;
+  opacity: 0.92;
+}
+
+:root[data-theme='dark'] .open-status-badge {
+  border-color: rgba(148, 163, 184, 0.18);
+  box-shadow: 0 14px 30px rgba(2, 6, 23, 0.34);
+}
+
+:root[data-theme='dark'] .open-status-badge.is-open {
+  background: linear-gradient(135deg, rgba(17, 77, 43, 0.92), rgba(26, 111, 59, 0.88));
+  color: #d7ffe6;
+}
+
+:root[data-theme='dark'] .open-status-badge.is-closing-soon {
+  background: linear-gradient(135deg, rgba(110, 71, 0, 0.92), rgba(148, 96, 0, 0.88));
+  color: #fff1c1;
+}
+
+:root[data-theme='dark'] .open-status-badge.is-closed {
+  background: linear-gradient(135deg, rgba(108, 25, 25, 0.92), rgba(137, 34, 34, 0.88));
+  color: #ffd8d8;
+}
+
+:root[data-theme='dark'] .open-status-badge.is-unknown {
+  background: linear-gradient(135deg, rgba(43, 50, 63, 0.94), rgba(55, 65, 81, 0.9));
+  color: #e5e7eb;
+}
+
+@keyframes open-status-pulse-slow {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.28;
+    transform: scale(0.86);
+  }
+}
+
+@keyframes open-status-pulse-fast {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.18;
+    transform: scale(0.8);
+  }
+}

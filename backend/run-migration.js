@@ -74,7 +74,8 @@ async function runMigration() {
       '20260424_create_user_notifications.sql',
       '20260424_fix_user_notifications_user_id_type.sql',
       '20260425_add_payos_ad_package_payments.sql',
-      '20260505_create_password_reset_tokens.sql'
+      '20260505_create_password_reset_tokens.sql',
+      '20260512_add_opening_hours_to_venues.sql'
     ];
 
     const uniqueMigrationFiles = [...new Set(migrationFiles)];

@@ -23,6 +23,8 @@ const publicVenueDetailCache = new Map();
 const publicVenueForDetailCache = new Map();
 const publicVenueCommunityBundleCache = new Map();
 const openWeatherCache = new Map();
+const publicTrendingVenuesCache = new Map();
+const aiSuggestionResponseCache = new Map();
 let publicWardsSummaryCache = { timestamp: 0, data: null };
 let publicWardsFullCache = { timestamp: 0, data: null };
 
@@ -194,7 +196,7 @@ try {
 
     const chatLimiter = _maybeRateLimit ? _maybeRateLimit({
         windowMs: 1 * 60 * 1000, // 1 minute
-        max: 10, 
+        max: 5, 
         standardHeaders: true,
         legacyHeaders: false
     }) : null;
@@ -341,6 +343,10 @@ const venueOwnerColumnState = {
     exists: null,
     checkedAt: 0
 };
+const venueOpeningHoursColumnState = {
+    exists: null,
+    checkedAt: 0
+};
 
 const MAX_INLINE_IMAGE_URL_LENGTH = 2000000;
 const MAX_METADATA_JSON_LENGTH = 300000;
@@ -366,9 +372,50 @@ function sanitizeVenueRecord(venue) {
 
     return {
         ...venue,
+        metadata: compactVenueMetadataForResponse(venue.metadata),
         cover_image_url: sanitizeLargeInlineAssetUrl(venue.cover_image_url),
         business_license_image_url: sanitizeLargeInlineAssetUrl(venue.business_license_image_url)
     };
+}
+
+function compactVenueMetadataForResponse(metadata) {
+    const source = normalizeVenueMetadataObject(metadata);
+    const galleryImages = extractGalleryImageUrlsFromMetadata(source)
+        .filter((imageUrl) => !/^data:image\//i.test(String(imageUrl || '').trim()));
+
+    const nextMetadata = {
+        category: source.category ?? null,
+        categoryName: source.categoryName ?? null,
+        categoryId: source.categoryId ?? null,
+        wardId: source.wardId ?? null,
+        wardName: source.wardName ?? null,
+        minPrice: source.minPrice ?? source.min_price ?? null,
+        maxPrice: source.maxPrice ?? source.max_price ?? null,
+        startTime: source.startTime ?? null,
+        endTime: source.endTime ?? null,
+        weeklyOpenHours: source.weeklyOpenHours ?? null,
+        weeklySchedule: source.weeklySchedule ?? null,
+        selectedServices: Array.isArray(source.selectedServices) ? source.selectedServices : [],
+        selectedServiceNames: Array.isArray(source.selectedServiceNames) ? source.selectedServiceNames : [],
+        contactEmail: source.contactEmail ?? null,
+        imagesCount: Number.isFinite(Number(source.imagesCount))
+            ? Math.max(0, Math.min(6, Number(source.imagesCount)))
+            : galleryImages.length,
+        galleryImages
+    };
+
+    return Object.entries(nextMetadata).reduce((result, [key, value]) => {
+        if (value === null || value === undefined) {
+            return result;
+        }
+
+        if (Array.isArray(value) && value.length === 0) {
+            return result;
+        }
+
+        result[key] = value;
+        return result;
+    }, {});
 }
 
 function buildSanitizedInlineAssetSql(columnSql, alias) {
@@ -421,6 +468,38 @@ async function hasVenueOwnerUserColumn() {
 
     venueOwnerColumnState.checkedAt = now;
     return venueOwnerColumnState.exists;
+}
+
+async function hasVenueOpeningHoursColumn() {
+    const now = Date.now();
+
+    if (typeof venueOpeningHoursColumnState.exists === 'boolean' && now - venueOpeningHoursColumnState.checkedAt < 30000) {
+        return venueOpeningHoursColumnState.exists;
+    }
+
+    try {
+        const result = await pool.query(
+            `
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'venues'
+                  AND column_name = 'opening_hours'
+                LIMIT 1
+            `
+        );
+
+        venueOpeningHoursColumnState.exists = Boolean(result.rows.length);
+    } catch {
+        venueOpeningHoursColumnState.exists = false;
+    }
+
+    venueOpeningHoursColumnState.checkedAt = now;
+    return venueOpeningHoursColumnState.exists;
+}
+
+function buildOpeningHoursSelect(hasColumn) {
+    return hasColumn ? 'venues.opening_hours AS opening_hours' : 'NULL::jsonb AS opening_hours';
 }
 
 function buildResolvedVenueOwnerUserSql(venueAlias = 'venues') {
@@ -3241,6 +3320,16 @@ async function listPublicTrendingVenues(req, res) {
     const limit = Number.isFinite(requestedLimit)
         ? Math.max(1, Math.min(24, requestedLimit))
         : 10;
+    const cacheKey = `limit:${limit}`;
+
+    const cachedPayload = getCachedMapValue(
+        publicTrendingVenuesCache,
+        cacheKey,
+        PUBLIC_TRENDING_VENUES_CACHE_TTL_MS
+    );
+    if (cachedPayload) {
+        return res.json(cachedPayload);
+    }
 
     try {
         const trendingResult = await pool.query(
@@ -3348,7 +3437,9 @@ async function listPublicTrendingVenues(req, res) {
             });
         }
 
-        return res.json({ venues });
+        const payload = { venues };
+        setCachedMapValue(publicTrendingVenuesCache, cacheKey, payload);
+        return res.json(payload);
     } catch (error) {
         console.error('List public trending venues error:', error);
         return res.status(500).json({ message: 'Could not load trending venues right now.' });
@@ -4771,26 +4862,26 @@ async function updateAdminUserRole(req, res) {
 
         if (nextStatus && previousStatus && nextStatus !== previousStatus) {
             const statusTitleByKey = {
-                active: 'Tài khoản của bạn đã được kích hoạt lại',
-                paused: 'Tài khoản của bạn đang bị tạm dừng',
-                blocked: 'Tài khoản của bạn đã bị khóa'
+                active: 'Your account has been reactivated',
+                paused: 'Your account is temporarily paused',
+                blocked: 'Your account has been blocked'
             };
 
             const statusContentByKey = {
-                active: 'Bạn có thể tiếp tục sử dụng các tính năng bình thường.',
+                active: 'You can continue using the service normally.',
                 paused: updatedUser.pause_until
-                    ? `Tài khoản tạm dừng đến ${new Date(updatedUser.pause_until).toLocaleString('vi-VN')}.`
-                    : 'Vui lòng liên hệ quản trị viên để biết thêm chi tiết về thời gian tạm dừng.',
+                    ? `Paused until ${new Date(updatedUser.pause_until).toLocaleString('en-US')}.`
+                    : 'Please contact an administrator for more details about the pause.',
                 blocked: updatedUser.blocked_reason
-                    ? `Lý do: ${String(updatedUser.blocked_reason).trim()}`
-                    : 'Vui lòng liên hệ quản trị viên để biết thêm chi tiết.'
+                    ? `Reason: ${String(updatedUser.blocked_reason).trim()}`
+                    : 'Please contact an administrator for more details.'
             };
 
             await createUserNotification({
                 userId: updatedUser.id,
                 type: 'general',
-                title: statusTitleByKey[nextStatus] || 'Trạng thái tài khoản của bạn đã thay đổi',
-                content: statusContentByKey[nextStatus] || 'Vui lòng kiểm tra trạng thái tài khoản mới nhất của bạn.',
+                title: statusTitleByKey[nextStatus] || 'Your account status has changed',
+                content: statusContentByKey[nextStatus] || 'Please review your latest account status.',
                 metadata: {
                     previousStatus,
                     nextStatus,
@@ -5130,7 +5221,7 @@ async function resolveVenueOwnerUserIdByVenueId(venueId) {
     return extractVenueOwnerCandidateIds(result.rows[0])[0] || '';
 }
 
-async function resolveNotificationActorName(userId, fallback = 'Người dùng') {
+async function resolveNotificationActorName(userId, fallback = 'User') {
     const normalizedUserId = String(userId || '').trim();
 
     if (!normalizedUserId) {
@@ -5311,13 +5402,13 @@ const USER_PREFERENCE_INTEREST_SET_BY_AGE = Object.entries(USER_PREFERENCE_INTER
 );
 
 const USER_PREFERENCE_INTEREST_KEYWORDS = {
-    street_food: ['street food', 'food market', 'food court', 'hawker', 'am thuc duong pho', 'an vat', 'quan an vat', 'cho dem'],
+    street_food: ['street food', 'food market', 'food court', 'hawker', 'am thuc duong pho', 'an vat', 'quan an vat', 'cho dem', 'cho', 'market an uong', 'food alley', 'street snack'],
     bubble_tea: ['bubble tea', 'milk tea', 'tea shop', 'tra sua'],
     instagram_spots: ['instagram', 'photo spot', 'check-in', 'scenic', 'viewpoint', 'check in', 'song ao', 'view dep'],
     arcades: ['arcade', 'game center', 'bowling', 'vr game', 'khu vui choi', 'choi game'],
     parks: ['park', 'green space', 'playground', 'cong vien'],
     cinema: ['cinema', 'movie', 'theater', 'rap phim', 'rap chieu phim'],
-    sports: ['sport', 'stadium', 'court', 'climbing', 'the thao', 'san bong', 'gym'],
+    sports: ['sport', 'stadium', 'court', 'climbing', 'the thao', 'san bong', 'gym', 'tennis', 'pickleball', 'skate', 'swim', 'pool', 'running', 'cycling', 'workout', 'ho boi', 'san tap'],
     nightlife: ['bar', 'club', 'nightlife', 'cocktail', 'pub', 'quan nhau', 'beer club', 'karaoke'],
     live_music: ['live music', 'acoustic', 'dj', 'concert', 'nhac song', 'music lounge'],
     cafes: ['cafe', 'coffee', 'espresso', 'tea room', 'ca phe', 'quan cafe'],
@@ -5353,6 +5444,124 @@ const USER_PREFERENCE_TIME_KEYWORDS = {
     late_night: ['late night', 'open 24/7', 'nightlife', 'after midnight', 'khuya', 'dem']
 };
 
+const USER_PREFERENCE_INTEREST_CATEGORY_AFFINITY = {
+    street_food: ['dining'],
+    bubble_tea: ['coffee_drinks'],
+    instagram_spots: ['travel_attractions', 'coffee_drinks'],
+    arcades: ['entertainment'],
+    parks: ['travel_attractions'],
+    cinema: ['entertainment'],
+    sports: ['travel_attractions'],
+    nightlife: ['lounge', 'entertainment'],
+    live_music: ['entertainment', 'lounge'],
+    cafes: ['coffee_drinks'],
+    adventure: ['travel_attractions', 'entertainment'],
+    photography: ['travel_attractions', 'coffee_drinks'],
+    fitness: ['travel_attractions'],
+    specialty_coffee: ['coffee_drinks'],
+    fine_dining: ['dining'],
+    family_spots: ['dining', 'travel_attractions'],
+    wellness: ['coffee_drinks', 'travel_attractions'],
+    networking: ['coffee_drinks', 'dining'],
+    cultural_sites: ['travel_attractions'],
+    weekend_getaways: ['accommodation', 'travel_attractions'],
+    family_friendly: ['dining', 'travel_attractions'],
+    local_cuisine: ['dining'],
+    heritage: ['travel_attractions'],
+    business_lunch: ['dining', 'coffee_drinks'],
+    shopping: ['shopping'],
+    nature_walks: ['travel_attractions'],
+    quiet_cafes: ['coffee_drinks'],
+    traditional_food: ['dining'],
+    scenic_walks: ['travel_attractions'],
+    spiritual_sites: ['travel_attractions'],
+    health_friendly: ['dining', 'coffee_drinks'],
+    gardens: ['travel_attractions']
+};
+
+const VENUE_SEMANTIC_SIGNAL_KEYWORDS = {
+    aesthetic: ['aesthetic', 'decor', 'photogenic', 'instagrammable', 'check in', 'check-in', 'song ao', 'xinh', 'view dep', 'rooftop'],
+    chill: ['chill', 'cozy', 'relax', 'thu gian', 'hangout', 'laid back', 'am cung'],
+    quiet: ['quiet', 'calm', 'peaceful', 'yen tinh', 'private', 'study'],
+    outdoor: ['outdoor', 'open air', 'garden', 'park', 'beach', 'riverside', 'ngoai troi', 'san vuon', 'di bo'],
+    sporty: ['sport', 'gym', 'court', 'football', 'badminton', 'climbing', 'workout', 'the thao'],
+    cinematic: ['cinema', 'movie', 'screen', 'theater', 'rap phim'],
+    street_food: ['street food', 'food stall', 'food court', 'hawker', 'an vat', 'quan coc', 'via he', 'cho', 'cho dem', 'market', 'street snack'],
+    nightlife: ['bar', 'pub', 'club', 'cocktail', 'karaoke', 'late night', 'nightlife', 'beer club'],
+    family: ['family', 'kids', 'child friendly', 'playground', 'gia dinh', 'tre em'],
+    work_friendly: ['wifi', 'free wifi', 'workspace', 'study', 'meeting', 'coworking', 'plug', 'lam viec', 'hoc tap'],
+    scenic: ['scenic', 'view', 'sunset', 'landmark', 'panorama', 'beachfront', 'song ao', 'canh dep'],
+    premium: ['premium', 'luxury', 'fine dining', 'private room', 'chef', 'sang trong', 'cao cap'],
+    quick_stop: ['take away', 'grab and go', 'fast service', 'quick bite', 'mang di'],
+    long_stay: ['parking', 'valet', 'reservation', 'large group', 'private room', 'ban rong', 'dau xe'],
+    acoustic: ['acoustic', 'live music', 'band', 'dj', 'music night', 'nhac song'],
+    beverage_focused: ['coffee', 'cafe', 'milk tea', 'tra sua', 'juice', 'smoothie', 'tea', 'drink', 'beverage'],
+    dining_focused: ['restaurant', 'food', 'dining', 'nha hang', 'am thuc', 'mon an', 'seafood', 'bbq', 'lau', 'nuong'],
+    entertainment_focused: ['entertainment', 'arcade', 'game', 'bowling', 'billiard', 'concert', 'giai tri'],
+    romantic: ['romantic', 'date night', 'couple', 'hen ho'],
+    wellness: ['spa', 'massage', 'wellness', 'healthy', 'vegan', 'yoga', 'thu gian'],
+    budget_friendly: ['budget', 'affordable', 'cheap', 'gia re', 'binh dan', 'student']
+};
+
+const USER_PREFERENCE_INTEREST_SEMANTIC_SIGNALS = {
+    street_food: ['street_food', 'dining_focused', 'budget_friendly', 'quick_stop'],
+    bubble_tea: ['beverage_focused', 'chill', 'aesthetic', 'quick_stop'],
+    instagram_spots: ['aesthetic', 'scenic', 'romantic', 'chill'],
+    arcades: ['entertainment_focused', 'nightlife', 'chill'],
+    parks: ['outdoor', 'scenic', 'family', 'quiet'],
+    cinema: ['cinematic', 'entertainment_focused', 'nightlife'],
+    sports: ['sporty', 'outdoor', 'long_stay'],
+    nightlife: ['nightlife', 'acoustic', 'premium', 'long_stay'],
+    live_music: ['acoustic', 'nightlife', 'chill', 'entertainment_focused'],
+    cafes: ['beverage_focused', 'chill', 'work_friendly', 'quiet'],
+    adventure: ['outdoor', 'sporty', 'scenic'],
+    photography: ['aesthetic', 'scenic', 'romantic'],
+    fitness: ['sporty', 'outdoor', 'long_stay'],
+    specialty_coffee: ['beverage_focused', 'quiet', 'work_friendly', 'premium'],
+    fine_dining: ['dining_focused', 'premium', 'romantic'],
+    family_spots: ['family', 'long_stay', 'dining_focused'],
+    wellness: ['wellness', 'quiet', 'premium'],
+    networking: ['work_friendly', 'quiet', 'premium'],
+    cultural_sites: ['scenic', 'quiet', 'outdoor'],
+    weekend_getaways: ['long_stay', 'premium', 'scenic'],
+    family_friendly: ['family', 'long_stay', 'dining_focused'],
+    local_cuisine: ['dining_focused', 'street_food', 'budget_friendly'],
+    heritage: ['scenic', 'quiet', 'outdoor'],
+    business_lunch: ['dining_focused', 'work_friendly', 'premium'],
+    shopping: ['long_stay', 'premium', 'aesthetic'],
+    nature_walks: ['outdoor', 'scenic', 'quiet'],
+    quiet_cafes: ['quiet', 'beverage_focused', 'work_friendly'],
+    traditional_food: ['dining_focused', 'street_food', 'budget_friendly'],
+    scenic_walks: ['scenic', 'outdoor', 'quiet'],
+    spiritual_sites: ['quiet', 'scenic'],
+    health_friendly: ['wellness', 'beverage_focused', 'dining_focused'],
+    gardens: ['outdoor', 'scenic', 'quiet']
+};
+
+const VENUE_SEMANTIC_SIGNAL_LABELS = {
+    aesthetic: 'aesthetic vibe',
+    chill: 'chill vibe',
+    quiet: 'quiet atmosphere',
+    outdoor: 'outdoor setting',
+    sporty: 'activity-focused',
+    cinematic: 'cinema vibe',
+    street_food: 'street-food style',
+    nightlife: 'nightlife vibe',
+    family: 'family-friendly atmosphere',
+    work_friendly: 'study/work-friendly setup',
+    scenic: 'scenic/check-in vibe',
+    premium: 'premium atmosphere',
+    quick_stop: 'quick-stop convenience',
+    long_stay: 'long-stay comfort',
+    acoustic: 'music/acoustic vibe',
+    beverage_focused: 'drinks-focused',
+    dining_focused: 'food-focused',
+    entertainment_focused: 'entertainment-focused',
+    romantic: 'romantic vibe',
+    wellness: 'wellness atmosphere',
+    budget_friendly: 'budget-friendly feel'
+};
+
 const USER_PREFERENCE_ADULT_KEYWORDS = [
     'bar', 'club', 'cocktail', 'nightlife', 'pub',
     'beer', 'beer club', 'lounge', 'karaoke',
@@ -5368,6 +5577,497 @@ const USER_PREFERENCE_TEEN_FRIENDLY_KEYWORDS = [
     'park', 'museum', 'cinema', 'sports',
     'khu vui choi', 'cong vien', 'thu vien', 'bao tang', 'nha sach', 'rap phim', 'the thao'
 ];
+
+const AI_SUGGEST_BROAD_CATEGORY_KEYWORDS = {
+    accommodation: ['accommodation', 'hotel', 'hostel', 'homestay', 'resort', 'villa', 'guesthouse', 'staycation', 'luu tru', 'khach san', 'nghi duong'],
+    lounge: ['lounge', 'cocktail', 'pub', 'bar', 'club', 'beer club', 'nightclub', 'karaoke', 'taproom', 'brewery'],
+    coffee_drinks: ['cafe', 'coffee', 'ca phe', 'espresso', 'latte', 'tea', 'milk tea', 'tra sua', 'tra chanh', 'juice', 'smoothie', 'beverage', 'drink', 'do uong'],
+    dining: ['restaurant', 'dining', 'food', 'eatery', 'quan an', 'nha hang', 'am thuc', 'street food', 'an vat', 'snack', 'dessert', 'bakery', 'bun', 'pho', 'lau', 'nuong', 'seafood', 'hai san'],
+    entertainment: ['entertainment', 'cinema', 'movie', 'rap phim', 'arcade', 'game center', 'theme park', 'amusement', 'khu vui choi', 'giai tri', 'bowling', 'billiard', 'live music', 'concert', 'music lounge'],
+    travel_attractions: ['attraction', 'travel', 'tourist', 'museum', 'heritage', 'landmark', 'beach', 'park', 'river', 'garden', 'sightseeing', 'scenic', 'viewpoint', 'outdoor', 'cong vien', 'bao tang', 'di tich', 'tham quan', 'bien'],
+    shopping: ['shopping', 'shop', 'store', 'market', 'mall', 'boutique', 'bookstore', 'supermarket', 'local market', 'mua sam', 'cua hang', 'trung tam thuong mai', 'sieu thi', 'nha sach']
+};
+
+const AI_SUGGEST_BROAD_CATEGORY_LABELS = {
+    accommodation: 'Accommodation',
+    lounge: 'Lounge',
+    coffee_drinks: 'Coffee & Drinks',
+    dining: 'Dining',
+    entertainment: 'Entertainment',
+    travel_attractions: 'Travel & Attractions',
+    shopping: 'Shopping'
+};
+
+const AI_SUGGEST_AGE_CATEGORY_POLICY = {
+    '13_17': {
+        blocked: ['accommodation', 'lounge'],
+        priority: ['entertainment', 'coffee_drinks', 'travel_attractions', 'dining']
+    },
+    '18_24': {
+        blocked: [],
+        priority: ['coffee_drinks', 'dining', 'entertainment', 'travel_attractions']
+    },
+    '25_34': {
+        blocked: [],
+        priority: ['accommodation', 'coffee_drinks', 'dining', 'entertainment']
+    },
+    '35_49': {
+        blocked: [],
+        priority: ['accommodation', 'coffee_drinks', 'dining', 'shopping']
+    },
+    '50_plus': {
+        blocked: [],
+        priority: ['coffee_drinks', 'dining', 'shopping', 'travel_attractions']
+    }
+};
+
+const AI_SUGGEST_TIME_WINDOW_CATEGORY_PRIORITIES = {
+    morning: ['coffee_drinks', 'dining', 'travel_attractions'],
+    noon: ['dining', 'coffee_drinks', 'shopping'],
+    afternoon: ['coffee_drinks', 'shopping', 'travel_attractions', 'entertainment'],
+    evening: ['dining', 'entertainment', 'coffee_drinks', 'travel_attractions'],
+    late_night: ['entertainment', 'coffee_drinks', 'dining', 'lounge']
+};
+
+const AI_SUGGEST_SAFE_PUBLIC_KEYWORDS = [
+    'family', 'kids', 'public', 'museum', 'park', 'garden', 'library', 'cultural',
+    'gia dinh', 'tre em', 'cong vien', 'bao tang', 'thu vien', 'van hoa', 'cong cong'
+];
+
+function resolveVenueBroadCategoryMatchesFromFields(fields) {
+    const combinedText = [
+        fields?.categoryText,
+        fields?.nameText,
+        fields?.descriptionText,
+        fields?.serviceNames,
+        fields?.metadataKeywords
+    ]
+        .map((item) => String(item || '').trim())
+        .filter(Boolean)
+        .join(' ');
+
+    const matchedCategories = new Set();
+
+    Object.entries(AI_SUGGEST_BROAD_CATEGORY_KEYWORDS).forEach(([categoryKey, keywords]) => {
+        if (countKeywordHits(combinedText, keywords) > 0) {
+            matchedCategories.add(categoryKey);
+        }
+    });
+
+    return [...matchedCategories];
+}
+
+function scoreVenueByAgeCategoryPolicy(fields, ageRangeKey) {
+    const policy = AI_SUGGEST_AGE_CATEGORY_POLICY[ageRangeKey] || AI_SUGGEST_AGE_CATEGORY_POLICY['18_24'];
+    const matchedCategories = resolveVenueBroadCategoryMatchesFromFields(fields);
+    const blockedCategory = policy.blocked.find((categoryKey) => matchedCategories.includes(categoryKey));
+
+    if (blockedCategory) {
+        return {
+            blocked: true,
+            score: -1000,
+            matchedCategories,
+            reasons: [`Filtered for age group: excludes ${AI_SUGGEST_BROAD_CATEGORY_LABELS[blockedCategory] || blockedCategory}`]
+        };
+    }
+
+    let score = 0;
+    const priorityMatches = policy.priority.filter((categoryKey) => matchedCategories.includes(categoryKey));
+    priorityMatches.forEach((categoryKey, index) => {
+        score += Math.max(0.65, 2.2 - index * 0.35);
+    });
+
+    if (ageRangeKey === '13_17') {
+        const safeHits = countKeywordHits(fields.fullText, AI_SUGGEST_SAFE_PUBLIC_KEYWORDS);
+        if (safeHits > 0) {
+            score += 0.9 + Math.min(0.8, safeHits * 0.18);
+        }
+    }
+
+    return {
+        blocked: false,
+        score,
+        matchedCategories,
+        reasons: priorityMatches.length
+            ? [`Age priority: ${priorityMatches.slice(0, 2).map((categoryKey) => AI_SUGGEST_BROAD_CATEGORY_LABELS[categoryKey] || categoryKey).join(', ')}`]
+            : []
+    };
+}
+
+function scoreVenueByCurrentTimeContext(fields, currentTimeWindowKey, isOpenNow) {
+    if (!currentTimeWindowKey) {
+        return { score: 0, reasons: [] };
+    }
+
+    const matchedCategories = resolveVenueBroadCategoryMatchesFromFields(fields);
+    const prioritizedCategories = AI_SUGGEST_TIME_WINDOW_CATEGORY_PRIORITIES[currentTimeWindowKey] || [];
+    let score = 0;
+    const reasons = [];
+
+    prioritizedCategories.forEach((categoryKey, index) => {
+        if (matchedCategories.includes(categoryKey)) {
+            score += Math.max(0.45, 1.45 - index * 0.2);
+        }
+    });
+
+    if (currentTimeWindowKey === 'late_night' && isOpenNow) {
+        score += 0.5;
+    }
+
+    if (score > 0) {
+        reasons.push(`Good for ${resolveTimeWindowLabel(currentTimeWindowKey)}`);
+    }
+
+    return { score, reasons };
+}
+
+function resolveVenueSemanticSignals(fields) {
+    const matchedSignals = new Set();
+
+    Object.entries(VENUE_SEMANTIC_SIGNAL_KEYWORDS).forEach(([signalKey, keywords]) => {
+        const fieldHits = scoreKeywordHitsByVenueFields(fields, keywords);
+        const weightedScore = resolveWeightedFieldHitScore(fieldHits);
+        const decisiveHits = fieldHits.nameHits + fieldHits.categoryHits + fieldHits.serviceHits;
+
+        if (weightedScore >= 1.1 || decisiveHits > 0) {
+            matchedSignals.add(signalKey);
+        }
+    });
+
+    const matchedCategories = resolveVenueBroadCategoryMatchesFromFields(fields);
+    if (matchedCategories.includes('coffee_drinks')) {
+        matchedSignals.add('beverage_focused');
+        matchedSignals.add('chill');
+    }
+    if (matchedCategories.includes('dining')) {
+        matchedSignals.add('dining_focused');
+    }
+    if (matchedCategories.includes('entertainment')) {
+        matchedSignals.add('entertainment_focused');
+    }
+    if (matchedCategories.includes('travel_attractions')) {
+        matchedSignals.add('outdoor');
+        matchedSignals.add('scenic');
+    }
+    if (matchedCategories.includes('lounge')) {
+        matchedSignals.add('nightlife');
+        matchedSignals.add('chill');
+    }
+    if (matchedCategories.includes('accommodation')) {
+        matchedSignals.add('long_stay');
+    }
+
+    return [...matchedSignals];
+}
+
+function scoreVenueByServiceAffinity(fields, preference) {
+    const preferredGender = String(preference?.preferredGender || '').trim().toLowerCase();
+    const interestKeys = Array.isArray(preference?.interests) ? preference.interests : [];
+    const serviceText = [
+        fields?.serviceNames,
+        fields?.metadataKeywords
+    ]
+        .map((item) => String(item || '').trim())
+        .filter(Boolean)
+        .join(' ');
+
+    if (!serviceText) {
+        return { score: 0, reasons: [] };
+    }
+
+    let score = 0;
+    const reasons = [];
+    const serviceInterestHits = interestKeys.reduce((total, interestKey) => {
+        const interestKeywords = [
+            ...(USER_PREFERENCE_INTEREST_KEYWORDS[interestKey] || []),
+            USER_PREFERENCE_INTEREST_MAP[interestKey] || interestKey
+        ];
+        return total + countKeywordHits(serviceText, interestKeywords);
+    }, 0);
+
+    if (serviceInterestHits > 0) {
+        score += Math.min(2.4, 0.95 + serviceInterestHits * 0.26);
+        reasons.push('Services align with your interests');
+    }
+
+    const semanticServiceHits = interestKeys.reduce((total, interestKey) => {
+        const semanticKeywords = (USER_PREFERENCE_INTEREST_SEMANTIC_SIGNALS[interestKey] || [])
+            .flatMap((signalKey) => VENUE_SEMANTIC_SIGNAL_KEYWORDS[signalKey] || []);
+        return total + countKeywordHits(serviceText, semanticKeywords);
+    }, 0);
+
+    if (semanticServiceHits > 0) {
+        score += Math.min(2.7, 0.85 + semanticServiceHits * 0.24);
+        reasons.push('Services match your lifestyle');
+    }
+
+    if (preferredGender === 'female') {
+        const comfortHits = countKeywordHits(serviceText, ['wellness', 'spa', 'quiet', 'family', 'kid friendly', 'an toan', 'yen tinh']);
+        if (comfortHits > 0) {
+            score += Math.min(0.5, comfortHits * 0.12);
+        }
+    } else if (preferredGender === 'male') {
+        const activeHits = countKeywordHits(serviceText, ['sports', 'gym', 'billiard', 'football', 'parking', 'outdoor']);
+        if (activeHits > 0) {
+            score += Math.min(0.45, activeHits * 0.1);
+        }
+    }
+
+    return { score, reasons };
+}
+
+function scoreVenueByPopularitySignals(venue) {
+    const ratingValue = Number(venue?.average_rating || venue?.averageRating || 0);
+    const reviewCount = Number(venue?.total_reviews || venue?.totalReviews || 0);
+
+    const ratingScore = Number.isFinite(ratingValue)
+        ? Math.max(0, Math.min(1, ratingValue / 5)) * 0.95
+        : 0;
+    const reviewScore = Number.isFinite(reviewCount) && reviewCount > 0
+        ? Math.min(0.95, Math.log10(reviewCount + 1) * 0.38)
+        : 0;
+
+    return {
+        score: ratingScore + reviewScore,
+        reason: Number.isFinite(reviewCount) && reviewCount >= 8
+            ? 'Popular with strong review activity'
+            : (ratingScore > 0.7 ? 'Strong rating signal' : '')
+    };
+}
+
+function scoreVenueByHotPromotion(venue) {
+    const isHot = Boolean(venue?.featuredPromotion?.isHot);
+    if (!isHot) {
+        return { score: 0, reason: '' };
+    }
+
+    return {
+        score: 0.85,
+        reason: 'HOT venue bonus'
+    };
+}
+
+function scoreVenueByInterestSemanticAffinity(fields, interestKeys = []) {
+    const matchedSignals = resolveVenueSemanticSignals(fields);
+    let score = 0;
+    const matchedInterestLabels = [];
+    const matchedSignalLabels = [];
+
+    interestKeys.forEach((interestKey) => {
+        const preferredSignals = USER_PREFERENCE_INTEREST_SEMANTIC_SIGNALS[interestKey] || [];
+        const signalHits = preferredSignals.filter((signalKey) => matchedSignals.includes(signalKey));
+
+        if (signalHits.length) {
+            signalHits.forEach((signalKey, index) => {
+                score += Math.max(0.95, 2.05 - index * 0.24);
+                if (index < 2) {
+                    matchedSignalLabels.push(VENUE_SEMANTIC_SIGNAL_LABELS[signalKey] || signalKey);
+                }
+            });
+            matchedInterestLabels.push(USER_PREFERENCE_INTEREST_MAP[interestKey] || interestKey);
+        }
+
+        const semanticKeywords = preferredSignals.flatMap((signalKey) => VENUE_SEMANTIC_SIGNAL_KEYWORDS[signalKey] || []);
+        if (semanticKeywords.length) {
+            const fieldHits = scoreKeywordHitsByVenueFields(fields, semanticKeywords);
+            const weightedFieldScore = resolveWeightedFieldHitScore(fieldHits);
+            if (weightedFieldScore > 0) {
+                score += Math.min(3.1, weightedFieldScore * 0.42);
+            }
+        }
+    });
+
+    return {
+        score,
+        matchedSignals,
+        reasons: matchedInterestLabels.length
+            ? [`Lifestyle fit: ${[...new Set(matchedSignalLabels)].slice(0, 2).join(', ')}`]
+            : []
+    };
+}
+
+function buildUserProfileCategoryWeightMap(preference) {
+    const weights = new Map();
+    const addWeight = (categoryKey, value) => {
+        if (!categoryKey || !Number.isFinite(Number(value)) || Number(value) <= 0) {
+            return;
+        }
+
+        weights.set(categoryKey, Number((Number(weights.get(categoryKey) || 0) + Number(value)).toFixed(4)));
+    };
+
+    const agePriority = AI_SUGGEST_AGE_CATEGORY_POLICY[String(preference?.ageRangeKey || '').trim()]?.priority || [];
+    agePriority.forEach((categoryKey, index) => {
+        addWeight(categoryKey, Math.max(0.45, 1.2 - index * 0.18));
+    });
+
+    const interestKeys = Array.isArray(preference?.interests) ? preference.interests : [];
+    interestKeys.forEach((interestKey) => {
+        const preferredCategories = USER_PREFERENCE_INTEREST_CATEGORY_AFFINITY[interestKey] || [];
+        preferredCategories.forEach((categoryKey, index) => {
+            addWeight(categoryKey, Math.max(1.2, 3.1 - index * 0.45));
+        });
+    });
+
+    return weights;
+}
+
+function scoreVenueByProfileCategoryRelevance(fields, preference) {
+    const matchedCategories = resolveVenueBroadCategoryMatchesFromFields(fields);
+    const categoryWeightMap = buildUserProfileCategoryWeightMap(preference);
+    const weightedMatches = matchedCategories
+        .map((categoryKey) => ({
+            categoryKey,
+            weight: Number(categoryWeightMap.get(categoryKey) || 0)
+        }))
+        .sort((first, second) => second.weight - first.weight);
+
+    let score = 0;
+    let penalty = 0;
+
+    weightedMatches.forEach((match, index) => {
+        if (match.weight <= 0) {
+            return;
+        }
+
+        const multiplier = index === 0 ? 1.18 : index === 1 ? 0.82 : 0.55;
+        score += match.weight * multiplier;
+    });
+
+    const dominantMatches = weightedMatches.filter((match) => match.weight >= 1.35);
+    if (dominantMatches.length >= 2) {
+        score += 0.9;
+    }
+
+    const strongestMatchWeight = Number(weightedMatches[0]?.weight || 0);
+    const strongestProfileWeight = Math.max(0, ...Array.from(categoryWeightMap.values()));
+
+    if (matchedCategories.length && strongestProfileWeight >= 1.75 && strongestMatchWeight < 0.95) {
+        penalty = Math.min(2.4, 1.15 + matchedCategories.length * 0.28);
+    }
+
+    return {
+        score: Number(score.toFixed(4)),
+        penalty: Number(penalty.toFixed(4)),
+        matchedCategories,
+        dominantCategories: dominantMatches.map((match) => match.categoryKey),
+        reasons: dominantMatches.length
+            ? [`Profile fit: ${dominantMatches.slice(0, 2).map((match) => AI_SUGGEST_BROAD_CATEGORY_LABELS[match.categoryKey] || match.categoryKey).join(', ')}`]
+            : []
+    };
+}
+
+function scoreVenueByInterestCategoryAffinity(fields, interestKeys = []) {
+    const matchedCategories = resolveVenueBroadCategoryMatchesFromFields(fields);
+    let score = 0;
+    const matchedInterestLabels = [];
+
+    interestKeys.forEach((interestKey) => {
+        const preferredCategories = USER_PREFERENCE_INTEREST_CATEGORY_AFFINITY[interestKey] || [];
+        const affinityHits = preferredCategories.filter((categoryKey) => matchedCategories.includes(categoryKey));
+        if (affinityHits.length) {
+            affinityHits.forEach((_, index) => {
+                score += Math.max(1.1, 2.15 - index * 0.38);
+            });
+            matchedInterestLabels.push(USER_PREFERENCE_INTEREST_MAP[interestKey] || interestKey);
+        }
+    });
+
+    return {
+        score,
+        reasons: matchedInterestLabels.length
+            ? [`Interest affinity: ${[...new Set(matchedInterestLabels)].slice(0, 2).join(', ')}`]
+            : []
+    };
+}
+
+function shouldLogAiSuggestDebug() {
+    const rawValue = String(process.env.AI_SUGGEST_DEBUG_LOGS || process.env.RECOMMENDATION_DEBUG_LOGS || '')
+        .trim()
+        .toLowerCase();
+
+    return ['1', 'true', 'yes', 'on'].includes(rawValue);
+}
+
+function logAiSuggestionDebugSnapshot(scope, preference, venues = []) {
+    if (!shouldLogAiSuggestDebug()) {
+        return;
+    }
+
+    const snapshot = {
+        scope,
+        userId: String(preference?.userId || ''),
+        ageRangeKey: String(preference?.ageRangeKey || ''),
+        preferredGender: String(preference?.preferredGender || ''),
+        interests: Array.isArray(preference?.interests) ? preference.interests : [],
+        topVenues: (Array.isArray(venues) ? venues : []).slice(0, 6).map((venue) => ({
+            id: venue?.id,
+            name: venue?.name || venue?.title || '',
+            score: Number(venue?.finalScore ?? venue?.recommendationScore ?? 0),
+            distanceKm: venue?.distanceKm,
+            isOpenNow: venue?.isOpenNow,
+            breakdown: venue?.recommendationBreakdown || null
+        }))
+    };
+
+    console.log(`[AI_SUGGEST_DEBUG] ${JSON.stringify(snapshot)}`);
+}
+
+function buildAiSuggestionProfileSignature(preference) {
+    const payload = {
+        ageRangeKey: String(preference?.ageRangeKey || '').trim(),
+        preferredGender: String(preference?.preferredGender || '').trim(),
+        interests: normalizePreferenceStringList(preference?.interests).sort(),
+        onboardingCompleted: Boolean(preference?.onboardingCompleted),
+        updatedAt: String(preference?.updatedAt || '').trim(),
+        lastKnownLatitude: Number.isFinite(Number(preference?.lastKnownLatitude))
+            ? Number(preference.lastKnownLatitude).toFixed(3)
+            : '',
+        lastKnownLongitude: Number.isFinite(Number(preference?.lastKnownLongitude))
+            ? Number(preference.lastKnownLongitude).toFixed(3)
+            : ''
+    };
+
+    return crypto.createHash('sha1').update(JSON.stringify(payload)).digest('hex');
+}
+
+function buildAiSuggestionResponseCacheKey(options = {}) {
+    const normalizedPayload = {
+        scope: String(options.scope || 'base').trim(),
+        userId: String(options.userId || '').trim(),
+        profileSignature: String(options.profileSignature || '').trim(),
+        limit: Number(options.limit) || 0,
+        latitude: Number.isFinite(Number(options.latitude)) ? Number(options.latitude).toFixed(3) : '',
+        longitude: Number.isFinite(Number(options.longitude)) ? Number(options.longitude).toFixed(3) : '',
+        weatherMain: normalizeRecommendationText(options.weatherMain),
+        currentTimeWindowKey: String(options.currentTimeWindowKey || '').trim(),
+        preferOpenNow: Boolean(options.preferOpenNow),
+        query: normalizeRecommendationText(options.query),
+        baseVenueIds: Array.isArray(options.baseVenueIds)
+            ? [...new Set(
+                options.baseVenueIds
+                    .map((value) => Number(value))
+                    .filter((value) => Number.isFinite(value) && value > 0)
+            )].sort((first, second) => first - second)
+            : []
+    };
+
+    const digest = crypto.createHash('sha1').update(JSON.stringify(normalizedPayload)).digest('hex');
+    return `${normalizedPayload.scope}:${normalizedPayload.userId}:${digest}`;
+}
+
+function invalidateAiSuggestionResponseCacheByUserId(userId) {
+    const normalizedUserId = String(userId || '').trim();
+    if (!normalizedUserId) {
+        return;
+    }
+
+    Array.from(aiSuggestionResponseCache.keys()).forEach((cacheKey) => {
+        if (String(cacheKey || '').includes(`:${normalizedUserId}:`)) {
+            aiSuggestionResponseCache.delete(cacheKey);
+        }
+    });
+}
 
 function normalizePreferenceStringList(input) {
     if (!Array.isArray(input)) {
@@ -5670,6 +6370,34 @@ function resolveVenueMetadataImageCandidates(metadata) {
     ];
 }
 
+function extractGalleryImageUrlsFromMetadata(metadata) {
+    const normalizedMetadata = normalizeVenueMetadataObject(metadata);
+    return mergeUniqueVenueImages(resolveVenueMetadataImageCandidates(normalizedMetadata)).slice(0, 6);
+}
+
+function buildPersistedVenueMetadata(metadata) {
+    const source = normalizeVenueMetadataObject(metadata);
+    const galleryImageUrls = extractGalleryImageUrlsFromMetadata(source);
+    const nextMetadata = {
+        ...source,
+        imagesCount: galleryImageUrls.length
+    };
+
+    delete nextMetadata.galleryImages;
+    delete nextMetadata.images;
+    delete nextMetadata.imageUrls;
+    delete nextMetadata.photos;
+    delete nextMetadata.photoUrls;
+    delete nextMetadata.mapImages;
+    delete nextMetadata.mapImageUrls;
+    delete nextMetadata.map_images;
+    delete nextMetadata.map_image_urls;
+    delete nextMetadata.mapImage;
+    delete nextMetadata.map_image;
+
+    return nextMetadata;
+}
+
 function mergeUniqueVenueImages(candidates = []) {
     const imageByKey = new Map();
 
@@ -5789,6 +6517,45 @@ async function loadVenueGalleryImageUrls(venueId) {
     } catch (error) {
         if (error?.code === '42P01') {
             return [];
+        }
+
+        throw error;
+    }
+}
+
+async function syncVenueGalleryImages(dbClient, venueId, imageUrls = []) {
+    const normalizedVenueId = Number(venueId);
+    if (!Number.isFinite(normalizedVenueId)) {
+        return;
+    }
+
+    const normalizedImageUrls = mergeUniqueVenueImages(normalizeStringArray(imageUrls)).slice(0, 6);
+
+    try {
+        await dbClient.query(
+            `
+                DELETE FROM venue_images
+                WHERE venue_id = $1
+            `,
+            [normalizedVenueId]
+        );
+
+        if (!normalizedImageUrls.length) {
+            return;
+        }
+
+        for (let index = 0; index < normalizedImageUrls.length; index += 1) {
+            await dbClient.query(
+                `
+                    INSERT INTO venue_images (venue_id, image_url, image_type, display_order)
+                    VALUES ($1, $2, 'gallery', $3)
+                `,
+                [normalizedVenueId, normalizedImageUrls[index], index]
+            );
+        }
+    } catch (error) {
+        if (error?.code === '42P01') {
+            return;
         }
 
         throw error;
@@ -5990,6 +6757,155 @@ function toMinutesFromHHmm(value) {
     return hour * 60 + minute;
 }
 
+function buildVenueScheduleWindow(scheduleItem) {
+    const startMinutes = toMinutesFromHHmm(scheduleItem?.open);
+    const endMinutes = toMinutesFromHHmm(scheduleItem?.close);
+    const isValid = !scheduleItem?.off && startMinutes !== null && endMinutes !== null;
+
+    return {
+        ...scheduleItem,
+        startMinutes,
+        endMinutes,
+        isValid,
+        isOvernight: isValid && endMinutes <= startMinutes
+    };
+}
+
+function isVenueScheduleWindowOpen(nowMinutes, window) {
+    if (!window?.isValid) {
+        return false;
+    }
+
+    if (!window.isOvernight) {
+        return nowMinutes >= window.startMinutes && nowMinutes < window.endMinutes;
+    }
+
+    return nowMinutes >= window.startMinutes || nowMinutes < window.endMinutes;
+}
+
+function resolveMinutesUntilWindowClose(nowMinutes, window) {
+    if (!window?.isValid) {
+        return null;
+    }
+
+    if (!window.isOvernight) {
+        return window.endMinutes - nowMinutes;
+    }
+
+    if (nowMinutes < window.endMinutes) {
+        return window.endMinutes - nowMinutes;
+    }
+
+    return (24 * 60 - nowMinutes) + window.endMinutes;
+}
+
+function formatVenueDurationCompact(totalMinutes) {
+    const normalized = Math.max(1, Math.floor(Number(totalMinutes) || 0));
+    const hours = Math.floor(normalized / 60);
+    const minutes = normalized % 60;
+
+    if (hours && minutes) {
+        return `${hours}h ${minutes}m`;
+    }
+
+    if (hours) {
+        return `${hours}h`;
+    }
+
+    return `${minutes}m`;
+}
+
+function formatVenueDurationWords(totalMinutes) {
+    const normalized = Math.max(1, Math.floor(Number(totalMinutes) || 0));
+    const hours = Math.floor(normalized / 60);
+    const minutes = normalized % 60;
+    const parts = [];
+
+    if (hours) {
+        parts.push(`${hours} hour${hours === 1 ? '' : 's'}`);
+    }
+
+    if (minutes) {
+        parts.push(`${minutes} minute${minutes === 1 ? '' : 's'}`);
+    }
+
+    return parts.join(' ');
+}
+
+function findNextVenueOpeningWindow(windows, todayIndex, nowMinutes) {
+    for (let offset = 0; offset < windows.length; offset += 1) {
+        const index = (todayIndex + offset) % windows.length;
+        const window = windows[index];
+
+        if (!window?.isValid) {
+            continue;
+        }
+
+        if (offset === 0) {
+            if (nowMinutes < window.startMinutes) {
+                return {
+                    ...window,
+                    daysAway: 0,
+                    relativeDay: 'today',
+                    totalMinutesAway: window.startMinutes - nowMinutes
+                };
+            }
+
+            if (window.isOvernight && nowMinutes >= window.endMinutes && nowMinutes < window.startMinutes) {
+                return {
+                    ...window,
+                    daysAway: 0,
+                    relativeDay: 'today',
+                    totalMinutesAway: window.startMinutes - nowMinutes
+                };
+            }
+
+            continue;
+        }
+
+        return {
+            ...window,
+            daysAway: offset,
+            relativeDay: offset === 1 ? 'tomorrow' : 'later',
+            totalMinutesAway: (24 * 60 - nowMinutes) + ((offset - 1) * 24 * 60) + window.startMinutes
+        };
+    }
+
+    return null;
+}
+
+function buildVenueClosedPrimaryLabel(nextOpen) {
+    if (!nextOpen) {
+        return 'Closed';
+    }
+
+    if (nextOpen.daysAway === 0) {
+        return `Closed · Opens at ${nextOpen.open}`;
+    }
+
+    if (nextOpen.daysAway === 1) {
+        return `Closed · Opens at ${nextOpen.open} tomorrow`;
+    }
+
+    return `Closed · Opens ${nextOpen.label} at ${nextOpen.open}`;
+}
+
+function buildVenueClosedSecondaryLabel(nextOpen) {
+    if (!nextOpen) {
+        return '';
+    }
+
+    if (nextOpen.daysAway === 0) {
+        return `Opens in ${formatVenueDurationWords(nextOpen.totalMinutesAway)}`;
+    }
+
+    if (nextOpen.daysAway === 1) {
+        return `Opens at ${nextOpen.open} tomorrow`;
+    }
+
+    return `Opens ${nextOpen.label} at ${nextOpen.open}`;
+}
+
 function extractVenueWeeklySchedule(metadata) {
     const normalizedMetadata = normalizeVenueMetadataObject(metadata);
     const source = resolveWeeklyScheduleSource(normalizedMetadata);
@@ -6031,7 +6947,17 @@ function buildVenueRealtimeOpeningPayload(metadata, now = new Date()) {
                 dayLabel: null,
                 isOpen: false,
                 start: 'N/A',
-                end: 'N/A'
+                end: 'N/A',
+                status: 'no_data',
+                minutesUntilClose: null,
+                minutesUntilOpen: null,
+                nextOpen: null,
+                badge: {
+                    tone: 'unknown',
+                    pulse: 'none',
+                    primaryLabel: 'Hours unavailable',
+                    secondaryLabel: ''
+                }
             },
             weeklySchedule: []
         };
@@ -6041,30 +6967,100 @@ function buildVenueRealtimeOpeningPayload(metadata, now = new Date()) {
     const todayKey = zonedNow.todayKey;
     const nowMinutes = zonedNow.nowMinutes;
 
-    const weeklyScheduleWithFlags = weeklySchedule.map((item) => ({
+    const todayIndex = Math.max(0, WEEKLY_SCHEDULE_DAYS.findIndex((item) => item.key === todayKey));
+    const weeklyScheduleWithFlags = weeklySchedule.map((item, index) => ({
         ...item,
-        isToday: item.key === todayKey
+        isToday: index === todayIndex
     }));
+    const windows = weeklyScheduleWithFlags.map((item) => buildVenueScheduleWindow(item));
+    const todayWindow = windows[todayIndex] || windows[0];
+    const previousWindow = windows[(todayIndex - 1 + windows.length) % windows.length] || null;
 
-    const todaySchedule = weeklyScheduleWithFlags.find((item) => item.key === todayKey) || weeklyScheduleWithFlags[0];
-    const startMinutes = toMinutesFromHHmm(todaySchedule.open);
-    const endMinutes = toMinutesFromHHmm(todaySchedule.close);
-    const isOpenNow =
-        !todaySchedule.off &&
-        startMinutes !== null &&
-        endMinutes !== null &&
-        nowMinutes >= startMinutes &&
-        nowMinutes < endMinutes;
+    let activeWindow = null;
+    if (previousWindow?.isValid && previousWindow.isOvernight && nowMinutes < previousWindow.endMinutes) {
+        activeWindow = previousWindow;
+    } else if (isVenueScheduleWindowOpen(nowMinutes, todayWindow)) {
+        activeWindow = todayWindow;
+    }
+
+    const nextOpen = findNextVenueOpeningWindow(windows, todayIndex, nowMinutes);
+    const defaultCurrentWindow = activeWindow || todayWindow || weeklyScheduleWithFlags[0];
+    let badge = {
+        tone: 'closed',
+        pulse: 'none',
+        primaryLabel: 'Closed',
+        secondaryLabel: ''
+    };
+    let status = 'closed';
+    let minutesUntilClose = null;
+    let minutesUntilOpen = nextOpen?.totalMinutesAway ?? null;
+
+    if (activeWindow) {
+        minutesUntilClose = resolveMinutesUntilWindowClose(nowMinutes, activeWindow);
+        const isClosingSoon = Number.isFinite(minutesUntilClose) && minutesUntilClose <= 30;
+        status = isClosingSoon ? 'closing_soon' : 'open';
+        badge = {
+            tone: isClosingSoon ? 'closing-soon' : 'open',
+            pulse: isClosingSoon ? 'fast' : 'slow',
+            primaryLabel: isClosingSoon
+                ? `Closing soon · ${Math.max(1, Math.floor(minutesUntilClose))} minutes left`
+                : `Open · Closes at ${activeWindow.close}`,
+            secondaryLabel: isClosingSoon
+                ? `Closes at ${activeWindow.close}`
+                : `${formatVenueDurationCompact(minutesUntilClose)} left`
+        };
+        minutesUntilOpen = null;
+    } else if (todayWindow?.isValid && nowMinutes < todayWindow.startMinutes) {
+        status = 'opens_later_today';
+        minutesUntilOpen = todayWindow.startMinutes - nowMinutes;
+        badge = {
+            tone: 'closed',
+            pulse: 'none',
+            primaryLabel: `Closed · Opens at ${todayWindow.open}`,
+            secondaryLabel: `Opens in ${formatVenueDurationWords(minutesUntilOpen)}`
+        };
+    } else if (!todayWindow?.isValid) {
+        status = 'closed_today';
+        badge = {
+            tone: 'closed',
+            pulse: 'none',
+            primaryLabel: 'Closed today',
+            secondaryLabel: buildVenueClosedSecondaryLabel(nextOpen)
+        };
+    } else {
+        status = 'closed';
+        badge = {
+            tone: 'closed',
+            pulse: 'none',
+            primaryLabel: buildVenueClosedPrimaryLabel(nextOpen),
+            secondaryLabel: buildVenueClosedSecondaryLabel(nextOpen)
+        };
+    }
 
     return {
         timezone: VENUE_OPENING_TIMEZONE,
         serverTime: now.toISOString(),
         current: {
-            dayKey: todaySchedule.key,
-            dayLabel: todaySchedule.label,
-            isOpen: isOpenNow,
-            start: todaySchedule.open,
-            end: todaySchedule.close
+            dayKey: defaultCurrentWindow?.key || null,
+            dayLabel: defaultCurrentWindow?.label || null,
+            isOpen: Boolean(activeWindow),
+            start: defaultCurrentWindow?.open || 'N/A',
+            end: defaultCurrentWindow?.close || 'N/A',
+            status,
+            minutesUntilClose,
+            minutesUntilOpen,
+            nextOpen: nextOpen
+                ? {
+                    dayKey: nextOpen.key,
+                    dayLabel: nextOpen.label,
+                    start: nextOpen.open,
+                    end: nextOpen.close,
+                    daysAway: nextOpen.daysAway,
+                    relativeDay: nextOpen.relativeDay,
+                    totalMinutesAway: nextOpen.totalMinutesAway
+                }
+                : null,
+            badge
         },
         weeklySchedule: weeklyScheduleWithFlags
     };
@@ -6913,7 +7909,7 @@ async function generateWardIdFromName(name) {
                 await pool.query(
                     `
                         UPDATE user_notifications
-                        SET title = COALESCE(NULLIF(BTRIM(title), ''), 'Thông báo')
+                        SET title = COALESCE(NULLIF(BTRIM(title), ''), 'Notification')
                         WHERE title IS NULL OR BTRIM(title) = ''
                     `
                 );
@@ -7731,10 +8727,12 @@ async function generateWardIdFromName(name) {
         const PUBLIC_WARDS_CACHE_TTL_MS = 30000;
         const PUBLIC_VENUES_COMPACT_CACHE_TTL_MS = 3000;
         const PUBLIC_VENUE_DETAIL_CACHE_TTL_MS = 8000;
-    const PUBLIC_VENUE_COMMUNITY_CACHE_TTL_MS = 5000;
+        const PUBLIC_VENUE_COMMUNITY_CACHE_TTL_MS = 5000;
+        const PUBLIC_TRENDING_VENUES_CACHE_TTL_MS = 60 * 1000;
         const OPEN_WEATHER_ENDPOINT = 'https://api.openweathermap.org/data/2.5/weather';
         const OPEN_WEATHER_TIMEOUT_MS = 7000;
         const OPEN_WEATHER_CACHE_TTL_MS = 5 * 60 * 1000;
+        const AI_SUGGESTION_RESPONSE_CACHE_TTL_MS = 90 * 1000;
         const OPEN_WEATHER_DEFAULT_LATITUDE = 16.0544;
         const OPEN_WEATHER_DEFAULT_LONGITUDE = 108.2022;
         const RECOMMENDATION_REFINE_AI_ENDPOINT = 'https://api.openai.com/v1/chat/completions';
@@ -7974,14 +8972,13 @@ async function generateWardIdFromName(name) {
             return statsByVenueId.get(Number(venueId)) || null;
         }
 
-        function buildUserPreferenceOptionsPayload() {
-            return {
-                ageRanges: USER_PREFERENCE_AGE_RANGES,
-                genders: USER_PREFERENCE_GENDERS,
-                visitTimes: USER_PREFERENCE_TIME_WINDOWS,
-                interestsByAgeRange: USER_PREFERENCE_INTERESTS_BY_AGE
-            };
-        }
+function buildUserPreferenceOptionsPayload() {
+    return {
+        ageRanges: USER_PREFERENCE_AGE_RANGES,
+        genders: USER_PREFERENCE_GENDERS,
+        interestsByAgeRange: USER_PREFERENCE_INTERESTS_BY_AGE
+    };
+}
 
         function mapUserPreferenceRow(row) {
             if (!row) {
@@ -8033,6 +9030,7 @@ async function generateWardIdFromName(name) {
             return String(value || '')
                 .toLowerCase()
                 .normalize('NFD')
+                .replace(/[đ]/g, 'd')
                 .replace(/[\u0300-\u036f]/g, '')
                 .replace(/[^a-z0-9\s]/g, ' ')
                 .replace(/\s+/g, ' ')
@@ -8194,10 +9192,10 @@ async function generateWardIdFromName(name) {
         }
 
         function scoreVenueByUserPreference(venue, preference, userLatitude, userLongitude, context = {}) {
-            const text = buildVenueRecommendationText(venue);
+            const venueSearchFields = buildVenueSearchFields(venue);
+            const text = venueSearchFields.fullText || buildVenueRecommendationText(venue);
             const ageRangeKey = preference.ageRangeKey;
             const interestKeys = preference.interests;
-            const visitTimes = preference.preferredTimes;
             const currentTime = context.currentTime instanceof Date ? context.currentTime : new Date();
             const currentTimeWindowKey =
                 String(context.currentTimeWindowKey || '').trim() || resolveCurrentPreferenceTimeWindowKey(currentTime);
@@ -8213,14 +9211,19 @@ async function generateWardIdFromName(name) {
                     : 'N/A - N/A';
 
             let interestScore = 0;
-            let timeScore = 0;
+            let interestSemanticScore = 0;
             let ageScore = 0;
             let genderScore = 0;
             let nearbyScore = 0;
             let openingScore = 0;
+            let categoryScore = 0;
+            let contextualTimeScore = 0;
+            let serviceAffinityScore = 0;
+            let interestAffinityScore = 0;
+            let profileRelevanceScore = 0;
+            let profileMismatchPenalty = 0;
 
             const matchedInterestLabels = [];
-            const matchedTimeLabels = [];
             let ageReason = '';
 
             interestKeys.forEach((interestKey) => {
@@ -8228,32 +9231,32 @@ async function generateWardIdFromName(name) {
                     ...(USER_PREFERENCE_INTEREST_KEYWORDS[interestKey] || []),
                     USER_PREFERENCE_INTEREST_MAP[interestKey] || interestKey
                 ];
-                const hits = countKeywordHits(text, interestKeywords);
+                const interestFieldHits = scoreKeywordHitsByVenueFields(venueSearchFields, interestKeywords);
+                const weightedInterestHits = resolveWeightedFieldHitScore(interestFieldHits);
 
-                if (hits > 0) {
-                    interestScore += 1 + Math.min(hits, 2) * 0.2;
+                if (weightedInterestHits > 0) {
+                    interestScore += Math.min(5.4, 0.9 + weightedInterestHits * 0.92);
                     matchedInterestLabels.push(USER_PREFERENCE_INTEREST_MAP[interestKey] || interestKey);
                 }
             });
 
-            visitTimes.forEach((timeWindowKey) => {
-                const timeKeywords = USER_PREFERENCE_TIME_KEYWORDS[timeWindowKey] || [];
-                const hits = countKeywordHits(text, timeKeywords);
-                if (hits > 0) {
-                    timeScore += 0.6 + Math.min(hits, 2) * 0.15;
-                    const label = resolveTimeWindowLabel(timeWindowKey);
-                    matchedTimeLabels.push(label);
-                }
-            });
-
-            if (currentTimeWindowKey && visitTimes.includes(currentTimeWindowKey)) {
-                timeScore += 0.95;
-                matchedTimeLabels.push(`Now (${resolveTimeWindowLabel(currentTimeWindowKey)})`);
-            }
-
             const adultHits = countKeywordHits(text, USER_PREFERENCE_ADULT_KEYWORDS);
             const familyHits = countKeywordHits(text, USER_PREFERENCE_FAMILY_KEYWORDS);
             const teenFriendlyHits = countKeywordHits(text, USER_PREFERENCE_TEEN_FRIENDLY_KEYWORDS);
+
+            const ageCategoryPolicy = scoreVenueByAgeCategoryPolicy(venueSearchFields, ageRangeKey);
+            if (ageCategoryPolicy.blocked) {
+                return {
+                    score: -1000,
+                    distanceKm: null,
+                    isOpenNow,
+                    openingTimeRange,
+                    hasRealtimeSchedule,
+                    reasons: ageCategoryPolicy.reasons
+                };
+            }
+
+            categoryScore += ageCategoryPolicy.score;
 
             if (ageRangeKey === '13_17' && adultHits > 0) {
                 return {
@@ -8297,15 +9300,20 @@ async function generateWardIdFromName(name) {
                 genderScore -= adultHits * 0.08;
             }
 
+            const serviceAffinity = scoreVenueByServiceAffinity(venueSearchFields, preference);
+            serviceAffinityScore += serviceAffinity.score;
+            const interestCategoryAffinity = scoreVenueByInterestCategoryAffinity(venueSearchFields, interestKeys);
+            interestAffinityScore += interestCategoryAffinity.score;
+            const interestSemanticAffinity = scoreVenueByInterestSemanticAffinity(venueSearchFields, interestKeys);
+            interestSemanticScore += interestSemanticAffinity.score;
+            const profileCategoryRelevance = scoreVenueByProfileCategoryRelevance(venueSearchFields, preference);
+            profileRelevanceScore += profileCategoryRelevance.score;
+            profileMismatchPenalty += profileCategoryRelevance.penalty;
+
             const distanceKm = computeDistanceKm(userLatitude, userLongitude, venue.latitude, venue.longitude);
             if (Number.isFinite(distanceKm)) {
-                nearbyScore = Math.max(0, 1.2 - distanceKm / 12);
+                nearbyScore = Math.max(0, 1.25 - distanceKm / 12);
             }
-
-            const ratingValue = Number(venue.average_rating || venue.averageRating || 0);
-            const ratingScore = Number.isFinite(ratingValue)
-                ? Math.max(0, Math.min(1, ratingValue / 5)) * 0.6
-                : 0;
 
             if (hasRealtimeSchedule) {
                 if (isOpenNow) {
@@ -8316,23 +9324,39 @@ async function generateWardIdFromName(name) {
             }
 
             const weatherScoring = scoreVenueByWeatherContext(venue, weatherMain);
+            const timeContextScoring = scoreVenueByCurrentTimeContext(venueSearchFields, currentTimeWindowKey, isOpenNow);
+            contextualTimeScore += timeContextScoring.score;
+            const popularityScoring = scoreVenueByPopularitySignals(venue);
+            const hotScoring = scoreVenueByHotPromotion(venue);
 
+            // Weighted recommendation score keeps the existing profile logic, then adds
+            // category policy, service affinity, live context, popularity, and HOT boost.
             const score =
-                interestScore * 2.2
-                + timeScore * 1.3
-                + ageScore
-                + genderScore
-                + nearbyScore * 2.1
-                + openingScore * 1.6
+                interestScore * 3.15
+                + interestSemanticScore * 2.35
+                + interestAffinityScore * 1.7
+                + profileRelevanceScore * 1.95
+                + ageScore * 0.7
+                + categoryScore * 0.78
+                + genderScore * 0.85
+                + serviceAffinityScore * 1.45
+                + nearbyScore * 1.9
+                + openingScore * 1.55
+                + contextualTimeScore * 1.2
                 + weatherScoring.score * 1.25
-                + ratingScore;
+                + popularityScoring.score * 0.58
+                + hotScoring.score
+                - profileMismatchPenalty * 1.65;
+            const interestCoreScore =
+                interestScore * 3.15
+                + interestSemanticScore * 2.35
+                + interestAffinityScore * 1.7
+                + serviceAffinityScore * 1.45
+                - profileMismatchPenalty * 1.65;
 
             const reasons = [];
             if (matchedInterestLabels.length) {
                 reasons.push(`Matches interests: ${[...new Set(matchedInterestLabels)].slice(0, 2).join(', ')}`);
-            }
-            if (matchedTimeLabels.length) {
-                reasons.push(`Fits your time: ${[...new Set(matchedTimeLabels)].slice(0, 2).join(', ')}`);
             }
             if (ageReason) {
                 reasons.push(ageReason);
@@ -8346,6 +9370,30 @@ async function generateWardIdFromName(name) {
             if (weatherScoring.reason) {
                 reasons.push(weatherScoring.reason);
             }
+            if (ageCategoryPolicy.reasons.length) {
+                reasons.push(...ageCategoryPolicy.reasons);
+            }
+            if (serviceAffinity.reasons.length) {
+                reasons.push(...serviceAffinity.reasons);
+            }
+            if (interestCategoryAffinity.reasons.length) {
+                reasons.push(...interestCategoryAffinity.reasons);
+            }
+            if (interestSemanticAffinity.reasons.length) {
+                reasons.push(...interestSemanticAffinity.reasons);
+            }
+            if (profileCategoryRelevance.reasons.length) {
+                reasons.push(...profileCategoryRelevance.reasons);
+            }
+            if (timeContextScoring.reasons.length) {
+                reasons.push(...timeContextScoring.reasons);
+            }
+            if (popularityScoring.reason) {
+                reasons.push(popularityScoring.reason);
+            }
+            if (hotScoring.reason) {
+                reasons.push(hotScoring.reason);
+            }
 
             return {
                 score,
@@ -8354,7 +9402,30 @@ async function generateWardIdFromName(name) {
                 openingTimeRange,
                 hasRealtimeSchedule,
                 currentTimeWindowKey,
-                reasons
+                primaryBroadCategory:
+                    profileCategoryRelevance.dominantCategories[0]
+                    || profileCategoryRelevance.matchedCategories[0]
+                    || null,
+                matchedBroadCategories: profileCategoryRelevance.matchedCategories,
+                reasons,
+                breakdown: {
+                    interestScore: Number((interestScore * 3.15).toFixed(4)),
+                    interestSemanticScore: Number((interestSemanticScore * 2.35).toFixed(4)),
+                    interestAffinityScore: Number((interestAffinityScore * 1.7).toFixed(4)),
+                    interestCoreScore: Number(interestCoreScore.toFixed(4)),
+                    profileRelevanceScore: Number((profileRelevanceScore * 1.95).toFixed(4)),
+                    profileMismatchPenalty: Number((profileMismatchPenalty * 1.65).toFixed(4)),
+                    ageScore: Number((ageScore * 0.7).toFixed(4)),
+                    categoryScore: Number((categoryScore * 0.78).toFixed(4)),
+                    genderScore: Number((genderScore * 0.85).toFixed(4)),
+                    serviceAffinityScore: Number((serviceAffinityScore * 1.45).toFixed(4)),
+                    distanceScore: Number((nearbyScore * 1.9).toFixed(4)),
+                    openingScore: Number((openingScore * 1.55).toFixed(4)),
+                    currentTimeContextScore: Number((contextualTimeScore * 1.2).toFixed(4)),
+                    weatherScore: Number((weatherScoring.score * 1.25).toFixed(4)),
+                    popularityScore: Number((popularityScoring.score * 0.58).toFixed(4)),
+                    hotBonus: Number(hotScoring.score.toFixed(4))
+                }
             };
         }
 
@@ -8550,6 +9621,7 @@ async function generateWardIdFromName(name) {
             ['bbq', ['nuong', 'bbq', 'grill']],
             ['seafood', ['hai san', 'seafood']],
             ['coffee', ['ca phe', 'cafe', 'coffee']],
+            ['drinks', ['uong nuoc', 'do uong', 'nuoc', 'drink', 'drinks', 'beverage', 'juice', 'smoothie', 'soda']],
             ['pub bar', ['quan nhau', 'nhau', 'bar', 'pub', 'beer', 'bia', 'cocktail', 'lounge', 'brewery', 'taproom']],
             ['banh mi', ['banh mi', 'sandwich']],
             ['street food', ['an vat', 'street food', 'snack', 'quan coc', 'tra chanh', 'xien', 'banh trang', 'tokbokki']],
@@ -8577,19 +9649,19 @@ async function generateWardIdFromName(name) {
             'nearby', 'nearest', 'close', 'closer', 'aroundme', 'around_me'
         ]);
 
-        const REFINE_FOOD_INTENT_PATTERN = /(?:\bquan an\b|\bnha hang\b|\bam thuc\b|\bdo an\b|\ban uong\b|\bquan nhau\b|\bnhau\b|\ban toi\b|\ban trua\b|\ban sang\b|\ban\s+vat\b|\bsnack\b|\btra\s+sua\b|\bmilk\s+tea\b|\btra\s+chanh\b|\beat(?:ing)?\b|\bfood\b|\brestaurants?\b|\beatery\b|\bdining\b|\bmeals?\b|\blunch\b|\bdinner\b|\bbreakfast\b|\bpubs?\b|\bbars?\b|\bbeer\b|\bcocktail\b|\blounge\b|\bbrewery\b)/;
+        const REFINE_FOOD_INTENT_PATTERN = /(?:\bquan an\b|\bnha hang\b|\bam thuc\b|\bdo an\b|\ban uong\b|\buong nuoc\b|\bdo uong\b|\bquan nhau\b|\bnhau\b|\ban toi\b|\ban trua\b|\ban sang\b|\ban\s+vat\b|\bsnack\b|\btra\s+sua\b|\bmilk\s+tea\b|\btra\s+chanh\b|\bjuice\b|\bsmoothie\b|\bcoffee\b|\bcafe\b|\bdrink(?:s)?\b|\bbeverage\b|\beat(?:ing)?\b|\bfood\b|\brestaurants?\b|\beatery\b|\bdining\b|\bmeals?\b|\blunch\b|\bdinner\b|\bbreakfast\b|\bpubs?\b|\bbars?\b|\bbeer\b|\bcocktail\b|\blounge\b|\bbrewery\b)/;
 
         const REFINE_FOOD_KEYWORDS = [
             'food', 'restaurant', 'dining', 'eatery', 'cuisine',
             'quan an', 'nha hang', 'am thuc', 'do an', 'an uong', 'quan nhau', 'nhau', 'pub', 'bar', 'beer', 'cocktail', 'lounge', 'brewery',
             'lau', 'nuong', 'hai san', 'bun', 'pho', 'com', 'mi quang', 'cao lau', 'banh mi',
-            'ca phe', 'cafe', 'coffee', 'tra sua', 'milk tea', 'dessert', 'an vat', 'snack',
+            'dessert', 'an vat', 'snack',
             'tra chanh', 'xien', 'banh trang', 'tokbokki', 'lap xuong', 'lap xuong nuong da'
         ];
 
         const REFINE_FOOD_CATEGORY_KEYWORDS = [
             'food', 'restaurant', 'dining', 'am thuc', 'quan an', 'nha hang',
-            'coffee', 'cafe', 'beverage', 'drink', 'do uong'
+            'street food', 'bakery', 'dessert'
         ];
 
         const REFINE_ACTIVITY_HINTS = [
@@ -8598,7 +9670,8 @@ async function generateWardIdFromName(name) {
             ['amusement', ['khu vui choi', 'vui choi', 'giai tri', 'entertainment', 'theme park', 'arcade', 'game center', 'playground']],
             ['shopping', ['mua sam', 'shopping', 'shop', 'cua hang', 'quan ao', 'thoi trang', 'giay', 'my pham', 'do gia dung', 'nha sach', 'bookstore', 'minimart', 'sieu thi']],
             ['repair', ['sua chua', 'repair', 'sua dien thoai', 'thay man hinh', 'ep kinh', 'phone repair', 'laptop repair', 'bao hanh']],
-            ['nature', ['ngoai troi', 'outdoor', 'hiking', 'trekking', 'camping', 'beach', 'bien', 'river', 'cong vien']]
+            ['nature', ['ngoai troi', 'outdoor', 'hiking', 'trekking', 'camping', 'beach', 'bien', 'river', 'cong vien']],
+            ['chill', ['chill', 'quan chill', 'thu gian', 'hang out', 'acoustic', 'rooftop', 'view dep', 'yen tinh', 'relax']]
         ];
 
         const REFINE_SERVICE_HINTS = [
@@ -8612,13 +9685,15 @@ async function generateWardIdFromName(name) {
             ['sports facility', ['dat san', 'thue san', 'huan luyen', 'cho thue dung cu', 'giai dau', 've theo gio']],
             ['repair', ['sua chua', 'bao hanh', 'thay man hinh', 'ep kinh', 'phone repair', 'repair']],
             ['retail support', ['doi tra', 'thu do', 'tu van size', 'order online', 'giao hang noi thanh']],
-            ['drink menu', ['tra sua', 'milk tea', 'topping', 'combo nuoc', 'do uong']]
+            ['drink menu', ['tra sua', 'milk tea', 'topping', 'combo nuoc', 'do uong', 'uong nuoc', 'juice', 'smoothie']],
+            ['quiet', ['yen tinh', 'quiet', 'calm', 'peaceful', 'khong on ao']],
+            ['late open', ['mo khuya', 'mo tre', 'open late', 'late night', 'overnight']]
         ];
 
         const REFINE_DISH_STYLE_HINTS = [
             ['spicy', ['cay', 'spicy', 'sa te', 'sate', 'hot flavor']],
             ['soupy', ['mon nuoc', 'nuoc dung', 'soup', 'broth', 'pho', 'bun', 'hu tieu', 'mi nuoc']],
-            ['drink', ['do uong', 'beverage', 'drink', 'juice', 'tea', 'tra sua', 'milk tea', 'coffee', 'ca phe']]
+            ['drink', ['do uong', 'uong nuoc', 'beverage', 'drink', 'drinks', 'juice', 'tea', 'tra sua', 'milk tea', 'coffee', 'ca phe', 'smoothie']]
         ];
 
         const REFINE_WEATHER_BUCKET_HINTS = [
@@ -8801,6 +9876,16 @@ async function generateWardIdFromName(name) {
             const hasStandaloneEatToken = tokens.includes('an') || tokens.includes('eat') || tokens.includes('eating');
 
             return hasStandaloneEatToken && tokens.length <= 2;
+        }
+
+        function detectStrictDiningIntent(normalizedQuery) {
+            return /(?:\bquan an\b|\bnha hang\b|\ban toi\b|\ban trua\b|\ban sang\b|\bfood\b|\bdining\b|\bmeal\b|\bmeals\b|\beat(?:ing)?\b|\brestaurant\b|\bstreet food\b|\ban vat\b|\bsnack\b)/.test(normalizedQuery)
+                && !/(?:\buong nuoc\b|\bdo uong\b|\bdrink(?:s)?\b|\bbeverage\b|\bjuice\b|\bsmoothie\b|\bcoffee\b|\bcafe\b|\bca phe\b|\bmilk tea\b|\btra sua\b)/.test(normalizedQuery);
+        }
+
+        function detectStrictDrinkIntent(normalizedQuery) {
+            return /(?:\buong nuoc\b|\bdo uong\b|\bdrink(?:s)?\b|\bbeverage\b|\bjuice\b|\bsmoothie\b|\bcoffee\b|\bcafe\b|\bca phe\b|\bmilk tea\b|\btra sua\b|\btea\b)/.test(normalizedQuery)
+                && !/(?:\bquan an\b|\bnha hang\b|\ban toi\b|\ban trua\b|\ban sang\b|\brestaurant\b|\bdining\b|\bmeal\b|\beat(?:ing)?\b)/.test(normalizedQuery);
         }
 
         function buildVenueSearchFields(venue) {
@@ -9234,6 +10319,8 @@ async function generateWardIdFromName(name) {
                 normalized.strictBudgetFloor
                 || (Number.isFinite(normalized.minBudgetVnd) && isStrictBudgetFloorQuery(normalizedQuery))
             );
+            const strictDiningIntent = detectStrictDiningIntent(normalizedQuery);
+            const strictDrinkIntent = detectStrictDrinkIntent(normalizedQuery);
 
             let maxBudgetVnd = Number.isFinite(normalized.maxBudgetVnd) ? normalized.maxBudgetVnd : null;
             let minBudgetVnd = Number.isFinite(normalized.minBudgetVnd) ? normalized.minBudgetVnd : null;
@@ -9257,12 +10344,17 @@ async function generateWardIdFromName(name) {
                 maxDistanceKm,
                 strictBudgetCap,
                 strictBudgetFloor,
+                implicitNearbyIntent,
+                strictDiningIntent,
+                strictDrinkIntent,
                 requireOpenNow: Boolean(normalized.requireOpenNow),
                 requireFoodVenue: Boolean(
+                    !strictDrinkIntent && (
                     normalized.requireFoodVenue
                     || cuisineKeywords.length > 0
                     || dishStyleKeywords.length > 0
                     || detectFoodIntent(normalizedQuery)
+                    )
                 ),
                 requireLocationMatch: Boolean(normalized.requireLocationMatch || locationPhrases.length > 0),
                 requireActivityMatch: Boolean((normalized.requireActivityMatch || activityKeywords.length > 0) && explicitActivityIntent),
@@ -9404,6 +10496,7 @@ async function generateWardIdFromName(name) {
                             'You parse user refine requests for venue recommendation constraints.',
                             'You are pass 1 of 2.',
                             'Understand Vietnamese, teencode abbreviations, and English, including mixed phrases.',
+                            'Map colloquial intent such as "uong nuoc" to drinks/cafe/milk tea, "quan chill mo khuya" to chill/open-late places, "cafe yen tinh" to quiet cafes, "an vat gan day" to snack places nearby, and "di choi toi nay" to evening entertainment.',
                             'Do not require full details. Infer intent from short refine requests.',
                             'If query implies nearby intent (gan toi, xung quanh, near me, nearby, nearest) without explicit km, set maxDistanceKm to 6.',
                             'Extract only constraints implied by user intent.',
@@ -9431,6 +10524,7 @@ async function generateWardIdFromName(name) {
                             'You are the second-pass validator for recommendation refine constraints.',
                             'Review and repair constraints from pass 1.',
                             'Resolve contradictions and avoid over-filtering.',
+                            'Keep colloquial Vietnamese and mixed-language intent faithful instead of reducing everything to raw keywords.',
                             'Rules:',
                             '1) If locationPhrases is not empty, requireLocationMatch must be true.',
                             '2) If activityKeywords is not empty, requireActivityMatch must be true.',
@@ -9764,6 +10858,8 @@ async function generateWardIdFromName(name) {
                                     content: [
                                         'You are a strict semantic matcher for venue recommendation refine requests.',
                                         'Read the full sentence intent, not isolated tokens.',
+                                        'Understand Vietnamese, English, and mixed-language refine requests.',
+                                        'Map colloquial phrases like "uong nuoc", "quan chill mo khuya", "cafe yen tinh", "an vat gan day", and "di choi toi nay" into the correct venue intent before matching.',
                                         'Only return venues that satisfy explicit user requirements from the whole sentence.',
                                         'Extract requiredDimensions from the user sentence and keep them strict.',
                                         'If query implies nearby intent (gan toi, xung quanh, near me, nearby, nearest), distance must be required and far venues must not match.',
@@ -9919,6 +11015,7 @@ async function generateWardIdFromName(name) {
 
             const venueSearchFields = buildVenueSearchFields(venue);
             const text = venueSearchFields.fullText;
+            const broadCategories = resolveVenueBroadCategoryMatchesFromFields(venueSearchFields);
             const userLatitude = Number(context.userLatitude);
             const userLongitude = Number(context.userLongitude);
             const currentTime = context.currentTime instanceof Date ? context.currentTime : new Date();
@@ -9944,6 +11041,8 @@ async function generateWardIdFromName(name) {
             const preferredTimeWindows = Array.isArray(constraints.preferredTimeWindows)
                 ? constraints.preferredTimeWindows
                 : [];
+            const strictDiningIntent = Boolean(constraints.strictDiningIntent);
+            const strictDrinkIntent = Boolean(constraints.strictDrinkIntent);
 
             const openingPayload = buildVenueRealtimeOpeningPayload(venue.metadata, currentTime);
             const hasRealtimeSchedule = Array.isArray(openingPayload?.weeklySchedule) && openingPayload.weeklySchedule.length > 0;
@@ -9955,6 +11054,34 @@ async function generateWardIdFromName(name) {
 
             result.isOpenNow = isOpenNow;
             result.openingTimeRange = openingTimeRange;
+
+            if (strictDiningIntent) {
+                const hasDiningCategory = broadCategories.includes('dining');
+                const isDrinkOnlyVenue = broadCategories.includes('coffee_drinks') && !hasDiningCategory;
+
+                if (isDrinkOnlyVenue) {
+                    result.hardFailures.push('Drink-focused venue for dining intent');
+                    markFailedDimension('cuisine');
+                } else if (hasDiningCategory) {
+                    result.refineScore += 1.45;
+                    result.reasons.push('Strong dining intent match');
+                    markMatchedDimension('cuisine');
+                }
+            }
+
+            if (strictDrinkIntent) {
+                const hasDrinkCategory = broadCategories.includes('coffee_drinks');
+                const isDiningOnlyVenue = broadCategories.includes('dining') && !hasDrinkCategory;
+
+                if (isDiningOnlyVenue) {
+                    result.hardFailures.push('Dining-focused venue for drink intent');
+                    markFailedDimension('service');
+                } else if (hasDrinkCategory) {
+                    result.refineScore += 1.35;
+                    result.reasons.push('Strong drink intent match');
+                    markMatchedDimension('service');
+                }
+            }
 
             if (constraints.requireOpenNow) {
                 if (hasRealtimeSchedule && isOpenNow === false) {
@@ -9987,6 +11114,9 @@ async function generateWardIdFromName(name) {
             if (constraints.requireFoodVenue) {
                 if (!isVenueLikelyFoodPlace(venueSearchFields)) {
                     result.hardFailures.push('Not a food venue');
+                    markFailedDimension('cuisine');
+                } else if (strictDiningIntent && broadCategories.includes('coffee_drinks') && !broadCategories.includes('dining')) {
+                    result.hardFailures.push('Drink-focused venue for dining intent');
                     markFailedDimension('cuisine');
                 } else {
                     result.refineScore += 1.1;
@@ -10198,8 +11328,8 @@ async function generateWardIdFromName(name) {
                         markFailedDimension('distance');
                     } else {
                         result.refineScore += Math.max(
-                            0.35,
-                            1.15 - distanceKm / Math.max(constraints.maxDistanceKm, 0.5)
+                            0.55,
+                            2.8 - (distanceKm / Math.max(constraints.maxDistanceKm, 0.5)) * 2.1
                         );
                         result.reasons.push(`Within ${constraints.maxDistanceKm} km`);
                         markMatchedDimension('distance');
@@ -10231,77 +11361,101 @@ async function generateWardIdFromName(name) {
                 : [];
             const cuisineKeywords = Array.isArray(constraints.cuisineKeywords) ? constraints.cuisineKeywords : [];
             const includeKeywords = Array.isArray(constraints.includeKeywords) ? constraints.includeKeywords : [];
+            const intentSignalText = [
+                ...activityKeywords,
+                ...dishStyleKeywords,
+                ...serviceKeywords,
+                ...cuisineKeywords
+            ].join(' ');
 
             if (Number.isFinite(constraints.maxBudgetVnd)) {
-                pieces.push(`under ${constraints.maxBudgetVnd.toLocaleString('vi-VN')} VND`);
+                pieces.push(`Under ${constraints.maxBudgetVnd.toLocaleString('vi-VN')} VND`);
                 if (constraints.strictBudgetCap) {
-                    pieces.push('strict budget');
+                    pieces.push('strict budget cap');
                 }
             }
 
             if (Number.isFinite(constraints.minBudgetVnd)) {
-                pieces.push(`over ${constraints.minBudgetVnd.toLocaleString('vi-VN')} VND`);
+                pieces.push(`Over ${constraints.minBudgetVnd.toLocaleString('vi-VN')} VND`);
                 if (constraints.strictBudgetFloor) {
                     pieces.push('strict min budget');
                 }
             }
 
             if (Number.isFinite(constraints.maxDistanceKm)) {
-                pieces.push(`within ${constraints.maxDistanceKm} km`);
+                pieces.push(`Within ${constraints.maxDistanceKm} km`);
             }
 
             if (constraints.requireOpenNow) {
-                pieces.push('open now');
+                pieces.push('Open now');
             }
 
             if (constraints.requireFoodVenue) {
-                pieces.push('food places');
+                pieces.push('Food-focused places');
+            }
+
+            if (countKeywordHits(intentSignalText, ['uong nuoc', 'do uong', 'drink', 'beverage', 'juice', 'coffee', 'ca phe', 'milk tea', 'tra sua']) > 0) {
+                pieces.push('Drink-friendly places');
+            }
+
+            if (countKeywordHits(intentSignalText, ['chill', 'hang out', 'thu gian', 'acoustic', 'rooftop']) > 0) {
+                pieces.push('Chill hangout vibe');
+            }
+
+            if (countKeywordHits(intentSignalText, ['yen tinh', 'quiet', 'calm', 'peaceful']) > 0) {
+                pieces.push('Quiet atmosphere');
+            }
+
+            if (countKeywordHits(intentSignalText, ['an vat', 'snack', 'street food', 'quan coc']) > 0) {
+                pieces.push('Snack-friendly places');
             }
 
             if (locationPhrases.length) {
-                pieces.push(`location: ${locationPhrases.slice(0, 2).join(', ')}`);
+                pieces.push(`Area: ${locationPhrases.slice(0, 2).join(', ')}`);
             }
 
             if (activityKeywords.length) {
-                pieces.push(`activity: ${activityKeywords.slice(0, 3).join(', ')}`);
+                pieces.push(`Activity: ${activityKeywords.slice(0, 3).join(', ')}`);
             }
 
             if (dishStyleKeywords.length) {
-                pieces.push(`style: ${dishStyleKeywords.slice(0, 3).join(', ')}`);
+                pieces.push(`Style: ${dishStyleKeywords.slice(0, 3).join(', ')}`);
             }
 
             if (serviceKeywords.length) {
-                pieces.push(`services: ${serviceKeywords.slice(0, 3).join(', ')}`);
+                pieces.push(`Services: ${serviceKeywords.slice(0, 3).join(', ')}`);
             }
 
             if (nameKeywords.length) {
-                pieces.push(`name: ${nameKeywords.slice(0, 3).join(', ')}`);
+                pieces.push(`Place name: ${nameKeywords.slice(0, 3).join(', ')}`);
             }
 
             if (preferredWeatherBuckets.length) {
-                pieces.push(`weather: ${preferredWeatherBuckets.slice(0, 2).join(', ')}`);
+                pieces.push(`Weather: ${preferredWeatherBuckets.slice(0, 2).join(', ')}`);
             }
 
             if (preferredTimeWindows.length) {
-                pieces.push(`time: ${preferredTimeWindows.slice(0, 2).map((key) => resolveTimeWindowLabel(key)).join(', ')}`);
+                pieces.push(`Time: ${preferredTimeWindows.slice(0, 2).map((key) => resolveTimeWindowLabel(key)).join(', ')}`);
             }
 
             if (cuisineKeywords.length) {
-                pieces.push(`cuisine: ${cuisineKeywords.slice(0, 3).join(', ')}`);
+                pieces.push(`Cuisine: ${cuisineKeywords.slice(0, 3).join(', ')}`);
             }
 
             if (includeKeywords.length) {
-                pieces.push(`keywords: ${includeKeywords.slice(0, 3).join(', ')}`);
+                pieces.push(`Matching: ${includeKeywords.slice(0, 3).join(', ')}`);
             }
 
-            return pieces.length ? pieces.join(' | ') : 'No hard constraints detected';
+            return pieces.length ? pieces.join(' • ') : 'Applied a broader semantic match for your request';
         }
 
-        function diversifyRecommendedVenues(scoredVenues, limit) {
+        function diversifyRecommendedVenues(scoredVenues, limit, scoreField = 'recommendationScore') {
             const groupedByCategory = new Map();
 
             scoredVenues.forEach((item) => {
-                const categoryKey = item.category_id ? String(item.category_id) : 'uncategorized';
+                const categoryKey =
+                    String(item?.recommendationPrimaryBroadCategory || '').trim()
+                    || (item.category_id ? String(item.category_id) : 'uncategorized');
                 if (!groupedByCategory.has(categoryKey)) {
                     groupedByCategory.set(categoryKey, []);
                 }
@@ -10309,8 +11463,8 @@ async function generateWardIdFromName(name) {
             });
 
             const categoryOrder = [...groupedByCategory.keys()].sort((firstKey, secondKey) => {
-                const firstScore = groupedByCategory.get(firstKey)?.[0]?.recommendationScore || 0;
-                const secondScore = groupedByCategory.get(secondKey)?.[0]?.recommendationScore || 0;
+                const firstScore = groupedByCategory.get(firstKey)?.[0]?.[scoreField] || 0;
+                const secondScore = groupedByCategory.get(secondKey)?.[0]?.[scoreField] || 0;
                 return secondScore - firstScore;
             });
 
@@ -10338,6 +11492,46 @@ async function generateWardIdFromName(name) {
             }
 
             return selected;
+        }
+
+        function prioritizeHotVenueRecommendations(scoredVenues, limit, scoreField = 'recommendationScore') {
+            const normalizedVenues = Array.isArray(scoredVenues) ? scoredVenues : [];
+            const topScore = Number(normalizedVenues[0]?.[scoreField] || 0);
+            const topInterestCore = Number(normalizedVenues[0]?.recommendationBreakdown?.interestCoreScore || 0);
+            const hotVenues = normalizedVenues
+                .filter((venue) => {
+                    if (!Boolean(venue?.featuredPromotion?.isHot)) {
+                        return false;
+                    }
+
+                    const venueScore = Number(venue?.[scoreField] || 0);
+                    const venueInterestCore = Number(venue?.recommendationBreakdown?.interestCoreScore || 0);
+                    return venueScore >= topScore - 2.75 && venueInterestCore >= topInterestCore - 2.2;
+                })
+                .sort((first, second) => {
+                    const secondScore = Number(second?.[scoreField] || 0);
+                    const firstScore = Number(first?.[scoreField] || 0);
+                    if (secondScore !== firstScore) {
+                        return secondScore - firstScore;
+                    }
+
+                    const secondRating = Number(second?.average_rating || 0);
+                    const firstRating = Number(first?.average_rating || 0);
+                    return secondRating - firstRating;
+                });
+
+            if (hotVenues.length >= limit) {
+                return hotVenues.slice(0, limit);
+            }
+
+            const remainingVenues = normalizedVenues.filter((venue) => !Boolean(venue?.featuredPromotion?.isHot));
+            const diversifiedRemaining = diversifyRecommendedVenues(
+                remainingVenues,
+                Math.max(0, limit - hotVenues.length),
+                scoreField
+            );
+
+            return [...hotVenues, ...diversifiedRemaining];
         }
 
         async function listPublicWards(req, res) {
@@ -11598,6 +12792,7 @@ async function generateWardIdFromName(name) {
         async function listPublicVenues(req, res) {
             try {
                 const venueHasOwnerUserColumn = await hasVenueOwnerUserColumn();
+                const venueHasOpeningHoursColumn = await hasVenueOpeningHoursColumn();
                 const statusFilter = normalizeStatusList(req.query.status);
                 const isMineRequest = String(req.query.mine || '').trim().toLowerCase() === 'true';
                 const requesterId = req.authUser?.id ? String(req.authUser.id).trim() : '';
@@ -11760,7 +12955,7 @@ async function generateWardIdFromName(name) {
                 const compactMetadataSelect = 'NULL::jsonb AS metadata';
                 const fullMetadataSelect = isMineRequest
                     ? 'venues.metadata AS metadata'
-                    : buildSanitizedMetadataSql('venues.metadata', 'metadata');
+                    : 'venues.metadata AS metadata';
                 const metadataSelect = compactMode ? compactMetadataSelect : fullMetadataSelect;
                 const fullBusinessLicenseSelect = isMineRequest
                     ? 'venues.business_license_image_url AS business_license_image_url'
@@ -11797,6 +12992,7 @@ async function generateWardIdFromName(name) {
                 const ownerJoin = venueHasOwnerUserColumn
                     ? `LEFT JOIN users AS owner_users ON owner_users.id = ${resolvedOwnerUserSql}`
                     : '';
+                const openingHoursSelect = buildOpeningHoursSelect(venueHasOpeningHoursColumn);
 
                 const result = await pool.query(
                     `
@@ -11808,6 +13004,7 @@ async function generateWardIdFromName(name) {
                     venues.address,
                     venues.description,
                     venues.phone,
+                    ${openingHoursSelect},
                     venues.latitude,
                     venues.longitude,
                     venues.ward_id,
@@ -11908,10 +13105,11 @@ async function generateWardIdFromName(name) {
 
             try {
                 const venueHasOwnerUserColumn = await hasVenueOwnerUserColumn();
+                const venueHasOpeningHoursColumn = await hasVenueOpeningHoursColumn();
                 const resolvedOwnerUserSql = buildResolvedVenueOwnerUserSql('venues');
                 const coverImageSelect = buildSanitizedInlineAssetSql('venues.cover_image_url', 'cover_image_url');
                 const businessLicenseSelect = buildSanitizedInlineAssetSql('venues.business_license_image_url', 'business_license_image_url');
-                const metadataSelect = buildSanitizedMetadataSql('venues.metadata', 'metadata');
+                const metadataSelect = 'venues.metadata AS metadata';
                 const ownerSelect = venueHasOwnerUserColumn
                     ? `
                     ${resolvedOwnerUserSql} AS owner_user_id,
@@ -11924,6 +13122,7 @@ async function generateWardIdFromName(name) {
                 const ownerJoin = venueHasOwnerUserColumn
                     ? `LEFT JOIN users AS owner_users ON owner_users.id = ${resolvedOwnerUserSql}`
                     : '';
+                const openingHoursSelect = buildOpeningHoursSelect(venueHasOpeningHoursColumn);
                 const isAdmin = normalizeRole(req.authUser?.role) === 'admin';
                 const cacheKey = `${isAdmin ? 'admin' : 'public'}:${venueId}`;
                 const cachedPayload = getCachedMapValue(
@@ -11946,6 +13145,7 @@ async function generateWardIdFromName(name) {
                     venues.address,
                     venues.description,
                     venues.phone,
+                    ${openingHoursSelect},
                     venues.latitude,
                     venues.longitude,
                     venues.ward_id,
@@ -12017,9 +13217,10 @@ async function generateWardIdFromName(name) {
 
         async function getPublicVenueForDetail(venueId, isAdmin) {
             const venueHasOwnerUserColumn = await hasVenueOwnerUserColumn();
+            const venueHasOpeningHoursColumn = await hasVenueOpeningHoursColumn();
             const resolvedOwnerUserSql = buildResolvedVenueOwnerUserSql('venues');
             const coverImageSelect = buildSanitizedInlineAssetSql('venues.cover_image_url', 'cover_image_url');
-            const metadataSelect = buildSanitizedMetadataSql('venues.metadata', 'metadata');
+            const metadataSelect = 'venues.metadata AS metadata';
             const ownerSelect = venueHasOwnerUserColumn
                 ? `
                     ${resolvedOwnerUserSql} AS owner_user_id,
@@ -12032,6 +13233,7 @@ async function generateWardIdFromName(name) {
             const ownerJoin = venueHasOwnerUserColumn
                 ? `LEFT JOIN users AS owner_users ON owner_users.id = ${resolvedOwnerUserSql}`
                 : '';
+            const openingHoursSelect = buildOpeningHoursSelect(venueHasOpeningHoursColumn);
             const cacheKey = `${isAdmin ? 'admin' : 'public'}:${venueId}`;
             const cachedVenue = getCachedMapValue(
                 publicVenueForDetailCache,
@@ -12053,6 +13255,7 @@ async function generateWardIdFromName(name) {
                     venues.address,
                     venues.description,
                     venues.phone,
+                    ${openingHoursSelect},
                     venues.latitude,
                     venues.longitude,
                     venues.ward_id,
@@ -12377,6 +13580,46 @@ async function generateWardIdFromName(name) {
             }
         }
 
+        async function compareVenuesHandler(req, res) {
+            const rawIds = String(req.query?.ids || '').trim();
+            const normalizedIds = [...new Set(
+                rawIds
+                    .split(',')
+                    .map((value) => Number(String(value || '').trim()))
+                    .filter((value) => Number.isFinite(value) && value > 0)
+            )].slice(0, 2);
+
+            if (normalizedIds.length !== 2) {
+                return res.status(400).json({ message: 'Please provide exactly 2 venue ids.' });
+            }
+
+            try {
+                const isAdmin = normalizeRole(req.authUser?.role) === 'admin';
+                const venues = await Promise.all(
+                    normalizedIds.map(async (venueId) => {
+                        const venue = await getPublicVenueForDetail(venueId, isAdmin);
+                        if (!venue) {
+                            return null;
+                        }
+
+                        const metadata = normalizeVenueMetadataObject(venue.metadata);
+                        const openingRealtime = buildVenueRealtimeOpeningPayload(metadata, new Date());
+
+                        return {
+                            ...venue,
+                            openingRealtime
+                        };
+                    })
+                );
+
+                return res.json({
+                    venues: venues.filter(Boolean)
+                });
+            } catch (error) {
+                return res.status(500).json({ message: error.message });
+            }
+        }
+
         async function getVenueServices(req, res) {
             const venueId = Number(req.params.venueId);
 
@@ -12510,7 +13753,7 @@ async function generateWardIdFromName(name) {
                     );
 
                     const authorName =
-                        userResult.rows[0]?.fullname || userResult.rows[0]?.username || req.authUser?.email || 'Người dùng';
+                        userResult.rows[0]?.fullname || userResult.rows[0]?.username || req.authUser?.email || 'User';
                     const imageUrls = uploadedFiles.map((file) => `/uploads/reviews/${file.filename}`);
 
                     const insertResult = await pool.query(
@@ -12549,8 +13792,8 @@ async function generateWardIdFromName(name) {
                         await createUserNotification({
                             userId: venueOwnerUserId,
                             type: 'venue_review',
-                            title: 'Bài đăng của bạn có bình luận mới',
-                            content: `${authorName} đã bình luận về bài đăng của bạn.`,
+                            title: 'Your venue has a new review',
+                            content: `${authorName} left a review on your venue.`,
                             metadata: {
                                 venueId,
                                 reviewId: Number(created.id),
@@ -12754,7 +13997,7 @@ async function generateWardIdFromName(name) {
                         [userId]
                     );
 
-                    const authorName = userResult.rows[0]?.fullname || userResult.rows[0]?.username || req.authUser?.email || 'Người dùng';
+                    const authorName = userResult.rows[0]?.fullname || userResult.rows[0]?.username || req.authUser?.email || 'User';
                     const imageUrls = uploadedFiles.map((file) => `/uploads/reviews/${file.filename}`);
 
                     const insertResult = await pool.query(
@@ -12782,8 +14025,8 @@ async function generateWardIdFromName(name) {
                         await createUserNotification({
                             userId: reviewOwnerUserId,
                             type: 'venue_reply',
-                            title: 'Bình luận của bạn có phản hồi mới',
-                            content: `${authorName} đã phản hồi bình luận của bạn.`,
+                            title: 'Your review has a new reply',
+                            content: `${authorName} replied to your review.`,
                             metadata: {
                                 venueId,
                                 reviewId,
@@ -13487,7 +14730,19 @@ async function generateWardIdFromName(name) {
                 return res.status(400).json({ message: 'categoryId must be a positive integer' });
             }
 
+            let client = null;
+
             try {
+                client = await pool.connect();
+                const submissionLockKey = [
+                    'venue_submission',
+                    submitterUserId,
+                    normalizedName.toLowerCase(),
+                    normalizedLatitude.toFixed(5),
+                    normalizedLongitude.toFixed(5)
+                ].join(':');
+                await client.query('SELECT pg_advisory_lock(hashtext($1))', [submissionLockKey]);
+
                 const venueHasOwnerUserColumn = await hasVenueOwnerUserColumn();
                 let resolvedCategoryId = normalizedCategoryId;
                 const activePurchase = await getLatestActiveUserAdPackagePurchase(submitterUserId);
@@ -13495,7 +14750,7 @@ async function generateWardIdFromName(name) {
                 const isPostLimitEnabled = Boolean(activePackageFeatures.postLimitEnabled);
                 const postLimit = Number(activePackageFeatures.postLimit);
 
-                const existingVenueCountResult = await pool.query(
+                const existingVenueCountResult = await client.query(
                     `
                         SELECT COUNT(*)::int AS total
                         FROM venues
@@ -13521,7 +14776,7 @@ async function generateWardIdFromName(name) {
 
                 if (resolvedCategoryId === null && normalizedCategoryName) {
                     const inferredSlug = slugifyText(normalizedCategoryName);
-                    const categoryLookup = await pool.query(
+                    const categoryLookup = await client.query(
                         `
                     SELECT id
                     FROM place_categories
@@ -13536,7 +14791,7 @@ async function generateWardIdFromName(name) {
                 }
 
                 if (resolvedCategoryId !== null) {
-                    const categoryCheck = await pool.query(
+                    const categoryCheck = await client.query(
                         `
                     SELECT id
                     FROM place_categories
@@ -13553,7 +14808,7 @@ async function generateWardIdFromName(name) {
                 }
 
                 if (requestedServiceIds.length) {
-                    const servicesResult = await pool.query(
+                    const servicesResult = await client.query(
                         `
                         SELECT id, name
                         FROM merchant_services
@@ -13611,7 +14866,10 @@ async function generateWardIdFromName(name) {
                     normalizedMetadata.weeklySchedule = normalizedScheduleResult.value;
                 }
 
-                const duplicateLocationResult = await pool.query(
+                const submittedGalleryImageUrls = extractGalleryImageUrlsFromMetadata(normalizedMetadata);
+                const persistedMetadata = buildPersistedVenueMetadata(normalizedMetadata);
+
+                const duplicateLocationResult = await client.query(
                     `
                     SELECT id, status::text AS status
                     FROM venues
@@ -13671,11 +14929,11 @@ async function generateWardIdFromName(name) {
                     resolvedCategoryId,
                     String(coverImageUrl || '').trim() || null,
                     String(businessLicenseImageUrl || '').trim() || null,
-                    normalizedMetadata
+                    persistedMetadata
                 ];
                 const insertPlaceholders = insertValues.map((_, index) => `$${index + 1}`);
 
-                const insertResult = await pool.query(
+                const insertResult = await client.query(
                     `
                 INSERT INTO venues (
                     ${insertColumns.join(',\n                    ')}
@@ -13692,6 +14950,12 @@ async function generateWardIdFromName(name) {
                 );
 
                 try {
+                    await syncVenueGalleryImages(client, insertResult.rows[0].id, submittedGalleryImageUrls);
+                } catch (gallerySyncError) {
+                    console.error('Sync venue gallery images on create error:', gallerySyncError);
+                }
+
+                try {
                     if (activePurchase?.packageId) {
                         await syncUserAdPackageAssignments(submitterUserId, activePurchase.packageId, pool, {
                             specificVenueIds: [insertResult.rows[0].id]
@@ -13701,7 +14965,7 @@ async function generateWardIdFromName(name) {
                     console.error('Sync account ad package for new venue error:', assignmentSyncError);
                 }
 
-                const venueDetails = await pool.query(
+                const venueDetails = await client.query(
                     `
                 SELECT
                     venues.id,
@@ -13734,11 +14998,11 @@ async function generateWardIdFromName(name) {
                     [insertResult.rows[0].id]
                 );
 
-                await createUserNotification({
-                    userId: submitterUserId,
-                    type: 'venue_submission',
-                    title: 'Đăng bài thành công',
-                    content: `${normalizedName} đang chờ quản trị viên duyệt.`,
+                    await createUserNotification({
+                        userId: submitterUserId,
+                        type: 'venue_submission',
+                        title: 'Venue submission received',
+                        content: `${normalizedName} is pending admin approval.`,
                     metadata: {
                         venueId: Number(insertResult.rows[0].id),
                         status: 'pending'
@@ -13755,6 +15019,23 @@ async function generateWardIdFromName(name) {
             } catch (err) {
                 console.error('API error:', err);
                 res.status(500).json({ error: 'Server error' });
+            } finally {
+                if (client) {
+                    try {
+                        const submissionLockKey = [
+                            'venue_submission',
+                            submitterUserId,
+                            normalizedName.toLowerCase(),
+                            normalizedLatitude.toFixed(5),
+                            normalizedLongitude.toFixed(5)
+                        ].join(':');
+                        await client.query('SELECT pg_advisory_unlock(hashtext($1))', [submissionLockKey]);
+                    } catch (unlockError) {
+                        console.error('Release venue submission advisory lock error:', unlockError);
+                    }
+
+                    client.release();
+                }
             }
         }
 
@@ -14919,8 +16200,8 @@ async function generateWardIdFromName(name) {
                         await createUserNotification({
                             userId: submitterUserId,
                             type: 'venue_submission',
-                            title: 'Yêu cầu cập nhật quán đã bị từ chối',
-                            content: normalizedRejectionReason || 'Vui lòng kiểm tra lại thông tin và gửi yêu cầu mới.',
+                            title: 'Venue update request rejected',
+                            content: normalizedRejectionReason || 'Please review the info and submit a new request.',
                             metadata: {
                                 action: 'reject',
                                 venueId: Number(updateRequest.venue_id) || null,
@@ -14989,6 +16270,8 @@ async function generateWardIdFromName(name) {
                     currentVenueResult.rows[0].metadata,
                     proposedSnapshot.metadata
                 );
+                const approvedGalleryImageUrls = extractGalleryImageUrlsFromMetadata(proposedSnapshot.metadata);
+                const persistedReviewMetadata = buildPersistedVenueMetadata(mergedReviewMetadata);
 
                 const venueUpdateResult = await client.query(
                     `
@@ -15023,13 +16306,19 @@ async function generateWardIdFromName(name) {
                         Number.isNaN(proposedSnapshot.categoryId) ? null : proposedSnapshot.categoryId,
                         proposedSnapshot.coverImageUrl,
                         proposedSnapshot.businessLicenseImageUrl,
-                        mergedReviewMetadata,
+                        persistedReviewMetadata,
                     ]
                 );
 
                 if (!venueUpdateResult.rows.length) {
                     await client.query('ROLLBACK');
                     return res.status(404).json({ message: 'Venue not found for this update request' });
+                }
+
+                try {
+                    await syncVenueGalleryImages(client, targetVenueId, approvedGalleryImageUrls);
+                } catch (gallerySyncError) {
+                    console.error('Sync venue gallery images on approval error:', gallerySyncError);
                 }
 
                 const requestUpdateResult = await client.query(
@@ -15097,14 +16386,14 @@ async function generateWardIdFromName(name) {
                         details.rows[0]?.name
                         || details.rows[0]?.title
                         || proposedSnapshot.name
-                        || 'Quán của bạn'
+                        || 'Your venue'
                     ).trim();
 
                     await createUserNotification({
                         userId: submitterUserId,
                         type: 'venue_submission',
-                        title: 'Yêu cầu cập nhật quán đã được duyệt',
-                        content: `${venueNameForNotification} đã được cập nhật thành công.`,
+                        title: 'Venue update request approved',
+                        content: `${venueNameForNotification} has been updated successfully.`,
                         metadata: {
                             action: 'approve',
                             venueId: targetVenueId,
@@ -16691,12 +17980,12 @@ async function generateWardIdFromName(name) {
                     const rejectedVenue = result.rows[0] || {};
                     const submitterUserId = String(rejectedVenue.submitted_by_user_id || '').trim();
                     if (submitterUserId) {
-                        const venueNameForNotification = String(rejectedVenue.name || rejectedVenue.title || `Quán #${venueId}`).trim();
+                        const venueNameForNotification = String(rejectedVenue.name || rejectedVenue.title || `Venue #${venueId}`).trim();
                         await createUserNotification({
                             userId: submitterUserId,
                             type: 'venue_submission',
-                            title: 'Bài đăng quán của bạn đã bị từ chối',
-                            content: normalizedRejectionReason || `${venueNameForNotification} chưa đủ điều kiện phê duyệt.`,
+                            title: 'Your venue submission was rejected',
+                            content: normalizedRejectionReason || `${venueNameForNotification} does not meet approval criteria.`,
                             metadata: {
                                 action: 'reject',
                                 venueId,
@@ -16774,14 +18063,14 @@ async function generateWardIdFromName(name) {
                 invalidateVenueCommunityBundleCacheByVenueId(venueId);
 
                 const approvedVenue = result.rows[0] || {};
-                const submitterUserId = String(approvedVenue.submitted_by_user_id || '').trim();
+                    const submitterUserId = String(approvedVenue.submitted_by_user_id || '').trim();
                 if (submitterUserId) {
-                    const venueNameForNotification = String(approvedVenue.name || approvedVenue.title || `Quán #${venueId}`).trim();
+                        const venueNameForNotification = String(approvedVenue.name || approvedVenue.title || `Venue #${venueId}`).trim();
                     await createUserNotification({
                         userId: submitterUserId,
                         type: 'venue_submission',
-                        title: 'Bài đăng quán của bạn đã được duyệt',
-                        content: `${venueNameForNotification} hiện đã hiển thị công khai cho người dùng.`,
+                            title: 'Your venue submission was approved',
+                            content: `${venueNameForNotification} is now publicly visible.`,
                         metadata: {
                             action: 'approve',
                             venueId
@@ -17254,8 +18543,8 @@ async function generateWardIdFromName(name) {
                         await createUserNotification({
                             userId: req.authUser.id,
                             type: 'feedback',
-                            title: 'Gửi phản hồi thành công',
-                            content: `Loại phản hồi: ${resolvedTypeName}`,
+                            title: 'Feedback submitted successfully',
+                            content: `Feedback type: ${resolvedTypeName}`,
                             metadata: {
                                 feedbackId: Number(rows?.[0]?.id || 0) || null,
                                 feedbackTypeCode: resolvedTypeCode
@@ -17297,8 +18586,8 @@ async function generateWardIdFromName(name) {
                             await createUserNotification({
                                 userId: req.authUser.id,
                                 type: 'feedback',
-                                title: 'Gửi phản hồi thành công',
-                                content: `Loại phản hồi: ${resolvedTypeName}`,
+                                title: 'Feedback submitted successfully',
+                                content: `Feedback type: ${resolvedTypeName}`,
                                 metadata: {
                                     feedbackId: Number(fallbackResult.rows?.[0]?.id || 0) || null,
                                     feedbackTypeCode: resolvedTypeCode
@@ -17741,8 +19030,8 @@ async function generateWardIdFromName(name) {
                         await createUserNotification({
                             userId: reporterUserId,
                             type: 'feedback',
-                            title: 'Báo cáo của bạn đã có phản hồi từ quản trị viên',
-                            content: `Báo cáo #${feedback.id} đã được cập nhật trạng thái ${normalizeFeedbackStatusLabel(nextStatus)}.`,
+                            title: 'Your report has an admin response',
+                            content: `Report #${feedback.id} was updated to ${normalizeFeedbackStatusLabel(nextStatus)}.`,
                             metadata: {
                                 feedbackId: feedback.id,
                                 nextStatus,
@@ -18496,7 +19785,7 @@ async function generateWardIdFromName(name) {
                 }
 
                 if (!resolvedThreadId || !recipientUserId) {
-                    return res.status(400).json({ message: 'Không thể xác định người nhận tin nhắn.' });
+                    return res.status(400).json({ message: 'Unable to resolve message recipient.' });
                 }
 
                 const customerUserId = currentUserId === ownerUserId ? recipientUserId : currentUserId;
@@ -18511,7 +19800,7 @@ async function generateWardIdFromName(name) {
                     const selectedVenueOwnerUserId = String(selectedVenueContext?.owner_user_id || '').trim();
 
                     if (!selectedVenueContext || selectedVenueOwnerUserId !== ownerUserId) {
-                        return res.status(400).json({ message: 'QuÃ¡n Ä‘Æ°á»£c chá»n khÃ´ng há»£p lá»‡ cho Ä‘oáº¡n chat nÃ y.' });
+                        return res.status(400).json({ message: 'Selected venue is not valid for this chat.' });
                     }
 
                     messageVenueId = requestedContextVenueId;
@@ -18565,20 +19854,20 @@ async function generateWardIdFromName(name) {
                         req.authUser?.fullname
                         || req.authUser?.username
                         || req.authUser?.email
-                        || 'Người dùng'
+                        || 'User'
                     ).trim();
                     const venueLabel = String(
                         venue.name
                         || venue.title
                         || messageContextLabel
-                        || 'quán'
+                        || 'venue'
                     ).trim();
 
                     await createUserNotification({
                         userId: recipientUserId,
                         type: 'general',
-                        title: 'Bạn có tin nhắn mới',
-                        content: `${senderDisplayName} vừa gửi tin nhắn về ${venueLabel}.`,
+                        title: 'You have a new message',
+                        content: `${senderDisplayName} sent a message about ${venueLabel}.`,
                         metadata: {
                             threadId: resolvedThreadId,
                             venueId: messageVenueId || venueId,
@@ -18603,7 +19892,7 @@ async function generateWardIdFromName(name) {
             const threadId = Number(req.params.threadId);
 
             if (!currentUserId) {
-                return res.status(401).json({ message: 'Bạn cần đăng nhập để đọc tin nhắn.' });
+                return res.status(401).json({ message: 'Please sign in to read messages.' });
             }
 
             if (!Number.isFinite(threadId)) {
@@ -18623,7 +19912,7 @@ async function generateWardIdFromName(name) {
                 );
 
                 if (!participantCheck.rows.length) {
-                    return res.status(404).json({ message: 'Không tìm thấy cuộc trò chuyện.' });
+                    return res.status(404).json({ message: 'Chat thread not found.' });
                 }
 
                 const ownerUserId = String(participantCheck.rows[0].owner_user_id || '').trim();
@@ -18692,7 +19981,7 @@ async function generateWardIdFromName(name) {
             const threadId = Number(req.params.threadId);
 
             if (!currentUserId) {
-                return res.status(401).json({ message: 'Báº¡n cáº§n Ä‘Äƒng nháº­p Ä‘á»ƒ xÃ³a tin nháº¯n.' });
+                return res.status(401).json({ message: 'Please sign in to delete messages.' });
             }
 
             if (!Number.isFinite(threadId)) {
@@ -18712,7 +20001,7 @@ async function generateWardIdFromName(name) {
                 );
 
                 if (!participantCheck.rows.length) {
-                    return res.status(404).json({ message: 'KhÃ´ng tÃ¬m tháº¥y cuá»™c trÃ² chuyá»‡n.' });
+                    return res.status(404).json({ message: 'Chat thread not found.' });
                 }
 
                 const ownerUserId = String(participantCheck.rows[0].owner_user_id || '').trim();
@@ -18816,6 +20105,71 @@ async function generateWardIdFromName(name) {
             }
         }
 
+        function normalizeLegacyNotificationText(value = '', replacements = []) {
+            return replacements.reduce(
+                (currentValue, [pattern, replacement]) => currentValue.replace(pattern, replacement),
+                String(value || '')
+            );
+        }
+
+        function normalizeNotificationRecordForResponse(notification) {
+            const source = notification && typeof notification === 'object' ? notification : {};
+            const metadata = source.metadata && typeof source.metadata === 'object' && !Array.isArray(source.metadata)
+                ? source.metadata
+                : {};
+            let title = String(source.title || '').trim();
+            let content = source.content == null ? null : String(source.content || '').trim();
+
+            const titleByExactMatch = new Map([
+                ['Đã bỏ khỏi yêu thích', 'Removed from favorites'],
+                ['Đã thêm vào yêu thích', 'Added to favorites'],
+                ['Bài đăng của bạn có lượt yêu thích mới', 'Your venue received a new favorite'],
+                ['Bạn có tin nhắn mới', 'You have a new message'],
+                ['Bạn đã cập nhật thông tin cá nhân thành công', 'Profile updated successfully'],
+                ['Bạn đã cập nhật sở thích thành công', 'Preferences updated successfully']
+            ]);
+
+            if (titleByExactMatch.has(title)) {
+                title = titleByExactMatch.get(title);
+            }
+
+            content = normalizeLegacyNotificationText(content, [
+                [/^(.*)\s+đã yêu thích bài đăng của bạn\.$/i, '$1 favorited your venue.'],
+                [/^(.*)\s+vừa gửi tin nhắn về\s+(.*)\.$/i, '$1 sent a message about $2.']
+            ]);
+
+            if (content === 'Hồ sơ của bạn vừa được lưu với thông tin mới nhất.') {
+                content = 'Your profile has been saved with the latest information.';
+            } else if (content === 'Hệ thống sẽ dùng sở thích mới để gợi ý địa điểm phù hợp hơn.') {
+                content = 'Your latest preferences will be used to improve venue recommendations.';
+            }
+
+            if (String(source.type || '').trim().toLowerCase() === 'favorite') {
+                if (metadata?.action === 'removed') {
+                    title = 'Removed from favorites';
+                } else if (metadata?.action === 'added') {
+                    title = 'Added to favorites';
+                }
+            }
+
+            if (String(source.type || '').trim().toLowerCase() === 'venue_favorite') {
+                title = 'Your venue received a new favorite';
+            }
+
+            if (String(source.type || '').trim().toLowerCase() === 'general' && metadata?.threadId) {
+                title = 'You have a new message';
+                content = normalizeLegacyNotificationText(content, [
+                    [/^(.*)\s+vừa gửi tin nhắn về\s+(.*)\.$/i, '$1 sent a message about $2.']
+                ]);
+            }
+
+            return {
+                ...source,
+                title,
+                content
+            };
+        }
+
         async function loadUserNotificationsPayload(userId, limit = 20) {
             const normalizedUserId = normalizeNotificationUserId(userId);
             const normalizedLimit = Math.min(Math.max(Number(limit) || 20, 1), 50);
@@ -18860,7 +20214,7 @@ async function generateWardIdFromName(name) {
 
             return {
                 success: true,
-                notifications: notificationsResult.rows,
+                notifications: notificationsResult.rows.map((item) => normalizeNotificationRecordForResponse(item)),
                 unreadCount: Number(unreadCountResult.rows?.[0]?.unread_count || 0)
             };
         }
@@ -18926,7 +20280,7 @@ async function generateWardIdFromName(name) {
 
                 const createdNotification = insertResult.rows[0] || null;
                 scheduleUserNotificationsRefresh(normalizedUserId);
-                return createdNotification;
+                return normalizeNotificationRecordForResponse(createdNotification);
             } catch (error) {
                 console.warn('createUserNotification warning:', error.message);
                 return null;
@@ -18947,7 +20301,7 @@ async function generateWardIdFromName(name) {
                     return res.json({ success: true, notifications: [], unreadCount: 0 });
                 }
                 console.error('listUserNotificationsHandler error:', error);
-                return res.status(500).json({ message: 'Không thể tải thông báo lúc này.' });
+                return res.status(500).json({ message: 'Unable to load notifications right now.' });
             }
         }
 
@@ -18955,7 +20309,7 @@ async function generateWardIdFromName(name) {
             const userId = normalizeNotificationUserId(req.user?.id);
 
             if (!userId) {
-                return res.status(401).json({ message: 'Thiếu thông tin người dùng.' });
+                return res.status(401).json({ message: 'Missing user information.' });
             }
 
             res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
@@ -19040,7 +20394,7 @@ async function generateWardIdFromName(name) {
                 return res.json({ success: true, updatedCount });
             } catch (error) {
                 console.error('markUserNotificationsReadHandler error:', error);
-                return res.status(500).json({ message: 'Không thể cập nhật thông báo lúc này.' });
+                return res.status(500).json({ message: 'Unable to update notifications right now.' });
             }
         }
 
@@ -19591,11 +20945,11 @@ async function generateWardIdFromName(name) {
                 );
 
                 if (creatorUserId) {
-                    await createUserNotification({
-                        userId: creatorUserId,
-                        type: 'forum_post',
-                        title: 'Đăng bài diễn đàn thành công',
-                        content: title,
+                        await createUserNotification({
+                            userId: creatorUserId,
+                            type: 'forum_post',
+                            title: 'Forum post published',
+                            content: title,
                         metadata: {
                             postId: Number(insertResult.rows?.[0]?.id || 0) || null,
                             category
@@ -19704,7 +21058,7 @@ async function generateWardIdFromName(name) {
                     await createUserNotification({
                         userId: creatorUserId,
                         type: 'forum_comment',
-                        title: 'Bình luận diễn đàn đã được đăng',
+                        title: 'Forum comment posted',
                         content: content.slice(0, 140),
                         metadata: {
                             postId,
@@ -19719,7 +21073,7 @@ async function generateWardIdFromName(name) {
                     await createUserNotification({
                         userId: postCreatorUserId,
                         type: 'forum_comment',
-                        title: 'Bài viết diễn đàn của bạn có bình luận mới',
+                        title: 'Your forum post has a new comment',
                         content: content.slice(0, 140),
                         metadata: {
                             postId,
@@ -19790,8 +21144,8 @@ async function generateWardIdFromName(name) {
                     await createUserNotification({
                         userId: postCreatorUserId,
                         type: 'forum_post',
-                        title: 'Bài viết diễn đàn của bạn có lượt thích mới',
-                        content: String(postCheck.rows[0]?.title || '').trim() || `Bài viết #${postId}`,
+                        title: 'Your forum post has a new like',
+                        content: String(postCheck.rows[0]?.title || '').trim() || `Post #${postId}`,
                         metadata: {
                             postId,
                             actorKey
@@ -20230,8 +21584,8 @@ async function generateWardIdFromName(name) {
                             createUserNotification({
                                 userId: row.id,
                                 type: 'forum_post',
-                                title: 'Báo cáo bài viết diễn đàn của bạn đã được xử lý',
-                                content: `Báo cáo liên quan đến bài viết #${postId} đã được quản trị viên xem xét.`,
+                                title: 'Your forum post report was processed',
+                                content: `Reports related to post #${postId} have been reviewed by an admin.`,
                                 metadata: {
                                     postId,
                                     dismissedCount: Number(deletedResult.rowCount || 0)
@@ -20301,8 +21655,8 @@ async function generateWardIdFromName(name) {
                             createUserNotification({
                                 userId: row.id,
                                 type: 'forum_comment',
-                                title: 'Báo cáo bình luận diễn đàn của bạn đã được xử lý',
-                                content: `Báo cáo liên quan đến bình luận #${commentId} đã được quản trị viên xem xét.`,
+                                title: 'Your forum comment report was processed',
+                                content: `Reports related to comment #${commentId} have been reviewed by an admin.`,
                                 metadata: {
                                     postId,
                                     commentId,
@@ -20338,9 +21692,11 @@ async function generateWardIdFromName(name) {
         registerVersionedRoute('get', '/merchant-services', listPublicMerchantServices);
         registerVersionedRoute('get', '/feedback/types', listPublicFeedbackTypes);
         registerVersionedRoute('get', '/venues', authenticateOptional, listPublicVenues);
+        registerVersionedRoute('get', '/venues/compare', authenticateOptional, compareVenuesHandler);
         registerVersionedRoute('get', '/venues/update-requests', authenticateRequest, checkUserStatus, listMerchantVenueUpdateRequests);
         registerVersionedRoute('get', '/venues/:venueId', authenticateOptional, getVenueDetails);
     registerVersionedRoute('get', '/venues/:venueId/reviews', authenticateOptional, listPublicVenueReviews);
+        app.get('/venues/compare', authenticateOptional, compareVenuesHandler);
         registerVersionedRoute('get', '/venues/:venueId', getVenueDetails);
         registerVersionedRoute('post', '/venues', authenticateRequest, createVenueSubmission);
         registerVersionedRoute('get', '/venues/:venueId/reviews', listPublicVenueReviews);
@@ -20731,8 +22087,8 @@ async function generateWardIdFromName(name) {
                 await createUserNotification({
                     userId,
                     type: 'general',
-                    title: 'Bạn đã cập nhật thông tin cá nhân thành công',
-                    content: 'Hồ sơ của bạn vừa được lưu với thông tin mới nhất.',
+                    title: 'Profile updated successfully',
+                    content: 'Your profile has been saved with the latest information.',
                     metadata: {
                         section: 'profile',
                         action: 'updated'
@@ -20838,7 +22194,8 @@ async function generateWardIdFromName(name) {
             const userId = String(req.user?.id || '').trim();
             const ageRangeKey = String(req.body?.ageRangeKey || '').trim();
             const preferredGender = String(req.body?.preferredGender || '').trim();
-            const preferredTimes = normalizePreferenceStringList(req.body?.preferredTimes);
+            const preferredTimes = normalizePreferenceStringList(req.body?.preferredTimes)
+                .filter((item) => USER_PREFERENCE_TIME_WINDOW_SET.has(item));
             const interests = normalizePreferenceStringList(req.body?.interests);
             const latitudeInput = req.body?.latitude;
             const longitudeInput = req.body?.longitude;
@@ -20853,10 +22210,6 @@ async function generateWardIdFromName(name) {
 
             if (!USER_PREFERENCE_GENDER_SET.has(preferredGender)) {
                 return res.status(400).json({ message: 'Invalid preferred gender.' });
-            }
-
-            if (!preferredTimes.length || preferredTimes.some((item) => !USER_PREFERENCE_TIME_WINDOW_SET.has(item))) {
-                return res.status(400).json({ message: 'Please select at least one valid preferred time.' });
             }
 
             const allowedInterestSet = USER_PREFERENCE_INTEREST_SET_BY_AGE[ageRangeKey] || new Set();
@@ -20925,17 +22278,18 @@ async function generateWardIdFromName(name) {
                 await createUserNotification({
                     userId,
                     type: 'general',
-                    title: 'Bạn đã cập nhật sở thích thành công',
-                    content: 'Hệ thống sẽ dùng sở thích mới để gợi ý địa điểm phù hợp hơn.',
+                    title: 'Preferences updated successfully',
+                    content: 'Your latest preferences will be used to improve venue recommendations.',
                     metadata: {
                         section: 'preferences',
                         action: 'updated',
                         ageRangeKey,
                         preferredGender,
-                        preferredTimes,
                         interests
                     }
                 });
+
+                invalidateAiSuggestionResponseCacheByUserId(userId);
 
                 return res.json({
                     success: true,
@@ -21033,6 +22387,31 @@ async function generateWardIdFromName(name) {
                     );
                 }
 
+                const profileSignature = buildAiSuggestionProfileSignature(preference);
+                const recommendationCacheKey = buildAiSuggestionResponseCacheKey({
+                    scope: 'base',
+                    userId,
+                    profileSignature,
+                    limit,
+                    latitude: effectiveLatitude,
+                    longitude: effectiveLongitude,
+                    weatherMain,
+                    currentTimeWindowKey,
+                    preferOpenNow
+                });
+                const cachedRecommendationPayload = getCachedMapValue(
+                    aiSuggestionResponseCache,
+                    recommendationCacheKey,
+                    AI_SUGGESTION_RESPONSE_CACHE_TTL_MS
+                );
+                if (cachedRecommendationPayload) {
+                    if (shouldLogAiSuggestDebug()) {
+                        console.log(`[AI_SUGGEST_DEBUG] cache_hit ${recommendationCacheKey}`);
+                    }
+
+                    return res.json(cachedRecommendationPayload);
+                }
+
                 const venueResult = await pool.query(
                     `
                         SELECT
@@ -21063,8 +22442,17 @@ async function generateWardIdFromName(name) {
                     `
                 );
 
-                const scoredVenues = venueResult.rows
-                    .map((row) => normalizeVenueCoordinates(row))
+                const normalizedVenues = venueResult.rows
+                    .map((row) => normalizeVenueCoordinates(row));
+                const promotionAssignmentMap = await resolveCurrentVenuePromotionMapByVenueIds(
+                    normalizedVenues.map((venue) => venue.id)
+                );
+                const featuredPromotionMap = await resolveFeaturedVenuePromotionMapByVenueIds(
+                    normalizedVenues.map((venue) => venue.id)
+                );
+
+                const scoredVenues = normalizedVenues
+                    .map((venue) => attachFeaturedVenuePromotion(venue, featuredPromotionMap, promotionAssignmentMap))
                     .map((venue) => {
                         const scoring = scoreVenueByUserPreference(
                             venue,
@@ -21086,14 +22474,48 @@ async function generateWardIdFromName(name) {
                             isOpenNow: scoring.isOpenNow,
                             openingTimeRange: scoring.openingTimeRange,
                             hasRealtimeSchedule: scoring.hasRealtimeSchedule,
-                            recommendationReasons: scoring.reasons
+                            recommendationPrimaryBroadCategory: scoring.primaryBroadCategory,
+                            recommendationBroadCategories: scoring.matchedBroadCategories,
+                            recommendationReasons: scoring.reasons,
+                            recommendationBreakdown: scoring.breakdown
                         };
                     })
-                    .filter((venue) => !(preferOpenNow && venue.hasRealtimeSchedule && venue.isOpenNow === false))
-                    .filter((venue) => venue.recommendationScore > 0.15)
+                    .filter((venue) => venue.recommendationScore > -25)
                     .sort((first, second) => {
+                        const secondInterestCore = Number(second?.recommendationBreakdown?.interestCoreScore || 0);
+                        const firstInterestCore = Number(first?.recommendationBreakdown?.interestCoreScore || 0);
+                        if (secondInterestCore !== firstInterestCore) {
+                            return secondInterestCore - firstInterestCore;
+                        }
+
+                        const firstOpenRank = first.isOpenNow === true ? 1 : 0;
+                        const secondOpenRank = second.isOpenNow === true ? 1 : 0;
+                        if (secondOpenRank !== firstOpenRank) {
+                            return secondOpenRank - firstOpenRank;
+                        }
+
                         if (second.recommendationScore !== first.recommendationScore) {
                             return second.recommendationScore - first.recommendationScore;
+                        }
+
+                        const secondPersonalization =
+                            Number(second?.recommendationBreakdown?.profileRelevanceScore || 0)
+                            + Number(second?.recommendationBreakdown?.interestScore || 0)
+                            + Number(second?.recommendationBreakdown?.interestSemanticScore || 0)
+                            + Number(second?.recommendationBreakdown?.serviceAffinityScore || 0);
+                        const firstPersonalization =
+                            Number(first?.recommendationBreakdown?.profileRelevanceScore || 0)
+                            + Number(first?.recommendationBreakdown?.interestScore || 0)
+                            + Number(first?.recommendationBreakdown?.interestSemanticScore || 0)
+                            + Number(first?.recommendationBreakdown?.serviceAffinityScore || 0);
+                        if (secondPersonalization !== firstPersonalization) {
+                            return secondPersonalization - firstPersonalization;
+                        }
+
+                        const firstDistance = Number(first.distanceKm);
+                        const secondDistance = Number(second.distanceKm);
+                        if (Number.isFinite(firstDistance) && Number.isFinite(secondDistance) && firstDistance !== secondDistance) {
+                            return firstDistance - secondDistance;
                         }
 
                         const secondRating = Number(second.average_rating || 0);
@@ -21101,16 +22523,66 @@ async function generateWardIdFromName(name) {
                         return secondRating - firstRating;
                     });
 
-                const diversifiedVenuesRaw = diversifyRecommendedVenues(scoredVenues, limit);
-                const promotionAssignmentMap = await resolveCurrentVenuePromotionMapByVenueIds(
-                    diversifiedVenuesRaw.map((v) => v.id)
-                );
-                const featuredPromotionMap = await resolveFeaturedVenuePromotionMapByVenueIds(
-                    diversifiedVenuesRaw.map((v) => v.id)
-                );
+                const effectiveScoredVenues = scoredVenues.length
+                    ? scoredVenues
+                    : normalizedVenues
+                        .map((venue) => attachFeaturedVenuePromotion(venue, featuredPromotionMap, promotionAssignmentMap))
+                        .map((venue) => {
+                            const scoring = scoreVenueByUserPreference(
+                                venue,
+                                preference,
+                                effectiveLatitude,
+                                effectiveLongitude,
+                                {
+                                    currentTime,
+                                    currentTimeWindowKey,
+                                    weatherMain,
+                                    preferOpenNow
+                                }
+                            );
 
-                const diversifiedVenues = diversifiedVenuesRaw.map((venue) => {
-                    const decoratedVenue = attachFeaturedVenuePromotion(venue, featuredPromotionMap, promotionAssignmentMap);
+                            return {
+                                ...venue,
+                                recommendationScore: Number(scoring.score.toFixed(4)),
+                                distanceKm: scoring.distanceKm,
+                                isOpenNow: scoring.isOpenNow,
+                                openingTimeRange: scoring.openingTimeRange,
+                                hasRealtimeSchedule: scoring.hasRealtimeSchedule,
+                                recommendationPrimaryBroadCategory: scoring.primaryBroadCategory,
+                                recommendationBroadCategories: scoring.matchedBroadCategories,
+                                recommendationReasons: scoring.reasons,
+                                recommendationBreakdown: scoring.breakdown
+                            };
+                        })
+                        .sort((first, second) => {
+                            const secondInterestCore = Number(second?.recommendationBreakdown?.interestCoreScore || 0);
+                            const firstInterestCore = Number(first?.recommendationBreakdown?.interestCoreScore || 0);
+                            if (secondInterestCore !== firstInterestCore) {
+                                return secondInterestCore - firstInterestCore;
+                            }
+
+                            const scoreDelta = Number(second.recommendationScore || 0) - Number(first.recommendationScore || 0);
+                            if (scoreDelta !== 0) {
+                                return scoreDelta;
+                            }
+
+                            const secondPersonalization =
+                                Number(second?.recommendationBreakdown?.profileRelevanceScore || 0)
+                                + Number(second?.recommendationBreakdown?.interestScore || 0)
+                                + Number(second?.recommendationBreakdown?.interestSemanticScore || 0)
+                                + Number(second?.recommendationBreakdown?.serviceAffinityScore || 0);
+                            const firstPersonalization =
+                                Number(first?.recommendationBreakdown?.profileRelevanceScore || 0)
+                                + Number(first?.recommendationBreakdown?.interestScore || 0)
+                                + Number(first?.recommendationBreakdown?.interestSemanticScore || 0)
+                                + Number(first?.recommendationBreakdown?.serviceAffinityScore || 0);
+                            return secondPersonalization - firstPersonalization;
+                        });
+
+                const prioritizedVenues = prioritizeHotVenueRecommendations(effectiveScoredVenues, limit, 'recommendationScore');
+                logAiSuggestionDebugSnapshot('ai_suggest', preference, prioritizedVenues);
+
+                const recommendationPayload = prioritizedVenues.map((decoratedVenue) => {
                     return {
                         id: decoratedVenue.id,
                         name: decoratedVenue.name,
@@ -21137,7 +22609,7 @@ async function generateWardIdFromName(name) {
                     };
                 });
 
-                return res.json({
+                const responsePayload = {
                     success: true,
                     preferencesCompleted: true,
                     preference,
@@ -21148,8 +22620,11 @@ async function generateWardIdFromName(name) {
                         weatherMain: weatherMain || null,
                         preferOpenNow
                     },
-                    recommendations: diversifiedVenues
-                });
+                    recommendations: recommendationPayload
+                };
+
+                setCachedMapValue(aiSuggestionResponseCache, recommendationCacheKey, responsePayload);
+                return res.json(responsePayload);
             } catch (error) {
                 if (isUndefinedTableError(error)) {
                     return res.status(500).json({
@@ -21364,9 +22839,18 @@ async function generateWardIdFromName(name) {
                     return secondRating - firstRating;
                 };
 
-                const computeScoredRefineVenuesFromRows = (venueRows) => {
-                    return venueRows
-                        .map((row) => normalizeVenueCoordinates(row))
+                const computeScoredRefineVenuesFromRows = async (venueRows) => {
+                    const normalizedVenues = venueRows
+                        .map((row) => normalizeVenueCoordinates(row));
+                    const promotionAssignmentMap = await resolveCurrentVenuePromotionMapByVenueIds(
+                        normalizedVenues.map((venue) => venue.id)
+                    );
+                    const featuredPromotionMap = await resolveFeaturedVenuePromotionMapByVenueIds(
+                        normalizedVenues.map((venue) => venue.id)
+                    );
+
+                    return normalizedVenues
+                        .map((venue) => attachFeaturedVenuePromotion(venue, featuredPromotionMap, promotionAssignmentMap))
                         .map((venue) => {
                             const scoring = scoreVenueByUserPreference(
                                 venue,
@@ -21406,11 +22890,14 @@ async function generateWardIdFromName(name) {
                                 isOpenNow: refineEvaluation.isOpenNow,
                                 openingTimeRange: refineEvaluation.openingTimeRange,
                                 hasRealtimeSchedule: scoring.hasRealtimeSchedule,
+                                recommendationPrimaryBroadCategory: scoring.primaryBroadCategory,
+                                recommendationBroadCategories: scoring.matchedBroadCategories,
                                 passesRefine: refineEvaluation.passes,
                                 hardFailures: refineEvaluation.hardFailures,
                                 matchedRefineDimensions: refineEvaluation.matchedDimensions,
                                 failedRefineDimensions: refineEvaluation.failedDimensions,
-                                recommendationReasons: mergedReasons
+                                recommendationReasons: mergedReasons,
+                                recommendationBreakdown: scoring.breakdown
                             };
                         })
                         .filter((venue) => {
@@ -21422,7 +22909,7 @@ async function generateWardIdFromName(name) {
                         });
                 };
 
-                let scoredVenueCandidates = computeScoredRefineVenuesFromRows(venueResult.rows);
+                let scoredVenueCandidates = await computeScoredRefineVenuesFromRows(venueResult.rows);
                 let refinedVenues = scoredVenueCandidates
                     .filter((venue) => venue.passesRefine)
                     .sort(sortScoredRefineVenues);
@@ -21436,7 +22923,7 @@ async function generateWardIdFromName(name) {
                         `
                     );
 
-                    scoredVenueCandidates = computeScoredRefineVenuesFromRows(expandedVenueResult.rows);
+                    scoredVenueCandidates = await computeScoredRefineVenuesFromRows(expandedVenueResult.rows);
                     refinedVenues = scoredVenueCandidates
                         .filter((venue) => venue.passesRefine)
                         .sort(sortScoredRefineVenues);
@@ -21562,16 +23049,35 @@ async function generateWardIdFromName(name) {
                             ? 'Semantic parser uncertain. Returned broader heuristic refine results from approved venues.'
                             : 'Unable to confidently understand this refine sentence. Please rewrite with clearer details.'));
 
-                const slicedRefinedVenues = refinedVenues.slice(0, limit);
-                const promotionAssignmentMap = await resolveCurrentVenuePromotionMapByVenueIds(
-                    slicedRefinedVenues.map((v) => v.id)
-                );
-                const featuredPromotionMap = await resolveFeaturedVenuePromotionMapByVenueIds(
-                    slicedRefinedVenues.map((v) => v.id)
-                );
+                if (!refinedVenues.length) {
+                    let fallbackVenues = [...scoredVenueCandidates];
 
-                const recommendations = slicedRefinedVenues.map((venue) => {
-                    const decoratedVenue = attachFeaturedVenuePromotion(venue, featuredPromotionMap, promotionAssignmentMap);
+                    if (Number.isFinite(refineConstraints.maxDistanceKm)) {
+                        const nearbyFallbackVenues = fallbackVenues.filter((venue) => Number.isFinite(venue.distanceKm) && venue.distanceKm <= refineConstraints.maxDistanceKm);
+                        if (nearbyFallbackVenues.length) {
+                            fallbackVenues = nearbyFallbackVenues;
+                        }
+                    }
+
+                    if (refineConstraints.requireFoodVenue || refineConstraints.strictDiningIntent) {
+                        const foodFallbackVenues = fallbackVenues.filter((venue) => {
+                            const fields = buildVenueSearchFields(venue);
+                            const broadCategories = resolveVenueBroadCategoryMatchesFromFields(fields);
+                            return broadCategories.includes('dining') || isVenueLikelyFoodPlace(fields);
+                        });
+                        if (foodFallbackVenues.length) {
+                            fallbackVenues = foodFallbackVenues;
+                        }
+                    }
+
+                    refinedVenues = fallbackVenues
+                        .sort(sortScoredRefineVenues)
+                        .slice(0, Math.max(limit, 12));
+                }
+
+                logAiSuggestionDebugSnapshot('ai_refine', preference, refinedVenues);
+
+                const recommendations = refinedVenues.slice(0, limit).map((decoratedVenue) => {
                     return {
                         id: decoratedVenue.id,
                         name: decoratedVenue.name,
@@ -21826,7 +23332,7 @@ async function generateWardIdFromName(name) {
                     await createUserNotification({
                         userId,
                         type: 'favorite',
-                        title: 'Đã bỏ khỏi yêu thích',
+                        title: 'Removed from favorites',
                         content: String(name || normalizedItemId),
                         metadata: {
                             itemId: normalizedItemId,
@@ -21854,7 +23360,7 @@ async function generateWardIdFromName(name) {
                 await createUserNotification({
                     userId,
                     type: 'favorite',
-                    title: 'Đã thêm vào yêu thích',
+                    title: 'Added to favorites',
                     content: String(name || normalizedItemId),
                     metadata: {
                         itemId: normalizedItemId,
@@ -21871,8 +23377,8 @@ async function generateWardIdFromName(name) {
                         await createUserNotification({
                             userId: venueOwnerUserId,
                             type: 'venue_favorite',
-                            title: 'Bài đăng của bạn có lượt yêu thích mới',
-                            content: `${actorName} đã yêu thích bài đăng của bạn.`,
+                            title: 'Your venue received a new favorite',
+                            content: `${actorName} favorited your venue.`,
                             metadata: {
                                 itemId: normalizedItemId,
                                 itemType: normalizedItemType,
