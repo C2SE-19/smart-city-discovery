@@ -17,6 +17,7 @@ const translations = {
   chooseFromLibrary: 'Choose from library',
   takeNewPhoto: 'Take a new photo',
   chooseOrCaptureImage: 'Choose or capture image',
+  searchFoodAndPlace: 'Search food & places',
   searchPlace: 'Search Places',
   searchFood: 'Search Food',
   backToSearchMode: 'Back',
@@ -201,6 +202,93 @@ const translations = {
         ],
         cta: 'Explore now →',
         imageAlt: 'Discover local places'
+      },
+      aboutPage: {
+        hero: {
+          kicker: 'Context-Aware AI-Driven Smart City Discovery Platform',
+          title: 'Discover Smarter Cities with AI',
+          subtitle:
+            'Smart City Discovery is an AI-powered platform that recommends dining, entertainment, and services based on weather, real-time context, and user preferences.',
+          primaryCta: 'Explore the city',
+          secondaryCta: 'Contact the team',
+          badges: ['Real-time context', 'OpenStreetMap data', 'Personalized discovery'],
+          floatingCards: [
+            { title: 'Live Weather', value: 'Context-aware updates' },
+            { title: 'AI Match', value: 'Personalized ranking' },
+            { title: 'City Pulse', value: 'Events + trends' }
+          ],
+          imageAlt: 'Smart city skyline'
+        },
+        story: {
+          title: 'What is Smart City Discovery?',
+          description:
+            'Capstone project: "Context-Aware AI-Driven Smart City Discovery Platform." We help people navigate overwhelming choices and discover places that truly fit their moment.',
+          challengesTitle: 'The problems we solve',
+          challenges: [
+            'Too many places and not enough clarity',
+            'Hard to find the right fit quickly',
+            'Generic recommendations without personalization',
+            'No updates based on weather or time of day',
+            'Hard to discover new areas after administrative changes'
+          ],
+          techTitle: 'What powers the system',
+          techStack: [
+            'AI Recommendation',
+            'Context-Aware Suggestions',
+            'OpenStreetMap',
+            'Real-time Weather',
+            'Personalized Discovery'
+          ],
+          imageAlt: 'AI dashboard preview',
+          highlightKicker: 'AI insight loop',
+          highlightTitle: 'Context-first recommendations',
+          highlightAlt: 'AI insight'
+        },
+        ai: {
+          title: 'How the AI works',
+          subtitle: 'We blend context signals with city data, then rank venues with explainable scoring.',
+          steps: [
+            {
+              title: 'Collect context signals',
+              copy: 'Weather, time, location, and user preferences become real-time inputs.'
+            },
+            {
+              title: 'Fuse smart city data',
+              copy: 'OpenStreetMap layers, venues, and curated knowledge stay in sync.'
+            },
+            {
+              title: 'Personalize and rank',
+              copy: 'AI ranks the best options and highlights why they match.'
+            }
+          ]
+        },
+        impact: {
+          title: 'Who we support',
+          userTitle: 'For users',
+          userPoints: [
+            'Find the right place faster',
+            'Discover hidden gems with confidence',
+            'Receive smarter, context-aware suggestions',
+            'Enjoy better city experiences'
+          ],
+          businessTitle: 'For local businesses',
+          businessPoints: [
+            'Promote services to the right audience',
+            'Increase reach with smarter visibility',
+            'Turn nearby intent into real visits'
+          ]
+        },
+        contact: {
+          title: 'Contact the Capstone Team',
+          subtitle: 'Reach out for collaboration, feedback, or demos.',
+          emailLabel: 'Email',
+          phoneLabel: 'Phone',
+          addressLabel: 'Address',
+          email: 'smartcity.discovery2026@gmail.com',
+          phone: '0787606053',
+          address: '384 Duong 2/9, Da Nang, Viet Nam',
+          mapTitle: 'Team location'
+        }
       },
       allCity: {
         sectionTitle: 'Explore Featured Cities',
@@ -411,6 +499,7 @@ const translations = {
   chooseFromLibrary: 'Chọn ảnh từ thư viện',
   takeNewPhoto: 'Chụp ảnh mới',
   chooseOrCaptureImage: 'Chọn hoặc chụp ảnh',
+  searchFoodAndPlace: 'Tìm kiếm đồ ăn & địa điểm',
   searchPlace: 'Tìm kiếm địa điểm',
   searchFood: 'Tìm kiếm món ăn',
   backToSearchMode: 'Quay lại',
@@ -595,6 +684,93 @@ const translations = {
         ],
         cta: 'Khám phá ngay →',
         imageAlt: 'Khám phá địa phương'
+      },
+      aboutPage: {
+        hero: {
+          kicker: 'Context-Aware AI-Driven Smart City Discovery Platform',
+          title: 'Discover Smarter Cities with AI',
+          subtitle:
+            'Smart City Discovery is an AI-powered platform that recommends dining, entertainment, and services based on weather, real-time context, and user preferences.',
+          primaryCta: 'Explore the city',
+          secondaryCta: 'Contact the team',
+          badges: ['Real-time context', 'OpenStreetMap data', 'Personalized discovery'],
+          floatingCards: [
+            { title: 'Live Weather', value: 'Context-aware updates' },
+            { title: 'AI Match', value: 'Personalized ranking' },
+            { title: 'City Pulse', value: 'Events + trends' }
+          ],
+          imageAlt: 'Smart city skyline'
+        },
+        story: {
+          title: 'What is Smart City Discovery?',
+          description:
+            'Capstone project: "Context-Aware AI-Driven Smart City Discovery Platform." We help people navigate overwhelming choices and discover places that truly fit their moment.',
+          challengesTitle: 'The problems we solve',
+          challenges: [
+            'Too many places and not enough clarity',
+            'Hard to find the right fit quickly',
+            'Generic recommendations without personalization',
+            'No updates based on weather or time of day',
+            'Hard to discover new areas after administrative changes'
+          ],
+          techTitle: 'What powers the system',
+          techStack: [
+            'AI Recommendation',
+            'Context-Aware Suggestions',
+            'OpenStreetMap',
+            'Real-time Weather',
+            'Personalized Discovery'
+          ],
+          imageAlt: 'AI dashboard preview',
+          highlightKicker: 'AI insight loop',
+          highlightTitle: 'Context-first recommendations',
+          highlightAlt: 'AI insight'
+        },
+        ai: {
+          title: 'How the AI works',
+          subtitle: 'We blend context signals with city data, then rank venues with explainable scoring.',
+          steps: [
+            {
+              title: 'Collect context signals',
+              copy: 'Weather, time, location, and user preferences become real-time inputs.'
+            },
+            {
+              title: 'Fuse smart city data',
+              copy: 'OpenStreetMap layers, venues, and curated knowledge stay in sync.'
+            },
+            {
+              title: 'Personalize and rank',
+              copy: 'AI ranks the best options and highlights why they match.'
+            }
+          ]
+        },
+        impact: {
+          title: 'Who we support',
+          userTitle: 'For users',
+          userPoints: [
+            'Find the right place faster',
+            'Discover hidden gems with confidence',
+            'Receive smarter, context-aware suggestions',
+            'Enjoy better city experiences'
+          ],
+          businessTitle: 'For local businesses',
+          businessPoints: [
+            'Promote services to the right audience',
+            'Increase reach with smarter visibility',
+            'Turn nearby intent into real visits'
+          ]
+        },
+        contact: {
+          title: 'Contact the Capstone Team',
+          subtitle: 'Reach out for collaboration, feedback, or demos.',
+          emailLabel: 'Email',
+          phoneLabel: 'Phone',
+          addressLabel: 'Address',
+          email: 'smartcity.discovery2026@gmail.com',
+          phone: '0787606053',
+          address: '384 Duong 2/9, Da Nang, Viet Nam',
+          mapTitle: 'Team location'
+        }
       },
       allCity: {
         sectionTitle: 'Khám phá thành phố nổi bật',
