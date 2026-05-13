@@ -308,6 +308,7 @@ function buildCasualReply(message = '') {
 
 const OPENAI_MODEL = process.env.OPENAI_CHAT_MODEL || 'gpt-4o-mini';
 const RESULT_LIMIT = 5;
+const CHAT_SUGGESTION_LIMIT = 2;
 // Common stop words (English + Vietnamese) used to filter weak tokens from user queries
 const STOP_WORDS = new Set([
   'the','a','an','and','or','of','in','on','at','for','to','by','with','from','about','as','is','are','it','this','that','these','those',
@@ -1194,6 +1195,59 @@ function cleanReplyText(text) {
   return value;
 }
 
+function normalizeCoordinate(value, min, max) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < min || parsed > max) {
+    return null;
+  }
+
+  return parsed;
+}
+
+function computeDistanceKm(fromLatitude, fromLongitude, toLatitude, toLongitude) {
+  const lat1 = normalizeCoordinate(fromLatitude, -90, 90);
+  const lon1 = normalizeCoordinate(fromLongitude, -180, 180);
+  const lat2 = normalizeCoordinate(toLatitude, -90, 90);
+  const lon2 = normalizeCoordinate(toLongitude, -180, 180);
+
+  if (![lat1, lon1, lat2, lon2].every(Number.isFinite)) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  const toRadians = (degrees) => (degrees * Math.PI) / 180;
+  const earthRadiusKm = 6371;
+  const dLat = toRadians(lat2 - lat1);
+  const dLon = toRadians(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return earthRadiusKm * c;
+}
+
+function prioritizeVenuesByDistance(venues = [], latitude = null, longitude = null) {
+  const userLatitude = normalizeCoordinate(latitude, -90, 90);
+  const userLongitude = normalizeCoordinate(longitude, -180, 180);
+
+  if (!Number.isFinite(userLatitude) || !Number.isFinite(userLongitude)) {
+    return Array.isArray(venues) ? venues.slice() : [];
+  }
+
+  return (Array.isArray(venues) ? venues : [])
+    .map((venue, index) => ({
+      venue,
+      index,
+      distanceKm: computeDistanceKm(userLatitude, userLongitude, venue?.latitude, venue?.longitude)
+    }))
+    .sort((a, b) => a.distanceKm - b.distanceKm || a.index - b.index)
+    .map((entry) => ({
+      ...entry.venue,
+      distanceKm: Number.isFinite(entry.distanceKm) ? Number(entry.distanceKm.toFixed(2)) : null
+    }));
+}
+
 function extractBearerToken(req) {
   const authHeader = String(req?.headers?.authorization || '').trim();
   if (!authHeader.startsWith('Bearer ')) return '';
@@ -1221,6 +1275,8 @@ function formatLocalClockByOffset(offsetSeconds) {
 
 async function resolveProjectRuntimeContext(req) {
   try {
+    let latitude = normalizeCoordinate(req.body?.latitude, -90, 90);
+    let longitude = normalizeCoordinate(req.body?.longitude, -180, 180);
     const token = extractBearerToken(req);
     let userId = '';
 
@@ -1233,10 +1289,7 @@ async function resolveProjectRuntimeContext(req) {
       }
     }
 
-    let latitude = null;
-    let longitude = null;
-
-    if (userId) {
+    if ((!Number.isFinite(latitude) || !Number.isFinite(longitude)) && userId) {
       const prefResult = await pool.query(
         `SELECT last_known_latitude, last_known_longitude
          FROM user_ai_preferences
@@ -1947,6 +2000,8 @@ async function getVenuesByCategory(categoryKey, limit = RESULT_LIMIT) {
          COALESCE(NULLIF(venues.name, ''), venues.title) AS name,
          venues.address,
          venues.description,
+         venues.latitude,
+         venues.longitude,
          wards.name AS ward_name,
          place_categories.name AS category_name,
          (
@@ -1983,6 +2038,8 @@ async function getVenuesByCategory(categoryKey, limit = RESULT_LIMIT) {
     id: row.id,
     name: row.name,
     address: row.address,
+    latitude: normalizeCoordinate(row.latitude, -90, 90),
+    longitude: normalizeCoordinate(row.longitude, -180, 180),
     category: row.category_name || '',
     description: row.description || '',
     ward_name: row.ward_name || ''
@@ -2262,7 +2319,9 @@ Lưu ý: nếu không muốn gợi ý quán thì trả về "suggested_venues": 
 // ================== ROUTE ==================
 router.post('/', async (req, res) => {
   try {
-    const { message, chatHistory = [] } = req.body;
+    const { message, chatHistory = [], latitude, longitude } = req.body;
+    const requestLatitude = normalizeCoordinate(latitude, -90, 90);
+    const requestLongitude = normalizeCoordinate(longitude, -180, 180);
 
     if (!message) {
       return res.status(400).json({ error: 'Message is required' });
@@ -2370,8 +2429,11 @@ router.post('/', async (req, res) => {
         venueResults = [...primary.slice(0, desiredPrimary), ...related.slice(0, relatedCount)];
       }
 
-      // ensure a sensible maximum for returned items (primary + related)
-      venueResults = (venueResults || []).slice(0, Math.max(5, RESULT_LIMIT + 2));
+      venueResults = prioritizeVenuesByDistance(
+        venueResults,
+        requestLatitude ?? runtimeContext?.latitude,
+        requestLongitude ?? runtimeContext?.longitude
+      ).slice(0, CHAT_SUGGESTION_LIMIT);
       console.log('CHAT: venueResults length =', (venueResults || []).length);
 
       if (!venueResults.length) {
@@ -2383,8 +2445,8 @@ router.post('/', async (req, res) => {
         });
       }
 
-      const replyText = buildSafeSuggestionReply(venueResults.slice(0, 5));
-      const suggestedNames = (venueResults || []).map((v) => v.name).slice(0, 2);
+      const replyText = buildSafeSuggestionReply(venueResults.slice(0, CHAT_SUGGESTION_LIMIT));
+      const suggestedNames = (venueResults || []).map((v) => v.name).slice(0, CHAT_SUGGESTION_LIMIT);
 
       return res.json({
         reply: replyText,
