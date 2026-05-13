@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { Link, useLocation } from 'react-router-dom';
 import { useLanguage } from './contexts/LanguageContext';
+import { useAuth } from './contexts/AuthContext';
 import { fetchDaNangFeaturedPlaces } from './services/api/landingApi';
 import { APP_ROUTES } from './constants/routes';
 import translations from './constants/translations';
@@ -9,11 +11,20 @@ import danangBaNa from './assets/images/landing/danang-ba-na.svg';
 import danangSonTra from './assets/images/landing/danang-son-tra.svg';
 import danangNguHanhSon from './assets/images/landing/danang-ngu-hanh-son.svg';
 import cityLandmark from './assets/images/landing/city-landmark.svg';
-import cityFood from './assets/images/landing/city-food.svg';
-import cityRoute from './assets/images/landing/city-route.svg';
+import cityFood from './assets/images/landing/Aifood.png';
+import cityRoute from './assets/images/landing/sontra.png';
+import anh1 from './assets/images/landing/songhan.png';
 import anh2 from './assets/images/1.png';
+import anh7 from './assets/images/landing/phaohoa.png';
 import anh5 from './assets/images/anh5.png';
-import anh6 from './assets/images/anh6.png';
+import anh6 from './assets/images/landing/bana.png';
+import aboutHero from './assets/images/landing/phaohoa.png';
+import aboutPanel from './assets/images/landing/mykhe.png';
+import aboutAi from './assets/images/landing/caurong.png';
+import allCityHeroOne from './assets/images/landing/caurong.png';
+import allCityHeroTwo from './assets/images/landing/hoian.png';
+import allCityHeroThree from './assets/images/landing/bana.png';
+import allCityHeroFour from './assets/images/landing/sontra.png';
 import './LandingInfoPage.css';
 
 const DEFAULT_DA_NANG_PLACES = [
@@ -94,6 +105,103 @@ const PLACE_IMAGE_BY_ID = {
   'hai-van-pass': cityRoute
 };
 
+const ALL_CITY_HERO_SLIDES = [
+  { src: allCityHeroOne, alt: 'Dragon Bridge at night' },
+  { src: allCityHeroTwo, alt: 'My Khe coastline' },
+  { src: allCityHeroThree, alt: 'Ba Na Hills panorama' },
+  { src: allCityHeroFour, alt: 'Son Tra peninsula' },
+  { src: anh7, alt: 'Da Nang skyline at night' }
+];
+
+const ALL_CITY_FLOATING_CARDS = [
+  { title: 'Dragon Bridge', value: 'Night fire show' },
+  { title: 'AI Match', value: 'Smart recommendations' },
+  { title: 'Weather', value: 'Real-time context' }
+];
+
+const ALL_CITY_SCENES = [
+  {
+    title: 'Dragon Bridge Nights',
+    copy: 'Feel the energy of the Han River as the city lights ignite the iconic bridge each weekend.',
+    image: allCityHeroOne,
+    tag: 'Nightlife'
+  },
+  {
+    title: 'The Timeless Charm of Hoi An',
+    copy: 'Colorful lanterns, old town charm, and a timeless atmosphere that makes Hội An unforgettable.',
+    image: allCityHeroTwo,
+    tag: 'HOI AN HERITAGE'
+  },
+  {
+    title: 'Ba Na Hills Escape',
+    copy: 'A mountain retreat of clouds, gardens, and the iconic Golden Bridge journey.',
+    image: allCityHeroThree,
+    tag: 'Tourism + nature'
+  }
+];
+
+const ALL_CITY_FEATURES = [
+  {
+    title: 'AI Recommendation',
+    copy: 'Match visitors with experiences that fit the moment, location, and mood.'
+  },
+  {
+    title: 'Smart Discovery',
+    copy: 'Surface new venues and hidden gems with city-aware intelligence.'
+  },
+  {
+    title: 'Weather-aware Suggestions',
+    copy: 'Adjust itineraries automatically for sunshine, rain, or nightfall.'
+  },
+  {
+    title: 'Personalized Exploration',
+    copy: 'Curate routes based on preferences, time available, and travel style.'
+  },
+  {
+    title: 'Interactive Maps',
+    copy: 'Navigate Da Nang with live layers, categories, and AI highlighted areas.'
+  }
+];
+
+const ALL_CITY_BENTO_ITEMS = [
+  {
+    title: 'Dragon Bridge',
+    subtitle: 'Fire & water show',
+    image: allCityHeroOne,
+    className: 'lg:col-span-2 lg:row-span-2'
+  },
+  {
+    title: 'My Khe Beach',
+    subtitle: 'Sunrise coastline',
+    image: allCityHeroTwo,
+    className: 'lg:col-span-2'
+  },
+  {
+    title: 'Son Tra Peninsula',
+    subtitle: 'Green escapes',
+    image: allCityHeroFour,
+    className: 'lg:col-span-1'
+  },
+  {
+    title: 'Ba Na Hills',
+    subtitle: 'Cloudy retreats',
+    image: allCityHeroThree,
+    className: 'lg:col-span-1'
+  },
+  {
+    title: 'Han River',
+    subtitle: 'City reflections',
+    image: anh1,
+    className: 'lg:col-span-2'
+  },
+  {
+    title: 'fireworks',
+    subtitle: 'Local flavors',
+    image: anh7,
+    className: 'lg:col-span-2'
+  }
+];
+
 const normalizeCategoryLabel = (category) =>
   String(category || '')
     .normalize('NFC')
@@ -103,12 +211,415 @@ const normalizeCategoryLabel = (category) =>
 function LandingInfoPage({ title, description, cards, stats = null }) {
   const location = useLocation();
   const { language } = useLanguage();
+  const { isAuthenticated } = useAuth();
   const t = translations[language] || translations.vi;
-  const landingCopy = t.landingInfo || translations.vi.landingInfo;
+  const isEnglish = language === 'en';
   const [loadedPlaces, setLoadedPlaces] = useState(null);
   const [loadingPlaces, setLoadingPlaces] = useState(false);
   const [activeFilter, setActiveFilter] = useState('All');
   const [searchTerm, setSearchTerm] = useState('');
+  const [heroSlideIndex, setHeroSlideIndex] = useState(0);
+  const [allCityCounters, setAllCityCounters] = useState([]);
+
+  const allCityCopy = useMemo(() => {
+    if (isEnglish) {
+      return {
+        heroKicker: 'Da Nang Cinematic Showcase',
+        heroTitle: 'Discover Da Nang',
+        heroSubtitle:
+          'Explore the most livable city in Viet Nam with AI-powered discovery, smart recommendations, and cinematic travel experiences.',
+        heroPrimaryCta: 'Explore Da Nang Map',
+        heroSecondaryCta: 'See AI Discovery',
+        introKicker: 'Smart City, Coastal Soul',
+        introTitle: 'Da Nang, the cinematic smart city of Viet Nam',
+        introDescription:
+          'A modern coastal capital that blends iconic bridges, golden beaches, and a fast-growing smart city vision.',
+        introBullets: [
+          'A modern coastal city celebrated for the Dragon Bridge, My Khe Beach, Ba Na Hills, and Son Tra Peninsula.',
+          'A destination where nature, technology, tourism, and modern living flow together.',
+          'From local cuisine to smart mobility, every route is curated for the moment.'
+        ],
+        insightKicker: 'Futuristic discovery',
+        insightTitle: 'Smart city intelligence, designed for explorers',
+        insightDescription: 'Built with AI, smart maps, and live data to guide travelers and locals with precision.',
+        insightCardKicker: 'Live insights',
+        insightCardTitle: 'Interactive city layers',
+        insightCardDescription:
+          'Explore curated routes, venue clusters, and recommendations that change with real-time context.',
+        highlightsTitle: 'Featured Da Nang Highlights',
+        highlightsSubtitle: 'Bento-style snapshots of the city’s most loved destinations.',
+        finaleTitle: 'Experience Da Nang Smarter',
+        finaleDescription: 'Explore destinations, food, entertainment, and hidden gems powered by AI.',
+        finaleCta: 'Start exploring',
+        heroSlides: ALL_CITY_HERO_SLIDES,
+        floatingCards: ALL_CITY_FLOATING_CARDS,
+        scenes: ALL_CITY_SCENES,
+        features: ALL_CITY_FEATURES,
+        bentoItems: ALL_CITY_BENTO_ITEMS,
+        stats: [
+          { value: 1000000, label: 'Visitors', suffix: '+', compact: 'm' },
+          { value: 1, label: 'Top Tourism City', prefix: '#', suffix: '' },
+          { value: 24, label: 'Smart City Destination', suffix: '/7' },
+          { value: 100, label: 'AI Powered Discovery', suffix: '%' }
+        ]
+      };
+    }
+
+    return {
+      heroKicker: 'Trình diễn Đà Nẵng điện ảnh',
+      heroTitle: 'Khám phá Đà Nẵng',
+      heroSubtitle:
+        'Khám phá thành phố đáng sống nhất Việt Nam với gợi ý AI, đề xuất thông minh và trải nghiệm du lịch điện ảnh.',
+      heroPrimaryCta: 'Khám phá bản đồ Đà Nẵng',
+      heroSecondaryCta: 'Xem gợi ý AI',
+      introKicker: 'Thành phố thông minh, hồn biển',
+      introTitle: 'Đà Nẵng, thành phố thông minh ven biển của Việt Nam',
+      introDescription:
+        'Thành phố biển hiện đại kết hợp những cây cầu biểu tượng, bãi biển vàng và tầm nhìn thành phố thông minh tăng tốc.',
+      introBullets: [
+        'Thành phố ven biển nổi bật với Cầu Rồng, biển Mỹ Khê, Bà Nà Hills và bán đảo Sơn Trà.',
+        'Nơi giao thoa giữa thiên nhiên, công nghệ, du lịch và nhịp sống hiện đại.',
+        'Từ ẩm thực đến di chuyển thông minh, mỗi lộ trình đều được cá nhân hóa.'
+      ],
+      insightKicker: 'Khám phá tương lai',
+      insightTitle: 'Trí tuệ thành phố, thiết kế cho người khám phá',
+      insightDescription:
+        'Xây dựng trên AI, bản đồ thông minh và dữ liệu thời gian thực để dẫn đường chính xác cho du khách và người dân.',
+      insightCardKicker: 'Insight trực tiếp',
+      insightCardTitle: 'Lớp bản đồ tương tác',
+      insightCardDescription:
+        'Khám phá lộ trình gợi ý, cụm địa điểm và đề xuất thay đổi theo ngữ cảnh thời gian thực.',
+      highlightsTitle: 'Điểm nhấn Đà Nẵng nổi bật',
+      highlightsSubtitle: 'Bộ sưu tập hình ảnh về những điểm đến được yêu thích nhất.',
+      finaleTitle: 'Trải nghiệm Đà Nẵng thông minh',
+      finaleDescription: 'Khám phá điểm đến, ẩm thực, giải trí và điểm ẩn được hỗ trợ bởi AI.',
+      finaleCta: 'Bắt đầu khám phá',
+      heroSlides: [
+        {
+          title: 'Cầu Rồng',
+          subtitle: 'Trình diễn lửa cuối tuần',
+          src: allCityHeroOne,
+          tag: 'Biểu tượng thành phố'
+        },
+        {
+          title: 'Phố cổ Hội An',
+          subtitle: 'Đèn lồng và di sản',
+          src: allCityHeroTwo,
+          tag: 'Di sản Hội An'
+        },
+        {
+          title: 'Ba Na Hills',
+          subtitle: 'Toàn cảnh trên mây',
+          src: allCityHeroThree,
+          tag: 'Du lịch và thiên nhiên'
+        },
+        {
+          title: 'Bán đảo Sơn Trà',
+          subtitle: 'Rừng xanh và đường mòn',
+          src: allCityHeroFour,
+          tag: 'Thiên nhiên hoang sơ'
+        },
+        {
+          title: 'Đà Nẵng về đêm',
+          subtitle: 'Sôi động và hiện đại',
+          src: anh7,
+          tag: 'Nhịp sống thành phố'
+        }
+      ],
+      floatingCards: [
+        { title: 'Điểm đến hàng đầu', value: 'AI chọn lọc' },
+        { title: 'Thời tiết trực tiếp', value: 'Cập nhật mỗi giờ' },
+        { title: 'Lộ trình thông minh', value: 'Luôn đúng thời điểm' }
+      ],
+      scenes: [
+        {
+          title: 'Đêm Cầu Rồng',
+          tag: 'Cuộc sống về đêm',
+          copy: 'Cảm nhận năng lượng bên sông Hàn khi ánh đèn thành phố thắp sáng cây cầu biểu tượng mỗi dịp cuối tuần.',
+          image: allCityHeroOne
+        },
+        {
+          title: 'Vẻ đẹp vượt thời gian của Hội An',
+          tag: 'Di sản Hội An',
+          copy: 'Đèn lồng rực rỡ, phố cổ trầm mặc và một bầu không khí khiến Hội An luôn đáng nhớ.',
+          image: allCityHeroTwo
+        },
+        {
+          title: 'Hành trình Ba Na Hills',
+          tag: 'Du lịch và thiên nhiên',
+          copy: 'Một điểm đến giữa mây trời với khu vườn, cảnh quan núi cao và hành trình biểu tượng qua Cầu Vàng.',
+          image: allCityHeroThree
+        }
+      ],
+      features: [
+        {
+          title: 'Gợi ý bằng AI',
+          copy: 'Kết nối du khách với trải nghiệm phù hợp theo thời điểm, vị trí và cảm xúc.'
+        },
+        {
+          title: 'Khám phá thông minh',
+          copy: 'Làm nổi bật địa điểm mới và các điểm ẩn nhờ lớp dữ liệu nhận biết theo thành phố.'
+        },
+        {
+          title: 'Gợi ý theo thời tiết',
+          copy: 'Tự động điều chỉnh kế hoạch khi nắng, mưa hoặc chuyển sang buổi tối.'
+        },
+        {
+          title: 'Khám phá cá nhân hóa',
+          copy: 'Xây dựng lộ trình dựa trên sở thích, thời gian hiện có và phong cách du lịch.'
+        },
+        {
+          title: 'Bản đồ tương tác',
+          copy: 'Điều hướng Đà Nẵng với lớp dữ liệu trực tiếp, danh mục và vùng gợi ý bởi AI.'
+        }
+      ],
+      bentoItems: [
+        {
+          title: 'Cầu Rồng',
+          subtitle: 'Biểu tượng thành phố',
+          image: allCityHeroOne,
+          className: 'lg:col-span-2 lg:row-span-2'
+        },
+        {
+          title: 'Ba Na Hills',
+          subtitle: 'Nghỉ dưỡng trên mây',
+          image: allCityHeroThree,
+          className: 'lg:col-span-1'
+        },
+        {
+          title: 'Vẻ đẹp vượt thời gian của Hội An',
+          subtitle: 'Di sản Hội An',
+          image: allCityHeroTwo,
+          className: 'lg:col-span-2'
+        },
+        {
+          title: 'Bán đảo Sơn Trà',
+          subtitle: 'Không gian xanh',
+          image: allCityHeroFour,
+          className: 'lg:col-span-1'
+        },
+        {
+          title: 'Sông Hàn',
+          subtitle: 'Phản chiếu thành phố',
+          image: anh1,
+          className: 'lg:col-span-2'
+        },
+        {
+          title: 'Lễ hội pháo hoa',
+          subtitle: 'Sắc màu lễ hội',
+          image: anh7,
+          className: 'lg:col-span-2'
+        }
+      ],
+      stats: [
+        { value: 1000000, label: 'Lượt khách', suffix: '+', compact: 'm' },
+        { value: 1, label: 'Thành phố du lịch hàng đầu', prefix: '#', suffix: '' },
+        { value: 24, label: 'Điểm đến thành phố thông minh', suffix: '/7' },
+        { value: 100, label: 'Khám phá AI', suffix: '%' }
+      ]
+    };
+  }, [isEnglish]);
+
+  const aboutPageCopy = useMemo(() => {
+    if (isEnglish) {
+      return {
+        hero: {
+          kicker: 'Context-Aware AI-Driven Smart City Discovery Platform',
+          title: 'Discover Smarter Cities with AI',
+          subtitle:
+            'Smart City Discovery is an AI-powered platform that recommends dining, entertainment, and services based on weather, real-time context, and user preferences.',
+          primaryCta: 'Explore the city',
+          secondaryCta: 'Contact the team',
+          badges: ['Real-time context', 'OpenStreetMap data', 'Personalized discovery'],
+          floatingCards: [
+            { title: 'Live Weather', value: 'Context-aware updates' },
+            { title: 'AI Match', value: 'Personalized ranking' },
+            { title: 'City Pulse', value: 'Events + trends' }
+          ],
+          imageAlt: 'Smart city skyline'
+        },
+        story: {
+          kicker: 'What is Smart City Discovery',
+          title: 'What is Smart City Discovery?',
+          description:
+            'Capstone project: "Context-Aware AI-Driven Smart City Discovery Platform." We help people navigate overwhelming choices and discover places that truly fit their moment.',
+          challengesTitle: 'The problems we solve',
+          challenges: [
+            'Too many places and not enough clarity',
+            'Hard to find the right fit quickly',
+            'Generic recommendations without personalization',
+            'No updates based on weather or time of day',
+            'Hard to discover new areas after administrative changes'
+          ],
+          techTitle: 'What powers the system',
+          techStack: [
+            'AI Recommendation',
+            'Context-Aware Suggestions',
+            'OpenStreetMap',
+            'Real-time Weather',
+            'Personalized Discovery'
+          ],
+          imageAlt: 'AI dashboard preview',
+          highlightKicker: 'AI insight loop',
+          highlightTitle: 'Context-first recommendations',
+          highlightAlt: 'AI insight'
+        },
+        ai: {
+          kicker: 'AI workflow',
+          title: 'How the AI works',
+          subtitle: 'We blend context signals with city data, then rank venues with explainable scoring.',
+          steps: [
+            {
+              title: 'Collect context signals',
+              copy: 'Weather, time, location, and user preferences become real-time inputs.'
+            },
+            {
+              title: 'Fuse smart city data',
+              copy: 'OpenStreetMap layers, venues, and curated knowledge stay in sync.'
+            },
+            {
+              title: 'Personalize and rank',
+              copy: 'AI ranks the best options and highlights why they match.'
+            }
+          ]
+        },
+        impact: {
+          title: 'Who we support',
+          userTitle: 'For users',
+          userPoints: [
+            'Find the right place faster',
+            'Discover hidden gems with confidence',
+            'Receive smarter, context-aware suggestions',
+            'Enjoy better city experiences'
+          ],
+          businessTitle: 'For local businesses',
+          businessPoints: [
+            'Promote services to the right audience',
+            'Increase reach with smarter visibility',
+            'Turn nearby intent into real visits'
+          ]
+        },
+        contact: {
+          kicker: 'Contact',
+          title: 'Contact the Capstone Team',
+          subtitle: 'Reach out for collaboration, feedback, or demos.',
+          emailLabel: 'Email',
+          phoneLabel: 'Phone',
+          addressLabel: 'Address',
+          email: 'smartcity.discovery2026@gmail.com',
+          phone: '0787606053',
+          address: '384 Duong 2/9, Da Nang, Viet Nam',
+          mapTitle: 'Team location',
+          mapCta: 'View on map'
+        }
+      };
+    }
+
+    return {
+      hero: {
+        kicker: 'NỀN TẢNG KHÁM PHÁ THÀNH PHỐ THÔNG MINH DỰA TRÊN AI VÀ NGỮ CẢNH',
+        title: 'Khám phá thành phố thông minh hơn cùng AI',
+        subtitle:
+          'Smart City Discovery là nền tảng ứng dụng AI để gợi ý ăn uống, giải trí và dịch vụ dựa trên thời tiết, bối cảnh thời gian thực và sở thích người dùng.',
+        primaryCta: 'Khám phá thành phố',
+        secondaryCta: 'Liên hệ nhóm',
+        badges: ['Ngữ cảnh thời gian thực', 'Dữ liệu OpenStreetMap', 'Khám phá cá nhân hóa'],
+        floatingCards: [
+          { title: 'Thời tiết trực tiếp', value: 'Cập nhật theo ngữ cảnh' },
+          { title: 'Ghép nối AI', value: 'Xếp hạng cá nhân hóa' },
+          { title: 'Nhịp thành phố', value: 'Sự kiện và xu hướng' }
+        ],
+        imageAlt: 'Toàn cảnh thành phố thông minh'
+      },
+      story: {
+        kicker: 'Smart City Discovery là gì',
+        title: 'Smart City Discovery là gì?',
+        description:
+          'Đây là đề tài capstone "Context-Aware AI-Driven Smart City Discovery Platform". Chúng tôi giúp người dùng giảm quá tải lựa chọn và tìm ra địa điểm phù hợp nhất với từng thời điểm.',
+        challengesTitle: 'Những vấn đề chúng tôi giải quyết',
+        challenges: [
+          'Quá nhiều lựa chọn địa điểm nhưng thiếu sự rõ ràng',
+          'Khó tìm đúng địa điểm phù hợp trong thời gian ngắn',
+          'Gợi ý chung chung, thiếu cá nhân hóa',
+          'Không cập nhật theo thời tiết hoặc thời gian trong ngày',
+          'Khó khám phá khu vực mới sau thay đổi hành chính'
+        ],
+        techTitle: 'Nền tảng công nghệ vận hành hệ thống',
+        techStack: [
+          'Gợi ý AI',
+          'Đề xuất theo ngữ cảnh',
+          'OpenStreetMap',
+          'Thời tiết thời gian thực',
+          'Khám phá cá nhân hóa'
+        ],
+        imageAlt: 'Giao diện hệ thống AI',
+        highlightKicker: 'Vòng lặp insight AI',
+        highlightTitle: 'Gợi ý ưu tiên theo ngữ cảnh',
+        highlightAlt: 'Insight AI'
+      },
+      ai: {
+        kicker: 'Quy trình AI',
+        title: 'AI hoạt động như thế nào',
+        subtitle: 'Hệ thống kết hợp tín hiệu ngữ cảnh với dữ liệu thành phố, sau đó xếp hạng địa điểm bằng cơ chế giải thích được.',
+        steps: [
+          {
+            title: 'Thu thập tín hiệu ngữ cảnh',
+            copy: 'Thời tiết, thời gian, vị trí và sở thích người dùng trở thành dữ liệu đầu vào theo thời gian thực.'
+          },
+          {
+            title: 'Kết hợp dữ liệu thành phố thông minh',
+            copy: 'Lớp dữ liệu OpenStreetMap, địa điểm và tri thức được đồng bộ để đảm bảo tính nhất quán.'
+          },
+          {
+            title: 'Cá nhân hóa và xếp hạng',
+            copy: 'AI xếp hạng lựa chọn phù hợp nhất và cho biết lý do tại sao địa điểm đó được đề xuất.'
+          }
+        ]
+      },
+      impact: {
+        title: 'Đối tượng hệ thống phục vụ',
+        userTitle: 'Dành cho người dùng',
+        userPoints: [
+          'Tìm đúng địa điểm nhanh hơn',
+          'Khám phá điểm đến ít người biết với nhiều tự tin hơn',
+          'Nhận đề xuất thông minh theo bối cảnh',
+          'Có trải nghiệm thành phố tốt hơn'
+        ],
+        businessTitle: 'Dành cho doanh nghiệp địa phương',
+        businessPoints: [
+          'Quảng bá dịch vụ đúng nhóm khách hàng',
+          'Tăng độ phủ nhờ khả năng hiển thị thông minh',
+          'Chuyển nhu cầu xung quanh thành lượt ghé thăm thực tế'
+        ]
+      },
+      contact: {
+        kicker: 'Liên hệ',
+        title: 'Liên hệ nhóm Capstone',
+        subtitle: 'Kết nối với chúng tôi để hợp tác, đóng góp ý kiến hoặc xem demo.',
+        emailLabel: 'Email',
+        phoneLabel: 'Điện thoại',
+        addressLabel: 'Địa chỉ',
+        email: 'smartcity.discovery2026@gmail.com',
+        phone: '0787606053',
+        address: '384 Duong 2/9, Da Nang, Viet Nam',
+        mapTitle: 'Vị trí nhóm',
+        mapCta: 'Xem trên bản đồ'
+      }
+    };
+  }, [isEnglish]);
+
+  const allCityStats = allCityCopy.stats;
+  const allCityHeroSlides = allCityCopy.heroSlides;
+
+  const formatAllCityStat = (stat, value) => {
+    if (stat.compact === 'm') {
+      const millions = Math.max(value, 0) / 1000000;
+      const display = Number.isInteger(millions) ? millions.toString() : millions.toFixed(1);
+      return `${stat.prefix || ''}${display}M${stat.suffix || ''}`;
+    }
+
+    return `${stat.prefix || ''}${Math.round(value)}${stat.suffix || ''}`;
+  };
   const carouselRef = useRef(null);
   const cardsPerView = 4;
 
@@ -119,6 +630,11 @@ function LandingInfoPage({ title, description, cards, stats = null }) {
     if (location.pathname === '/service') return 'service';
     return 'default';
   }, [location.pathname]);
+
+  const isAboutPage = pageType === 'about';
+  const isAllCityPage = pageType === 'all-city';
+  const languagePack = t;
+  const landingCopy = languagePack.landingInfo || translations.en.landingInfo;
 
   useEffect(() => {
     if (pageType !== 'all-city') {
@@ -152,6 +668,46 @@ function LandingInfoPage({ title, description, cards, stats = null }) {
       isMounted = false;
     };
   }, [pageType]);
+
+  useEffect(() => {
+    if (!isAllCityPage || allCityHeroSlides.length === 0) {
+      return;
+    }
+
+    const interval = setInterval(() => {
+      setHeroSlideIndex((current) => (current + 1) % allCityHeroSlides.length);
+    }, 6500);
+
+    return () => clearInterval(interval);
+  }, [isAllCityPage, allCityHeroSlides]);
+
+  useEffect(() => {
+    if (!isAllCityPage) {
+      return;
+    }
+
+    let rafId = null;
+    const duration = 1400;
+    const start = performance.now();
+
+    const tick = (now) => {
+      const progress = Math.min((now - start) / duration, 1);
+      setAllCityCounters(allCityStats.map((stat) => stat.value * progress));
+
+      if (progress < 1) {
+        rafId = requestAnimationFrame(tick);
+      }
+    };
+
+    setAllCityCounters(allCityStats.map(() => 0));
+    rafId = requestAnimationFrame(tick);
+
+    return () => {
+      if (rafId) {
+        cancelAnimationFrame(rafId);
+      }
+    };
+  }, [allCityStats, isAllCityPage]);
 
   const pageCopy = landingCopy?.[pageType] || {};
   const resolvedTitle = pageCopy.title || title || '';
@@ -245,6 +801,15 @@ function LandingInfoPage({ title, description, cards, stats = null }) {
   const filterOptions = useMemo(() => {
     const defaultOrder = ['Phổ Biến', 'Phố Biển', 'Mua Sắm', 'Ẩm Thực', 'Giải Trí', 'Thiên Nhiên'];
     const categoryMap = new Map();
+    const categoryLabels = {
+      'Phổ Biến': 'Popular',
+      'Phố Biển': 'Coastal',
+      'Mua Sắm': 'Shopping',
+      'Ẩm Thực': 'Food',
+      'Giải Trí': 'Entertainment',
+      'Thiên Nhiên': 'Nature'
+    };
+    const shouldTranslateCategories = isAllCityPage && isEnglish;
 
     formattedPlaces.forEach((place) => {
       const rawCategory = normalizeCategoryLabel(place.category);
@@ -264,37 +829,228 @@ function LandingInfoPage({ title, description, cards, stats = null }) {
 
     return [
       { value: 'All', label: landingCopy.allCity?.filterAllLabel || 'Tất cả' },
-      ...orderedCategories.map((category) => ({ value: category, label: category })),
-      ...remainingCategories.map((category) => ({ value: category, label: category }))
+      ...orderedCategories.map((category) => ({
+        value: category,
+        label: shouldTranslateCategories ? categoryLabels[category] || category : category
+      })),
+      ...remainingCategories.map((category) => ({
+        value: category,
+        label: shouldTranslateCategories ? categoryLabels[category] || category : category
+      }))
     ];
-  }, [formattedPlaces, landingCopy.allCity?.filterAllLabel]);
+  }, [formattedPlaces, landingCopy.allCity?.filterAllLabel, isAllCityPage, isEnglish]);
 
-  const serviceItems = landingCopy?.service?.items || [
-    {
-      icon: '🚚',
-      title: 'Giao hàng thông minh',
-      copy: 'Kết nối người dùng với cửa hàng và hệ thống vận chuyển.',
-      slug: 'giao-hang-thong-minh'
-    },
-    {
-      icon: '📣',
-      title: 'Quảng cáo & Promotion',
-      copy: 'Hiển thị cửa hàng nổi bật theo vị trí và hành vi.',
-      slug: 'quang-cao-promotion'
-    },
-    {
-      icon: '🧩',
-      title: 'Module linh hoạt',
-      copy: 'Tùy chỉnh nội dung từng trang mà không ảnh hưởng layout chung.',
-      slug: 'module-linh-hoat'
-    },
-    {
-      icon: '🗺️',
-      title: 'Tích hợp GIS',
-      copy: 'Hiển thị bản đồ theo khu vực, hỗ trợ phân tích dữ liệu.',
-      slug: 'tich-hop-gis'
+  const serviceCopy = useMemo(() => {
+    if (isEnglish) {
+      return {
+        heroKicker: 'SMART CITY AI SERVICES',
+        heroTitle: 'AI-Powered Smart Urban Experience',
+        heroSubtitle:
+          'Smart City Discovery integrates AI recommendation, AI image recognition, interactive maps, and AI chatbot technology to help users explore smarter city experiences.',
+        heroMediaAlt: 'Smart city AI dashboard',
+        heroCards: [
+          { title: 'AI Recommendation', copy: 'Context-aware picks', position: { top: '8%', left: '6%' } },
+          { title: 'Smart Navigation', copy: 'Dynamic routing', position: { bottom: '12%', left: '12%' } },
+          { title: 'AI Chatbot', copy: '24/7 city guide', position: { top: '12%', right: '8%' } },
+          { title: 'Image Recognition', copy: 'Food and place ID', position: { bottom: '8%', right: '12%' } }
+        ],
+        aiKicker: 'AI Recommendation',
+        aiTitle: 'AI Smart Recommendation',
+        aiText: 'The system analyzes real-time context to surface the most relevant places for every moment.',
+        aiSignals: ['Weather', 'Time of day', 'User preferences', 'Age group', 'Exploration behavior'],
+        aiExamples: [
+          'Rainy weather -> indoor cafe',
+          'Late evening -> nightlife hotspots',
+          'Nature lovers -> Son Tra escapes'
+        ],
+        aiCta: 'Try AI Suggestion',
+        aiLoginNote: 'Login to access personalized AI recommendations',
+        visionKicker: 'Vision AI',
+        visionTitle: 'AI Image Recognition',
+        visionText: 'Upload a dish photo and let AI find the nearest authentic spots in seconds.',
+        visionSteps: [
+          'Upload a dish photo',
+          'AI recognizes the cuisine',
+          'Find nearby places that serve it',
+          'Explore authentic local food'
+        ],
+        visionCta: 'Try Image Search',
+        visionLoginNote: 'Login to access AI image search',
+        chatKicker: 'AI Assistant',
+        chatTitle: 'Smart AI Chat Assistant',
+        chatText: 'Get instant guidance, tailored plans, and quick answers for city exploration.',
+        chatPrompts: [
+          '"Where should I go tonight?"',
+          '"Best cafe near the beach?"',
+          '"Suggest indoor places when raining"'
+        ],
+        chatCta: 'Open AI Assistant',
+        chatLoginNote: 'Login to access the AI assistant',
+        chatBotPrompt: 'Hey, I can plan your city night in seconds.',
+        chatUserPrompt: 'Show me cozy cafes nearby.',
+        chatBotReply: 'Here are three great options with live ratings.',
+        mapKicker: 'Smart Navigation',
+        mapTitle: 'Interactive Smart City Maps',
+        mapText:
+          'Explore neighborhoods, discover nearby venues, and navigate with intelligent routes and live layers.',
+        mapList: [
+          'Smart navigation and curated routes',
+          'Nearby discovery with live context',
+          'Interactive maps with updated boundaries',
+          'Administrative area support'
+        ],
+        mapCards: ['Nearby Places', 'Real-time Discovery', 'Smart Navigation', 'Explore Hidden Gems'],
+        mapCta: 'Open Smart Map',
+        mapFrameTitle: 'Smart city map preview',
+        mapLinkLabel: 'Open smart map',
+        merchantKicker: 'Merchant Growth',
+        merchantTitle: 'Local Business Amplifier',
+        merchantText:
+          'Give merchants premium visibility with AI-driven placement, community discovery, and smart promotion.',
+        merchantBullets: [
+          'Support local businesses with smarter visibility',
+          'Push-to-top promotion for high intent visitors',
+          'Community reviews that build trust',
+          'Hidden gems spotlight for curated venues'
+        ],
+        bentoKicker: 'AI Experience Gallery',
+        bentoTitle: 'A Modern Smart City Stack',
+        bentoText: 'Visual snapshots of the AI-powered discovery flow across the platform.',
+        galleryItems: [
+          { title: 'Smart City', subtitle: 'AI pulse map', image: allCityHeroOne, className: 'is-wide is-tall' },
+          { title: 'Cafes', subtitle: 'Morning rituals', image: allCityHeroTwo, className: 'is-wide' },
+          { title: 'Restaurants', subtitle: 'Local flavors', image: cityFood, className: 'is-tall' },
+          { title: 'Nightlife', subtitle: 'After dark energy', image: anh7, className: '' },
+          { title: 'Smart Maps', subtitle: 'Layered discovery', image: cityRoute, className: 'is-wide' },
+          { title: 'AI Dashboard', subtitle: 'Insight cockpit', image: aboutPanel, className: '' },
+          { title: 'Chat Assistant', subtitle: 'Always-on guidance', image: aboutAi, className: '' },
+          { title: 'Food Vision', subtitle: 'Instant recognition', image: anh6, className: 'is-wide' }
+        ],
+        finaleTitle: 'Experience Smarter City Discovery',
+        finaleText:
+          'AI-powered recommendation, intelligent maps, image recognition, and smart urban exploration in one platform.'
+      };
     }
-  ];
+
+    return {
+      heroKicker: 'DỊCH VỤ AI THÀNH PHỐ THÔNG MINH',
+      heroTitle: 'Trải nghiệm đô thị thông minh cùng AI',
+      heroSubtitle:
+        'Smart City Discovery tích hợp gợi ý AI, nhận diện hình ảnh, bản đồ tương tác, và chatbot AI để giúp người dùng khám phá thành phố thông minh hơn.',
+      heroMediaAlt: 'Bang dieu khien AI thanh pho thong minh',
+      heroCards: [
+        { title: 'Gợi ý AI', copy: 'Gợi ý theo ngữ cảnh', position: { top: '8%', left: '6%' } },
+        { title: 'Dẫn đường thông minh', copy: 'Lộ trình linh hoạt', position: { bottom: '12%', left: '12%' } },
+        { title: 'Trợ lý AI', copy: 'Hướng dẫn 24/7', position: { top: '12%', right: '8%' } },
+        { title: 'Nhận diện hình ảnh', copy: 'Món ăn & địa điểm', position: { bottom: '8%', right: '12%' } }
+      ],
+      aiKicker: 'Gợi ý AI',
+      aiTitle: 'Gợi ý AI thông minh',
+      aiText: 'Hệ thống phân tích bối cảnh thời gian thực để đề xuất địa điểm phù hợp nhất cho từng khoảnh khắc.',
+      aiSignals: ['Thời tiết', 'Thời gian trong ngày', 'Sở thích người dùng', 'Độ tuổi', 'Hành vi khám phá'],
+      aiExamples: [
+        'Trời mưa -> quán cà phê trong nhà',
+        'Đêm muộn -> điểm vui chơi đêm',
+        'Thích thiên nhiên -> khám phá Sơn Trà'
+      ],
+      aiCta: 'Thử gợi ý AI',
+      aiLoginNote: 'Đăng nhập để nhận gợi ý AI cá nhân hóa',
+      visionKicker: 'Thị giác AI',
+      visionTitle: 'Nhận diện hình ảnh AI',
+      visionText: 'Tải ảnh món ăn và để AI tìm địa điểm phù hợp gần bạn chỉ trong vài giây.',
+      visionSteps: [
+        'Tải ảnh món ăn',
+        'AI nhận diện món',
+        'Tìm địa điểm phù hợp gần bạn',
+        'Khám phá ẩm thực địa phương'
+      ],
+      visionCta: 'Thử tìm bằng ảnh',
+      visionLoginNote: 'Đăng nhập để dùng tìm kiếm bằng ảnh',
+      chatKicker: 'Trợ lý AI',
+      chatTitle: 'Trợ lý chat AI thông minh',
+      chatText: 'Nhận hướng dẫn nhanh, kế hoạch cá nhân hóa, và trả lời tức thì khi khám phá thành phố.',
+      chatPrompts: [
+        '"Tôi nên đi đâu tối nay?"',
+        '"Quán cà phê gần biển ngon nhất?"',
+        '"Gợi ý chỗ trong nhà khi trời mưa"'
+      ],
+      chatCta: 'Mở trợ lý AI',
+      chatLoginNote: 'Đăng nhập để dùng trợ lý AI',
+      chatBotPrompt: 'Tôi có thể lên lịch tối nay trong vài giây.',
+      chatUserPrompt: 'Gợi ý quán cà phê ấm cúng gần đây.',
+      chatBotReply: 'Đây là ba gợi ý tốt kèm đánh giá.',
+      mapKicker: 'Dẫn đường thông minh',
+      mapTitle: 'Bản đồ thành phố thông minh tương tác',
+      mapText:
+        'Khám phá khu vực, tìm địa điểm gần bạn, và điều hướng với lộ trình thông minh cùng lớp dữ liệu trực tiếp.',
+      mapList: [
+        'Dẫn đường thông minh và lộ trình chọn lọc',
+        'Khám phá gần bạn theo ngữ cảnh',
+        'Bản đồ tương tác với ranh giới cập nhật',
+        'Hỗ trợ khu vực hành chính'
+      ],
+      mapCards: ['Địa điểm gần đây', 'Khám phá thời gian thực', 'Dẫn đường thông minh', 'Khám phá điểm ẩn'],
+      mapCta: 'Mở bản đồ thông minh',
+      mapFrameTitle: 'Xem trước bản đồ thông minh',
+      mapLinkLabel: 'Mở bản đồ thông minh',
+      merchantKicker: 'Tăng trưởng Merchant',
+      merchantTitle: 'Tăng cường doanh nghiệp địa phương',
+      merchantText:
+        'Giúp merchant tăng hiện diện với định vị AI, khám phá cộng đồng, và quảng bá thông minh.',
+      merchantBullets: [
+        'Hỗ trợ doanh nghiệp địa phương với hiển thị thông minh',
+        'Quảng bá ưu tiên cho khách hàng quan tâm',
+        'Đánh giá cộng đồng tạo uy tín',
+        'Gợi ý điểm ẩn được chọn lọc'
+      ],
+      bentoKicker: 'Thư viện trải nghiệm AI',
+      bentoTitle: 'Hệ thống thành phố thông minh hiện đại',
+      bentoText: 'Hình ảnh tổng quan về luồng khám phá AI trên nền tảng.',
+      galleryItems: [
+        { title: 'Thành phố thông minh', subtitle: 'Bản đồ nhịp sống AI', image: allCityHeroOne, className: 'is-wide is-tall' },
+        { title: 'Quán cà phê', subtitle: 'Buổi sáng bình yên', image: allCityHeroTwo, className: 'is-wide' },
+        { title: 'Nhà hàng', subtitle: 'Hương vị địa phương', image: cityFood, className: 'is-tall' },
+        { title: 'Đời sống đêm', subtitle: 'Năng lượng về đêm', image: anh7, className: '' },
+        { title: 'Bản đồ thông minh', subtitle: 'Khám phá nhiều lớp', image: cityRoute, className: 'is-wide' },
+        { title: 'Bảng điều khiển AI', subtitle: 'Góc nhìn insight', image: aboutPanel, className: '' },
+        { title: 'Trợ lý chat', subtitle: 'Hướng dẫn 24/7', image: aboutAi, className: '' },
+        { title: 'Nhận diện món ăn', subtitle: 'Nhận diện tức thì', image: anh6, className: 'is-wide' }
+      ],
+      finaleTitle: 'Trải nghiệm khám phá thành phố thông minh',
+      finaleText:
+        'Gợi ý AI, bản đồ thông minh, nhận diện hình ảnh, và hành trình đô thị thông minh trên một nền tảng.'
+    };
+  }, [isEnglish]);
+
+  const serviceHeroCards = serviceCopy.heroCards;
+  const serviceAiSignals = serviceCopy.aiSignals;
+  const serviceAiExamples = serviceCopy.aiExamples;
+  const serviceVisionSteps = serviceCopy.visionSteps;
+  const serviceChatPrompts = serviceCopy.chatPrompts;
+  const serviceMapCards = serviceCopy.mapCards;
+  const serviceMerchantBullets = serviceCopy.merchantBullets;
+  const serviceGalleryItems = serviceCopy.galleryItems;
+  const serviceMapLat = 16.061026;
+  const serviceMapLng = 108.22303;
+  const serviceMapZoom = 16;
+  const serviceMapDelta = 0.006;
+  const serviceMapBbox = [
+    serviceMapLng - serviceMapDelta,
+    serviceMapLat - serviceMapDelta,
+    serviceMapLng + serviceMapDelta,
+    serviceMapLat + serviceMapDelta
+  ]
+    .map((value) => value.toFixed(6))
+    .join('%2C');
+  const serviceMapEmbed = `https://www.openstreetmap.org/export/embed.html?bbox=${serviceMapBbox}&layer=mapnik&marker=${serviceMapLat}%2C${serviceMapLng}`;
+  const serviceMapLink = `${APP_ROUTES.CITY_MAP}?lat=${serviceMapLat}&lng=${serviceMapLng}&mapZoom=${serviceMapZoom}`;
+
+  const fadeInUp = {
+    initial: { opacity: 0, y: 24 },
+    whileInView: { opacity: 1, y: 0 },
+    viewport: { once: true, amount: 0.2 },
+    transition: { duration: 0.8, ease: 'easeOut' }
+  };
 
   const resolvePlaceLink = (place) => {
     if (place?.mapLink) {
@@ -328,6 +1084,766 @@ function LandingInfoPage({ title, description, cards, stats = null }) {
     const scrollAmount = (cardWidth + gap) * cardsPerView;
     container.scrollBy({ left: direction * scrollAmount, behavior: 'smooth' });
   };
+
+  if (isAboutPage) {
+    const aboutPage = isEnglish ? landingCopy.aboutPage || aboutPageCopy : aboutPageCopy;
+    const hero = aboutPage.hero || {};
+    const story = aboutPage.story || {};
+    const ai = aboutPage.ai || {};
+    const impact = aboutPage.impact || {};
+    const contact = aboutPage.contact || {};
+
+    const heroBadges = hero.badges || ['Real-time context', 'OpenStreetMap data', 'Personalized discovery'];
+    const heroCards =
+      hero.floatingCards ||
+      [
+        { title: 'Live Weather', value: 'Context-aware updates' },
+        { title: 'AI Match', value: 'Personalized ranking' },
+        { title: 'City Pulse', value: 'Events + trends' }
+      ];
+    const heroCardPositions = ['top-10 right-6', 'bottom-14 right-24', 'top-36 left-[55%]'];
+
+    const challenges =
+      story.challenges ||
+      [
+        'Too many places and not enough clarity',
+        'Hard to find the right fit quickly',
+        'Generic recommendations without personalization',
+        'No updates based on weather or time of day',
+        'Hard to discover new areas after administrative changes'
+      ];
+    const techStack =
+      story.techStack ||
+      [
+        'AI Recommendation',
+        'Context-Aware Suggestions',
+        'OpenStreetMap',
+        'Real-time Weather',
+        'Personalized Discovery'
+      ];
+    const aiSteps =
+      ai.steps ||
+      [
+        {
+          title: 'Collect context signals',
+          copy: 'Weather, time, location, and user preferences become real-time inputs.'
+        },
+        {
+          title: 'Fuse smart city data',
+          copy: 'OpenStreetMap layers, venues, and curated knowledge stay in sync.'
+        },
+        {
+          title: 'Personalize and rank',
+          copy: 'AI ranks the best options and highlights why they match.'
+        }
+      ];
+    const userPoints =
+      impact.userPoints ||
+      [
+        'Find the right place faster',
+        'Discover hidden gems with confidence',
+        'Receive smarter, context-aware suggestions',
+        'Enjoy better city experiences'
+      ];
+    const businessPoints =
+      impact.businessPoints ||
+      [
+        'Promote services to the right audience',
+        'Increase reach with smarter visibility',
+        'Turn nearby intent into real visits'
+      ];
+    const contactEmail = contact.email || 'smartcity.discovery2026@gmail.com';
+    const contactPhone = contact.phone || '0787606053';
+    const contactAddress = contact.address || '384 Duong 2/9, Da Nang, Viet Nam';
+
+    const mapLat = 16.038545;
+    const mapLng = 108.22339;
+    const mapSrc =
+      'https://www.openstreetmap.org/export/embed.html?bbox=108.22004%2C16.035195%2C108.22674%2C16.041895&layer=mapnik&marker=16.038545%2C108.22339';
+    const mapLink = `${APP_ROUTES.CITY_MAP}?lat=${mapLat}&lng=${mapLng}&mapZoom=16`;
+
+    return (
+      <section className="w-full text-[var(--color-text)]">
+        <div className="relative isolate overflow-hidden">
+          <div className="absolute inset-0">
+            <div
+              className="absolute inset-0 bg-cover bg-center md:bg-fixed"
+              style={{ backgroundImage: `url(${aboutHero})` }}
+              aria-hidden="true"
+            />
+            <div className="absolute inset-0 bg-slate-950/50" aria-hidden="true" />
+            <div
+              className="absolute inset-0 bg-gradient-to-b from-black/50 via-black/30 to-[#f7f0e6]"
+              aria-hidden="true"
+            />
+          </div>
+
+          <div className="relative mx-auto max-w-6xl px-6 py-24 lg:py-32">
+            <motion.div
+              initial={{ opacity: 0, y: 24 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.8, ease: 'easeOut' }}
+              className="max-w-2xl"
+            >
+              <p className="text-xs uppercase tracking-[0.3em] text-white/70">
+                {hero.kicker || 'Context-Aware AI-Driven Smart City Discovery Platform'}
+              </p>
+              <h1 className="mt-4 text-4xl font-[var(--font-display)] font-semibold text-white sm:text-5xl lg:text-6xl">
+                {hero.title || 'Discover Smarter Cities with AI'}
+              </h1>
+              <p className="mt-6 text-base text-white/85 sm:text-lg">
+                {hero.subtitle ||
+                  'Smart City Discovery is an AI-powered platform that recommends dining, entertainment, and services based on weather, real-time context, and user preferences.'}
+              </p>
+              <div className="mt-8 flex flex-wrap items-center gap-4">
+                <Link
+                  to={APP_ROUTES.ALL_CITY}
+                  className="rounded-full bg-[#f4b37f] px-6 py-3 text-sm font-semibold text-slate-900 shadow-lg shadow-[#f4b37f]/30 transition hover:-translate-y-0.5 hover:bg-[#f7c58f]"
+                >
+                  {hero.primaryCta || 'Explore the city'}
+                </Link>
+                <Link
+                  to={APP_ROUTES.FEEDBACK}
+                  className="rounded-full border border-white/50 px-6 py-3 text-sm font-semibold text-white/90 backdrop-blur transition hover:-translate-y-0.5 hover:bg-white/15"
+                >
+                  {hero.secondaryCta || 'Contact the team'}
+                </Link>
+              </div>
+              <div className="mt-10 flex flex-wrap gap-3 text-xs uppercase tracking-[0.2em] text-white/70">
+                {heroBadges.map((badge) => (
+                  <span
+                    key={badge}
+                    className="rounded-full border border-white/30 bg-white/10 px-3 py-1 backdrop-blur"
+                  >
+                    {badge}
+                  </span>
+                ))}
+              </div>
+            </motion.div>
+
+            {heroCards.map((card, index) => (
+              <motion.div
+                key={`${card.title}-${index}`}
+                animate={{ y: [0, -10, 0] }}
+                transition={{ duration: 6, repeat: Infinity, ease: 'easeInOut', delay: index * 0.7 }}
+                className={`absolute hidden flex-col gap-2 rounded-2xl border border-white/40 bg-white/70 px-4 py-3 shadow-xl backdrop-blur lg:flex ${heroCardPositions[index] || 'top-0 right-0'}`}
+              >
+                <span className="text-[10px] uppercase tracking-[0.2em] text-[#c78c5f]">
+                  {card.title}
+                </span>
+                <span className="text-sm font-semibold text-slate-900">{card.value}</span>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+
+        <div className="relative bg-gradient-to-b from-[#f7f0e6] via-[#fff7ed] to-white">
+          <div className="pointer-events-none absolute inset-0">
+            <div className="absolute -top-16 right-0 h-72 w-72 rounded-full bg-[#f4b37f]/30 blur-3xl" />
+            <div className="absolute bottom-0 left-0 h-72 w-72 rounded-full bg-[#fff1df]/80 blur-3xl" />
+          </div>
+
+          <div className="relative mx-auto flex max-w-6xl flex-col gap-16 px-6 py-16">
+            <motion.div
+              initial={{ opacity: 0, y: 32 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, amount: 0.3 }}
+              transition={{ duration: 0.7, ease: 'easeOut' }}
+              className="grid items-center gap-12 lg:grid-cols-[1.15fr_0.85fr]"
+            >
+              <div className="space-y-6">
+                <p className="text-xs uppercase tracking-[0.28em] text-[#c78c5f]">
+                  {story.kicker || 'What is Smart City Discovery'}
+                </p>
+                <h2 className="text-3xl font-[var(--font-display)] font-semibold text-slate-900 lg:text-4xl">
+                  {story.title || 'What is Smart City Discovery?'}
+                </h2>
+                <p className="text-base text-[var(--color-text-dim)]">
+                  {story.description ||
+                    'Capstone project: "Context-Aware AI-Driven Smart City Discovery Platform." We help people navigate overwhelming choices and discover places that truly fit their moment.'}
+                </p>
+                <div className="rounded-2xl border border-white/70 bg-white/70 p-6 shadow-sm backdrop-blur">
+                  <h4 className="text-xs uppercase tracking-[0.2em] text-[#c78c5f]">
+                    {story.challengesTitle || 'The problems we solve'}
+                  </h4>
+                  <ul className="mt-4 space-y-3 text-sm text-slate-700">
+                    {challenges.map((item) => (
+                      <li key={item} className="flex gap-3">
+                        <span className="mt-2 h-2 w-2 rounded-full bg-[#f4b37f]" />
+                        <span>{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <h4 className="text-xs uppercase tracking-[0.2em] text-[#c78c5f]">
+                    {story.techTitle || 'What powers the system'}
+                  </h4>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {techStack.map((item) => (
+                      <span
+                        key={item}
+                        className="rounded-full border border-white/70 bg-white/70 px-3 py-1 text-xs font-semibold text-slate-700 shadow-sm"
+                      >
+                        {item}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="relative">
+                <div className="absolute -top-10 left-6 h-40 w-40 rounded-full bg-[#f4b37f]/35 blur-3xl" />
+                <div className="rounded-3xl border border-white/70 bg-white/60 p-3 shadow-xl backdrop-blur">
+                  <img
+                    src={aboutPanel}
+                    alt={story.imageAlt || 'AI dashboard preview'}
+                    className="h-full w-full rounded-2xl object-cover"
+                    loading="lazy"
+                  />
+                </div>
+                <div className="absolute -bottom-6 left-6 right-6 rounded-2xl border border-white/70 bg-white/80 p-4 shadow-lg backdrop-blur">
+                  <div className="flex items-center gap-3">
+                    <img
+                      src={aboutAi}
+                      alt={story.highlightAlt || 'AI insight'}
+                      className="h-12 w-12 rounded-xl object-cover"
+                      loading="lazy"
+                    />
+                    <div>
+                      <p className="text-[10px] uppercase tracking-[0.2em] text-[#c78c5f]">
+                        {story.highlightKicker || 'AI insight loop'}
+                      </p>
+                      <p className="text-sm font-semibold text-slate-900">
+                        {story.highlightTitle || 'Context-first recommendations'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 32 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, amount: 0.3 }}
+              transition={{ duration: 0.7, ease: 'easeOut' }}
+              className="rounded-3xl border border-white/70 bg-white/70 p-8 shadow-lg backdrop-blur"
+            >
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.2em] text-[#c78c5f]">
+                    {ai.kicker || 'AI workflow'}
+                  </p>
+                  <h3 className="text-2xl font-[var(--font-display)] font-semibold text-slate-900">
+                    {ai.title || 'How the AI works'}
+                  </h3>
+                </div>
+                <p className="max-w-lg text-sm text-[var(--color-text-dim)]">
+                  {ai.subtitle ||
+                    'We blend context signals with city data, then rank venues with explainable scoring.'}
+                </p>
+              </div>
+
+              <div className="mt-8 grid gap-6 md:grid-cols-3">
+                {aiSteps.map((step, index) => (
+                  <motion.div
+                    key={step.title}
+                    initial={{ opacity: 0, y: 20 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true, amount: 0.4 }}
+                    transition={{ duration: 0.5, ease: 'easeOut', delay: index * 0.1 }}
+                    className="group rounded-2xl border border-white/70 bg-white/80 p-6 shadow-sm backdrop-blur transition hover:-translate-y-1 hover:shadow-lg"
+                  >
+                    <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-[#f4b37f]/25 text-sm font-semibold text-[#c78c5f]">
+                      {`0${index + 1}`}
+                    </div>
+                    <h4 className="text-lg font-semibold text-slate-900">{step.title}</h4>
+                    <p className="mt-2 text-sm text-[var(--color-text-dim)]">{step.copy}</p>
+                  </motion.div>
+                ))}
+              </div>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 32 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, amount: 0.3 }}
+              transition={{ duration: 0.7, ease: 'easeOut' }}
+              className="space-y-6"
+            >
+              <h3 className="text-2xl font-[var(--font-display)] font-semibold text-slate-900">
+                {impact.title || 'Who we support'}
+              </h3>
+              <div className="grid gap-6 md:grid-cols-2">
+                <div className="rounded-3xl border border-white/70 bg-white/75 p-6 shadow-md backdrop-blur">
+                  <h4 className="text-lg font-semibold text-slate-900">{impact.userTitle || 'For users'}</h4>
+                  <ul className="mt-4 space-y-3 text-sm text-slate-700">
+                    {userPoints.map((item) => (
+                      <li key={item} className="flex gap-3">
+                        <span className="mt-2 h-2 w-2 rounded-full bg-[#f4b37f]" />
+                        <span>{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="rounded-3xl border border-white/70 bg-white/75 p-6 shadow-md backdrop-blur">
+                  <h4 className="text-lg font-semibold text-slate-900">{impact.businessTitle || 'For local businesses'}</h4>
+                  <ul className="mt-4 space-y-3 text-sm text-slate-700">
+                    {businessPoints.map((item) => (
+                      <li key={item} className="flex gap-3">
+                        <span className="mt-2 h-2 w-2 rounded-full bg-[#f4b37f]" />
+                        <span>{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 32 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, amount: 0.3 }}
+              transition={{ duration: 0.7, ease: 'easeOut' }}
+              className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]"
+            >
+              <div className="rounded-3xl border border-white/70 bg-white/75 p-8 shadow-lg backdrop-blur">
+                <p className="text-xs uppercase tracking-[0.2em] text-[#c78c5f]">
+                  {contact.kicker || 'Contact'}
+                </p>
+                <h3 className="mt-2 text-2xl font-[var(--font-display)] font-semibold text-slate-900">
+                  {contact.title || 'Contact the Capstone Team'}
+                </h3>
+                <p className="mt-3 text-sm text-[var(--color-text-dim)]">
+                  {contact.subtitle || 'Reach out for collaboration, feedback, or demos.'}
+                </p>
+                <div className="mt-6 space-y-4 text-sm text-slate-700">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.2em] text-[#c78c5f]">
+                      {contact.emailLabel || 'Email'}
+                    </p>
+                    <p className="font-semibold text-slate-900">{contactEmail}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.2em] text-[#c78c5f]">
+                      {contact.phoneLabel || 'Phone'}
+                    </p>
+                    <p className="font-semibold text-slate-900">{contactPhone}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.2em] text-[#c78c5f]">
+                      {contact.addressLabel || 'Address'}
+                    </p>
+                    <p className="font-semibold text-slate-900">{contactAddress}</p>
+                  </div>
+                </div>
+              </div>
+              <div className="overflow-hidden rounded-3xl border border-white/70 bg-white shadow-lg">
+                <iframe
+                  title={contact.mapTitle || 'Team location'}
+                  src={mapSrc}
+                  className="h-72 w-full border-0"
+                  loading="lazy"
+                  referrerPolicy="no-referrer-when-downgrade"
+                />
+                <div className="flex items-center justify-between bg-white/80 px-4 py-3 text-xs text-slate-600">
+                  <span>{contact.mapTitle || 'Team location'}</span>
+                  <Link to={mapLink} className="font-semibold text-[#c78c5f]">
+                    {contact.mapCta || 'View on map'}
+                  </Link>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  if (isAllCityPage) {
+    return (
+      <section className="w-full text-[var(--color-text)]">
+        <div className="relative min-h-[92vh] overflow-hidden">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={allCityHeroSlides[heroSlideIndex]?.src}
+              className="absolute inset-0 bg-cover bg-center"
+              style={{ backgroundImage: `url(${allCityHeroSlides[heroSlideIndex]?.src})` }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 1.2, ease: 'easeOut' }}
+              aria-hidden="true"
+            />
+          </AnimatePresence>
+          <div className="absolute inset-0 bg-gradient-to-b from-slate-950/70 via-slate-950/35 to-[#f7f0e6]" />
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.2),_transparent_45%)]" />
+
+          <motion.div
+            animate={{ y: [0, -20, 0] }}
+            transition={{ duration: 10, repeat: Infinity, ease: 'easeInOut' }}
+            className="absolute right-16 top-24 hidden h-40 w-40 rounded-full bg-[#f4b37f]/40 blur-3xl lg:block"
+          />
+          <motion.div
+            animate={{ y: [0, 18, 0] }}
+            transition={{ duration: 12, repeat: Infinity, ease: 'easeInOut' }}
+            className="absolute bottom-16 left-16 hidden h-44 w-44 rounded-full bg-white/30 blur-3xl lg:block"
+          />
+
+          <div className="relative mx-auto flex min-h-[92vh] max-w-6xl flex-col justify-center px-6 py-24">
+            <motion.div
+              initial={{ opacity: 0, y: 24 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.9, ease: 'easeOut' }}
+              className="max-w-3xl"
+            >
+              <p className="text-xs uppercase tracking-[0.3em] text-white/70">
+                {allCityCopy.heroKicker}
+              </p>
+              <h1 className="mt-4 text-4xl font-[var(--font-display)] font-semibold text-white sm:text-5xl lg:text-6xl">
+                {allCityCopy.heroTitle}
+              </h1>
+              <p className="mt-6 text-base text-white/85 sm:text-lg">
+                {allCityCopy.heroSubtitle}
+              </p>
+              <div className="mt-8 flex flex-wrap gap-4">
+                <Link
+                  to={`${APP_ROUTES.CITY_MAP}?lat=16.060969&lng=108.223486&mapZoom=16`}
+                  className="rounded-full bg-[#f4b37f] px-6 py-3 text-sm font-semibold text-slate-900 shadow-lg shadow-[#f4b37f]/30 transition hover:-translate-y-0.5 hover:bg-[#f7c58f]"
+                >
+                  {allCityCopy.heroPrimaryCta}
+                </Link>
+                <Link
+                  to={APP_ROUTES.SERVICE}
+                  className="rounded-full border border-white/50 px-6 py-3 text-sm font-semibold text-white/90 backdrop-blur transition hover:-translate-y-0.5 hover:bg-white/15"
+                >
+                  {allCityCopy.heroSecondaryCta}
+                </Link>
+              </div>
+            </motion.div>
+
+            {allCityCopy.floatingCards.map((card, index) => (
+              <motion.div
+                key={`${card.title}-${index}`}
+                animate={{ y: [0, -10, 0] }}
+                transition={{ duration: 6, repeat: Infinity, ease: 'easeInOut', delay: index * 0.6 }}
+                className={`absolute hidden rounded-2xl border border-white/40 bg-white/70 px-4 py-3 shadow-xl backdrop-blur lg:flex lg:flex-col lg:gap-2 ${
+                  index === 0 ? 'right-16 top-32' : index === 1 ? 'right-24 bottom-20' : 'left-[55%] top-44'
+                }`}
+              >
+                <span className="text-[10px] uppercase tracking-[0.2em] text-[#c78c5f]">
+                  {card.title}
+                </span>
+                <span className="text-sm font-semibold text-slate-900">{card.value}</span>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+
+        <div className="relative bg-gradient-to-b from-[#f7f0e6] via-[#fff7ed] to-white">
+          <div className="pointer-events-none absolute inset-0">
+            <div className="absolute -top-20 right-0 h-72 w-72 rounded-full bg-[#f4b37f]/30 blur-3xl" />
+            <div className="absolute bottom-0 left-0 h-72 w-72 rounded-full bg-[#fff1df]/80 blur-3xl" />
+          </div>
+
+          <div className="relative mx-auto flex max-w-6xl flex-col gap-16 px-6 py-16">
+            <motion.section
+              initial={{ opacity: 0, y: 32 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, amount: 0.3 }}
+              transition={{ duration: 0.7, ease: 'easeOut' }}
+              className="grid items-center gap-12 lg:grid-cols-[1.1fr_0.9fr]"
+            >
+              <div className="space-y-6">
+                <p className="text-xs uppercase tracking-[0.28em] text-[#c78c5f]">{allCityCopy.introKicker}</p>
+                <h2 className="text-3xl font-[var(--font-display)] font-semibold text-slate-900 lg:text-4xl">
+                  {allCityCopy.introTitle}
+                </h2>
+                <p className="text-base text-[var(--color-text-dim)]">
+                  {allCityCopy.introDescription}
+                </p>
+                <ul className="space-y-3 text-sm text-slate-700">
+                  {allCityCopy.introBullets.map((item) => (
+                    <li key={item} className="flex gap-3">
+                      <span className="mt-2 h-2 w-2 rounded-full bg-[#f4b37f]" />
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+
+                <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                  {allCityStats.map((stat, index) => (
+                    <div
+                      key={stat.label}
+                      className="rounded-2xl border border-white/70 bg-white/80 p-4 text-center shadow-sm backdrop-blur"
+                    >
+                      <div className="text-2xl font-semibold text-slate-900">
+                        {formatAllCityStat(stat, allCityCounters[index] || 0)}
+                      </div>
+                      <div className="mt-1 text-xs uppercase tracking-[0.2em] text-[#c78c5f]">
+                        {stat.label}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                {[aboutPanel, allCityHeroTwo, allCityHeroThree, aboutAi].map((image, index) => (
+                  <motion.div
+                    key={`${image}-${index}`}
+                    initial={{ opacity: 0, y: 20 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true, amount: 0.4 }}
+                    transition={{ duration: 0.6, ease: 'easeOut', delay: index * 0.1 }}
+                    className="overflow-hidden rounded-3xl border border-white/70 bg-white/70 shadow-lg backdrop-blur"
+                  >
+                    <img src={image} alt={allCityCopy.heroTitle} className="h-full w-full object-cover" loading="lazy" />
+                  </motion.div>
+                ))}
+              </div>
+            </motion.section>
+
+            <div className="space-y-12">
+              {allCityCopy.scenes.map((scene, index) => {
+                const isReversed = index % 2 === 1;
+                return (
+                  <motion.div
+                    key={scene.title}
+                    initial={{ opacity: 0, y: 32 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true, amount: 0.3 }}
+                    transition={{ duration: 0.7, ease: 'easeOut' }}
+                    className="group grid items-center gap-8 lg:grid-cols-2"
+                  >
+                    <div className={isReversed ? 'lg:order-2' : ''}>
+                      <div className="relative overflow-hidden rounded-3xl shadow-xl">
+                        <img
+                          src={scene.image}
+                          alt={scene.title}
+                          className="h-full w-full object-cover transition duration-700 group-hover:scale-105"
+                          loading="lazy"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-slate-900/60 via-transparent to-transparent" />
+                      </div>
+                    </div>
+                    <div className={isReversed ? 'lg:order-1' : ''}>
+                      <div className="rounded-3xl border border-white/70 bg-white/75 p-6 shadow-lg backdrop-blur">
+                        <p className="text-xs uppercase tracking-[0.25em] text-[#c78c5f]">{scene.tag}</p>
+                        <h3 className="mt-3 text-2xl font-[var(--font-display)] font-semibold text-slate-900">
+                          {scene.title}
+                        </h3>
+                        <p className="mt-3 text-sm text-[var(--color-text-dim)]">{scene.copy}</p>
+                      </div>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
+
+            <motion.section
+              initial={{ opacity: 0, y: 32 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, amount: 0.3 }}
+              transition={{ duration: 0.7, ease: 'easeOut' }}
+              className="relative overflow-hidden rounded-[32px] border border-white/70 bg-gradient-to-br from-white/80 via-[#fff3e5] to-white/80 p-8 shadow-2xl backdrop-blur"
+            >
+              <div className="absolute -right-10 top-10 h-40 w-40 rounded-full bg-[#f4b37f]/30 blur-3xl" />
+              <div className="absolute -left-10 bottom-10 h-32 w-32 rounded-full bg-[#fff1df]/80 blur-3xl" />
+
+              <div className="relative grid gap-10 lg:grid-cols-[1.1fr_0.9fr]">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.2em] text-[#c78c5f]">{allCityCopy.insightKicker}</p>
+                  <h3 className="mt-2 text-2xl font-[var(--font-display)] font-semibold text-slate-900">
+                    {allCityCopy.insightTitle}
+                  </h3>
+                  <p className="mt-3 text-sm text-[var(--color-text-dim)]">
+                    {allCityCopy.insightDescription}
+                  </p>
+
+                  <div className="mt-6 grid gap-4 sm:grid-cols-2">
+                    {allCityCopy.features.map((feature) => (
+                      <div
+                        key={feature.title}
+                        className="rounded-2xl border border-white/70 bg-white/80 p-4 shadow-sm backdrop-blur transition hover:-translate-y-1 hover:shadow-lg"
+                      >
+                        <h4 className="text-sm font-semibold text-slate-900">{feature.title}</h4>
+                        <p className="mt-2 text-xs text-[var(--color-text-dim)]">{feature.copy}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="space-y-4">
+                  <div className="overflow-hidden rounded-3xl border border-white/70 bg-white/70 shadow-lg backdrop-blur">
+                    <img src={aboutPanel} alt={allCityCopy.insightTitle} className="h-full w-full object-cover" loading="lazy" />
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="overflow-hidden rounded-3xl border border-white/70 bg-white/70 shadow-lg backdrop-blur">
+                      <img src={aboutAi} alt={allCityCopy.insightCardTitle} className="h-full w-full object-cover" loading="lazy" />
+                    </div>
+                    <div className="rounded-3xl border border-white/70 bg-white/70 p-4 text-sm text-[var(--color-text-dim)] shadow-lg backdrop-blur">
+                      <p className="text-xs uppercase tracking-[0.2em] text-[#c78c5f]">{allCityCopy.insightCardKicker}</p>
+                      <p className="mt-2 font-semibold text-slate-900">{allCityCopy.insightCardTitle}</p>
+                      <p className="mt-2">
+                        {allCityCopy.insightCardDescription}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </motion.section>
+
+            <motion.section
+              initial={{ opacity: 0, y: 32 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, amount: 0.3 }}
+              transition={{ duration: 0.7, ease: 'easeOut' }}
+              className="space-y-6"
+            >
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <h3 className="text-2xl font-[var(--font-display)] font-semibold text-slate-900">
+                  {allCityCopy.highlightsTitle}
+                </h3>
+                <p className="text-sm text-[var(--color-text-dim)]">
+                  {allCityCopy.highlightsSubtitle}
+                </p>
+              </div>
+              <div className="grid gap-4 lg:grid-cols-4 lg:auto-rows-[180px]">
+                {allCityCopy.bentoItems.map((item) => (
+                  <div
+                    key={item.title}
+                    className={`group relative overflow-hidden rounded-3xl border border-white/70 bg-white/40 shadow-lg backdrop-blur ${item.className}`}
+                  >
+                    <img
+                      src={item.image}
+                      alt={item.title}
+                      className="h-full w-full object-cover transition duration-700 group-hover:scale-105"
+                      loading="lazy"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-slate-900/60 via-transparent to-transparent" />
+                    <div className="absolute bottom-4 left-4 right-4 rounded-2xl border border-white/60 bg-white/70 p-3 text-xs text-slate-800 shadow-md backdrop-blur">
+                      <p className="text-[10px] uppercase tracking-[0.25em] text-[#c78c5f]">{item.subtitle}</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-900">{item.title}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </motion.section>
+
+            <motion.section
+              initial={{ opacity: 0, y: 32 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, amount: 0.3 }}
+              transition={{ duration: 0.7, ease: 'easeOut' }}
+              className="landing-info-cities-section rounded-[32px] border border-white/70 bg-white/80 p-8 shadow-[0_24px_60px_rgba(212,165,116,0.2)] backdrop-blur"
+            >
+              <h3 className="landing-info-cities-title">
+                {landingCopy.allCity?.sectionTitle || 'Explore Featured Cities'}
+              </h3>
+
+              <div className="landing-info-cities-search">
+                <input
+                  type="text"
+                  placeholder={landingCopy.allCity?.searchPlaceholder || 'Search cities...'}
+                  className="landing-info-cities-search-input"
+                  value={searchTerm}
+                  onChange={(event) => setSearchTerm(event.target.value)}
+                />
+              </div>
+
+              <div className="landing-info-cities-filters">
+                {filterOptions.map((filter) => (
+                  <button
+                    key={filter.value}
+                    type="button"
+                    className={`landing-info-cities-filter ${activeFilter === filter.value ? 'active' : ''}`}
+                    onClick={() => setActiveFilter(filter.value)}
+                  >
+                    {filter.label}
+                  </button>
+                ))}
+              </div>
+
+              {loadingPlaces && (
+                <div className="landing-info-cities-loading">
+                  {landingCopy.allCity?.loadingLabel || 'Loading data...'}
+                </div>
+              )}
+
+              {!loadingPlaces && (
+                <div className="landing-info-cities-carousel">
+                  <button
+                    type="button"
+                    className="landing-info-cities-nav landing-info-cities-nav-left"
+                    onClick={() => handleCarouselScroll(-1)}
+                    aria-label={landingCopy.allCity?.prevLabel || 'Previous places'}
+                  >
+                    ←
+                  </button>
+                  <div
+                    ref={carouselRef}
+                    className="landing-info-cities-grid"
+                    style={{ '--cards-per-view': cardsPerView }}
+                  >
+                    {filteredPlaces.map((place, idx) => (
+                      <div key={`place-${idx}`} className="landing-info-city-card">
+                        <div className="landing-info-city-image">
+                          <img src={place.image} alt={place.name} loading="lazy" />
+                        </div>
+                        <div className="landing-info-city-info">
+                          <h4>{place.name}</h4>
+                          <p>{place.count}</p>
+                        </div>
+                        <Link to={resolvePlaceLink(place)} className="landing-info-city-link">
+                          {landingCopy.allCity?.exploreCta || 'Explore →'}
+                        </Link>
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    className="landing-info-cities-nav landing-info-cities-nav-right"
+                    onClick={() => handleCarouselScroll(1)}
+                    aria-label={landingCopy.allCity?.nextLabel || 'Next places'}
+                  >
+                    →
+                  </button>
+                </div>
+              )}
+            </motion.section>
+
+            <motion.section
+              initial={{ opacity: 0, y: 32 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true, amount: 0.3 }}
+              transition={{ duration: 0.7, ease: 'easeOut' }}
+              className="relative overflow-hidden rounded-[32px]"
+            >
+              <div
+                className="absolute inset-0 bg-cover bg-center"
+                style={{ backgroundImage: `url(${allCityHeroOne})` }}
+                aria-hidden="true"
+              />
+              <div className="absolute inset-0 bg-gradient-to-b from-slate-950/70 via-slate-900/50 to-slate-950/80" />
+              <div className="relative flex flex-col items-center justify-center px-6 py-20 text-center text-white">
+                <h3 className="text-3xl font-[var(--font-display)] font-semibold">{allCityCopy.finaleTitle}</h3>
+                <p className="mt-3 max-w-xl text-sm text-white/80">
+                  {allCityCopy.finaleDescription}
+                </p>
+                <Link
+                  to={`${APP_ROUTES.CITY_MAP}?lat=16.060969&lng=108.223486&mapZoom=16`}
+                  className="mt-6 rounded-full bg-white/90 px-6 py-3 text-sm font-semibold text-slate-900 shadow-lg transition hover:-translate-y-0.5 hover:bg-white"
+                >
+                  {allCityCopy.finaleCta}
+                </Link>
+              </div>
+            </motion.section>
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="landing-info-section">
@@ -409,67 +1925,217 @@ function LandingInfoPage({ title, description, cards, stats = null }) {
       {/* Service Page */}
       {pageType === 'service' && (
         <div className="landing-info-service">
-          <div className="landing-info-service-hero">
-            <div className="landing-info-service-hero-text">
-              <span className="landing-info-service-kicker">
-                {landingCopy.service?.kicker || 'Smart City Discovery'}
-              </span>
-              <h3>{landingCopy.service?.heroTitle || 'Dịch vụ của chúng tôi'}</h3>
-              <p>{landingCopy.service?.heroDescription || resolvedDescription}</p>
-              <div className="landing-info-service-actions">
-                <Link to="/landing/dich-vu-tong-quan" className="landing-info-service-primary">
-                  {landingCopy.service?.primaryCta || 'Khám phá ngay'}
-                </Link>
-                <Link to={APP_ROUTES.FEEDBACK} className="landing-info-service-secondary">
-                  {landingCopy.service?.secondaryCta || 'Liên hệ'}
+          <motion.div {...fadeInUp} className="service-hero">
+            <div className="service-hero-left">
+              <span className="service-hero-kicker">{serviceCopy.heroKicker}</span>
+              <h1 className="service-hero-title">{serviceCopy.heroTitle}</h1>
+              <p className="service-hero-subtitle">{serviceCopy.heroSubtitle}</p>
+            </div>
+            <div className="service-hero-right">
+              <motion.div
+                className="service-hero-media"
+                animate={{ y: [0, -8, 0] }}
+                transition={{ duration: 6, repeat: Infinity, ease: 'easeInOut' }}
+                style={{ backgroundImage: `url(${allCityHeroOne})` }}
+              >
+                <div className="service-hero-glow" aria-hidden="true" />
+                <img src={aboutPanel} alt={serviceCopy.heroMediaAlt} loading="lazy" />
+              </motion.div>
+              <div className="service-hero-cards" aria-hidden="true">
+                {serviceHeroCards.map((card, index) => (
+                  <motion.div
+                    key={card.title}
+                    className="service-hero-card"
+                    style={card.position}
+                    animate={{ y: [0, -10, 0] }}
+                    transition={{ duration: 7, repeat: Infinity, ease: 'easeInOut', delay: index * 0.4 }}
+                  >
+                    <span>{card.title}</span>
+                    <strong>{card.copy}</strong>
+                  </motion.div>
+                ))}
+              </div>
+            </div>
+          </motion.div>
+
+          <motion.section {...fadeInUp} className="service-feature">
+            <div className="service-feature-media">
+              <img src={aboutHero} alt={serviceCopy.aiTitle} loading="lazy" />
+              <div className="service-feature-glow" aria-hidden="true" />
+            </div>
+            <div className="service-feature-content">
+              <p className="service-feature-kicker">{serviceCopy.aiKicker}</p>
+              <h3 className="service-feature-title">{serviceCopy.aiTitle}</h3>
+              <p className="service-feature-text">{serviceCopy.aiText}</p>
+              <ul className="service-feature-list">
+                {serviceAiSignals.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+              <div className="service-feature-examples">
+                {serviceAiExamples.map((item) => (
+                  <span key={item}>{item}</span>
+                ))}
+              </div>
+              <div className="service-feature-actions">
+                {isAuthenticated ? (
+                  <Link to={`${APP_ROUTES.HOME}?aiSuggest=1`} className="service-cta">
+                    {serviceCopy.aiCta}
+                  </Link>
+                ) : (
+                  <div className="service-login-note">{serviceCopy.aiLoginNote}</div>
+                )}
+              </div>
+            </div>
+          </motion.section>
+
+          <motion.section {...fadeInUp} className="service-feature is-reverse service-feature-vision">
+            <div className="service-feature-media">
+              <img src={cityFood} alt={serviceCopy.visionTitle} loading="lazy" />
+              <div className="service-vision-scan" aria-hidden="true" />
+              <div className="service-feature-glow" aria-hidden="true" />
+            </div>
+            <div className="service-feature-content">
+              <p className="service-feature-kicker">{serviceCopy.visionKicker}</p>
+              <h3 className="service-feature-title">{serviceCopy.visionTitle}</h3>
+              <p className="service-feature-text">{serviceCopy.visionText}</p>
+              <ul className="service-feature-list">
+                {serviceVisionSteps.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+              <div className="service-feature-actions">
+                {isAuthenticated ? (
+                  <Link to={`${APP_ROUTES.HOME}?imageSearch=1`} className="service-cta">
+                    {serviceCopy.visionCta}
+                  </Link>
+                ) : (
+                  <div className="service-login-note">{serviceCopy.visionLoginNote}</div>
+                )}
+              </div>
+            </div>
+          </motion.section>
+
+          <motion.section {...fadeInUp} className="service-feature service-feature-chat">
+            <div className="service-feature-media">
+              <div className="service-chat-preview">
+                <div className="service-chat-bubble bot">
+                  {serviceCopy.chatBotPrompt}
+                </div>
+                <div className="service-chat-bubble user">{serviceCopy.chatUserPrompt}</div>
+                <div className="service-chat-bubble bot">{serviceCopy.chatBotReply}</div>
+                <div className="service-chat-typing">
+                  <span />
+                  <span />
+                  <span />
+                </div>
+              </div>
+            </div>
+            <div className="service-feature-content">
+              <p className="service-feature-kicker">{serviceCopy.chatKicker}</p>
+              <h3 className="service-feature-title">{serviceCopy.chatTitle}</h3>
+              <p className="service-feature-text">{serviceCopy.chatText}</p>
+              <div className="service-feature-prompts">
+                {serviceChatPrompts.map((item) => (
+                  <span key={item}>{item}</span>
+                ))}
+              </div>
+              <div className="service-feature-actions">
+                {isAuthenticated ? (
+                  <Link to={`${APP_ROUTES.SERVICE}?openChat=1`} className="service-cta">
+                    {serviceCopy.chatCta}
+                  </Link>
+                ) : (
+                  <div className="service-login-note">{serviceCopy.chatLoginNote}</div>
+                )}
+              </div>
+            </div>
+          </motion.section>
+
+          <motion.section {...fadeInUp} className="service-feature is-reverse service-feature-map">
+            <div className="service-feature-media">
+              <Link to={serviceMapLink} className="service-map-link" aria-label={serviceCopy.mapLinkLabel}>
+                <div className="service-map-preview">
+                  <iframe
+                    title={serviceCopy.mapFrameTitle}
+                    src={serviceMapEmbed}
+                    loading="lazy"
+                    referrerPolicy="no-referrer-when-downgrade"
+                  />
+                  <span className="service-map-marker marker-one" />
+                  <span className="service-map-marker marker-two" />
+                  <span className="service-map-marker marker-three" />
+                </div>
+              </Link>
+            </div>
+            <div className="service-feature-content">
+              <p className="service-feature-kicker">{serviceCopy.mapKicker}</p>
+              <h3 className="service-feature-title">{serviceCopy.mapTitle}</h3>
+              <p className="service-feature-text">{serviceCopy.mapText}</p>
+              <ul className="service-feature-list">
+                {serviceCopy.mapList.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+              <div className="service-mini-cards">
+                {serviceMapCards.map((item) => (
+                  <span key={item}>{item}</span>
+                ))}
+              </div>
+              <div className="service-feature-actions">
+                <Link to={serviceMapLink} className="service-cta">
+                  {serviceCopy.mapCta}
                 </Link>
               </div>
             </div>
-            <div className="landing-info-service-hero-image">
-              <img src={anh5} alt={landingCopy.service?.heroImageAlt || 'Dịch vụ Smart City'} loading="lazy" />
-            </div>
-          </div>
+          </motion.section>
 
-          <div className="landing-info-service-body">
-            <div className="landing-info-service-list">
-              <h4>{landingCopy.service?.listTitle || 'Dịch vụ nổi bật'}</h4>
-              {serviceItems.map((item) => (
-                <div key={item.slug} className="landing-info-service-item">
-                  <span className="landing-info-service-icon">{item.icon}</span>
-                  <div>
+          <motion.section
+            {...fadeInUp}
+            className="service-full-bleed service-merchant"
+            style={{ backgroundImage: `url(${anh7})` }}
+          >
+            <div className="service-merchant-card">
+              <p className="service-feature-kicker">{serviceCopy.merchantKicker}</p>
+              <h3 className="service-feature-title">{serviceCopy.merchantTitle}</h3>
+              <p className="service-feature-text">{serviceCopy.merchantText}</p>
+              <ul className="service-merchant-list">
+                {serviceMerchantBullets.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          </motion.section>
+
+          <motion.section {...fadeInUp} className="service-full-bleed service-bento">
+            <div className="service-bento-header">
+              <p className="service-feature-kicker">{serviceCopy.bentoKicker}</p>
+              <h3 className="service-feature-title">{serviceCopy.bentoTitle}</h3>
+              <p className="service-feature-text">{serviceCopy.bentoText}</p>
+            </div>
+            <div className="service-bento-grid">
+              {serviceGalleryItems.map((item) => (
+                <div key={item.title} className={`service-bento-item ${item.className}`}>
+                  <img src={item.image} alt={item.title} loading="lazy" />
+                  <div className="service-bento-overlay">
+                    <span>{item.subtitle}</span>
                     <strong>{item.title}</strong>
-                    <p>{item.copy}</p>
                   </div>
-                  <Link to={`/service-detail/${item.slug}`} className="landing-info-service-link">
-                    {landingCopy.service?.detailCta || 'Chi tiết →'}
-                  </Link>
                 </div>
               ))}
             </div>
+          </motion.section>
 
-            <div className="landing-info-service-highlight">
-              <img src={anh6} alt={landingCopy.service?.highlightImageAlt || 'Smart Promotion System'} loading="lazy" />
-              <div className="landing-info-service-highlight-card">
-                <h4>{landingCopy.service?.highlightTitle || 'Smart Promotion System'}</h4>
-                <p>
-                  {landingCopy.service?.highlightDescription ||
-                    'Hệ thống quảng cáo thông minh giúp cửa hàng tiếp cận đúng khách hàng theo vị trí và hành vi.'}
-                </p>
-                <ul>
-                  {(landingCopy.service?.highlightBullets || []).map((item) => (
-                    <li key={item}>✓ {item}</li>
-                  ))}
-                </ul>
-              </div>
+          <motion.section
+            {...fadeInUp}
+            className="service-full-bleed service-finale"
+            style={{ backgroundImage: `url(${allCityHeroOne})` }}
+          >
+            <div className="service-finale-content">
+              <h3>{serviceCopy.finaleTitle}</h3>
+              <p>{serviceCopy.finaleText}</p>
             </div>
-          </div>
-
-          <div className="landing-info-service-cta">
-            <p>{landingCopy.service?.ctaText || 'Bạn muốn đưa cửa hàng lên hệ thống?'}</p>
-            <Link to={APP_ROUTES.MERCHANT_DASHBOARD} className="landing-info-service-primary">
-              {landingCopy.service?.ctaButton || 'Đăng ký ngay →'}
-            </Link>
-          </div>
+          </motion.section>
         </div>
       )}
 
