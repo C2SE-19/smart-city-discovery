@@ -760,6 +760,7 @@ function OverviewPage() {
   const [aiRefineLoading, setAiRefineLoading] = useState(false);
   const [aiRefineError, setAiRefineError] = useState('');
   const [aiRefineMeta, setAiRefineMeta] = useState(null);
+  const [autoScrollAi, setAutoScrollAi] = useState(false);
   const [geoCoordinates, setGeoCoordinates] = useState({ latitude: null, longitude: null });
   const [sliderPager, setSliderPager] = useState({});
   const sliderRefs = useRef(new Map());
@@ -777,6 +778,7 @@ function OverviewPage() {
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
   const [showCameraOverlay, setShowCameraOverlay] = useState(false);
+  const aiSectionRef = useRef(null);
   const placeCategoryTree = useMemo(() => buildPlaceCategoryTree(categories), [categories]);
   const rootPlaceCategories = placeCategoryTree.rootCategories;
   const childCategoriesByParentId = placeCategoryTree.childrenByParentId;
@@ -1533,7 +1535,7 @@ function OverviewPage() {
     });
   };
 
-  const handleAiSuggest = async () => {
+  const handleAiSuggest = async ({ skipPreferenceGate = false } = {}) => {
     if (!token) {
       navigate('/login');
       return;
@@ -1543,7 +1545,7 @@ function OverviewPage() {
       return;
     }
 
-    if (!userPreference?.onboardingCompleted) {
+    if (!userPreference?.onboardingCompleted && !skipPreferenceGate) {
       setShowPreferenceWizard(true);
       return;
     }
@@ -1598,7 +1600,7 @@ function OverviewPage() {
       setAiBaseVenues(recommendedVenues);
       setAiVisibleCount(8);
 
-      if (!response?.preferencesCompleted) {
+      if (!response?.preferencesCompleted && !skipPreferenceGate) {
         setShowPreferenceWizard(true);
       }
     } catch (error) {
@@ -1610,6 +1612,57 @@ function OverviewPage() {
       setAiSuggestLoading(false);
     }
   };
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const shouldSuggest = params.get('aiSuggest') === '1';
+    const shouldImageSearch = params.get('imageSearch') === '1';
+    let didHandle = false;
+
+    if ((shouldSuggest || shouldImageSearch) && !isAuthenticated) {
+      navigate('/login', { state: { from: `${location.pathname}${location.search || ''}` } });
+      return;
+    }
+
+    if (shouldSuggest && preferencesLoading) {
+      return;
+    }
+
+    if (shouldSuggest) {
+      handleAiSuggest({ skipPreferenceGate: true });
+      setAutoScrollAi(true);
+      params.delete('aiSuggest');
+      didHandle = true;
+    }
+
+    if (shouldImageSearch) {
+      openImageModal();
+      params.delete('imageSearch');
+      didHandle = true;
+    }
+
+    if (didHandle) {
+      const nextSearch = params.toString();
+      navigate(
+        { pathname: location.pathname, search: nextSearch ? `?${nextSearch}` : '' },
+        { replace: true }
+      );
+    }
+  }, [isAuthenticated, location.pathname, location.search, navigate, preferencesLoading]);
+
+  useEffect(() => {
+    if (!autoScrollAi || !aiSuggestMode) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      aiSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 200);
+
+    setAutoScrollAi(false);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [aiSuggestMode, autoScrollAi]);
 
   const handleClearAiRefine = () => {
     setAiRefineInput('');
@@ -2774,7 +2827,11 @@ function OverviewPage() {
       ) : null}
 
       {aiSuggestMode ? (
-        <section className="overview-section overview-search-result-section overview-ai-result-section">
+        <section
+          id="ai-suggested"
+          ref={aiSectionRef}
+          className="overview-section overview-search-result-section overview-ai-result-section"
+        >
           <div className="overview-section-heading">
             <h2>AI Suggested for You</h2>
             <span />
