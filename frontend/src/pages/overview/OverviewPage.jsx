@@ -8,7 +8,7 @@ import { getApiBaseUrl } from '../../services/api/client';
 import { fetchPlaceCategories } from '../../services/api/placeCategoriesApi';
 import { fetchMerchantServices } from '../../services/api/merchantServicesApi';
 import { fetchWards } from '../../services/api/wardsApi';
-import { fetchVenues } from '../../services/api/venuesApi';
+import { fetchVenues, invalidateVenuesListCache } from '../../services/api/venuesApi';
 import { searchVenuesByImage } from '../../services/api/imageSearchApi';
 import {
   fetchForYouRecommendations,
@@ -18,7 +18,9 @@ import {
 import { fetchCurrentWeather } from '../../services/api/weatherApi';
 import {
   fetchTrendingVenues,
+  invalidateTrendingVenuesCache,
 } from '../../services/api/adPackagesApi';
+import { resolvePublicOverviewStreamUrl } from '../../services/api/publicRealtimeApi';
 import OverviewCityMapCard from '../../components/map/OverviewCityMapCard';
 import heroFoodImage from '../../assets/images/anh1.png';
 import UserPreferenceWizard from '../../components/preferences/UserPreferenceWizard';
@@ -779,6 +781,9 @@ function OverviewPage() {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
+  const loadTrendingVenuesRef = useRef(null);
+  const loadVenuesRef = useRef(null);
+  const publicRealtimeRetryRef = useRef(null);
   const [showCameraOverlay, setShowCameraOverlay] = useState(false);
   const aiSectionRef = useRef(null);
   const placeCategoryTree = useMemo(() => buildPlaceCategoryTree(categories), [categories]);
@@ -1189,12 +1194,14 @@ function OverviewPage() {
   useEffect(() => {
     let isMounted = true;
 
-    const loadTrendingVenues = async () => {
-      setTrendingLoading(true);
+    loadTrendingVenuesRef.current = async ({ force = false, silent = false } = {}) => {
+      if (!silent) {
+        setTrendingLoading(true);
+      }
       setTrendingError('');
 
       try {
-        const rows = await fetchTrendingVenues(12);
+        const rows = await fetchTrendingVenues(12, { force });
         if (!isMounted) {
           return;
         }
@@ -1205,19 +1212,22 @@ function OverviewPage() {
           return;
         }
 
-        setTrendingVenues([]);
-        setTrendingError(error?.response?.data?.message || 'Unable to load trending places right now.');
+        if (!silent) {
+          setTrendingVenues([]);
+          setTrendingError(error?.response?.data?.message || 'Unable to load trending places right now.');
+        }
       } finally {
-        if (isMounted) {
+        if (isMounted && !silent) {
           setTrendingLoading(false);
         }
       }
     };
 
-    loadTrendingVenues();
+    loadTrendingVenuesRef.current({ force: true });
 
     return () => {
       isMounted = false;
+      loadTrendingVenuesRef.current = null;
     };
   }, []);
 
@@ -1276,13 +1286,18 @@ function OverviewPage() {
   useEffect(() => {
     let isMounted = true;
 
-    const loadVenues = async () => {
-      setLoadingVenues(true);
+    loadVenuesRef.current = async ({ force = false, silent = false, live = false } = {}) => {
+      if (!silent) {
+        setLoadingVenues(true);
+        setVenues([]);
+      }
       setVenueError('');
-      setVenues([]);
 
       try {
-        const venueData = await fetchVenues({ ...venueParams });
+        const venueData = await fetchVenues(
+          live ? { ...venueParams, live: 'true' } : { ...venueParams },
+          { force }
+        );
 
         if (!isMounted) {
           return;
@@ -1294,19 +1309,22 @@ function OverviewPage() {
           return;
         }
 
-        setVenueError(error.response?.data?.message || 'Unable to load venues right now.');
-        setVenues([]);
+        if (!silent) {
+          setVenueError(error.response?.data?.message || 'Unable to load venues right now.');
+          setVenues([]);
+        }
       } finally {
-        if (isMounted) {
+        if (isMounted && !silent) {
           setLoadingVenues(false);
         }
       }
     };
 
-    loadVenues();
+    loadVenuesRef.current({ force: true });
 
     return () => {
       isMounted = false;
+      loadVenuesRef.current = null;
     };
   }, [venueParams]);
 
@@ -1321,8 +1339,7 @@ function OverviewPage() {
       pollingInFlight = true;
 
       try {
-        const liveVenueData = await fetchVenues({ ...venueParams, live: 'true' });
-        setVenues(Array.isArray(liveVenueData) ? liveVenueData : []);
+        await loadVenuesRef.current?.({ force: true, silent: true, live: true });
       } catch {
         // Keep currently rendered venue list on transient polling errors.
       } finally {
@@ -1334,6 +1351,83 @@ function OverviewPage() {
       window.clearInterval(intervalId);
     };
   }, [venueParams]);
+
+  useEffect(() => {
+    if (typeof EventSource === 'undefined') {
+      return undefined;
+    }
+
+    const streamUrl = resolvePublicOverviewStreamUrl();
+    if (!streamUrl) {
+      return undefined;
+    }
+
+    const eventSource = new EventSource(streamUrl);
+    let isActive = true;
+
+    const runRealtimeRefresh = (scope = 'all') => {
+      if (!isActive) {
+        return;
+      }
+
+      if (scope === 'all' || scope === 'venues') {
+        invalidateVenuesListCache();
+        loadVenuesRef.current?.({ force: true, silent: true, live: true });
+      }
+
+      if (scope === 'all' || scope === 'trending') {
+        invalidateTrendingVenuesCache();
+        loadTrendingVenuesRef.current?.({ force: true, silent: true });
+      }
+    };
+
+    const scheduleRealtimeRefresh = (scope = 'all') => {
+      if (publicRealtimeRetryRef.current) {
+        window.clearTimeout(publicRealtimeRetryRef.current);
+      }
+
+      publicRealtimeRetryRef.current = window.setTimeout(() => {
+        publicRealtimeRetryRef.current = null;
+        runRealtimeRefresh(scope);
+      }, 150);
+    };
+
+    const handleOverviewUpdate = (event) => {
+      try {
+        const payload = JSON.parse(event?.data || '{}');
+        const eventType = String(payload?.type || '').trim().toLowerCase();
+
+        if (eventType === 'trending_changed') {
+          scheduleRealtimeRefresh('trending');
+          return;
+        }
+
+        if (eventType === 'venues_changed') {
+          scheduleRealtimeRefresh('venues');
+        }
+      } catch {
+        // Ignore malformed realtime payloads.
+      }
+    };
+
+    const handleWindowFocus = () => {
+      scheduleRealtimeRefresh('all');
+    };
+
+    eventSource.addEventListener('overview-update', handleOverviewUpdate);
+    window.addEventListener('focus', handleWindowFocus);
+
+    return () => {
+      isActive = false;
+      window.removeEventListener('focus', handleWindowFocus);
+      eventSource.removeEventListener('overview-update', handleOverviewUpdate);
+      eventSource.close();
+      if (publicRealtimeRetryRef.current) {
+        window.clearTimeout(publicRealtimeRetryRef.current);
+        publicRealtimeRetryRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     setSearchPage(1);

@@ -15,6 +15,10 @@ function clearVenuesListCaches() {
   venuesInFlight.clear();
 }
 
+export function invalidateVenuesListCache() {
+  clearVenuesListCaches();
+}
+
 function invalidateVenueScopedCaches(venueId) {
   const cacheKey = String(venueId || '').trim();
   if (!cacheKey) {
@@ -36,17 +40,23 @@ function buildVenuesCacheKey(params = {}) {
   return JSON.stringify(normalized);
 }
 
-export async function fetchVenues(params = {}) {
+export async function fetchVenues(params = {}, options = {}) {
   const cacheKey = buildVenuesCacheKey(params);
+  const shouldForceRefresh = Boolean(options?.force);
   const now = Date.now();
   const cached = venuesCache.get(cacheKey);
 
-  if (cached && now - cached.timestamp < VENUES_CACHE_TTL_MS) {
+  if (!shouldForceRefresh && cached && now - cached.timestamp < VENUES_CACHE_TTL_MS) {
     return cached.data;
   }
 
-  if (venuesInFlight.has(cacheKey)) {
+  if (!shouldForceRefresh && venuesInFlight.has(cacheKey)) {
     return venuesInFlight.get(cacheKey);
+  }
+
+  if (shouldForceRefresh) {
+    venuesCache.delete(cacheKey);
+    venuesInFlight.delete(cacheKey);
   }
 
   const request = apiClient

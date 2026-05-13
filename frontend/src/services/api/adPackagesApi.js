@@ -4,6 +4,11 @@ const trendingVenuesCache = new Map();
 const trendingVenuesInFlight = new Map();
 const TRENDING_VENUES_CACHE_TTL_MS = 60 * 1000;
 
+export function invalidateTrendingVenuesCache() {
+  trendingVenuesCache.clear();
+  trendingVenuesInFlight.clear();
+}
+
 export async function fetchPublicAdPackages() {
   const response = await apiClient.get('/ad-packages');
 
@@ -111,18 +116,24 @@ export async function fetchAdminDashboardOverview(months = 6) {
   return response.data;
 }
 
-export async function fetchTrendingVenues(limit = 10) {
+export async function fetchTrendingVenues(limit = 10, options = {}) {
   const normalizedLimit = Number.isFinite(Number(limit)) ? Number(limit) : 10;
   const cacheKey = `limit:${normalizedLimit}`;
+  const shouldForceRefresh = Boolean(options?.force);
   const now = Date.now();
   const cached = trendingVenuesCache.get(cacheKey);
 
-  if (cached && now - cached.timestamp < TRENDING_VENUES_CACHE_TTL_MS) {
+  if (!shouldForceRefresh && cached && now - cached.timestamp < TRENDING_VENUES_CACHE_TTL_MS) {
     return cached.data;
   }
 
-  if (trendingVenuesInFlight.has(cacheKey)) {
+  if (!shouldForceRefresh && trendingVenuesInFlight.has(cacheKey)) {
     return trendingVenuesInFlight.get(cacheKey);
+  }
+
+  if (shouldForceRefresh) {
+    trendingVenuesCache.delete(cacheKey);
+    trendingVenuesInFlight.delete(cacheKey);
   }
 
   const request = apiClient.get('/ad-packages/trending/venues', {
@@ -160,5 +171,6 @@ export async function fetchMerchantTrendingOverview(days = 7) {
 
 export async function pushMerchantTrendingVenue(venueId) {
   const response = await apiClient.post(`/merchant/ad-trending/venues/${venueId}/push`);
+  invalidateTrendingVenuesCache();
   return response.data;
 }
