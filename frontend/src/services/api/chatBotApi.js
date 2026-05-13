@@ -36,10 +36,18 @@ function normalizeChatHistory(chatHistory = []) {
     .filter(Boolean);
 }
 
-export async function sendAiChatMessage(message, chatHistory = [], authToken = '') {
+export async function sendAiChatMessage(message, chatHistory = [], authToken = '', location = null) {
+  const latitude = Number(location?.latitude);
+  const longitude = Number(location?.longitude);
   const response = await apiClient.post('/chat-v2', {
     message,
-    chatHistory: normalizeChatHistory(chatHistory)
+    chatHistory: normalizeChatHistory(chatHistory),
+    ...(Number.isFinite(latitude) && Number.isFinite(longitude)
+      ? {
+          latitude,
+          longitude
+        }
+      : {})
   }, {
     headers: resolveAuthHeaders(authToken)
   });

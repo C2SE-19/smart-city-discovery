@@ -110,7 +110,7 @@ function loadImageElement(dataUrl) {
   });
 }
 
-async function createCompressedImageDataUrl(file, maxWidth = 1400, maxHeight = 1400, quality = 0.84) {
+async function createCompressedImageDataUrl(file, maxWidth = 1024, maxHeight = 1024, quality = 0.75) {
   const originalDataUrl = await readFileAsDataUrl(file);
 
   if (typeof document === 'undefined') {
@@ -1905,7 +1905,7 @@ function OverviewPage() {
         } catch (e) {}
         closeCameraOverlay();
         try {
-          await runVisionSearchWithFile(file, imageSearchTarget);
+          await runVisionSearchWithFile(file, imageSearchTarget || 'any');
           resolve();
         } catch (err) {
           reject(err);
@@ -1915,6 +1915,7 @@ function OverviewPage() {
   };
 
   const runVisionSearchWithFile = async (file, target) => {
+    const searchTarget = target || 'any';
     setImageSearchLoading(true);
     setImageError('');
 
@@ -1922,7 +1923,7 @@ function OverviewPage() {
       const imageDataUrl = await createCompressedImageDataUrl(file);
       const response = await searchVenuesByImage({
         imageDataUrl,
-        target,
+        target: searchTarget,
         language
       });
 
@@ -1936,9 +1937,12 @@ function OverviewPage() {
       ]
         .map((item) => String(item || '').trim())
         .find((item) => item && item.toLowerCase() !== 'unknown' && item.toLowerCase() !== 'place' && item.toLowerCase() !== 'food');
-      const fallbackSearchText = target === 'food'
-        ? (language === 'en' ? 'Detected food from image' : 'Món ăn nhận diện từ ảnh')
-        : (language === 'en' ? 'Detected place from image' : 'Địa điểm nhận diện từ ảnh');
+      const isUnifiedTarget = target === 'any' || !target;
+      const fallbackSearchText = isUnifiedTarget
+        ? (language === 'en' ? 'Detected food or place from image' : 'Món ăn hoặc địa điểm nhận diện từ ảnh')
+        : (target === 'food'
+            ? (language === 'en' ? 'Detected food from image' : 'Món ăn nhận diện từ ảnh')
+            : (language === 'en' ? 'Detected place from image' : 'Địa điểm nhận diện từ ảnh'));
       const resolvedSearchText = (!nextSearchText || isUnknownLabel)
         ? (readableHint || fallbackSearchText)
         : nextSearchText;
@@ -1989,16 +1993,11 @@ function OverviewPage() {
       return;
     }
 
-    if (!imageSearchTarget) {
-      setImageError(language === 'en' ? 'Please select search mode first.' : 'Vui lòng chọn kiểu tìm kiếm trước.');
-      return;
-    }
-
     setSelectedImage(file);
     const url = URL.createObjectURL(file);
     setPreviewUrl(url);
 
-    await runVisionSearchWithFile(file, imageSearchTarget);
+    await runVisionSearchWithFile(file, imageSearchTarget || 'any');
   };
 
   const clearSelectedImage = () => {
@@ -2476,22 +2475,50 @@ function OverviewPage() {
             <div className="overview-image-search-panel">
               {!imageSearchTarget ? (
                 <div className="overview-image-step-root">
-                  <div className="overview-image-search-actions">
+                  <div className="overview-image-intro">
+                    <p className="overview-image-eyebrow">{language === 'en' ? 'AI image search' : 'Tìm kiếm bằng hình ảnh AI'}</p>
+                    <h3 className="overview-image-title">{t.hero.searchFoodAndPlace}</h3>
+                    <p className="overview-image-description">
+                      {language === 'en'
+                        ? 'Upload one image and let the system detect both food items and venue contexts in a single workflow.'
+                        : 'Tải lên một ảnh để hệ thống tự nhận diện cả món ăn lẫn bối cảnh địa điểm trong cùng một quy trình.'}
+                    </p>
+                    <div className="overview-image-info-row" aria-hidden="true">
+                      <span>Food</span>
+                      <span>Venue</span>
+                      <span>AI matched</span>
+                    </div>
+                  </div>
+
+                  <div className="overview-image-source-grid">
                     <button
                       type="button"
-                      className="overview-image-button food"
-                      onClick={() => setImageSearchTarget('food')}
+                      className="overview-image-source-card camera"
+                      onClick={() => handlePickImage('camera')}
                       disabled={imageSearchLoading}
                     >
-                      {t.hero.searchFood}
+                      <span className="overview-image-source-badge">CAM</span>
+                      <span className="overview-image-source-title">{t.hero.takeNewPhoto}</span>
+                      <span className="overview-image-source-description">
+                        {language === 'en'
+                          ? 'Open the camera and capture a fresh photo for instant analysis.'
+                          : 'Mở camera và chụp ảnh mới để phân tích ngay lập tức.'}
+                      </span>
                     </button>
+
                     <button
                       type="button"
-                      className="overview-image-button place"
-                      onClick={() => setImageSearchTarget('place')}
+                      className="overview-image-source-card library"
+                      onClick={() => handlePickImage('library')}
                       disabled={imageSearchLoading}
                     >
-                      {t.hero.searchPlace}
+                      <span className="overview-image-source-badge">FILE</span>
+                      <span className="overview-image-source-title">{t.hero.chooseFromLibrary}</span>
+                      <span className="overview-image-source-description">
+                        {language === 'en'
+                          ? 'Select a prepared photo from your device.'
+                          : 'Chọn ảnh có sẵn trên thiết bị để phân tích nhanh hơn.'}
+                      </span>
                     </button>
                   </div>
                 </div>
@@ -2511,22 +2538,39 @@ function OverviewPage() {
                     </button>
                   </div>
 
-                  <div className="overview-image-search-actions overview-image-source-actions">
+                  <div className="overview-image-source-grid overview-image-source-grid-compact">
                     <button
                       type="button"
-                      className="overview-image-button camera"
+                      className="overview-image-source-card camera"
                       onClick={() => handlePickImage('camera')}
                       disabled={imageSearchLoading}
                     >
-                      {imageSearchLoading ? t.hero.analyzingImage : t.hero.takeNewPhoto}
+                      <span className="overview-image-source-badge">CAM</span>
+                      <span className="overview-image-source-title">
+                        {imageSearchLoading ? t.hero.analyzingImage : t.hero.takeNewPhoto}
+                      </span>
+                      <span className="overview-image-source-description">
+                        {language === 'en'
+                          ? 'Open the camera for a direct capture.'
+                          : 'Mở camera để chụp trực tiếp và nhận diện ngay.'}
+                      </span>
                     </button>
+
                     <button
                       type="button"
-                      className="overview-image-button library"
+                      className="overview-image-source-card library"
                       onClick={() => handlePickImage('library')}
                       disabled={imageSearchLoading}
                     >
-                      {imageSearchLoading ? t.hero.analyzingImage : t.hero.chooseFromLibrary}
+                      <span className="overview-image-source-badge">LIB</span>
+                      <span className="overview-image-source-title">
+                        {imageSearchLoading ? t.hero.analyzingImage : t.hero.chooseFromLibrary}
+                      </span>
+                      <span className="overview-image-source-description">
+                        {language === 'en'
+                          ? 'Use a saved photo from your library.'
+                          : 'Dùng ảnh đã lưu trong thư viện để xử lý nhanh.'}
+                      </span>
                     </button>
                   </div>
                 </div>
@@ -2551,7 +2595,32 @@ function OverviewPage() {
               {showCameraOverlay && (
                 <div className="overview-camera-overlay">
                   <div className="overview-camera-inner">
-                    <video ref={videoRef} className="overview-camera-video" playsInline muted />
+                    <div className="overview-camera-header">
+                      <div>
+                        <p className="overview-camera-eyebrow">{language === 'en' ? 'Capture mode' : 'Chế độ chụp'}</p>
+                        <h4>{language === 'en' ? 'Professional framing for AI detection' : 'Khung chụp tối ưu cho AI nhận diện'}</h4>
+                        <p>
+                          {language === 'en'
+                            ? 'Keep the subject inside the frame for a clearer result.'
+                            : 'Giữ chủ thể trong khung để kết quả nhận diện rõ và chính xác hơn.'}
+                        </p>
+                      </div>
+                      <button type="button" className="overview-camera-close" onClick={closeCameraOverlay} disabled={imageSearchLoading}>
+                        {t.hero.backToSearchMode}
+                      </button>
+                    </div>
+
+                    <div className="overview-camera-stage">
+                      <video ref={videoRef} className="overview-camera-video" playsInline muted />
+                      <div className="overview-camera-frame" aria-hidden="true">
+                        <span className="overview-camera-corner overview-camera-corner-tl" />
+                        <span className="overview-camera-corner overview-camera-corner-tr" />
+                        <span className="overview-camera-corner overview-camera-corner-bl" />
+                        <span className="overview-camera-corner overview-camera-corner-br" />
+                        <div className="overview-camera-grid" />
+                      </div>
+                    </div>
+
                     <div className="overview-camera-actions">
                       <button type="button" className="overview-camera-capture" onClick={capturePhoto} disabled={imageSearchLoading}>
                         {t.hero.takeNewPhoto}

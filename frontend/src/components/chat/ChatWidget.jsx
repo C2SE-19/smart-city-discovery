@@ -101,6 +101,34 @@ const loadSavedPosition = (storageKey) => {
   }
 };
 
+const getCurrentLocation = () =>
+  new Promise((resolve) => {
+    if (typeof window === 'undefined' || !navigator.geolocation) {
+      resolve(null);
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const latitude = Number(position?.coords?.latitude);
+        const longitude = Number(position?.coords?.longitude);
+
+        if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+          resolve({ latitude, longitude });
+          return;
+        }
+
+        resolve(null);
+      },
+      () => resolve(null),
+      {
+        enableHighAccuracy: true,
+        timeout: 5000,
+        maximumAge: 60000
+      }
+    );
+  });
+
 const ChatWidget = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -309,7 +337,8 @@ const ChatWidget = () => {
     setIsLoading(true);
 
     try {
-      const data = await sendAiChatMessage(trimmedInput, chatHistory);
+      const location = await getCurrentLocation();
+      const data = await sendAiChatMessage(trimmedInput, chatHistory, '', location);
 
       const botMessage = {
         id: messages.length + 2,
