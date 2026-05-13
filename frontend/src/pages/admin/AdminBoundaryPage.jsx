@@ -3038,7 +3038,7 @@ function AdminBoundaryPage() {
                 onClick={() => loadWardToEditor(ward)}
               >
                 <strong>{ward.name}</strong>
-                <small>{formatDateTime(ward.updated_at || ward.created_at)}</small>
+                <small>{formatDateTime(ward.updated_at || ward.created_at, locale, tx)}</small>
               </button>
             ))}
 
@@ -3829,7 +3829,7 @@ function AdminBoundaryPage() {
                                   ) : null}
                                 </div>
                               </div>
-                              <small>{formatDateTime(review?.updated_at || review?.created_at)}</small>
+                              <small>{formatDateTime(review?.updated_at || review?.created_at, locale, tx)}</small>
 
                               <div className="admin-review-parent-content">
                                 {reviewTitle ? <p className="admin-review-title">{reviewTitle}</p> : null}
@@ -3916,7 +3916,7 @@ function AdminBoundaryPage() {
                                             ) : null}
                                           </div>
                                         </div>
-                                        <small>{formatDateTime(reply?.updated_at || reply?.updatedAt || reply?.created_at || reply?.createdAt)}</small>
+                                        <small>{formatDateTime(reply?.updated_at || reply?.updatedAt || reply?.created_at || reply?.createdAt, locale, tx)}</small>
                                         {replyTitle ? <p className="admin-review-title">{replyTitle}</p> : null}
                                         <p className="admin-review-reply-content">{replyContent || 'No content.'}</p>
 
@@ -4444,7 +4444,7 @@ function AdminBoundaryPage() {
                             <ul>
                               <li>Ward: {venue.ward_name || venue.ward_id || 'Not detected'}</li>
                               <li>Category: {formatVenueCategoryLabel(venue, placeCategoryTree)}</li>
-                              <li>Status: {statusLabel(venue.status)}</li>
+                              <li>Status: {statusLabel(venue.status, tx)}</li>
                               <li>Phone: {venue.phone || 'Not provided'}</li>
                             </ul>
                             {venue.description ? <p className="admin-map-popup-description">{venue.description}</p> : null}
