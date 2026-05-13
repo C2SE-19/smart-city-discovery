@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { FiFlag } from 'react-icons/fi';
+import OpenStatusBadge from '../../components/discovery/OpenStatusBadge';
 import './HeroVenueSection.css';
 
 export default function HeroVenueSection({
@@ -9,15 +10,18 @@ export default function HeroVenueSection({
   reviews = 0,
   category = 'Dining',
   openingHours = '',
+  openingStatusSource = null,
   isSaved = false,
-  isOpen = false,
   onBackClick = () => {},
   onWriteReview = () => {},
   onAddPhotos = () => {},
   onShare = () => {},
+  onCompare = () => {},
   onSave = () => {},
   onPreviewImage = () => {},
-  onReportVenue = () => {}
+  onReportVenue = () => {},
+  isCompared = false,
+  isCompareDisabled = false,
 }) {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [showAllPhotosModal, setShowAllPhotosModal] = useState(false);
@@ -61,6 +65,7 @@ export default function HeroVenueSection({
   const featuredPromotionLabel = venue?.featuredPromotion?.isHot
     ? String(venue?.featuredPromotion?.label || 'HOT').trim() || 'HOT'
     : '';
+  const normalizedOpeningHours = String(openingHours || '').trim();
 
   const handlePreviewImage = (imageUrl) => {
     if (!imageUrl) {
@@ -157,15 +162,15 @@ export default function HeroVenueSection({
 
             <div className="hero-meta-row">
               <span className="hero-category-badge">{category}</span>
-              <span className={`hero-status-badge ${isOpen ? 'open' : 'closed'}`}>
-                {isOpen ? '🟢 Open' : '🔴 Closed'}
-              </span>
+              <OpenStatusBadge scheduleSource={openingStatusSource || venue} />
             </div>
 
-            <div className="hero-hours">
-              <span className="hero-hours-icon">🕐</span>
-              <span className="hero-hours-text">{openingHours || 'Hours info'}</span>
-            </div>
+            {normalizedOpeningHours ? (
+              <div className="hero-hours">
+                <span className="hero-hours-icon">🕐</span>
+                <span className="hero-hours-text">{normalizedOpeningHours}</span>
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
@@ -183,6 +188,21 @@ export default function HeroVenueSection({
         <button className="hero-action-btn hero-action-write-review" onClick={onShare}>
           <span className="hero-action-icon">🔗</span>
           <span className="hero-action-text">Share</span>
+        </button>
+        <button
+          className={`hero-action-btn hero-action-write-review hero-action-compare ${isCompared ? 'hero-action-compare-active' : ''}`}
+          onClick={onCompare}
+          disabled={isCompareDisabled}
+          title={
+            isCompared
+              ? 'Remove from compare'
+              : isCompareDisabled
+                ? 'You can compare up to 2 venues'
+                : 'Add to compare'
+          }
+        >
+          <span className="hero-action-icon">⚖️</span>
+          <span className="hero-action-text">{isCompared ? 'Compared' : 'Compare'}</span>
         </button>
         <button
           className={`hero-action-btn hero-action-write-review ${isSaved ? 'hero-action-saved' : ''}`}

@@ -198,6 +198,22 @@ export async function fetchVenueOpeningHoursRealtime(venueId) {
   return response.data;
 }
 
+export async function fetchVenueCompareBundle(venueIds = []) {
+  const ids = [...new Set(
+    (Array.isArray(venueIds) ? venueIds : [])
+      .map((value) => String(value || '').trim())
+      .filter(Boolean)
+  )].slice(0, 2);
+
+  const response = await apiClient.get('/venues/compare', {
+    params: {
+      ids: ids.join(','),
+    },
+  });
+
+  return response.data;
+}
+
 export async function fetchVenueServices(venueId) {
   const response = await apiClient.get(`/venues/${venueId}/services`);
   return response.data;
@@ -281,4 +297,3 @@ export function clearVenueDetailCache(venueId) {
   invalidateVenueScopedCaches(venueId);
   clearVenuesListCaches();
 }
-

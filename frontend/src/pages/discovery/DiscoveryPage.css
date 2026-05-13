@@ -1,0 +1,15 @@
+.venue-list--cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.venue-list--cards .venue-card {
+  min-height: 100%;
+}
+
+@media (max-width: 640px) {
+  .venue-list--cards {
+    grid-template-columns: 1fr;
+  }
+}

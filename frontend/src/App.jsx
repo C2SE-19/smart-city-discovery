@@ -4,14 +4,15 @@ import { GoogleOAuthProvider } from '@react-oauth/google';
 import { LanguageProvider } from './contexts/LanguageContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { AuthProvider } from './contexts/AuthContext';
+import { CompareProvider } from './contexts/CompareContext';
 import LandingLayout from './components/layouts/LandingLayout';
-import WorkspaceLayout from './components/layouts/WorkspaceLayout';
 import MerchantLayout from './components/layouts/MerchantLayout';
 import AdminLayout from './components/layouts/AdminLayout';
 import ErrorBoundary from './components/shared/ErrorBoundary';
 import RoleGuard from './components/auth/RoleGuard';
 import ChatWidget from './components/chat/ChatWidget';
 import AppOnboarding from './components/onboarding/AppOnboarding';
+import VenueCompareBar from './components/compare/VenueCompareBar';
 import OverviewPage from './pages/overview/OverviewPage';
 import LandingInfoPage from './LandingInfoPage';
 import LandingDetailPage from './pages/landing/LandingDetailPage';
@@ -102,6 +103,7 @@ function AppRoutes({ landingStats }) {
         <Route path={APP_ROUTES.LANDING_DETAIL} element={<LandingDetailPage />} />
         <Route path={APP_ROUTES.PLACE_LIST} element={<PlaceListPage />} />
         <Route path={APP_ROUTES.SERVICE_DETAIL} element={<ServiceDetailPage />} />
+        <Route path={APP_ROUTES.DISCOVERY} element={<DiscoveryPage />} />
         <Route path={APP_ROUTES.VENUE_DETAIL} element={<VenueDetailPage />} />
         <Route path="/profile" element={<ProfilePage />} />
       </Route>
@@ -111,10 +113,6 @@ function AppRoutes({ landingStats }) {
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path={APP_ROUTES.CITY_MAP} element={<CityMapPage />} />
-
-      <Route element={<WorkspaceLayout />}>
-        <Route path={APP_ROUTES.DISCOVERY} element={<DiscoveryPage />} />
-      </Route>
 
       <Route element={<MerchantLayout />}>
         <Route path={APP_ROUTES.MERCHANT_DASHBOARD} element={<MerchantDashboardPage />} />
@@ -210,13 +208,16 @@ function App() {
     <ErrorBoundary>
       <AuthProvider>
         <ThemeProvider>
-          <LanguageProvider>
-            <BrowserRouter>
-              <AppRoutes landingStats={landingStats} />
-              <ChatWidgetGate />
-              <AppOnboarding />
-            </BrowserRouter>
-          </LanguageProvider>
+          <CompareProvider>
+            <LanguageProvider>
+              <BrowserRouter>
+                <AppRoutes landingStats={landingStats} />
+                <VenueCompareBar />
+                <ChatWidgetGate />
+                <AppOnboarding />
+              </BrowserRouter>
+            </LanguageProvider>
+          </CompareProvider>
         </ThemeProvider>
       </AuthProvider>
     </ErrorBoundary>

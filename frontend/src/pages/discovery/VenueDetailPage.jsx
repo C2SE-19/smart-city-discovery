@@ -17,12 +17,14 @@ import {
 import { submitFeedback } from '../../services/feedbackService';
 import { APP_ROUTES } from '../../constants/routes';
 import { useAuth } from '../../contexts/AuthContext';
+import { useCompareVenues } from '../../contexts/CompareContext';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { normalizeVenueMetadata } from '../../components/map/cityMapUtils';
 import { fetchVenueChatThread, markChatThreadRead, sendVenueChatMessage } from '../../services/api/chatApi';
 import { trackTrendingAssignmentClick } from '../../services/api/adPackagesApi';
 import { getApiBaseUrl } from '../../services/api/client';
+import OpenStatusBadge from '../../components/discovery/OpenStatusBadge';
 import HeroVenueSection from './HeroVenueSection';
 import VenueInfoSection from './VenueInfoSection';
 import SimilarVenuesSection from './SimilarVenuesSection';
@@ -593,6 +595,10 @@ function formatDisplayTime(value) {
 	return value;
 }
 
+function isScheduleTimeValue(value) {
+	return /^\d{2}:\d{2}$/.test(String(value || '').trim());
+}
+
 function resolveTodaySchedule(weeklySchedule) {
 	if (!Array.isArray(weeklySchedule) || !weeklySchedule.length) {
 		return null;
@@ -720,6 +726,7 @@ function VenueDetailPage() {
 	const navigate = useNavigate();
 	const { language } = useLanguage();
 	const { token, user } = useAuth();
+	const { compareVenues, maxItems, isCompared, toggleVenue } = useCompareVenues();
 	const { theme } = useTheme();
 	const apiUrl = useMemo(() => getApiBaseUrl(), []);
 	const apiBase = useMemo(() => apiUrl.replace(/\/api\/v1$|\/api$/i, ''), [apiUrl]);
@@ -2244,6 +2251,10 @@ function VenueDetailPage() {
 	const isRealtimeReady = Boolean(currentOpen);
 	const displayStart = currentOpen?.start || todaySchedule?.open || 'N/A';
 	const displayEnd = currentOpen?.end || todaySchedule?.close || 'N/A';
+	const displayOpeningHoursText =
+		isScheduleTimeValue(displayStart) && isScheduleTimeValue(displayEnd)
+			? `${displayStart} - ${displayEnd}`
+			: '';
 	const displayStatusText = !isRealtimeReady ? i18n.updating : currentOpen?.isOpen ? i18n.openNow : i18n.closedNow;
 	const showOpenState = isRealtimeReady ? currentOpen?.isOpen : !todaySchedule?.off;
 	const displaySchedule =
@@ -2253,6 +2264,8 @@ function VenueDetailPage() {
 	const venueAddress = String(venue?.address || '').trim();
 	const venueLatitude = Number(venue?.latitude);
 	const venueLongitude = Number(venue?.longitude);
+	const venueCompareActive = isCompared(venue?.id);
+	const venueCompareDisabled = !venueCompareActive && compareVenues.length >= maxItems;
 
 	const handleOpenInternalVenueMap = () => {
 		const params = new URLSearchParams();
@@ -2286,14 +2299,18 @@ function VenueDetailPage() {
 				}}
 				onAddPhotos={() => setShowImagesModal(true)}
 				onShare={() => setShowShareModal(true)}
+				onCompare={() => toggleVenue(venue)}
 				onSave={handleToggleFavorite}
 				onReportVenue={openVenueReportModal}
 				isSaved={isFavorite}
+				isCompared={venueCompareActive}
+				isCompareDisabled={venueCompareDisabled}
 				isOpen={showOpenState}
 				rating={Number(communityStats.averageRating || 0)}
 				reviews={Number(communityStats.totalReviews || 0)}
 				category={String(venue?.category || 'Dining').trim()}
-				openingHours={`${formatDisplayTime(displayStart)} - ${formatDisplayTime(displayEnd)}`}
+				openingHours={displayOpeningHoursText}
+				openingStatusSource={openingRealtime || venue}
 			/>
 
 
@@ -2990,10 +3007,10 @@ function VenueDetailPage() {
 							<div className="venue-comment-hero-content">
 								<h4>{resolveVenueName(venue)}</h4>
 								<p>📍 {venue.address || 'No address yet'}</p>
-								<p className="venue-comment-hero-opening">
-									<span className={showOpenState ? 'is-open' : 'is-close'}>{showOpenState ? 'Open now' : 'Closed now'}</span>
-									{formatDisplayTime(displayStart)} - {formatDisplayTime(displayEnd)}
-								</p>
+								<div className="venue-comment-hero-opening">
+									<OpenStatusBadge scheduleSource={openingRealtime || venue} />
+									{displayOpeningHoursText ? <span className="venue-comment-hero-hours">{displayOpeningHoursText}</span> : null}
+								</div>
 								<p>💲 {venuePriceRange}</p>
 								<p><StarRatingDisplay rating={communityStats.averageRating || 0} /> {Number(communityStats.averageRating || 0).toFixed(1)}/5 ({communityStats.totalReviews} reviews)</p>
 							</div>
@@ -3361,4 +3378,3 @@ function VenueDetailPage() {
 }
 
 export default VenueDetailPage;
-
