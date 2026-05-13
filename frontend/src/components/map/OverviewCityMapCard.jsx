@@ -74,7 +74,13 @@ function renderStars(rating) {
 }
 
 function resolveVenuePopupImage(venue) {
-  const candidates = [venue?.cover_image_url, venue?.coverImageUrl, venue?.image];
+  const candidates = [
+    venue?.venue_primary_image_url,
+    venue?.venue_images?.[0],
+    venue?.cover_image_url,
+    venue?.coverImageUrl,
+    venue?.image,
+  ];
 
   for (const candidate of candidates) {
     const normalized = typeof candidate === 'string' ? candidate.trim() : '';

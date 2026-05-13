@@ -17699,7 +17699,23 @@ function buildUserPreferenceOptionsPayload() {
                     return res.status(404).json({ message: 'Venue not found' });
                 }
 
-                return res.json(result.rows[0]);
+                const venue = result.rows[0];
+                const galleryImagesFromTable = await loadVenueGalleryImageUrls(venue.id);
+                const resolvedReviewStats = await resolveVenueReviewStatsByVenueId(venue.id);
+                const sanitizedVenue = sanitizeVenueRecord(venue);
+                const normalizedVenue = normalizeVenueCoordinates(sanitizedVenue);
+
+                return res.json({
+                    ...normalizedVenue,
+                    average_rating: Number(resolvedReviewStats?.averageRating ?? venue.average_rating ?? 0),
+                    total_reviews: Number(resolvedReviewStats?.totalReviews ?? venue.total_reviews ?? 0),
+                    averageRating: Number(resolvedReviewStats?.averageRating ?? venue.average_rating ?? 0),
+                    totalReviews: Number(resolvedReviewStats?.totalReviews ?? venue.total_reviews ?? 0),
+                    review_count: Number(resolvedReviewStats?.totalReviews ?? venue.total_reviews ?? 0),
+                    reviewCount: Number(resolvedReviewStats?.totalReviews ?? venue.total_reviews ?? 0),
+                    venue_primary_image_url: galleryImagesFromTable[0] || null,
+                    venue_images: extractVenueImageUrls(sanitizedVenue, galleryImagesFromTable)
+                });
             } catch (error) {
                 return res.status(500).json({ message: error.message });
             }
