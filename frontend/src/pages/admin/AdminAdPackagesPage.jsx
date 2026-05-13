@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import useAdminI18n from '../../hooks/useAdminI18n';
 import {
   calculateDiscountedPackagePrice,
   formatCurrencyVnd,
@@ -173,6 +174,7 @@ function formatUsageDate(dateValue) {
 }
 
 function AdminAdPackagesPage() {
+  const { language, tx } = useAdminI18n();
   const [activeView, setActiveView] = useState(VIEW_MODES.packages);
   const [packages, setPackages] = useState([]);
   const [loadingPackages, setLoadingPackages] = useState(true);
@@ -582,11 +584,11 @@ function AdminAdPackagesPage() {
     <section className="admin-packages-page">
       <header className="admin-packages-header">
         <div className="admin-packages-header-copy">
-          <p className="admin-packages-kicker">Campaign control</p>
-          <h2>Ad Packages</h2>
-          <p>
-            Create package rules for merchant advertising. This workspace remains separated from map moderation.
-          </p>
+        <p className="admin-packages-kicker">{tx('Campaign control')}</p>
+        <h2>{tx('Ad Packages')}</h2>
+        <p>
+            {tx('Create package rules for merchant advertising. This workspace remains separated from map moderation.')}
+        </p>
 
           <div className="admin-packages-view-switch" role="tablist" aria-label="Ad package views">
             <button
@@ -594,14 +596,14 @@ function AdminAdPackagesPage() {
               className={`admin-packages-view-btn ${activeView === VIEW_MODES.packages ? 'is-active' : ''}`.trim()}
               onClick={() => setActiveView(VIEW_MODES.packages)}
             >
-              Packages
+              {tx('Packages')}
             </button>
             <button
               type="button"
               className={`admin-packages-view-btn ${activeView === VIEW_MODES.stats ? 'is-active' : ''}`.trim()}
               onClick={() => setActiveView(VIEW_MODES.stats)}
             >
-              Statisticals
+              {tx('Statisticals')}
             </button>
           </div>
         </div>
@@ -612,7 +614,7 @@ function AdminAdPackagesPage() {
       {activeView === VIEW_MODES.packages ? (
       <div className="admin-packages-layout">
         <article className="admin-packages-panel">
-          <h3>{isEditMode ? 'Edit Package' : 'Create a New Package'}</h3>
+          <h3>{isEditMode ? tx('Edit Package') : tx('Create a New Package')}</h3>
           <p className="admin-packages-panel-helper">
             {isEditMode
               ? 'Update package identity, active duration and campaign capabilities.'
@@ -621,7 +623,7 @@ function AdminAdPackagesPage() {
 
           <form className="admin-package-form" onSubmit={handleCreatePackage}>
             <div className="admin-package-form-field">
-              <label htmlFor="package-name">Package name</label>
+              <label htmlFor="package-name">{tx('Package name')}</label>
               <input
                 id="package-name"
                 type="text"
@@ -633,7 +635,7 @@ function AdminAdPackagesPage() {
             </div>
 
             <div className="admin-package-form-field">
-              <label>Package type</label>
+              <label>{tx('Package type')}</label>
               <div className="admin-package-tier-selector">
                 {Object.values(PACKAGE_TIERS).map((tierItem) => (
                   <button
@@ -646,15 +648,15 @@ function AdminAdPackagesPage() {
                       '--tier-soft': tierItem.accent,
                     }}
                   >
-                    <strong>{tierItem.label}</strong>
-                    <span>{tierItem.value === 'premium' ? 'Gold' : tierItem.value === 'boosted' ? 'Silver' : 'Bronze'}</span>
+                    <strong>{tx(tierItem.label)}</strong>
+                    <span>{tierItem.value === 'premium' ? tx('Gold') : tierItem.value === 'boosted' ? tx('Silver') : tx('Bronze')}</span>
                   </button>
                 ))}
               </div>
             </div>
 
             <div className="admin-package-form-field">
-              <label>Activation duration</label>
+              <label>{tx('Activation duration')}</label>
               <div className="admin-package-duration-selector">
                 {PACKAGE_DURATIONS.map((durationOption) => (
                   <button
@@ -663,8 +665,8 @@ function AdminAdPackagesPage() {
                     className={`admin-package-chip ${Number(formState.durationMonths) === Number(durationOption.value) ? 'is-active' : ''}`.trim()}
                     onClick={() => handleDurationSelect(durationOption.value)}
                   >
-                    <strong>{durationOption.label}</strong>
-                    <span>{durationOption.days} days</span>
+                    <strong>{tx(durationOption.label)}</strong>
+                    <span>{durationOption.days} {tx('days')}</span>
                   </button>
                 ))}
               </div>
@@ -673,7 +675,7 @@ function AdminAdPackagesPage() {
             <div className="admin-package-form-field">
               <div className="admin-package-price-grid">
                 <div>
-                  <label htmlFor="package-price">Package price (VND)</label>
+                  <label htmlFor="package-price">{tx('Package price (VND)')}</label>
                   <input
                     id="package-price"
                     type="text"
@@ -687,7 +689,7 @@ function AdminAdPackagesPage() {
                 </div>
 
                 <div>
-                  <label htmlFor="package-discount-percent">Discount (%)</label>
+                  <label htmlFor="package-discount-percent">{tx('Discount (%)')}</label>
                   <input
                     id="package-discount-percent"
                     type="text"
@@ -701,13 +703,13 @@ function AdminAdPackagesPage() {
                 </div>
               </div>
               <div className="admin-package-price-preview" aria-live="polite">
-                <span>Discounted price</span>
-                <strong>{discountedPreviewPrice > 0 ? formatCurrencyVnd(discountedPreviewPrice) : 'N/A'}</strong>
+                <span>{tx('Discounted price')}</span>
+                <strong>{discountedPreviewPrice > 0 ? formatCurrencyVnd(discountedPreviewPrice) : tx('N/A')}</strong>
               </div>
             </div>
 
             <div className="admin-package-form-field">
-              <label>Package capabilities</label>
+              <label>{tx('Package capabilities')}</label>
               <div className="admin-package-toggle-grid">
                 {PACKAGE_FEATURES.map((featureItem) => {
                   const isEnabled = Boolean(formState.features[featureItem.key]);
@@ -715,8 +717,8 @@ function AdminAdPackagesPage() {
                   return (
                     <div key={featureItem.key} className="admin-package-toggle">
                       <div className="admin-package-toggle-copy">
-                        <strong>{featureItem.label}</strong>
-                        <span>{featureItem.description}</span>
+                        <strong>{tx(featureItem.label)}</strong>
+                        <span>{tx(featureItem.description)}</span>
                       </div>
 
                       <button
@@ -724,7 +726,7 @@ function AdminAdPackagesPage() {
                         className={`admin-package-switch ${isEnabled ? 'is-on' : ''}`.trim()}
                         onClick={() => handleFeatureToggle(featureItem.key)}
                         aria-pressed={isEnabled}
-                        aria-label={`Toggle ${featureItem.label}`}
+                        aria-label={language === 'vi' ? `Bật/tắt ${tx(featureItem.label)}` : `Toggle ${featureItem.label}`}
                       />
                     </div>
                   );
@@ -734,7 +736,7 @@ function AdminAdPackagesPage() {
 
             {formState.features.postLimitEnabled ? (
               <div className="admin-package-limit-field">
-                <label htmlFor="package-post-limit">Maximum promoted posts</label>
+                <label htmlFor="package-post-limit">{tx('Maximum promoted posts')}</label>
                 <input
                   id="package-post-limit"
                   type="number"
@@ -749,7 +751,7 @@ function AdminAdPackagesPage() {
             {formState.features.showInTrending ? (
               <div className="admin-package-limit-field admin-package-trend-field-grid">
                 <div>
-                  <label htmlFor="package-trend-push-limit">Number of pushes</label>
+                  <label htmlFor="package-trend-push-limit">{tx('Number of pushes')}</label>
                   <input
                     id="package-trend-push-limit"
                     type="number"
@@ -761,7 +763,7 @@ function AdminAdPackagesPage() {
                 </div>
 
                 <div>
-                  <label htmlFor="package-trend-display-hours">Display duration (hours)</label>
+                  <label htmlFor="package-trend-display-hours">{tx('Display duration (hours)')}</label>
                   <input
                     id="package-trend-display-hours"
                     type="number"
@@ -779,11 +781,11 @@ function AdminAdPackagesPage() {
 
             <div className="admin-package-form-actions">
               <button type="submit" className="admin-package-submit" disabled={submitting}>
-                {submitting ? (isEditMode ? 'Saving...' : 'Creating...') : isEditMode ? 'Save changes' : 'Create package'}
+                {submitting ? (isEditMode ? tx('Saving...') : tx('Creating...')) : isEditMode ? tx('Save changes') : tx('Create package')}
               </button>
               {isEditMode ? (
                 <button type="button" className="admin-package-secondary-btn" onClick={handleCancelEditPackage}>
-                  Cancel edit
+                  {tx('Cancel edit')}
                 </button>
               ) : null}
             </div>
@@ -791,16 +793,16 @@ function AdminAdPackagesPage() {
         </article>
 
         <article className="admin-packages-panel">
-          <h3>Created Packages</h3>
+          <h3>{tx('Created Packages')}</h3>
           <p className="admin-packages-panel-helper">
             These package definitions are available in merchant advertisement flow.
           </p>
 
           <div className="admin-packages-list">
             {loadingPackages ? (
-              <p className="admin-package-empty">Loading packages...</p>
+              <p className="admin-package-empty">{tx('Loading packages...')}</p>
             ) : packages.length === 0 ? (
-              <p className="admin-package-empty">No package yet. Create the first package to activate merchant advertising.</p>
+              <p className="admin-package-empty">{tx('No package yet. Create the first package to activate merchant advertising.')}</p>
             ) : (
               packages.map((packageItem) => {
                 const tierMeta = getTierMeta(packageItem.tier);
@@ -822,7 +824,7 @@ function AdminAdPackagesPage() {
                       <div>
                         <strong>{packageItem.name}</strong>
                         <span>
-                          {durationMeta.label} ({durationMeta.days} days)
+                          {tx(durationMeta.label)} ({durationMeta.days} {tx('days')})
                         </span>
                         <span className="admin-package-price-label">{formatCurrencyVnd(discountedPackagePrice)}</span>
                         {hasDiscount ? (
@@ -832,18 +834,18 @@ function AdminAdPackagesPage() {
                         ) : null}
                       </div>
 
-                      <span className="admin-package-tier-badge">{tierMeta.label}</span>
+                      <span className="admin-package-tier-badge">{tx(tierMeta.label)}</span>
                     </div>
 
                     <div className="admin-package-card-body">
                       <ul className="admin-package-feature-list">
                         {featureSummary.map((featureLabel) => (
-                          <li key={`${packageItem.id}-${featureLabel}`}>{featureLabel}</li>
+                          <li key={`${packageItem.id}-${featureLabel}`}>{tx(featureLabel)}</li>
                         ))}
                       </ul>
 
                       <div className="admin-package-card-meta">
-                        <span>Created: {formatCreatedAt(packageItem.createdAt)}</span>
+                        <span>{tx('Created:')} {formatCreatedAt(packageItem.createdAt)}</span>
 
                         <div className="admin-package-card-actions">
                           <button
@@ -859,7 +861,7 @@ function AdminAdPackagesPage() {
                             disabled={deletingPackageId === packageItem.id}
                             onClick={() => handleRequestDeletePackage(packageItem)}
                           >
-                            {deletingPackageId === packageItem.id ? 'Removing...' : 'Delete'}
+                            {deletingPackageId === packageItem.id ? tx('Removing...') : tx('Delete')}
                           </button>
                         </div>
                       </div>
@@ -877,7 +879,7 @@ function AdminAdPackagesPage() {
         <div className="admin-packages-stats-layout">
           <article className="admin-packages-panel admin-stats-overview-panel">
             <div className="admin-stats-head">
-              <h3>Package Performance Dashboard</h3>
+              <h3>{tx('Package Performance Dashboard')}</h3>
               <div className="admin-stats-range-switch">
                 {STATS_MONTH_OPTIONS.map((monthOption) => (
                   <button
@@ -892,12 +894,12 @@ function AdminAdPackagesPage() {
               </div>
             </div>
 
-            {statsLoading ? <p className="admin-package-empty">Loading statistics...</p> : null}
+            {statsLoading ? <p className="admin-package-empty">{tx('Loading statistics...')}</p> : null}
             {!statsLoading && statsError ? (
               <div className="admin-package-empty">
                 <p>{statsError}</p>
                 <button type="button" className="admin-package-secondary-btn" onClick={loadStats}>
-                  Retry
+                  {tx('Retry')}
                 </button>
               </div>
             ) : null}
@@ -906,12 +908,12 @@ function AdminAdPackagesPage() {
               <>
                 <div className="admin-stats-kpis">
                   <div className="admin-stats-kpi-card">
-                    <span>Most used package</span>
+                    <span>{tx('Most used package')}</span>
                     <strong>{topPackageMeta?.packageName || 'No data yet'}</strong>
-                    <em>{formatUsageCount(topPackageMeta?.activeCount || 0)} active assignments</em>
+                    <em>{formatUsageCount(topPackageMeta?.activeCount || 0)} {tx('active assignments')}</em>
                   </div>
                   <div className="admin-stats-kpi-card">
-                    <span>Active assignments</span>
+                    <span>{tx('Active assignments')}</span>
                     <strong>{formatUsageCount(statsPayload?.totalActiveAssignments || 0)}</strong>
                     <em>Currently linked venue campaigns</em>
                   </div>
@@ -976,7 +978,7 @@ function AdminAdPackagesPage() {
           </article>
 
           <article className="admin-packages-panel admin-stats-usage-panel">
-            <h3>Package Usage Details</h3>
+            <h3>{tx('Package Usage Details')}</h3>
             <p className="admin-packages-panel-helper">
               Click any package in ranking or chart to inspect venues and users currently linked to it.
             </p>
@@ -992,13 +994,13 @@ function AdminAdPackagesPage() {
                   >
                     <strong>{row.packageName}</strong>
                     <span>{formatUsageCount(row.activeCount)} active</span>
-                    <em>{formatUsageCount(row.monthlyTotal)} events in selected window</em>
+                    <em>{formatUsageCount(row.monthlyTotal)} {tx('events in selected window')}</em>
                   </button>
                 ))}
               </div>
             ) : null}
 
-            {usageLoading ? <p className="admin-package-empty">Loading package usage details...</p> : null}
+            {usageLoading ? <p className="admin-package-empty">{tx('Loading package usage details...')}</p> : null}
             {!usageLoading && usageError ? <p className="admin-package-empty">{usageError}</p> : null}
             {!usageLoading && !usageError && !usageRows.length ? (
               <p className="admin-package-empty">No venue has actively selected this package yet.</p>
@@ -1012,18 +1014,18 @@ function AdminAdPackagesPage() {
                       <th>User</th>
                       <th>Venue</th>
                       <th>Address</th>
-                      <th>Assigned at</th>
+                      <th>{tx('Assigned at')}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {usageRows.map((usageRow) => (
                       <tr key={usageRow.assignmentId}>
                         <td>
-                          <strong>{usageRow.user?.name || 'Unknown user'}</strong>
-                          <span>{usageRow.user?.email || 'No email'}</span>
+                          <strong>{usageRow.user?.name || tx('Unknown user')}</strong>
+                          <span>{usageRow.user?.email || tx('No email')}</span>
                         </td>
-                        <td>{usageRow.venue?.name || 'Unknown venue'}</td>
-                        <td>{usageRow.venue?.address || 'N/A'}</td>
+                        <td>{usageRow.venue?.name || tx('Unknown venue')}</td>
+                        <td>{usageRow.venue?.address || tx('N/A')}</td>
                         <td>{formatUsageDate(usageRow.assignedAt)}</td>
                       </tr>
                     ))}
@@ -1038,7 +1040,7 @@ function AdminAdPackagesPage() {
       {confirmDeletePackage ? (
         <div className="admin-package-confirm-overlay" role="dialog" aria-modal="true">
           <div className="admin-package-confirm-modal">
-            <h3>Delete package?</h3>
+            <h3>{tx('Delete package?')}</h3>
             <p>
               This action will archive <strong>{confirmDeletePackage.name}</strong> from the active package list.
             </p>
@@ -1050,7 +1052,7 @@ function AdminAdPackagesPage() {
                 onClick={() => setConfirmDeletePackage(null)}
                 disabled={deletingPackageId === confirmDeletePackage.id}
               >
-                Cancel
+                {tx('Cancel')}
               </button>
               <button
                 type="button"
@@ -1058,7 +1060,7 @@ function AdminAdPackagesPage() {
                 onClick={handleDeletePackage}
                 disabled={deletingPackageId === confirmDeletePackage.id}
               >
-                {deletingPackageId === confirmDeletePackage.id ? 'Deleting...' : 'Confirm delete'}
+                {deletingPackageId === confirmDeletePackage.id ? tx('Deleting...') : tx('Confirm delete')}
               </button>
             </div>
           </div>

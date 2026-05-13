@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { APP_ROUTES } from '../../constants/routes';
+import useAdminI18n from '../../hooks/useAdminI18n';
 import {
   createAdminForumBannedKeyword,
   deleteAdminForumBannedKeyword,
@@ -8,14 +9,8 @@ import {
 } from '../../services/api/adminForumApi';
 import './AdminForumKeywordBanPage.css';
 
-function formatTime(value) {
-  if (!value) return 'N/A';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'N/A';
-  return date.toLocaleString('en-US');
-}
-
 function AdminForumKeywordBanPage() {
+  const { tx, formatDateTime } = useAdminI18n();
   const [keywordInput, setKeywordInput] = useState('');
   const [keywords, setKeywords] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -39,7 +34,7 @@ function AdminForumKeywordBanPage() {
       } catch (apiError) {
         if (isMounted) {
           const message = String(apiError?.response?.data?.message || apiError?.message || '').trim();
-          setError(message || 'Unable to load banned keywords.');
+          setError(message || tx('Unable to load banned keywords.'));
         }
       } finally {
         if (isMounted) {
@@ -53,14 +48,14 @@ function AdminForumKeywordBanPage() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [tx]);
 
   const handleApplyKeyword = async (event) => {
     event.preventDefault();
     const keyword = String(keywordInput || '').trim();
 
     if (!keyword) {
-      setError('Enter a keyword to ban.');
+      setError(tx('Enter a keyword to ban.'));
       setSuccess('');
       return;
     }
@@ -76,17 +71,17 @@ function AdminForumKeywordBanPage() {
         return created ? [created, ...next] : next;
       });
       setKeywordInput('');
-      setSuccess('Keyword ban applied successfully.');
+      setSuccess(tx('Keyword ban applied successfully.'));
     } catch (apiError) {
       const message = String(apiError?.response?.data?.message || apiError?.message || '').trim();
-      setError(message || 'Unable to apply the keyword ban right now.');
+      setError(message || tx('Unable to apply the keyword ban right now.'));
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleRemoveKeyword = async (keywordId) => {
-    const accepted = window.confirm('Are you sure you want to remove this banned keyword?');
+    const accepted = window.confirm(tx('Are you sure you want to remove this banned keyword?'));
     if (!accepted) return;
 
     setDeletingKeywordId(keywordId);
@@ -96,10 +91,10 @@ function AdminForumKeywordBanPage() {
     try {
       await deleteAdminForumBannedKeyword(keywordId);
       setKeywords((current) => current.filter((item) => String(item.id) !== String(keywordId)));
-      setSuccess('Banned keyword removed.');
+      setSuccess(tx('Banned keyword removed.'));
     } catch (apiError) {
       const message = String(apiError?.response?.data?.message || apiError?.message || '').trim();
-      setError(message || 'Unable to remove this banned keyword right now.');
+      setError(message || tx('Unable to remove this banned keyword right now.'));
     } finally {
       setDeletingKeywordId(null);
     }
@@ -109,21 +104,21 @@ function AdminForumKeywordBanPage() {
     <section className="admin-forum-keyword-page">
       <header className="admin-forum-keyword-header">
         <div>
-          <p className="admin-forum-keyword-eyebrow">Forum moderation workspace</p>
-          <h2>Banned Keywords</h2>
-          <p>Add blocked words or phrases to prevent posts and comments containing them.</p>
+          <p className="admin-forum-keyword-eyebrow">{tx('Forum moderation workspace')}</p>
+          <h2>{tx('Banned Keywords')}</h2>
+          <p>{tx('Add blocked words or phrases to prevent posts and comments containing them.')}</p>
         </div>
       </header>
 
-      <nav className="admin-forum-section-switch" aria-label="Forum moderation navigation">
+      <nav className="admin-forum-section-switch" aria-label={tx('Forum moderation navigation')}>
         <NavLink to={APP_ROUTES.ADMIN_FORUM_REPORTS} className={({ isActive }) => `admin-forum-switch-link ${isActive ? 'is-active' : ''}`}>
-          Reports
+          {tx('Reports')}
         </NavLink>
         <NavLink to={APP_ROUTES.ADMIN_FORUM_VIEW} className={({ isActive }) => `admin-forum-switch-link ${isActive ? 'is-active' : ''}`}>
-          Forum
+          {tx('Forum')}
         </NavLink>
         <NavLink to={APP_ROUTES.ADMIN_FORUM_KEYWORDS} className={({ isActive }) => `admin-forum-switch-link ${isActive ? 'is-active' : ''}`}>
-          Banned Keywords
+          {tx('Banned Keywords')}
         </NavLink>
       </nav>
 
@@ -132,33 +127,33 @@ function AdminForumKeywordBanPage() {
           type="text"
           value={keywordInput}
           onChange={(event) => setKeywordInput(event.target.value)}
-          placeholder="Enter a blocked word or phrase..."
+          placeholder={tx('Enter a blocked word or phrase...')}
           maxLength={160}
           disabled={submitting}
         />
         <button type="submit" disabled={submitting}>
-          {submitting ? 'Applying...' : 'Apply'}
+          {submitting ? tx('Applying...') : tx('Apply')}
         </button>
       </form>
 
       {error ? <p className="admin-forum-keyword-error">{error}</p> : null}
       {success ? <p className="admin-forum-keyword-success">{success}</p> : null}
-      {loading ? <p className="admin-forum-keyword-loading">Loading banned keywords...</p> : null}
+      {loading ? <p className="admin-forum-keyword-loading">{tx('Loading banned keywords...')}</p> : null}
 
       <section className="admin-forum-keyword-table-wrap">
         <table className="admin-forum-keyword-table">
           <thead>
             <tr>
-              <th>Keyword</th>
-              <th>Applied On</th>
-              <th>Action</th>
+              <th>{tx('Keyword')}</th>
+              <th>{tx('Applied On')}</th>
+              <th>{tx('Action')}</th>
             </tr>
           </thead>
           <tbody>
             {keywords.map((item) => (
               <tr key={item.id}>
                 <td>{item.keyword}</td>
-                <td>{formatTime(item.created_at)}</td>
+                <td>{formatDateTime(item.created_at)}</td>
                 <td>
                   <button
                     type="button"
@@ -166,14 +161,14 @@ function AdminForumKeywordBanPage() {
                     onClick={() => handleRemoveKeyword(item.id)}
                     disabled={deletingKeywordId === item.id}
                   >
-                    {deletingKeywordId === item.id ? 'Removing...' : 'Remove'}
+                    {deletingKeywordId === item.id ? tx('Removing...') : tx('Remove')}
                   </button>
                 </td>
               </tr>
             ))}
             {!loading && !keywords.length ? (
               <tr>
-                <td colSpan={3} className="admin-forum-keyword-empty">No banned keywords have been applied yet.</td>
+                <td colSpan={3} className="admin-forum-keyword-empty">{tx('No banned keywords have been applied yet.')}</td>
               </tr>
             ) : null}
           </tbody>

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import useAdminI18n from '../../hooks/useAdminI18n';
 import { fetchAdminRevenueReport } from '../../services/api/adPackagesApi';
 import { formatCurrencyVnd, getTierMeta } from '../../services/adPackageStorage';
 import './AdminReportsPage.css';
@@ -10,53 +11,18 @@ const CHART_PADDING = 28;
 const REPORTS_LAST_SEEN_KEY = 'adminReportsLastSeen';
 const BADGE_REFRESH_EVENT = 'admin-badges-refresh';
 
-function formatMonthLabel(value) {
-  const [rawYear, rawMonth] = String(value || '').split('-');
-  const year = Number.parseInt(rawYear, 10);
-  const month = Number.parseInt(rawMonth, 10);
-
-  if (!Number.isFinite(year) || !Number.isFinite(month)) {
-    return value;
-  }
-
-  const date = new Date(Date.UTC(year, month - 1, 1));
-  return date.toLocaleDateString('en-US', {
-    month: 'short',
-    year: 'numeric',
-  });
-}
-
-function formatDateTime(value) {
-  if (!value) {
-    return 'N/A';
-  }
-
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return 'N/A';
-  }
-
-  return parsed.toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
-function formatStatusLabel(status) {
+function formatStatusLabel(status, tx) {
   switch (String(status || '').trim().toLowerCase()) {
     case 'paid':
-      return 'Paid';
+      return tx('Paid');
     case 'pending_payment':
-      return 'Pending payment';
+      return tx('Pending payment');
     case 'cancelled':
-      return 'Cancelled';
+      return tx('Cancelled');
     case 'failed':
-      return 'Failed';
+      return tx('Failed');
     default:
-      return 'Unknown';
+      return tx('Unknown');
   }
 }
 
@@ -92,6 +58,7 @@ function buildChartPaths(series) {
 }
 
 function AdminReportsPage() {
+  const { tx, formatDateTime, formatMonthLabel, formatNumber } = useAdminI18n();
   const [monthWindow, setMonthWindow] = useState(6);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -105,12 +72,12 @@ function AdminReportsPage() {
       const payload = await fetchAdminRevenueReport(monthWindow);
       setReportPayload(payload || null);
     } catch (requestError) {
-      setError(requestError?.response?.data?.message || 'Could not load revenue analytics right now.');
+      setError(requestError?.response?.data?.message || tx('Could not load revenue analytics right now.'));
       setReportPayload(null);
     } finally {
       setLoading(false);
     }
-  }, [monthWindow]);
+  }, [monthWindow, tx]);
 
   useEffect(() => {
     loadReport();
@@ -162,14 +129,14 @@ function AdminReportsPage() {
     <section className="admin-reports-page">
       <header className="admin-reports-header">
         <div>
-          <p className="admin-reports-kicker">Finance Intelligence</p>
-          <h2>Reports & Revenue</h2>
+          <p className="admin-reports-kicker">{tx('Finance Intelligence')}</p>
+          <h2>{tx('Reports & Revenue')}</h2>
           <p>
-            Monitor real package revenue, payment lifecycle health, and package demand across the advertising system.
+            {tx('Monitor real package revenue, payment lifecycle health, and package demand across the advertising system.')}
           </p>
         </div>
 
-        <div className="admin-reports-range-switch" role="tablist" aria-label="Revenue window">
+        <div className="admin-reports-range-switch" role="tablist" aria-label={tx('Revenue window')}>
           {RANGE_OPTIONS.map((option) => (
             <button
               key={option}
@@ -177,7 +144,7 @@ function AdminReportsPage() {
               className={`admin-reports-range-btn ${monthWindow === option ? 'is-active' : ''}`.trim()}
               onClick={() => setMonthWindow(option)}
             >
-              {option} months
+              {option} {tx('months')}
             </button>
           ))}
         </div>
@@ -185,17 +152,17 @@ function AdminReportsPage() {
 
       {loading ? (
         <div className="admin-reports-empty">
-          <h3>Loading revenue dashboard...</h3>
-          <p>Please wait while we aggregate package payments and usage signals.</p>
+          <h3>{tx('Loading revenue dashboard...')}</h3>
+          <p>{tx('Please wait while we aggregate package payments and usage signals.')}</p>
         </div>
       ) : null}
 
       {!loading && error ? (
         <div className="admin-reports-empty">
-          <h3>Unable to load analytics</h3>
+          <h3>{tx('Unable to load analytics')}</h3>
           <p>{error}</p>
           <button type="button" className="admin-reports-secondary-btn" onClick={loadReport}>
-            Retry
+            {tx('Retry')}
           </button>
         </div>
       ) : null}
@@ -204,24 +171,24 @@ function AdminReportsPage() {
         <>
           <section className="admin-reports-kpi-grid">
             <article className="admin-reports-kpi-card">
-              <span>Revenue in window</span>
+              <span>{tx('Revenue in window')}</span>
               <strong>{formatCurrencyVnd(overview.totalRevenueInWindow || 0)}</strong>
-              <em>{Number(overview.totalTransactionsInWindow || 0)} successful payments</em>
+              <em>{formatNumber(overview.totalTransactionsInWindow || 0)} {tx('successful payments')}</em>
             </article>
             <article className="admin-reports-kpi-card">
-              <span>All-time revenue</span>
+              <span>{tx('All-time revenue')}</span>
               <strong>{formatCurrencyVnd(overview.totalRevenueAllTime || 0)}</strong>
-              <em>{Number(overview.paidTransactionsAllTime || 0)} paid package orders</em>
+              <em>{formatNumber(overview.paidTransactionsAllTime || 0)} {tx('paid package orders')}</em>
             </article>
             <article className="admin-reports-kpi-card">
-              <span>Average order value</span>
+              <span>{tx('Average order value')}</span>
               <strong>{formatCurrencyVnd(overview.averageOrderValue || 0)}</strong>
-              <em>Across the selected reporting window</em>
+              <em>{tx('Across the selected reporting window')}</em>
             </article>
             <article className="admin-reports-kpi-card">
-              <span>Active assignment coverage</span>
-              <strong>{Number(overview.activeAssignments || 0).toLocaleString('en-US')}</strong>
-              <em>{Number(overview.activePackagesSold || 0)} packages have generated revenue</em>
+              <span>{tx('Active assignment coverage')}</span>
+              <strong>{formatNumber(overview.activeAssignments || 0)}</strong>
+              <em>{formatNumber(overview.activePackagesSold || 0)} {tx('packages have generated revenue')}</em>
             </article>
           </section>
 
@@ -229,8 +196,8 @@ function AdminReportsPage() {
             <article className="admin-reports-panel admin-reports-chart-panel">
               <div className="admin-reports-panel-head">
                 <div>
-                  <h3>Revenue Trend</h3>
-                  <p>Monthly revenue and payment volume sourced from successful PayOS confirmations.</p>
+                  <h3>{tx('Revenue Trend')}</h3>
+                  <p>{tx('Monthly revenue and payment volume sourced from successful PayOS confirmations.')}</p>
                 </div>
               </div>
 
@@ -240,7 +207,7 @@ function AdminReportsPage() {
                     className="admin-reports-chart"
                     viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
                     role="img"
-                    aria-label="Monthly revenue trend"
+                    aria-label={tx('Monthly revenue trend')}
                   >
                     <defs>
                       <linearGradient id="revenueAreaGradient" x1="0%" x2="0%" y1="0%" y2="100%">
@@ -270,7 +237,7 @@ function AdminReportsPage() {
                       <g key={point.month}>
                         <circle cx={point.x} cy={point.y} r="5.5" className="admin-reports-chart-point" />
                         <text x={point.x} y={point.y - 12} className="admin-reports-chart-point-label">
-                          {Math.round(point.revenue / 1000).toLocaleString('en-US')}k
+                          {formatNumber(Math.round(point.revenue / 1000))}k
                         </text>
                       </g>
                     ))}
@@ -280,50 +247,50 @@ function AdminReportsPage() {
                     {chartModel.points.map((point) => (
                       <div key={`axis-${point.month}`} className="admin-reports-chart-axis-item">
                         <strong>{formatMonthLabel(point.month)}</strong>
-                        <span>{point.transactions} payment(s)</span>
+                        <span>{formatNumber(point.transactions)} {tx('payment(s)')}</span>
                       </div>
                     ))}
                   </div>
                 </div>
               ) : (
-                <p className="admin-reports-inline-empty">No successful package payments yet.</p>
+                <p className="admin-reports-inline-empty">{tx('No successful package payments yet.')}</p>
               )}
             </article>
 
             <article className="admin-reports-panel admin-reports-spotlight-panel">
               <div className="admin-reports-panel-head">
                 <div>
-                  <h3>Package Spotlight</h3>
-                  <p>Which package is generating the most revenue and coverage right now.</p>
+                  <h3>{tx('Package Spotlight')}</h3>
+                  <p>{tx('Which package is generating the most revenue and coverage right now.')}</p>
                 </div>
               </div>
 
               <div className="admin-reports-spotlight-card">
-                <span className="admin-reports-spotlight-label">Top revenue package</span>
-                <strong>{overview.topPackage?.packageName || 'No revenue yet'}</strong>
-                <p>{formatCurrencyVnd(overview.topPackage?.revenue || 0)} in confirmed payments</p>
+                <span className="admin-reports-spotlight-label">{tx('Top revenue package')}</span>
+                <strong>{overview.topPackage?.packageName || tx('No revenue yet')}</strong>
+                <p>{formatCurrencyVnd(overview.topPackage?.revenue || 0)} {tx('in confirmed payments')}</p>
                 <div className="admin-reports-spotlight-metrics">
                   <div>
-                    <span>Paid orders</span>
-                    <strong>{Number(overview.topPackage?.paidCount || 0).toLocaleString('en-US')}</strong>
+                    <span>{tx('Paid orders')}</span>
+                    <strong>{formatNumber(overview.topPackage?.paidCount || 0)}</strong>
                   </div>
                   <div>
-                    <span>Active merchants</span>
-                    <strong>{Number(overview.topPackage?.activeMerchantCount || 0).toLocaleString('en-US')}</strong>
+                    <span>{tx('Active merchants')}</span>
+                    <strong>{formatNumber(overview.topPackage?.activeMerchantCount || 0)}</strong>
                   </div>
                 </div>
               </div>
 
               <div className="admin-reports-insight-list">
                 <article>
-                  <span>Most used package</span>
-                  <strong>{mostUsedPackage?.packageName || 'No active usage yet'}</strong>
-                  <p>{Number(mostUsedPackage?.activeAssignmentCount || 0).toLocaleString('en-US')} active assignments</p>
+                  <span>{tx('Most used package')}</span>
+                  <strong>{mostUsedPackage?.packageName || tx('No active usage yet')}</strong>
+                  <p>{formatNumber(mostUsedPackage?.activeAssignmentCount || 0)} {tx('active assignments')}</p>
                 </article>
                 <article>
-                  <span>Revenue packages</span>
-                  <strong>{Number(overview.activePackagesSold || 0).toLocaleString('en-US')}</strong>
-                  <p>Packages with at least one paid transaction</p>
+                  <span>{tx('Revenue packages')}</span>
+                  <strong>{formatNumber(overview.activePackagesSold || 0)}</strong>
+                  <p>{tx('Packages with at least one paid transaction')}</p>
                 </article>
               </div>
             </article>
@@ -333,20 +300,20 @@ function AdminReportsPage() {
             <article className="admin-reports-panel">
               <div className="admin-reports-panel-head">
                 <div>
-                  <h3>Payment Status Mix</h3>
-                  <p>Track checkout health across pending, paid, cancelled, and failed package orders.</p>
+                  <h3>{tx('Payment Status Mix')}</h3>
+                  <p>{tx('Track checkout health across pending, paid, cancelled, and failed package orders.')}</p>
                 </div>
               </div>
 
               <div className="admin-reports-status-grid">
                 {statusBreakdown.map((row) => (
                   <div key={row.status} className="admin-reports-status-card">
-                    <span>{formatStatusLabel(row.status)}</span>
-                    <strong>{Number(row.total || 0).toLocaleString('en-US')}</strong>
+                    <span>{formatStatusLabel(row.status, tx)}</span>
+                    <strong>{formatNumber(row.total || 0)}</strong>
                     <em>
                       {totalStatuses
-                        ? `${Math.round(((Number(row.total || 0) / totalStatuses) * 100))}% of all package orders`
-                        : 'No package orders yet'}
+                        ? `${Math.round(((Number(row.total || 0) / totalStatuses) * 100))}% ${tx('of all package orders')}`
+                        : tx('No package orders yet')}
                     </em>
                   </div>
                 ))}
@@ -356,8 +323,8 @@ function AdminReportsPage() {
             <article className="admin-reports-panel">
               <div className="admin-reports-panel-head">
                 <div>
-                  <h3>Best-Selling Packages</h3>
-                  <p>Revenue contribution, paid order count, and active assignment volume for each package.</p>
+                  <h3>{tx('Best-Selling Packages')}</h3>
+                  <p>{tx('Revenue contribution, paid order count, and active assignment volume for each package.')}</p>
                 </div>
               </div>
 
@@ -395,14 +362,14 @@ function AdminReportsPage() {
                       </div>
 
                       <div className="admin-reports-package-meta">
-                        <span>{formatCurrencyVnd(item.revenue || 0)} revenue</span>
-                        <span>{Number(item.paidCount || 0).toLocaleString('en-US')} paid orders</span>
-                        <span>{Number(item.activeAssignmentCount || 0).toLocaleString('en-US')} active assignments</span>
+                        <span>{formatCurrencyVnd(item.revenue || 0)} {tx('revenue')}</span>
+                        <span>{formatNumber(item.paidCount || 0)} {tx('paid orders')}</span>
+                        <span>{formatNumber(item.activeAssignmentCount || 0)} {tx('active assignments')}</span>
                       </div>
                     </article>
                   );
                 }) : (
-                  <p className="admin-reports-inline-empty">No package revenue yet.</p>
+                  <p className="admin-reports-inline-empty">{tx('No package revenue yet.')}</p>
                 )}
               </div>
             </article>
@@ -411,8 +378,8 @@ function AdminReportsPage() {
           <section className="admin-reports-panel">
             <div className="admin-reports-panel-head">
               <div>
-                <h3>Recent Successful Payments</h3>
-                <p>The most recent advertising package payments confirmed in the system.</p>
+                <h3>{tx('Recent Successful Payments')}</h3>
+                <p>{tx('The most recent advertising package payments confirmed in the system.')}</p>
               </div>
             </div>
 
@@ -421,26 +388,26 @@ function AdminReportsPage() {
                 <table className="admin-reports-table">
                   <thead>
                     <tr>
-                      <th>Merchant</th>
-                      <th>Package</th>
-                      <th>Amount</th>
-                      <th>Order code</th>
-                      <th>Confirmed at</th>
+                      <th>{tx('Merchant')}</th>
+                      <th>{tx('Package')}</th>
+                      <th>{tx('Amount')}</th>
+                      <th>{tx('Order code')}</th>
+                      <th>{tx('Confirmed at')}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {recentPayments.map((payment) => (
                       <tr key={payment.id}>
                         <td>
-                          <strong>{payment.merchant?.name || 'Unknown merchant'}</strong>
-                          <span>{payment.merchant?.email || 'No email'}</span>
+                          <strong>{payment.merchant?.name || tx('Unknown merchant')}</strong>
+                          <span>{payment.merchant?.email || tx('No email')}</span>
                         </td>
                         <td>
-                          <strong>{payment.package?.name || 'Archived package'}</strong>
+                          <strong>{payment.package?.name || tx('Archived package')}</strong>
                           <span>{payment.package?.tier || 'basic'}</span>
                         </td>
                         <td>{formatCurrencyVnd(payment.amount || 0)}</td>
-                        <td>{payment.orderCode || payment.paymentReference || 'N/A'}</td>
+                        <td>{payment.orderCode || payment.paymentReference || tx('N/A')}</td>
                         <td>{formatDateTime(payment.paidAt)}</td>
                       </tr>
                     ))}
@@ -448,7 +415,7 @@ function AdminReportsPage() {
                 </table>
               </div>
             ) : (
-              <p className="admin-reports-inline-empty">There are no confirmed payments yet.</p>
+              <p className="admin-reports-inline-empty">{tx('There are no confirmed payments yet.')}</p>
             )}
           </section>
         </>

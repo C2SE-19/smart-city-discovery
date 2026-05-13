@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { APP_ROUTES } from '../../constants/routes';
+import useAdminI18n from '../../hooks/useAdminI18n';
 import {
   dismissAdminForumCommentReports,
   dismissAdminForumPostReports,
@@ -9,13 +10,6 @@ import {
   fetchAdminForumPosts
 } from '../../services/api/adminForumApi';
 import './AdminForumManagementPage.css';
-
-function formatTime(value) {
-  if (!value) return 'N/A';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'N/A';
-  return date.toLocaleString('en-US');
-}
 
 function collectDescendantCommentIds(comments, rootCommentId) {
   const rootKey = String(rootCommentId);
@@ -46,6 +40,7 @@ function collectDescendantCommentIds(comments, rootCommentId) {
 }
 
 function AdminForumManagementPage() {
+  const { tx, formatDateTime, formatNumber } = useAdminI18n();
   const [searchInput, setSearchInput] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [posts, setPosts] = useState([]);
@@ -72,7 +67,7 @@ function AdminForumManagementPage() {
       } catch (apiError) {
         if (isMounted) {
           const message = String(apiError?.response?.data?.message || apiError?.message || '').trim();
-          setError(message || 'Unable to load forum management data.');
+          setError(message || tx('Unable to load forum management data.'));
         }
       } finally {
         if (isMounted) {
@@ -86,7 +81,7 @@ function AdminForumManagementPage() {
     return () => {
       isMounted = false;
     };
-  }, [searchTerm]);
+  }, [searchTerm, tx]);
 
   const summary = useMemo(() => {
     const totalPosts = posts.length;
@@ -135,7 +130,7 @@ function AdminForumManagementPage() {
   }, [posts]);
 
   const handleDeletePost = async (postId) => {
-    const accepted = window.confirm('Are you sure you want to delete this post?');
+    const accepted = window.confirm(tx('Are you sure you want to delete this post?'));
     if (!accepted) return;
 
     setActionError('');
@@ -145,18 +140,18 @@ function AdminForumManagementPage() {
     try {
       await deleteAdminForumPost(postId);
       setPosts((current) => current.filter((post) => String(post.id) !== String(postId)));
-      setActionSuccess('Post deleted successfully.');
+      setActionSuccess(tx('Post deleted successfully.'));
         window.dispatchEvent(new Event('admin-badges-refresh'));
     } catch (apiError) {
       const message = String(apiError?.response?.data?.message || apiError?.message || '').trim();
-      setActionError(message || 'Unable to delete post at this time. Please try again.');
+      setActionError(message || tx('Unable to delete post at this time. Please try again.'));
     } finally {
       setDeletingPostId(null);
     }
   };
 
   const handleDeleteComment = async (postId, commentId) => {
-    const accepted = window.confirm('Are you sure you want to delete this comment?');
+    const accepted = window.confirm(tx('Are you sure you want to delete this comment?'));
     if (!accepted) return;
 
     setActionError('');
@@ -183,18 +178,18 @@ function AdminForumManagementPage() {
         })
       );
 
-      setActionSuccess('Comment deleted successfully.');
+      setActionSuccess(tx('Comment deleted successfully.'));
         window.dispatchEvent(new Event('admin-badges-refresh'));
     } catch (apiError) {
       const message = String(apiError?.response?.data?.message || apiError?.message || '').trim();
-      setActionError(message || 'Unable to delete comment at this time. Please try again.');
+      setActionError(message || tx('Unable to delete comment at this time. Please try again.'));
     } finally {
       setDeletingCommentId(null);
     }
   };
 
   const handleDismissPostReports = async (postId) => {
-    const accepted = window.confirm('Dismiss all reports for this post?');
+    const accepted = window.confirm(tx('Dismiss all reports for this post?'));
     if (!accepted) return;
 
     setActionError('');
@@ -221,18 +216,18 @@ function AdminForumManagementPage() {
         })
       );
 
-      setActionSuccess('Post reports dismissed successfully.');
+      setActionSuccess(tx('Post reports dismissed successfully.'));
         window.dispatchEvent(new Event('admin-badges-refresh'));
     } catch (apiError) {
       const message = String(apiError?.response?.data?.message || apiError?.message || '').trim();
-      setActionError(message || 'Unable to dismiss post reports right now. Please try again.');
+      setActionError(message || tx('Unable to dismiss post reports right now. Please try again.'));
     } finally {
       setDismissingPostId(null);
     }
   };
 
   const handleDismissCommentReports = async (postId, commentId) => {
-    const accepted = window.confirm('Dismiss all reports for this comment?');
+    const accepted = window.confirm(tx('Dismiss all reports for this comment?'));
     if (!accepted) return;
 
     setActionError('');
@@ -271,11 +266,11 @@ function AdminForumManagementPage() {
         })
       );
 
-      setActionSuccess('Comment reports dismissed.');
+      setActionSuccess(tx('Comment reports dismissed.'));
         window.dispatchEvent(new Event('admin-badges-refresh'));
     } catch (apiError) {
       const message = String(apiError?.response?.data?.message || apiError?.message || '').trim();
-      setActionError(message || 'Unable to dismiss comment reports at this time. Please try again.');
+      setActionError(message || tx('Unable to dismiss comment reports at this time. Please try again.'));
     } finally {
       setDismissingCommentId(null);
     }
@@ -290,36 +285,36 @@ function AdminForumManagementPage() {
     <section className="admin-forum-page">
       <header className="admin-forum-header">
         <div>
-          <p className="admin-forum-eyebrow">Forum moderation workspace</p>
-          <h2>View Reports</h2>
-          <p>View and take action on reported posts and comments.</p>
+          <p className="admin-forum-eyebrow">{tx('Forum moderation workspace')}</p>
+          <h2>{tx('View Reports')}</h2>
+          <p>{tx('View and take action on reported posts and comments.')}</p>
         </div>
       </header>
 
-      <nav className="admin-forum-section-switch" aria-label="Forum management navigation">
+      <nav className="admin-forum-section-switch" aria-label={tx('Forum management navigation')}>
         <NavLink to={APP_ROUTES.ADMIN_FORUM_REPORTS} className={({ isActive }) => `admin-forum-switch-link ${isActive ? 'is-active' : ''}`}>
-          View Reports
+          {tx('View Reports')}
         </NavLink>
         <NavLink to={APP_ROUTES.ADMIN_FORUM_VIEW} className={({ isActive }) => `admin-forum-switch-link ${isActive ? 'is-active' : ''}`}>
-          Forum Overview
+          {tx('Forum Overview')}
         </NavLink>
         <NavLink to={APP_ROUTES.ADMIN_FORUM_KEYWORDS} className={({ isActive }) => `admin-forum-switch-link ${isActive ? 'is-active' : ''}`}>
-          Banned Keywords
+          {tx('Banned Keywords')}
         </NavLink>
       </nav>
 
       <section className="admin-forum-stats">
         <article>
-          <strong>{summary.totalPosts}</strong>
-          <span>Total Posts</span>
+          <strong>{formatNumber(summary.totalPosts)}</strong>
+          <span>{tx('Total Posts')}</span>
         </article>
         <article className="is-warning">
-          <strong>{summary.reportedPosts}</strong>
-          <span>Reported Posts</span>
+          <strong>{formatNumber(summary.reportedPosts)}</strong>
+          <span>{tx('Reported Posts')}</span>
         </article>
         <article className="is-warning">
-          <strong>{summary.reportedComments}</strong>
-          <span>Reported Comments</span>
+          <strong>{formatNumber(summary.reportedComments)}</strong>
+          <span>{tx('Reported Comments')}</span>
         </article>
       </section>
 
@@ -334,22 +329,22 @@ function AdminForumManagementPage() {
               setSearchTerm('');
             }
           }}
-          placeholder="Search by title, content, author, or comments..."
-          aria-label="Search forum posts"
+          placeholder={tx('Search by title, content, author, or comments...')}
+          aria-label={tx('Search forum posts')}
         />
-        <button type="submit">Search</button>
+        <button type="submit">{tx('Search')}</button>
       </form>
 
       {error ? <p className="admin-forum-error">{error}</p> : null}
       {actionError ? <p className="admin-forum-error">{actionError}</p> : null}
       {actionSuccess ? <p className="admin-forum-loading">{actionSuccess}</p> : null}
-      {loading ? <p className="admin-forum-loading">Loading forum data...</p> : null}
+      {loading ? <p className="admin-forum-loading">{tx('Loading forum data...')}</p> : null}
 
       <section className="admin-forum-split">
         <article className="admin-forum-split-column">
           <header className="admin-forum-split-head">
-            <h3>Reported Posts</h3>
-            <span>{reportedPosts.length}</span>
+            <h3>{tx('Reported Posts')}</h3>
+            <span>{formatNumber(reportedPosts.length)}</span>
           </header>
 
           <div className="admin-forum-list">
@@ -359,12 +354,12 @@ function AdminForumManagementPage() {
                   <div>
                     <h3>{post.title}</h3>
                     <p>
-                      Author: <strong>{post.author}</strong> · Category: <strong>{post.category}</strong>
+                      {tx('Author:')} <strong>{post.author}</strong> • {tx('Category:')} <strong>{post.category}</strong>
                     </p>
                   </div>
                   <div className="admin-forum-card-meta">
-                    <span className="admin-flag-badge">Reported</span>
-                    <span>{formatTime(post.lastReportedAt || post.createdAt)}</span>
+                    <span className="admin-flag-badge">{tx('Reported')}</span>
+                    <span>{formatDateTime(post.lastReportedAt || post.createdAt)}</span>
                   </div>
                 </div>
 
@@ -379,19 +374,19 @@ function AdminForumManagementPage() {
                 ) : null}
 
                 <div className="admin-forum-badges-row">
-                  <span className="admin-chip is-danger">Report count: {Number(post.reportCount || 0)}</span>
-                  <span className="admin-chip">Likes: {Number(post.likesCount || 0)}</span>
-                  <span className="admin-chip">Comments: {Number(post.comments || 0)}</span>
+                  <span className="admin-chip is-danger">{tx('Report count')}: {formatNumber(post.reportCount || 0)}</span>
+                  <span className="admin-chip">{tx('Likes')}: {formatNumber(post.likesCount || 0)}</span>
+                  <span className="admin-chip">{tx('Comments')}: {formatNumber(post.comments || 0)}</span>
                 </div>
 
                 <div className="admin-forum-report-block">
-                  <h4>Report reasons</h4>
+                  <h4>{tx('Report reasons')}</h4>
                   <ul>
                     {(Array.isArray(post.postReportReasons) ? post.postReportReasons : []).map((item) => (
                       <li key={`post-report-${post.id}-${item.id}`}>
                         <div>
                           <strong>{item.reason}</strong>
-                          <span>{formatTime(item.created_at)}</span>
+                          <span>{formatDateTime(item.created_at)}</span>
                         </div>
                       </li>
                     ))}
@@ -405,7 +400,7 @@ function AdminForumManagementPage() {
                     onClick={() => handleDismissPostReports(post.id)}
                     disabled={dismissingPostId === post.id}
                   >
-                    {dismissingPostId === post.id ? 'Dismissing...' : 'Dismiss report'}
+                    {dismissingPostId === post.id ? tx('Dismissing...') : tx('Dismiss report')}
                   </button>
                   <button
                     type="button"
@@ -413,22 +408,22 @@ function AdminForumManagementPage() {
                     onClick={() => handleDeletePost(post.id)}
                     disabled={deletingPostId === post.id || dismissingPostId === post.id}
                   >
-                    {deletingPostId === post.id ? 'Deleting...' : 'Delete Post'}
+                    {deletingPostId === post.id ? tx('Deleting...') : tx('Delete Post')}
                   </button>
                 </div>
               </article>
             ))}
 
             {!loading && !reportedPosts.length ? (
-              <p className="admin-forum-empty">There are no reported posts yet.</p>
+              <p className="admin-forum-empty">{tx('There are no reported posts yet.')}</p>
             ) : null}
           </div>
         </article>
 
         <article className="admin-forum-split-column">
           <header className="admin-forum-split-head">
-            <h3>Reported Comments</h3>
-            <span>{reportedComments.length}</span>
+            <h3>{tx('Reported Comments')}</h3>
+            <span>{formatNumber(reportedComments.length)}</span>
           </header>
 
           <div className="admin-forum-list">
@@ -438,12 +433,12 @@ function AdminForumManagementPage() {
                   <div>
                     <h3>{comment.author}</h3>
                     <p>
-                      Post: <strong>{comment.postTitle}</strong> · Post author: <strong>{comment.postAuthor}</strong>
+                      {tx('Post:')} <strong>{comment.postTitle}</strong> • {tx('Post author:')} <strong>{comment.postAuthor}</strong>
                     </p>
                   </div>
                   <div className="admin-forum-card-meta">
-                    <span className="admin-flag-badge">Reported</span>
-                    <span>{formatTime(comment.lastReportedAt || comment.createdAt)}</span>
+                    <span className="admin-flag-badge">{tx('Reported')}</span>
+                    <span>{formatDateTime(comment.lastReportedAt || comment.createdAt)}</span>
                   </div>
                 </div>
 
@@ -458,18 +453,18 @@ function AdminForumManagementPage() {
                 ) : null}
 
                 <div className="admin-forum-badges-row">
-                  <span className="admin-chip is-danger">Report count: {Number(comment.reportCount || 0)}</span>
-                  <span className="admin-chip">Post category: {comment.postCategory || 'N/A'}</span>
+                  <span className="admin-chip is-danger">{tx('Report count')}: {formatNumber(comment.reportCount || 0)}</span>
+                  <span className="admin-chip">{tx('Post category:')} {comment.postCategory || tx('N/A')}</span>
                 </div>
 
                 <div className="admin-forum-report-block">
-                  <h4>Report reasons</h4>
+                  <h4>{tx('Report reasons')}</h4>
                   <ul>
                     {(Array.isArray(comment.reportReasons) ? comment.reportReasons : []).map((item) => (
                       <li key={`comment-report-${comment.id}-${item.id}`}>
                         <div>
                           <strong>{item.reason}</strong>
-                          <span>{formatTime(item.created_at)}</span>
+                          <span>{formatDateTime(item.created_at)}</span>
                         </div>
                       </li>
                     ))}
@@ -483,7 +478,7 @@ function AdminForumManagementPage() {
                     onClick={() => handleDismissCommentReports(comment.postId, comment.id)}
                     disabled={dismissingCommentId === comment.id}
                   >
-                    {dismissingCommentId === comment.id ? 'Dismissing...' : 'Dismiss report'}
+                    {dismissingCommentId === comment.id ? tx('Dismissing...') : tx('Dismiss report')}
                   </button>
                   <button
                     type="button"
@@ -491,21 +486,21 @@ function AdminForumManagementPage() {
                     onClick={() => handleDeleteComment(comment.postId, comment.id)}
                     disabled={deletingCommentId === comment.id || dismissingCommentId === comment.id}
                   >
-                    {deletingCommentId === comment.id ? 'Deleting...' : 'Delete Comment'}
+                    {deletingCommentId === comment.id ? tx('Deleting...') : tx('Delete Comment')}
                   </button>
                 </div>
               </article>
             ))}
 
             {!loading && !reportedComments.length ? (
-              <p className="admin-forum-empty">There are no reported comments yet.</p>
+              <p className="admin-forum-empty">{tx('There are no reported comments yet.')}</p>
             ) : null}
           </div>
         </article>
       </section>
 
       {!loading && !posts.length ? (
-        <p className="admin-forum-empty">No forum posts match the current search criteria.</p>
+        <p className="admin-forum-empty">{tx('No forum posts match the current search criteria.')}</p>
       ) : null}
     </section>
   );
