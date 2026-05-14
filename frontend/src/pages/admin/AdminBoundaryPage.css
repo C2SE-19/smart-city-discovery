@@ -16,9 +16,8 @@
 }
 
 .admin-map-section-card .section-card-body {
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
-  align-content: stretch;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
   flex: 1 1 auto;
   min-height: 0;
@@ -121,6 +120,7 @@
   grid-template-columns: minmax(228px, 0.78fr) minmax(0, 2.3fr) minmax(292px, 0.96fr);
   gap: 10px;
   height: 100%;
+  flex: 1 1 auto;
   min-height: 0;
   align-items: stretch;
 }
