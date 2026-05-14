@@ -3107,7 +3107,7 @@ function OverviewPage() {
                     className="overview-ai-show-more"
                     onClick={() => setAiVisibleCount((prev) => Math.min(prev + 8, aiSuggestedVenues.length))}
                   >
-                    khác
+                    Other
                   </button>
                 </div>
               ) : null}
