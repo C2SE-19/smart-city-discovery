@@ -1,21 +1,22 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { APP_ROUTES } from '../../constants/routes';
+import useUserI18n from '../../hooks/useUserI18n';
 import { formatCurrencyVnd } from '../../services/adPackageStorage';
 import { fetchMerchantAdPackageCheckoutStatus } from '../../services/api/adPackagesApi';
 import './MerchantAdCheckoutResultPage.css';
 
-function formatDateTime(value) {
+function formatDateTime(value, locale, tx) {
   if (!value) {
-    return 'N/A';
+    return tx('N/A');
   }
 
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
-    return 'N/A';
+    return tx('N/A');
   }
 
-  return parsed.toLocaleString('en-US', {
+  return parsed.toLocaleString(locale, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
@@ -41,6 +42,7 @@ function resolveResultTone(queryStatus, purchase) {
 }
 
 function MerchantAdCheckoutResultPage() {
+  const { locale, tx } = useUserI18n();
   const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -54,7 +56,7 @@ function MerchantAdCheckoutResultPage() {
   const loadCheckoutStatus = useCallback(async () => {
     if (!transactionId) {
       setLoading(false);
-      setError('Missing checkout transaction information.');
+      setError(tx('Missing checkout transaction information.'));
       setPurchase(null);
       return;
     }
@@ -66,12 +68,12 @@ function MerchantAdCheckoutResultPage() {
       const result = await fetchMerchantAdPackageCheckoutStatus(transactionId);
       setPurchase(result?.purchase || null);
     } catch (requestError) {
-      setError(requestError?.response?.data?.message || 'Could not verify the payment result right now.');
+      setError(requestError?.response?.data?.message || tx('Could not verify the payment result right now.'));
       setPurchase(null);
     } finally {
       setLoading(false);
     }
-  }, [transactionId]);
+  }, [transactionId, tx]);
 
   useEffect(() => {
     loadCheckoutStatus();
@@ -84,24 +86,24 @@ function MerchantAdCheckoutResultPage() {
 
   const toneCopy = {
     success: {
-      eyebrow: 'Payment confirmed',
-      title: 'Your advertising package is now active',
-      body: 'PayOS confirmed the payment successfully. This package is already covering your merchant account.',
+      eyebrow: tx('Payment confirmed'),
+      title: tx('Your advertising package is now active'),
+      body: tx('PayOS confirmed the payment successfully. This package is already covering your merchant account.'),
     },
     pending: {
-      eyebrow: 'Waiting for confirmation',
-      title: 'The payment is still being processed',
-      body: 'Please complete the transfer on PayOS, then refresh this page. The package will activate only after confirmation.',
+      eyebrow: tx('Waiting for confirmation'),
+      title: tx('The payment is still being processed'),
+      body: tx('Please complete the transfer on PayOS, then refresh this page. The package will activate only after confirmation.'),
     },
     cancelled: {
-      eyebrow: 'Checkout cancelled',
-      title: 'The payment was not completed',
-      body: 'The checkout was cancelled before payment confirmation. You can return to the package list and start again.',
+      eyebrow: tx('Checkout cancelled'),
+      title: tx('The payment was not completed'),
+      body: tx('The checkout was cancelled before payment confirmation. You can return to the package list and start again.'),
     },
     failed: {
-      eyebrow: 'Payment failed',
-      title: 'This package has not been activated',
-      body: 'We could not confirm the payment for this checkout. Please start a new purchase if you still want to use this package.',
+      eyebrow: tx('Payment failed'),
+      title: tx('This package has not been activated'),
+      body: tx('We could not confirm the payment for this checkout. Please start a new purchase if you still want to use this package.'),
     },
   };
 
@@ -116,43 +118,43 @@ function MerchantAdCheckoutResultPage() {
 
         {error ? (
           <div className="merchant-checkout-result-alert is-error">
-            <strong>Verification error</strong>
+            <strong>{tx('Verification error')}</strong>
             <span>{error}</span>
           </div>
         ) : null}
 
         {loading ? (
           <div className="merchant-checkout-result-alert">
-            <strong>Verifying payment</strong>
-            <span>Please wait while we sync the latest status from PayOS.</span>
+            <strong>{tx('Verifying payment')}</strong>
+            <span>{tx('Please wait while we sync the latest status from PayOS.')}</span>
           </div>
         ) : null}
 
         {!loading && purchase ? (
           <div className="merchant-checkout-result-grid">
             <article>
-              <span>Package</span>
-              <strong>{purchase?.package?.name || 'Advertising package'}</strong>
+              <span>{tx('Package')}</span>
+              <strong>{purchase?.package?.name || tx('Advertising package')}</strong>
             </article>
             <article>
-              <span>Amount</span>
+              <span>{tx('Amount')}</span>
               <strong>{formatCurrencyVnd(purchase?.paymentAmount || purchase?.package?.price || 0)}</strong>
             </article>
             <article>
-              <span>Payment status</span>
-              <strong>{String(purchase?.paymentStatus || 'pending_payment').replace('_', ' ')}</strong>
+              <span>{tx('Payment status')}</span>
+              <strong>{tx(String(purchase?.paymentStatus || 'pending payment').replace('_', ' '))}</strong>
             </article>
             <article>
-              <span>Confirmed at</span>
-              <strong>{formatDateTime(purchase?.paidAt || purchase?.paymentConfirmedAt)}</strong>
+              <span>{tx('Confirmed at')}</span>
+              <strong>{formatDateTime(purchase?.paidAt || purchase?.paymentConfirmedAt, locale, tx)}</strong>
             </article>
             <article>
-              <span>Package expires</span>
-              <strong>{formatDateTime(purchase?.expiresAt)}</strong>
+              <span>{tx('Package expires')}</span>
+              <strong>{formatDateTime(purchase?.expiresAt, locale, tx)}</strong>
             </article>
             <article>
-              <span>Order code</span>
-              <strong>{purchase?.payosOrderCode || payosOrderCode || payosLinkId || 'N/A'}</strong>
+              <span>{tx('Order code')}</span>
+              <strong>{purchase?.payosOrderCode || payosOrderCode || payosLinkId || tx('N/A')}</strong>
             </article>
           </div>
         ) : null}
@@ -166,7 +168,7 @@ function MerchantAdCheckoutResultPage() {
                 window.location.href = purchase.payosCheckoutUrl;
               }}
             >
-              Continue payment
+              {tx('Continue payment')}
             </button>
           ) : null}
 
@@ -176,15 +178,15 @@ function MerchantAdCheckoutResultPage() {
             onClick={loadCheckoutStatus}
             disabled={loading || !transactionId}
           >
-            {loading ? 'Refreshing...' : 'Refresh status'}
+            {loading ? tx('Refreshing...') : tx('Refresh status')}
           </button>
 
           <Link to={APP_ROUTES.MERCHANT_TRANSACTIONS} className="merchant-checkout-result-link">
-            Go to Transaction History
+            {tx('Go to Transaction History')}
           </Link>
 
           <Link to={APP_ROUTES.MERCHANT_POST_ADVERTISE} className="merchant-checkout-result-link">
-            Browse packages
+            {tx('Browse packages')}
           </Link>
         </div>
       </div>

@@ -2,11 +2,13 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { FaUser, FaSignOutAlt } from 'react-icons/fa';
+import useUserI18n from '../../hooks/useUserI18n';
 import './UserDropdown.css';
 
 export default function UserDropdown() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const { tx } = useUserI18n();
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef(null);
 
@@ -54,7 +56,7 @@ export default function UserDropdown() {
 
           <button className="user-dropdown-item logout" onClick={handleLogout}>
             <FaSignOutAlt />
-            <span>Logout</span>
+            <span>{tx('Logout')}</span>
           </button>
         </div>
       )}

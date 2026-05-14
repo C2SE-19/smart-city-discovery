@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { APP_ROUTES } from '../../constants/routes';
+import useUserI18n from '../../hooks/useUserI18n';
 import {
   formatCurrencyVnd,
   getPackageDurationMeta,
@@ -31,7 +32,7 @@ const TIER_COPY = {
   },
 };
 
-function buildBenefitRows(features = {}) {
+function buildBenefitRows(features = {}, tx) {
   const items = [];
 
   if (features.showInTrending) {
@@ -39,30 +40,34 @@ function buildBenefitRows(features = {}) {
 
     const displayHours = Number(features.trendDisplayHours);
     if (Number.isFinite(displayHours) && displayHours > 0) {
-      details.push(`Visible for ${displayHours} hour${displayHours === 1 ? '' : 's'} per push`);
+      details.push(tx('Visible for {{hours}} hour(s) per push', { hours: displayHours }));
     }
 
     const pushLimit = Number(features.trendPushLimit);
     if (Number.isFinite(pushLimit) && pushLimit > 0) {
-      details.push(`${pushLimit} push${pushLimit === 1 ? '' : 'es'} included`);
+      details.push(
+        tx(pushLimit === 1 ? '{{count}} push included' : '{{count}} pushes included', {
+          count: pushLimit,
+        })
+      );
     }
 
     items.push({
-      label: 'Displayed in Trending blocks',
+      label: tx('Displayed in Trending blocks'),
       details,
     });
   }
 
   if (features.showOnHomepageBanner) {
     items.push({
-      label: 'Show a HOT badge on promoted posts',
+      label: tx('Show a HOT badge on promoted posts'),
       details: [],
     });
   }
 
   if (features.priorityReview) {
     items.push({
-      label: 'Priority moderation queue',
+      label: tx('Priority moderation queue'),
       details: [],
     });
   }
@@ -71,7 +76,7 @@ function buildBenefitRows(features = {}) {
     const postLimit = Number(features.postLimit);
     if (Number.isFinite(postLimit) && postLimit > 0) {
       items.push({
-        label: `Maximum promoted posts: ${postLimit}`,
+        label: tx('Maximum promoted posts: {{count}}', { count: postLimit }),
         details: [],
       });
     }
@@ -79,7 +84,7 @@ function buildBenefitRows(features = {}) {
 
   if (!items.length) {
     return [{
-      label: 'Base distribution settings',
+      label: tx('Base distribution settings'),
       details: [],
     }];
   }
@@ -88,6 +93,7 @@ function buildBenefitRows(features = {}) {
 }
 
 function MerchantAdPackagesSelectionPage() {
+  const { language, tx } = useUserI18n();
   const navigate = useNavigate();
   const location = useLocation();
   const params = useParams();
@@ -132,11 +138,11 @@ function MerchantAdPackagesSelectionPage() {
       setNotice('');
 
       if (transactionResult.status !== 'fulfilled') {
-        setNotice('Packages are available. Account summary is temporarily unavailable, but you can still purchase a package.');
+        setNotice(tx('Packages are available. Account summary is temporarily unavailable, but you can still purchase a package.'));
       }
     } catch (error) {
       setNotice('');
-      setLoadError(error.response?.data?.message || 'Could not load ad packages right now.');
+      setLoadError(error.response?.data?.message || tx('Could not load ad packages right now.'));
       setPackages([]);
       setAccountSummary({});
       setPackageTransactions([]);
@@ -144,7 +150,7 @@ function MerchantAdPackagesSelectionPage() {
     } finally {
       setLoadingPackages(false);
     }
-  }, []);
+  }, [tx]);
 
   useEffect(() => {
     loadPageData();
@@ -211,17 +217,17 @@ function MerchantAdPackagesSelectionPage() {
       if (result?.checkoutUrl) {
         setNotice(
           result?.existingPending
-            ? 'A pending checkout already exists for this package. Redirecting you back to the payment page...'
-            : 'Redirecting to the secure payment page...'
+            ? tx('A pending checkout already exists for this package. Redirecting you back to the payment page...')
+            : tx('Redirecting to the secure payment page...')
         );
         window.location.href = result.checkoutUrl;
         return;
       }
 
       await loadPageData();
-      setNotice('We created the package order, but the checkout link is unavailable right now.');
+      setNotice(tx('We created the package order, but the checkout link is unavailable right now.'));
     } catch (error) {
-      setLoadError(error.response?.data?.message || 'Could not start payment for this package right now. Please try again.');
+      setLoadError(error.response?.data?.message || tx('Could not start payment for this package right now. Please try again.'));
     } finally {
       setAssigningPackageId('');
     }
@@ -231,21 +237,23 @@ function MerchantAdPackagesSelectionPage() {
     <section className="merchant-ad-packages-page">
       <header className="merchant-ad-packages-header">
         <div>
-          <p className="merchant-ad-packages-kicker">Account Advertising</p>
-          <h1>Choose an Advertising Package</h1>
-          <p>Select one package for your whole merchant account.</p>
+          <p className="merchant-ad-packages-kicker">{tx('Account Advertising')}</p>
+          <h1>{tx('Choose an Advertising Package')}</h1>
+          <p>{tx('Select one package for your whole merchant account.')}</p>
           <p className="merchant-ad-account-copy">
-            The package becomes active for all current and future venues in this merchant account only after successful payment.
+            {tx('The package becomes active for all current and future venues in this merchant account only after successful payment.')}
           </p>
           {openedFromVenueName ? (
             <p className="merchant-ad-account-copy">
-              Opened from <strong>{openedFromVenueName}</strong>. The selected package still applies account-wide.
+              {tx('Opened from {{venueName}}. The selected package still applies account-wide.', {
+                venueName: openedFromVenueName,
+              })}
             </p>
           ) : null}
         </div>
 
         <button type="button" className="merchant-ad-back-button" onClick={handleBackToPosts}>
-          Back to posts
+          {tx('Back to posts')}
         </button>
       </header>
 
@@ -254,44 +262,42 @@ function MerchantAdPackagesSelectionPage() {
       {selectedPackage ? (
         <section className="merchant-ad-current-package">
           <div>
-            <span className="merchant-ad-current-kicker">Current account package</span>
+            <span className="merchant-ad-current-kicker">{tx('Current account package')}</span>
             <strong>{selectedPackage.name}</strong>
-            <p>
-              This package currently covers <strong>{coveredVenueCount}</strong> venue(s) in your account.
-            </p>
+            <p>{tx('This package currently covers {{count}} venue(s) in your account.', { count: coveredVenueCount })}</p>
             <p className="merchant-ad-current-price">
               {formatCurrencyVnd(selectedPackage.discountedPrice || selectedPackage.price)}
             </p>
           </div>
           <span className="merchant-ad-scope-pill">
-            {accountSummary?.appliesToAllVenues ? 'Account-wide' : 'Package active'}
+            {accountSummary?.appliesToAllVenues ? tx('Account-wide') : tx('Package active')}
           </span>
         </section>
       ) : null}
 
       {loadError ? (
         <div className="merchant-ad-empty-state">
-          <h2>Could not load packages</h2>
+          <h2>{tx('Could not load packages')}</h2>
           <p>{loadError}</p>
           <button type="button" className="merchant-ad-back-button" onClick={loadPageData}>
-            Retry
+            {tx('Retry')}
           </button>
         </div>
       ) : null}
 
       {!loadError && loadingPackages ? (
         <div className="merchant-ad-empty-state">
-          <h2>Loading packages...</h2>
-          <p>Please wait while we fetch available advertising plans.</p>
+          <h2>{tx('Loading packages...')}</h2>
+          <p>{tx('Please wait while we fetch available advertising plans.')}</p>
         </div>
       ) : null}
 
       {!loadError && !loadingPackages && packages.length === 0 ? (
         <div className="merchant-ad-empty-state">
-          <h2>No package is available yet</h2>
-          <p>Ask an admin to create ad packages in the Admin Ad Packages workspace.</p>
+          <h2>{tx('No package is available yet')}</h2>
+          <p>{tx('Ask an admin to create ad packages in the Admin Ad Packages workspace.')}</p>
           <button type="button" className="merchant-ad-back-button" onClick={handleBackToPosts}>
-            Return to manage posts
+            {tx('Return to manage posts')}
           </button>
         </div>
       ) : null}
@@ -302,7 +308,7 @@ function MerchantAdPackagesSelectionPage() {
             const tierMeta = getTierMeta(packageItem.tier);
             const tierCopy = TIER_COPY[packageItem.tier] || TIER_COPY.basic;
             const durationMeta = getPackageDurationMeta(packageItem.durationMonths);
-            const benefitRows = buildBenefitRows(packageItem.features);
+            const benefitRows = buildBenefitRows(packageItem.features, tx);
             const isSelected = selectedPackageId === packageItem.id;
             const relatedTransaction = activeTransactionByPackageId.get(String(packageItem.id)) || null;
             const hasOpenPaidPurchase = Boolean(relatedTransaction?.isPaid && !relatedTransaction?.isExpired);
@@ -320,24 +326,27 @@ function MerchantAdPackagesSelectionPage() {
                 }}
               >
                 <div className="merchant-ad-package-head">
-                  {tierCopy.ribbon ? <span className="merchant-ad-ribbon">{tierCopy.ribbon}</span> : null}
-                  <p className="merchant-ad-tier-label">Package</p>
+                  {tierCopy.ribbon ? <span className="merchant-ad-ribbon">{tx(tierCopy.ribbon)}</span> : null}
+                  <p className="merchant-ad-tier-label">{tx('Package')}</p>
                   <h2>{packageItem.name}</h2>
                   <p className="merchant-ad-price">{formatCurrencyVnd(discountedPrice)}</p>
                   {hasDiscount ? (
                     <p className="merchant-ad-card-note">
-                      Original price {formatCurrencyVnd(packageItem.price)} with {packageItem.discountPercent}% discount.
+                      {tx('Original price {{price}} with {{discount}}% discount.', {
+                        price: formatCurrencyVnd(packageItem.price),
+                        discount: packageItem.discountPercent,
+                      })}
                     </p>
                   ) : null}
-                  <span className="merchant-ad-impact-tag">{tierCopy.line}</span>
-                  <p className="merchant-ad-impact-copy">{tierCopy.support}</p>
+                  <span className="merchant-ad-impact-tag">{tx(tierCopy.line)}</span>
+                  <p className="merchant-ad-impact-copy">{tx(tierCopy.support)}</p>
                   <p className="merchant-ad-duration-copy">
-                    Active for <strong>{durationMeta.days}</strong> days ({durationMeta.label})
+                    {tx('Active for')} <strong>{durationMeta.days}</strong> {tx('days')} ({durationMeta.label})
                   </p>
                 </div>
 
                 <div className="merchant-ad-package-body">
-                  <h3>Package benefits</h3>
+                  <h3>{tx('Package benefits')}</h3>
                   <ul>
                     {benefitRows.map((benefit) => (
                       <li key={`${packageItem.id}-${benefit.label}`} className="merchant-ad-benefit-item">
@@ -362,25 +371,25 @@ function MerchantAdPackagesSelectionPage() {
                     onClick={() => handleSelectPackage(packageItem.id)}
                   >
                     {assigningPackageId === packageItem.id
-                      ? 'Preparing checkout...'
+                      ? tx('Preparing checkout...')
                       : isSelected
-                        ? 'Current account package'
+                        ? tx('Current account package')
                         : canContinueCheckout
-                          ? 'Continue payment'
+                          ? tx('Continue payment')
                           : hasOpenPaidPurchase
-                          ? 'Already purchased'
-                          : 'Buy for this account'}
+                          ? tx('Already purchased')
+                          : tx('Buy for this account')}
                   </button>
 
                   {canContinueCheckout ? (
                     <p className="merchant-ad-card-note">
-                      A payment session is still open for this package. You can continue from the latest checkout page.
+                      {tx('A payment session is still open for this package. You can continue from the latest checkout page.')}
                     </p>
                   ) : null}
 
                   {hasOpenPaidPurchase && !isSelected ? (
                     <p className="merchant-ad-card-note">
-                      This package is already paid in your account. You can switch to it later from Transaction History.
+                      {tx('This package is already paid in your account. You can switch to it later from Transaction History.')}
                     </p>
                   ) : null}
                 </div>
