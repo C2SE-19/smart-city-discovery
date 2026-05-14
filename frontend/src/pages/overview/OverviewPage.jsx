@@ -22,6 +22,7 @@ import {
 } from '../../services/api/adPackagesApi';
 import { resolvePublicOverviewStreamUrl } from '../../services/api/publicRealtimeApi';
 import OverviewCityMapCard from '../../components/map/OverviewCityMapCard';
+import useUserI18n from '../../hooks/useUserI18n';
 import heroFoodImage from '../../assets/images/anh1.png';
 import UserPreferenceWizard from '../../components/preferences/UserPreferenceWizard';
 import {
@@ -708,6 +709,7 @@ function OverviewPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { language } = useLanguage();
+  const { tx } = useUserI18n();
   const { token, user } = useAuth();
   const isAuthenticated = Boolean(token && user);
   const t = translations[language] || translations.en;
@@ -1214,7 +1216,7 @@ function OverviewPage() {
 
         if (!silent) {
           setTrendingVenues([]);
-          setTrendingError(error?.response?.data?.message || 'Unable to load trending places right now.');
+          setTrendingError(error?.response?.data?.message || tx('Unable to load trending places right now.'));
         }
       } finally {
         if (isMounted && !silent) {
@@ -2800,7 +2802,7 @@ function OverviewPage() {
             onClick={() => setShowFilterPanel((current) => !current)}
             data-onboarding="overview-filter-button"
           >
-            Filter
+            {tx('Filter')}
           </button>
 
           {/* AI suggestion button */}
@@ -2812,21 +2814,25 @@ function OverviewPage() {
             disabled={aiSuggestLoading || preferencesLoading}
             data-onboarding="overview-ai-button"
           >
-            {aiSuggestLoading ? 'Thinking...' : t.search.aiSuggest}
+            {aiSuggestLoading ? tx('Thinking...') : t.search.aiSuggest}
           </button>
         </div>
 
         {activeFilterCount > 0 ? (
           <div className="overview-active-filters">
-            <span>{activeFilterCount} filter{activeFilterCount === 1 ? '' : 's'} active</span>
+            <span>
+              {tx(activeFilterCount === 1 ? '{{count}} filter active' : '{{count}} filters active', {
+                count: activeFilterCount,
+              })}
+            </span>
             <button type="button" onClick={clearAllFilters}>
-              Clear all
+              {tx('Clear all')}
             </button>
           </div>
         ) : null}
 
         {showFilterPanel ? (
-          <div className="overview-filter-panel" role="region" aria-label="Filter options">
+          <div className="overview-filter-panel" role="region" aria-label={tx('Filter options')}>
             <OverviewCategoryFilterGroup
               rootCategories={rootPlaceCategories}
               childCategoriesByParentId={childCategoriesByParentId}
@@ -2837,7 +2843,7 @@ function OverviewPage() {
             />
 
             <FilterGroup
-              title="Ward Naming"
+              title={tx('Ward Naming')}
               options={wards}
               selectedValues={selectedWardIds}
               optionValue={(ward) => String(ward.ward_id)}
@@ -2846,7 +2852,7 @@ function OverviewPage() {
             />
 
             <FilterGroup
-              title="Services Offered - Merchant"
+              title={tx('Services Offered - Merchant')}
               options={services}
               selectedValues={selectedServiceIds}
               optionValue={(service) => Number(service.id)}
@@ -2854,7 +2860,7 @@ function OverviewPage() {
               onToggle={toggleServiceSelection}
             />
 
-            {loadingFilters ? <p className="overview-empty-copy">Loading filter options...</p> : null}
+            {loadingFilters ? <p className="overview-empty-copy">{tx('Loading filter options...')}</p> : null}
             {filterError ? <p className="overview-inline-error">{filterError}</p> : null}
           </div>
         ) : null}
@@ -2863,14 +2869,14 @@ function OverviewPage() {
       {!isCondensedMode ? (
         <section className="overview-section overview-content-lane overview-for-you-section">
           <div className="overview-section-heading">
-            <h2>Trend</h2>
+            <h2>{tx('Trend')}</h2>
             <span />
             <p className="overview-section-subcopy">
-              Promoted places currently being pushed by merchants.
+              {tx('Promoted places currently being pushed by merchants.')}
             </p>
           </div>
 
-          {trendingLoading ? <p className="overview-empty-copy">Loading trending places...</p> : null}
+          {trendingLoading ? <p className="overview-empty-copy">{tx('Loading trending places...')}</p> : null}
           {!trendingLoading && trendingError ? <p className="overview-inline-error">{trendingError}</p> : null}
 
           {!trendingLoading && !trendingError && trendingVenues.length > 0 ? (
@@ -2909,7 +2915,7 @@ function OverviewPage() {
           ) : null}
 
           {!trendingLoading && !trendingError && !trendingVenues.length ? (
-            <p className="overview-empty-copy">No promoted trending places are active right now.</p>
+            <p className="overview-empty-copy">{tx('No promoted trending places are active right now.')}</p>
           ) : null}
         </section>
       ) : null}
@@ -2917,22 +2923,22 @@ function OverviewPage() {
       {!isCondensedMode && token ? (
         <section className="overview-section overview-content-lane overview-for-you-section">
           <div className="overview-section-heading">
-            <h2>For You</h2>
+            <h2>{tx('For You')}</h2>
             <span />
             <p className="overview-section-subcopy">
-              Personalized places based on your profile, interests, and nearby distance.
+              {tx('Personalized places based on your profile, interests, and nearby distance.')}
             </p>
           </div>
 
           {preferencesLoading ? (
-            <p className="overview-empty-copy">Checking your preference profile...</p>
+            <p className="overview-empty-copy">{tx('Checking your preference profile...')}</p>
           ) : null}
 
           {!preferencesLoading && !userPreference?.onboardingCompleted ? (
             <div className="overview-for-you-empty">
-              <p>Complete your preference form to unlock personalized recommendations.</p>
+              <p>{tx('Complete your preference form to unlock personalized recommendations.')}</p>
               <button type="button" onClick={() => setShowPreferenceWizard(true)}>
-                Set preferences
+                {tx('Set preferences')}
               </button>
             </div>
           ) : null}
@@ -2942,7 +2948,7 @@ function OverviewPage() {
           ) : null}
 
           {!preferencesLoading && userPreference?.onboardingCompleted && forYouLoading ? (
-            <p className="overview-empty-copy">Loading personalized places...</p>
+            <p className="overview-empty-copy">{tx('Loading personalized places...')}</p>
           ) : null}
 
           {!preferencesLoading &&
@@ -2954,7 +2960,7 @@ function OverviewPage() {
               <button
                 type="button"
                 className="overview-slider-btn prev"
-                aria-label="Scroll For You left"
+                aria-label={tx('Scroll For You left')}
                 onClick={() => scrollCategorySlider('for-you', -1)}
               />
               <div
@@ -2974,7 +2980,7 @@ function OverviewPage() {
               <button
                 type="button"
                 className="overview-slider-btn next"
-                aria-label="Scroll For You right"
+                aria-label={tx('Scroll For You right')}
                 onClick={() => scrollCategorySlider('for-you', 1)}
               />
               {renderSliderPaginationDots('for-you')}
@@ -2986,7 +2992,7 @@ function OverviewPage() {
           !forYouLoading &&
           !forYouError &&
           !forYouVenues.length ? (
-            <p className="overview-empty-copy">No personalized place found yet. Try updating your preferences.</p>
+            <p className="overview-empty-copy">{tx('No personalized place found yet. Try updating your preferences.')}</p>
           ) : null}
         </section>
       ) : null}
@@ -2998,15 +3004,15 @@ function OverviewPage() {
           className="overview-section overview-search-result-section overview-ai-result-section"
         >
           <div className="overview-section-heading">
-            <h2>AI Suggested for You</h2>
+            <h2>{tx('AI Suggested for You')}</h2>
             <span />
             <p className="overview-section-subcopy">
-              Personalized picks based on profile, nearby distance, real-time weather, current time, and opening hours.
+              {tx('Personalized picks based on profile, nearby distance, real-time weather, current time, and opening hours.')}
             </p>
             {aiContext?.currentTimeWindowLabel ? (
               <p className="overview-ai-context-copy">
-                Best for now: {aiContext.currentTimeWindowLabel}
-                {aiContext.weatherMain ? ` • Weather: ${aiContext.weatherMain}` : ''}
+                {tx('Best for now:')} {aiContext.currentTimeWindowLabel}
+                {aiContext.weatherMain ? ` | ${tx('Weather:')} ${aiContext.weatherMain}` : ''}
               </p>
             ) : null}
           </div>

@@ -1,3 +1,4 @@
+import useUserI18n from '../../../hooks/useUserI18n';
 import '../styles/ServiceSelector.css';
 
 function normalizeServiceId(value) {
@@ -16,6 +17,7 @@ function ServiceSelector({
   selectedServices = [],
   disabled = false,
 }) {
+  const { tx } = useUserI18n();
   const normalizedSelectedServices = Array.isArray(selectedServices)
     ? [...new Set(selectedServices.map((serviceId) => normalizeServiceId(serviceId)).filter(Boolean))]
     : [];
@@ -46,9 +48,9 @@ function ServiceSelector({
 
   return (
     <div className="service-selector">
-      <label className="selector-label">Services Offered</label>
+      <label className="selector-label">{tx('Services Offered')}</label>
       {!activeServices.length ? (
-        <p className="service-empty-note">No services configured by admin yet.</p>
+        <p className="service-empty-note">{tx('No services configured by admin yet.')}</p>
       ) : (
         <div className="services-grid">
           {activeServices.map((service) => {

@@ -1,7 +1,9 @@
 import { useState } from 'react';
+import useUserI18n from '../../../hooks/useUserI18n';
 import '../styles/ImageUploader.css';
 
 function ImageUploader({ maxImages = 6, onImagesChange, allowSetCover = true }) {
+  const { tx } = useUserI18n();
   const [images, setImages] = useState([]);
   const [previews, setPreviews] = useState([]);
 
@@ -9,7 +11,8 @@ function ImageUploader({ maxImages = 6, onImagesChange, allowSetCover = true }) 
     new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result);
-      reader.onerror = () => reject(new Error(`Failed to read file: ${file?.name || 'unknown'}`));
+      reader.onerror = () =>
+        reject(new Error(tx('Failed to read file: {{name}}', { name: file?.name || 'unknown' })));
       reader.readAsDataURL(file);
     });
 
@@ -18,7 +21,12 @@ function ImageUploader({ maxImages = 6, onImagesChange, allowSetCover = true }) 
     const remainingSlots = maxImages - images.length;
 
     if (files.length > remainingSlots) {
-      alert(`You can only upload ${remainingSlots} more image(s). Maximum is ${maxImages}.`);
+      alert(
+        tx('You can only upload {{count}} more image(s). Maximum is {{max}}.', {
+          count: remainingSlots,
+          max: maxImages,
+        })
+      );
       return;
     }
 
@@ -38,7 +46,7 @@ function ImageUploader({ maxImages = 6, onImagesChange, allowSetCover = true }) 
         onImagesChange(newImages);
       }
     } catch (error) {
-      alert(error.message || 'Could not read selected images. Please try again.');
+      alert(error.message || tx('Could not read selected images. Please try again.'));
     }
 
     event.target.value = '';
@@ -76,10 +84,10 @@ function ImageUploader({ maxImages = 6, onImagesChange, allowSetCover = true }) 
 
   return (
     <div className="image-uploader">
-      <div 
+      <div
         className="uploader-upload-zone"
-        onDragOver={(e) => e.preventDefault()}
-        onDragLeave={(e) => e.preventDefault()}
+        onDragOver={(event) => event.preventDefault()}
+        onDragLeave={(event) => event.preventDefault()}
         onClick={() => images.length < maxImages && document.getElementById('image-input').click()}
       >
         <input
@@ -92,45 +100,53 @@ function ImageUploader({ maxImages = 6, onImagesChange, allowSetCover = true }) 
           className="uploader-hidden-input"
         />
         <div className="uploader-placeholder">
-          <div className="uploader-text">Click or drag images here</div>
-          <div className="uploader-subtext">{images.length}/{maxImages} images • PNG, JPG up to 10MB</div>
+          <div className="uploader-text">{tx('Click or drag images here')}</div>
+          <div className="uploader-subtext">
+            {images.length}/{maxImages} {tx('images • PNG, JPG up to 10MB')}
+          </div>
         </div>
       </div>
 
       {images.length >= maxImages && (
         <div className="max-images-warning">
-          ⓘ You've reached the maximum of {maxImages} images
+          {tx("You've reached the maximum of {{count}} images", { count: maxImages })}
         </div>
       )}
 
       {previews.length > 0 && (
         <div className="preview-section">
-          <div className="preview-label">Uploaded Images</div>
-          <div className="preview-count">{previews.length} of {maxImages} images</div>
+          <div className="preview-label">{tx('Uploaded Images')}</div>
+          <div className="preview-count">
+            {tx('{{count}} of {{max}} images', { count: previews.length, max: maxImages })}
+          </div>
           <div className="preview-grid">
             {previews.map((preview, index) => (
               <div key={index} className="preview-item">
-                <img src={preview} alt={`Preview ${index + 1}`} className="preview-image" />
-                {index === 0 ? <span className="preview-cover-badge">Cover</span> : null}
+                <img
+                  src={preview}
+                  alt={tx('Preview {{index}}', { index: index + 1 })}
+                  className="preview-image"
+                />
+                {index === 0 ? <span className="preview-cover-badge">{tx('Cover')}</span> : null}
                 <div className="preview-remove">
-                  <button 
-                    type="button" 
-                    onClick={(e) => {
-                      e.stopPropagation();
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
                       removeImage(index);
-                    }} 
+                    }}
                     className="preview-remove-btn"
-                    aria-label="Remove image"
+                    aria-label={tx('Remove image')}
                   >
-                    ✕
+                    x
                   </button>
                 </div>
 
                 <div className="preview-actions">
                   {index === 0 ? (
-                    <span className="preview-cover-label">Cover image</span>
+                    <span className="preview-cover-label">{tx('Cover image')}</span>
                   ) : !allowSetCover ? (
-                    <span className="preview-cover-label preview-cover-label-locked">Cover locked</span>
+                    <span className="preview-cover-label preview-cover-label-locked">{tx('Cover locked')}</span>
                   ) : (
                     <button
                       type="button"
@@ -140,7 +156,7 @@ function ImageUploader({ maxImages = 6, onImagesChange, allowSetCover = true }) 
                         setCoverImage(index);
                       }}
                     >
-                      Set Cover
+                      {tx('Set Cover')}
                     </button>
                   )}
                 </div>

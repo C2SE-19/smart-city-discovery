@@ -5,6 +5,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import translations from '../../constants/translations';
 import { APP_ROUTES } from '../../constants/routes';
+import useUserI18n from '../../hooks/useUserI18n';
 import {
   deleteMerchantVenuePost,
   fetchMyVenueSubmissions,
@@ -196,9 +197,10 @@ function mapRejectedUpdateRequestToPost(updateRequest) {
 function MerchantPostListPage() {
   const navigate = useNavigate();
   const { language } = useLanguage();
+  const { tx } = useUserI18n();
   const { user, logout } = useAuth();
   const { theme } = useTheme();
-  const t = translations[language];
+  const t = translations[language] || translations.en;
   const [posts, setPosts] = useState([]);
   const [loadingPosts, setLoadingPosts] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -228,14 +230,14 @@ function MerchantPostListPage() {
 
         setPosts([...normalizedVenuePosts, ...normalizedRejectedUpdatePosts]);
       } catch (error) {
-        setLoadError(error.response?.data?.message || 'Could not load your posts. Please refresh and try again.');
+        setLoadError(error.response?.data?.message || tx('Could not load your posts. Please refresh and try again.'));
       } finally {
         setLoadingPosts(false);
       }
     }
 
     loadMerchantPosts();
-  }, []);
+  }, [tx]);
 
   const handlePublishClick = () => {
     navigate('/merchant/workbench');
@@ -292,7 +294,7 @@ function MerchantPostListPage() {
       await deleteMerchantVenuePost(post.venueId);
       setPosts((currentPosts) => currentPosts.filter((item) => Number(item.venueId) !== Number(post.venueId)));
     } catch (error) {
-      setLoadError(error.response?.data?.message || 'Could not delete this post. Please try again.');
+      setLoadError(error.response?.data?.message || tx('Could not delete this post. Please try again.'));
     } finally {
       setDeletingPostId(null);
     }
@@ -325,7 +327,7 @@ function MerchantPostListPage() {
         )
       );
     } catch (error) {
-      setLoadError(error.response?.data?.message || 'Could not update venue visibility. Please try again.');
+      setLoadError(error.response?.data?.message || tx('Could not update venue visibility. Please try again.'));
     } finally {
       setTogglingPausePostId(null);
     }
@@ -369,11 +371,11 @@ function MerchantPostListPage() {
   const emptyMessage =
     activeStatus === POST_STATUSES.pending
       ? language === 'en'
-        ? 'No posts are waiting for admin review.'
+        ? tx('No posts are waiting for admin review.')
         : 'Hiện chưa có bài đăng nào đang chờ duyệt.'
       : activeStatus === POST_STATUSES.rejected
         ? language === 'en'
-          ? 'No rejected posts.'
+          ? tx('No rejected posts.')
           : 'Hiện chưa có bài đăng nào bị từ chối.'
         : t.merchant.noPostsFound;
 
@@ -387,7 +389,7 @@ function MerchantPostListPage() {
             <div className="merchant-user-avatar">{getUserInitial()}</div>
             <div className="merchant-user-details">
               <h3>{user?.fullname || 'Nguyễn Hữu Lộc'}</h3>
-              <p>Merchant</p>
+              <p>{tx('Merchant')}</p>
             </div>
           </div>
         </div>
@@ -405,7 +407,7 @@ function MerchantPostListPage() {
             type="button"
             onClick={handleAdvertiseAccount}
           >
-            Advertise
+            {tx('Advertise')}
           </button>
           </div>
 
@@ -439,7 +441,7 @@ function MerchantPostListPage() {
               <div className="merchant-profile-avatar-large">{getUserInitial()}</div>
               <div className="merchant-profile-details">
                 <h2>{user?.fullname || 'Nguyễn Hữu Lộc'}</h2>
-                <p className="merchant-profile-role">Merchant</p>
+                <p className="merchant-profile-role">{tx('Merchant')}</p>
               </div>
             </div>
 
@@ -448,7 +450,7 @@ function MerchantPostListPage() {
                 className="merchant-post-advertise-btn-header"
                 onClick={handleAdvertiseAccount}
               >
-                Advertise
+                {tx('Advertise')}
               </button>
               <button
                 className="merchant-post-publish-btn-header"
@@ -459,7 +461,9 @@ function MerchantPostListPage() {
             </div>
           </div>
           <p className="merchant-post-header-note">
-            Advertising packages now apply to your whole merchant account, not to individual venues.
+            {language === 'vi'
+              ? 'Các gói quảng cáo hiện áp dụng cho toàn bộ tài khoản merchant của bạn, không còn theo từng địa điểm riêng lẻ.'
+              : 'Advertising packages now apply to your whole merchant account, not to individual venues.'}
           </p>
         </div>
 
@@ -499,7 +503,7 @@ function MerchantPostListPage() {
         <div className="merchant-post-list" data-onboarding="merchant-post-list">
           {loadingPosts ? (
             <div className="merchant-post-empty">
-              <p>{language === 'en' ? 'Loading posts...' : 'Đang tải bài đăng...'}</p>
+              <p>{tx('Loading posts...')}</p>
             </div>
           ) : loadError ? (
             <div className="merchant-post-empty">
@@ -521,16 +525,16 @@ function MerchantPostListPage() {
                   <h3>{post.name}</h3>
                   {post.status === POST_STATUSES.rejected && post.rejectionTopic ? (
                     <p className="merchant-post-topic">
-                      {language === 'en' ? 'Topic' : 'Chủ đề'}: {post.rejectionTopic}
+                      {tx('Topic')}: {post.rejectionTopic}
                     </p>
                   ) : null}
-                  <p className="merchant-post-price">{post.price || (language === 'en' ? 'Price updating' : 'Đang cập nhật giá')}</p>
+                  <p className="merchant-post-price">{post.price || tx('Price updating')}</p>
                   <div className="merchant-post-rating">
                     <span className="merchant-post-stars">⭐ {post.rating}</span>
                     <span className="merchant-post-review-count">({post.reviews} {t.merchant.reviews})</span>
                   </div>
                   {post.status === POST_STATUSES.rejected && post.rejectionReason ? (
-                    <p className="merchant-post-review-count">{language === 'en' ? 'Reason' : 'Lý do'}: {post.rejectionReason}</p>
+                    <p className="merchant-post-review-count">{tx('Reason')}: {post.rejectionReason}</p>
                   ) : null}
                 </div>
                 <div className="merchant-post-actions">
@@ -549,10 +553,10 @@ function MerchantPostListPage() {
                       onClick={() => handleTogglePausePost(post)}
                     >
                       {togglingPausePostId === post.id
-                        ? 'Updating...'
+                        ? (language === 'vi' ? 'Đang cập nhật...' : 'Updating...')
                         : post.status === POST_STATUSES.hidden
-                          ? 'Resume Shop'
-                          : 'Pause Shop'}
+                          ? (language === 'vi' ? 'Mở lại cửa hàng' : 'Resume Shop')
+                          : (language === 'vi' ? 'Tạm dừng cửa hàng' : 'Pause Shop')}
                     </button>
                   ) : null}
                   <button 
@@ -560,7 +564,7 @@ function MerchantPostListPage() {
                     disabled={deletingPostId === post.id}
                     onClick={() => handleDeletePost(post)}
                   >
-                    {deletingPostId === post.id ? 'Deleting...' : t.merchant.delete}
+                    {deletingPostId === post.id ? tx('Deleting...') : t.merchant.delete}
                   </button>
                 </div>
               </div>

@@ -4,6 +4,7 @@ import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../../contexts/AuthContext';
 import translations from '../../constants/translations';
 import { APP_ROUTES } from '../../constants/routes';
+import useUserI18n from '../../hooks/useUserI18n';
 import { formatCurrencyVnd } from '../../services/adPackageStorage';
 import {
   activateMerchantAdPackageTransaction,
@@ -22,17 +23,17 @@ const MenuItems = [
   { id: 'support', icon: '💬', translationKey: 'support' },
 ];
 
-function formatDateTime(value) {
+function formatDateTime(value, locale = 'en-US', tx = (text) => text) {
   if (!value) {
-    return 'N/A';
+    return tx('N/A');
   }
 
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
-    return 'N/A';
+    return tx('N/A');
   }
 
-  return parsed.toLocaleString('en-US', {
+  return parsed.toLocaleString(locale, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
@@ -41,48 +42,49 @@ function formatDateTime(value) {
   });
 }
 
-function buildFeatureRows(features = {}) {
+function buildFeatureRows(features = {}, tx) {
   const rows = [];
 
   if (features.showInTrending) {
-    rows.push('Trending placement enabled');
+    rows.push(tx('Trending placement enabled'));
   }
 
   if (features.showOnHomepageBanner) {
-    rows.push('Featured HOT badge across listings');
+    rows.push(tx('Featured HOT badge across listings'));
   }
 
   if (features.priorityReview) {
-    rows.push('Priority Approval for pending submissions');
+    rows.push(tx('Priority Approval for pending submissions'));
   }
 
   if (features.postLimitEnabled && Number(features.postLimit) > 0) {
-    rows.push(`Post quantity limit: ${Number(features.postLimit)}`);
+    rows.push(tx('Post quantity limit: {{count}}', { count: Number(features.postLimit) }));
   }
 
-  return rows.length ? rows : ['Standard package benefits'];
+  return rows.length ? rows : [tx('Standard package benefits')];
 }
 
-function formatPaymentStatus(status) {
+function formatPaymentStatus(status, tx) {
   switch (String(status || '').trim().toLowerCase()) {
     case 'paid':
-      return 'Paid';
+      return tx('Paid');
     case 'pending_payment':
-      return 'Pending payment';
+      return tx('Pending payment');
     case 'cancelled':
-      return 'Cancelled';
+      return tx('Cancelled');
     case 'failed':
-      return 'Failed';
+      return tx('Failed');
     default:
-      return 'Pending';
+      return tx('Pending');
   }
 }
 
 function MerchantAdsPage() {
   const navigate = useNavigate();
   const { language } = useLanguage();
+  const { locale, tx } = useUserI18n();
   const { user, logout } = useAuth();
-  const t = translations[language];
+  const t = translations[language] || translations.en;
   const [payload, setPayload] = useState({ summary: {}, transactions: [] });
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -104,12 +106,12 @@ function MerchantAdsPage() {
         transactions: Array.isArray(nextPayload.transactions) ? nextPayload.transactions : [],
       });
     } catch (error) {
-      setLoadError(error?.response?.data?.message || 'Could not load transaction history right now.');
+      setLoadError(error?.response?.data?.message || tx('Could not load transaction history right now.'));
       setPayload({ summary: {}, transactions: [] });
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [tx]);
 
   useEffect(() => {
     loadTransactions();
@@ -121,29 +123,29 @@ function MerchantAdsPage() {
     [payload.transactions]
   );
 
-  const activePackageName = summary.activePackage?.name || 'No active package';
+  const activePackageName = summary.activePackage?.name || tx('No active package');
   const activePackageEndsAt = summary.activeExpiresAt || null;
   const activePackagePrice = summary.activePackage?.discountedPrice || summary.activePackage?.price || 0;
   const summaryCards = useMemo(
     () => [
       {
-        label: 'Purchases',
+        label: tx('Purchases'),
         value: Number(summary.totalTransactions || 0),
       },
       {
-        label: 'Paid',
+        label: tx('Paid'),
         value: Number(summary.totalPaidTransactions || 0),
       },
       {
-        label: 'Pending checkout',
+        label: tx('Pending checkout'),
         value: Number(summary.totalPendingTransactions || 0),
       },
       {
-        label: 'Covered venues',
+        label: tx('Covered venues'),
         value: Number(summary.coveredVenueCount || 0),
       },
     ],
-    [summary]
+    [summary, tx]
   );
 
   const getUserInitial = () => {
@@ -182,11 +184,11 @@ function MerchantAdsPage() {
 
     try {
       await deleteMerchantAdPackageTransaction(deleteTarget.id);
-      setActionMessage(deleteTarget?.isPending ? 'Pending checkout removed successfully.' : 'Package removed from transaction history.');
+      setActionMessage(deleteTarget?.isPending ? tx('Pending checkout removed successfully.') : tx('Package removed from transaction history.'));
       setDeleteTarget(null);
       await loadTransactions();
     } catch (error) {
-      setActionMessage(error?.response?.data?.message || 'Could not delete this transaction right now.');
+      setActionMessage(error?.response?.data?.message || tx('Could not delete this transaction right now.'));
     } finally {
       setDeletingTransactionId('');
     }
@@ -202,10 +204,10 @@ function MerchantAdsPage() {
 
     try {
       await deactivateMerchantAdPackageTransaction(transaction.id);
-      setActionMessage('The active package has been stopped. Your account is not using any package now.');
+      setActionMessage(tx('The active package has been stopped. Your account is not using any package now.'));
       await loadTransactions();
     } catch (error) {
-      setActionMessage(error?.response?.data?.message || 'Could not stop this package right now.');
+      setActionMessage(error?.response?.data?.message || tx('Could not stop this package right now.'));
     } finally {
       setStoppingTransactionId('');
     }
@@ -222,13 +224,13 @@ function MerchantAdsPage() {
     try {
       const result = await fetchMerchantAdPackageCheckoutStatus(transaction.id);
       if (result?.isPaid) {
-        setActionMessage('Payment confirmed successfully. The package is now active for your merchant account.');
+        setActionMessage(tx('Payment confirmed successfully. The package is now active for your merchant account.'));
       } else {
-        setActionMessage('The checkout is still pending. Please complete payment on the PayOS page and refresh again.');
+        setActionMessage(tx('The checkout is still pending. Please complete payment on the PayOS page and refresh again.'));
       }
       await loadTransactions();
     } catch (error) {
-      setActionMessage(error?.response?.data?.message || 'Could not verify this payment right now.');
+      setActionMessage(error?.response?.data?.message || tx('Could not verify this payment right now.'));
     } finally {
       setCheckingPaymentTransactionId('');
     }
@@ -236,7 +238,7 @@ function MerchantAdsPage() {
 
   const handleContinueCheckout = (transaction) => {
     if (!transaction?.payosCheckoutUrl) {
-      setActionMessage('The checkout link is unavailable. Please create a new purchase.');
+      setActionMessage(tx('The checkout link is unavailable. Please create a new purchase.'));
       return;
     }
 
@@ -253,10 +255,10 @@ function MerchantAdsPage() {
 
     try {
       await activateMerchantAdPackageTransaction(transaction.id);
-      setActionMessage('Active package updated successfully. The selected package now powers your merchant account.');
+      setActionMessage(tx('Active package updated successfully. The selected package now powers your merchant account.'));
       await loadTransactions();
     } catch (error) {
-      setActionMessage(error?.response?.data?.message || 'Could not activate this package right now.');
+      setActionMessage(error?.response?.data?.message || tx('Could not activate this package right now.'));
     } finally {
       setActivatingTransactionId('');
     }
@@ -270,8 +272,8 @@ function MerchantAdsPage() {
             <div className="merchant-user-info">
               <div className="merchant-user-avatar">{getUserInitial()}</div>
               <div className="merchant-user-details">
-                <h3>{user?.fullname || 'Merchant account'}</h3>
-                <p>Merchant</p>
+                <h3>{user?.fullname || tx('Merchant account')}</h3>
+                <p>{tx('Merchant')}</p>
               </div>
             </div>
           </div>
@@ -290,7 +292,7 @@ function MerchantAdsPage() {
               className="merchant-advertise-btn merchant-primary-action-btn"
               onClick={() => navigate(APP_ROUTES.MERCHANT_POST_ADVERTISE)}
             >
-              Advertise
+              {tx('Advertise')}
             </button>
           </div>
 
@@ -318,25 +320,24 @@ function MerchantAdsPage() {
         <main className="merchant-main-content">
           <section className="merchant-transactions-hero">
             <div>
-              <p className="merchant-transactions-kicker">Payment History</p>
-              <h1>Shared Advertising Packages</h1>
+              <p className="merchant-transactions-kicker">{tx('Payment History')}</p>
+              <h1>{tx('Shared Advertising Packages')}</h1>
               <p className="merchant-transactions-subtitle">
-                One purchase now powers every venue in this merchant account. Review purchases, active coverage, and
-                package history here.
+                {tx('One purchase now powers every venue in this merchant account. Review purchases, active coverage, and package history here.')}
               </p>
             </div>
 
             <div className="merchant-transactions-hero-card">
-              <span className="merchant-transactions-hero-label">Current package</span>
+              <span className="merchant-transactions-hero-label">{tx('Current package')}</span>
               <strong>{activePackageName}</strong>
               <p>
-                Applies to <strong>{Number(summary.coveredVenueCount || 0)}</strong> venue(s)
+                {tx('Applies to')} <strong>{Number(summary.coveredVenueCount || 0)}</strong> {tx('venue(s)')}
               </p>
               <p>
-                Price <strong>{activePackagePrice ? formatCurrencyVnd(activePackagePrice) : 'N/A'}</strong>
+                {tx('Price')} <strong>{activePackagePrice ? formatCurrencyVnd(activePackagePrice) : tx('N/A')}</strong>
               </p>
               <p>
-                Ends at <strong>{formatDateTime(activePackageEndsAt)}</strong>
+                {tx('Ends at')} <strong>{formatDateTime(activePackageEndsAt, locale, tx)}</strong>
               </p>
             </div>
           </section>
@@ -345,18 +346,18 @@ function MerchantAdsPage() {
 
           {loadError ? (
             <section className="merchant-transactions-empty">
-              <h2>Unable to load history</h2>
+              <h2>{tx('Unable to load history')}</h2>
               <p>{loadError}</p>
               <button type="button" className="merchant-transactions-primary" onClick={loadTransactions}>
-                Retry
+                {tx('Retry')}
               </button>
             </section>
           ) : null}
 
           {!loadError && loading ? (
             <section className="merchant-transactions-empty">
-              <h2>Loading payment history...</h2>
-              <p>Please wait while we prepare your package records.</p>
+              <h2>{tx('Loading payment history...')}</h2>
+              <p>{tx('Please wait while we prepare your package records.')}</p>
             </section>
           ) : null}
 
@@ -374,31 +375,31 @@ function MerchantAdsPage() {
               {transactions.length ? (
                 <section className="merchant-transactions-list">
                   {transactions.map((transaction) => {
-                    const featureRows = buildFeatureRows(transaction.package?.features);
+                    const featureRows = buildFeatureRows(transaction.package?.features, tx);
                     return (
                       <article key={transaction.id} className="merchant-transaction-card">
                         <div className="merchant-transaction-card-head">
                           <div>
                             <div className="merchant-transaction-topline">
-                              <h2>{transaction.package?.name || 'Archived package'}</h2>
+                              <h2>{transaction.package?.name || tx('Archived package')}</h2>
                               {transaction.isActive ? (
-                                <span className="merchant-transaction-badge is-active">Active</span>
+                                <span className="merchant-transaction-badge is-active">{tx('Active')}</span>
                               ) : null}
                               {transaction.isPending ? (
-                                <span className="merchant-transaction-badge is-pending">Pending payment</span>
+                                <span className="merchant-transaction-badge is-pending">{tx('Pending payment')}</span>
                               ) : null}
                               {transaction.isCancelled ? (
-                                <span className="merchant-transaction-badge is-cancelled">Cancelled</span>
+                                <span className="merchant-transaction-badge is-cancelled">{tx('Cancelled')}</span>
                               ) : null}
                               {transaction.isFailed ? (
-                                <span className="merchant-transaction-badge is-failed">Failed</span>
+                                <span className="merchant-transaction-badge is-failed">{tx('Failed')}</span>
                               ) : null}
                               {transaction.isExpired ? (
-                                <span className="merchant-transaction-badge is-expired">Expired</span>
+                                <span className="merchant-transaction-badge is-expired">{tx('Expired')}</span>
                               ) : null}
                             </div>
                             <p>
-                              Purchased on <strong>{formatDateTime(transaction.purchasedAt)}</strong>
+                              {tx('Purchased on')} <strong>{formatDateTime(transaction.purchasedAt, locale, tx)}</strong>
                             </p>
                           </div>
 
@@ -410,7 +411,7 @@ function MerchantAdsPage() {
                                 disabled={stoppingTransactionId === String(transaction.id)}
                                 onClick={() => handleStopTransaction(transaction)}
                               >
-                                {stoppingTransactionId === String(transaction.id) ? 'Stopping...' : 'Stop package'}
+                                {stoppingTransactionId === String(transaction.id) ? tx('Stopping...') : tx('Stop package')}
                               </button>
                             ) : null}
 
@@ -422,7 +423,7 @@ function MerchantAdsPage() {
                                   disabled={!transaction.canContinueCheckout}
                                   onClick={() => handleContinueCheckout(transaction)}
                                 >
-                                  {transaction.isCheckoutExpired ? 'Checkout expired' : 'Continue payment'}
+                                  {transaction.isCheckoutExpired ? tx('Checkout expired') : tx('Continue payment')}
                                 </button>
                                 <button
                                   type="button"
@@ -430,7 +431,7 @@ function MerchantAdsPage() {
                                   disabled={checkingPaymentTransactionId === String(transaction.id)}
                                   onClick={() => handleCheckPaymentStatus(transaction)}
                                 >
-                                  {checkingPaymentTransactionId === String(transaction.id) ? 'Checking...' : 'Check payment'}
+                                  {checkingPaymentTransactionId === String(transaction.id) ? tx('Checking...') : tx('Check payment')}
                                 </button>
                               </>
                             ) : (
@@ -441,16 +442,16 @@ function MerchantAdsPage() {
                                 onClick={() => handleActivateTransaction(transaction)}
                               >
                                 {transaction.isActive
-                                  ? 'Current active package'
+                                  ? tx('Current active package')
                                   : activatingTransactionId === String(transaction.id)
-                                    ? 'Activating...'
+                                    ? tx('Activating...')
                                     : transaction.isExpired
-                                      ? 'Expired package'
+                                      ? tx('Expired package')
                                       : transaction.isCancelled
-                                        ? 'Cancelled purchase'
+                                        ? tx('Cancelled purchase')
                                         : transaction.isFailed
-                                          ? 'Failed purchase'
-                                          : 'Set as active package'}
+                                          ? tx('Failed purchase')
+                                          : tx('Set as active package')}
                               </button>
                             )}
 
@@ -461,7 +462,7 @@ function MerchantAdsPage() {
                                 disabled={Boolean(deletingTransactionId)}
                                 onClick={() => setDeleteTarget(transaction)}
                               >
-                                {transaction.isPending ? 'Cancel checkout' : 'Delete'}
+                                {transaction.isPending ? tx('Cancel checkout') : tx('Delete')}
                               </button>
                             ) : null}
                           </div>
@@ -469,28 +470,28 @@ function MerchantAdsPage() {
 
                         <div className="merchant-transaction-meta">
                           <div>
-                            <span>Price</span>
+                            <span>{tx('Price')}</span>
                             <strong>{formatCurrencyVnd(transaction.paymentAmount || transaction.package?.price || 0)}</strong>
                           </div>
                           <div>
-                            <span>Payment status</span>
-                            <strong>{formatPaymentStatus(transaction.paymentStatus)}</strong>
+                            <span>{tx('Payment status')}</span>
+                            <strong>{formatPaymentStatus(transaction.paymentStatus, tx)}</strong>
                           </div>
                           <div>
-                            <span>Tier</span>
+                            <span>{tx('Tier')}</span>
                             <strong>{transaction.package?.tier || 'basic'}</strong>
                           </div>
                           <div>
-                            <span>Duration</span>
-                            <strong>{Number(transaction.package?.durationDays || 0)} days</strong>
+                            <span>{tx('Duration')}</span>
+                            <strong>{Number(transaction.package?.durationDays || 0)} {language === 'vi' ? 'ngày' : 'days'}</strong>
                           </div>
                           <div>
-                            <span>Coverage</span>
-                            <strong>All merchant venues</strong>
+                            <span>{tx('Coverage')}</span>
+                            <strong>{tx('All merchant venues')}</strong>
                           </div>
                           <div>
-                            <span>{transaction.isPending ? 'Checkout expires' : 'Ends at'}</span>
-                            <strong>{formatDateTime(transaction.isPending ? transaction.paymentExpiresAt : transaction.expiresAt)}</strong>
+                            <span>{transaction.isPending ? tx('Checkout expires') : tx('Ends at')}</span>
+                            <strong>{formatDateTime(transaction.isPending ? transaction.paymentExpiresAt : transaction.expiresAt, locale, tx)}</strong>
                           </div>
                         </div>
 
@@ -502,7 +503,7 @@ function MerchantAdsPage() {
 
                         {transaction.isPending ? (
                           <p className="merchant-transaction-note">
-                            This package will only cover your merchant account after PayOS confirms the payment.
+                            {tx('This package will only cover your merchant account after PayOS confirms the payment.')}
                           </p>
                         ) : null}
                       </article>
@@ -511,14 +512,14 @@ function MerchantAdsPage() {
                 </section>
               ) : (
                 <section className="merchant-transactions-empty">
-                  <h2>No package purchases yet</h2>
-                  <p>Select a package once, and it will cover all venues in your merchant account.</p>
+                  <h2>{tx('No package purchases yet')}</h2>
+                  <p>{tx('Select a package once, and it will cover all venues in your merchant account.')}</p>
                   <button
                     type="button"
                     className="merchant-transactions-primary"
                     onClick={() => navigate(APP_ROUTES.MERCHANT_POSTS)}
                   >
-                    Go to Manage Posts
+                    {tx('Go to Manage Posts')}
                   </button>
                 </section>
               )}
@@ -530,11 +531,11 @@ function MerchantAdsPage() {
       {deleteTarget ? (
         <div className="merchant-transactions-modal-backdrop" role="presentation">
           <div className="merchant-transactions-modal" role="dialog" aria-modal="true" aria-labelledby="delete-title">
-            <h2 id="delete-title">Delete this transaction?</h2>
+            <h2 id="delete-title">{tx('Delete this transaction?')}</h2>
             <p>
               {deleteTarget?.isPending
-                ? 'This will cancel the selected unpaid checkout and remove it from your payment history.'
-                : 'This will remove the selected package from your transaction history for this merchant account.'}
+                ? tx('This will cancel the selected unpaid checkout and remove it from your payment history.')
+                : tx('This will remove the selected package from your transaction history for this merchant account.')}
             </p>
             <div className="merchant-transactions-modal-actions">
               <button
@@ -543,7 +544,7 @@ function MerchantAdsPage() {
                 disabled={Boolean(deletingTransactionId)}
                 onClick={() => setDeleteTarget(null)}
               >
-                Cancel
+                {tx('Cancel')}
               </button>
               <button
                 type="button"
@@ -553,11 +554,11 @@ function MerchantAdsPage() {
               >
                 {deletingTransactionId
                   ? deleteTarget?.isPending
-                    ? 'Cancelling...'
-                    : 'Deleting...'
+                    ? tx('Cancelling...')
+                    : tx('Deleting...')
                   : deleteTarget?.isPending
-                    ? 'Cancel checkout'
-                    : 'Delete'}
+                    ? tx('Cancel checkout')
+                    : tx('Delete')}
               </button>
             </div>
           </div>

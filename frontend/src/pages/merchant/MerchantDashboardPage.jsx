@@ -4,6 +4,7 @@ import { useLanguage } from '../../contexts/LanguageContext';
 import { useAuth } from '../../contexts/AuthContext';
 import translations from '../../constants/translations';
 import { APP_ROUTES } from '../../constants/routes';
+import useUserI18n from '../../hooks/useUserI18n';
 import {
   fetchMerchantTrendingOverview,
   pushMerchantTrendingVenue,
@@ -19,17 +20,17 @@ const MenuItems = [
 
 const DEFAULT_CHART_DAYS = 7;
 
-function formatDateTime(value) {
+function formatDateTime(value, locale = 'en-US', tx = (text) => text) {
   if (!value) {
-    return 'N/A';
+    return tx('N/A');
   }
 
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
-    return 'N/A';
+    return tx('N/A');
   }
 
-  return parsed.toLocaleString('en-US', {
+  return parsed.toLocaleString(locale, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
@@ -38,13 +39,13 @@ function formatDateTime(value) {
   });
 }
 
-function formatDateKeyLabel(value) {
+function formatDateKeyLabel(value, locale = 'en-US') {
   const parsed = new Date(`${value}T00:00:00`);
   if (Number.isNaN(parsed.getTime())) {
     return value;
   }
 
-  return parsed.toLocaleDateString('en-US', {
+  return parsed.toLocaleDateString(locale, {
     month: 'short',
     day: 'numeric',
   });
@@ -65,11 +66,18 @@ function buildPushHistoryLabel(entry, fallbackIndex = 0) {
   return `Push #${pushNumber} · ${pushedAtText}`;
 }
 
+function buildLocalizedPushHistoryLabel(entry, locale, tx, fallbackIndex = 0) {
+  const pushNumber = Number(entry?.pushNumber) || fallbackIndex + 1;
+  const pushedAtText = formatDateTime(entry?.pushedAt, locale, tx);
+  return `${tx('Push cycle')} #${pushNumber} · ${pushedAtText}`;
+}
+
 function MerchantDashboardPage() {
   const navigate = useNavigate();
   const { language } = useLanguage();
+  const { locale, tx } = useUserI18n();
   const { user, logout } = useAuth();
-  const t = translations[language];
+  const t = translations[language] || translations.en;
   const [activeMenu, setActiveMenu] = useState('overview');
   const [overviewPayload, setOverviewPayload] = useState({
     summary: {},
@@ -97,7 +105,7 @@ function MerchantDashboardPage() {
         items: Array.isArray(payload?.items) ? payload.items : [],
       });
     } catch (error) {
-      setOverviewError(error?.response?.data?.message || 'Unable to load advertising overview right now.');
+      setOverviewError(error?.response?.data?.message || tx('Unable to load advertising overview right now.'));
       setOverviewPayload({
         summary: {},
         days: DEFAULT_CHART_DAYS,
@@ -107,7 +115,7 @@ function MerchantDashboardPage() {
     } finally {
       setOverviewLoading(false);
     }
-  }, []);
+  }, [tx]);
 
   useEffect(() => {
     if (activeMenu === 'overview') {
@@ -152,23 +160,23 @@ function MerchantDashboardPage() {
   const summaryCards = useMemo(
     () => [
       {
-        label: 'Covered venues',
+        label: tx('Covered venues'),
         value: Number(overviewPayload?.summary?.coveredVenueCount) || dashboardSummary.coveredVenues,
       },
       {
-        label: 'Trending ready',
+        label: tx('Trending ready'),
         value: Number(overviewPayload?.summary?.trendingEligibleVenueCount) || dashboardSummary.trendingEligible,
       },
       {
-        label: 'Total pushes',
+        label: tx('Total pushes'),
         value: dashboardSummary.totalPushes,
       },
       {
-        label: 'Total clicks',
+        label: tx('Total clicks'),
         value: dashboardSummary.totalClicks,
       },
     ],
-    [dashboardSummary, overviewPayload]
+    [dashboardSummary, overviewPayload, tx]
   );
 
   const getUserInitial = () => {
@@ -215,14 +223,14 @@ function MerchantDashboardPage() {
 
     if (trendState.isAdvertising || trendState.isCoolingDown) {
       const nextPushAtText = trendState.nextPushAt
-        ? formatDateTime(trendState.nextPushAt)
-        : 'later';
-      setActionMessage(`This venue cannot be pushed now. Next push time: ${nextPushAtText}.`);
+        ? formatDateTime(trendState.nextPushAt, locale, tx)
+        : tx('later');
+      setActionMessage(tx('This venue cannot be pushed now. Next push time: {{time}}.', { time: nextPushAtText }));
       return;
     }
 
     if ((Number(trendState.pushesRemaining) || 0) <= 0) {
-      setActionMessage('This venue has no push credits remaining in the current account package.');
+      setActionMessage(tx('This venue has no push credits remaining in the current account package.'));
       return;
     }
 
@@ -231,14 +239,14 @@ function MerchantDashboardPage() {
 
     try {
       await pushMerchantTrendingVenue(venueId);
-      setActionMessage('Push started successfully. The venue is now active in Trending.');
+      setActionMessage(tx('Push started successfully. The venue is now active in Trending.'));
       setExpandedPushHistoryByAssignment((currentState) => ({
         ...currentState,
         [String(item.assignmentId)]: true,
       }));
       await loadAdvertisingOverview();
     } catch (error) {
-      setActionMessage(error?.response?.data?.message || 'Unable to push this venue right now.');
+      setActionMessage(error?.response?.data?.message || tx('Unable to push this venue right now.'));
     } finally {
       setPushingVenueId('');
     }
@@ -248,8 +256,8 @@ function MerchantDashboardPage() {
     if (overviewLoading) {
       return (
         <div className="merchant-dashboard-content">
-          <h2>Advertising Overview</h2>
-          <p>Loading account coverage and venue analytics...</p>
+          <h2>{tx('Advertising Overview')}</h2>
+          <p>{tx('Loading account coverage and venue analytics...')}</p>
         </div>
       );
     }
@@ -257,10 +265,10 @@ function MerchantDashboardPage() {
     if (overviewError) {
       return (
         <div className="merchant-dashboard-content">
-          <h2>Advertising Overview</h2>
+          <h2>{tx('Advertising Overview')}</h2>
           <p>{overviewError}</p>
           <button type="button" className="merchant-publish-btn" onClick={loadAdvertisingOverview}>
-            Retry
+            {tx('Retry')}
           </button>
         </div>
       );
@@ -270,19 +278,19 @@ function MerchantDashboardPage() {
       <div className="merchant-dashboard-content merchant-trend-overview">
         <div className="merchant-trend-header">
           <div>
-            <p className="merchant-trend-kicker">Account-wide advertising</p>
-            <h2>Advertising Overview</h2>
-            <p>Track package coverage, venue clicks, and trending push activity for your whole merchant account.</p>
+            <p className="merchant-trend-kicker">{tx('Account-wide advertising')}</p>
+            <h2>{tx('Advertising Overview')}</h2>
+            <p>{tx('Track package coverage, venue clicks, and trending push activity for your whole merchant account.')}</p>
           </div>
 
           <div className="merchant-trend-header-actions">
             <div className="merchant-trend-package-chip">
-              <span>Current package</span>
-              <strong>{overviewPayload?.summary?.activePackage?.name || 'No active package'}</strong>
+              <span>{tx('Current package')}</span>
+              <strong>{overviewPayload?.summary?.activePackage?.name || tx('No active package')}</strong>
             </div>
 
             <button type="button" className="merchant-publish-btn" onClick={loadAdvertisingOverview}>
-              Refresh
+              {tx('Refresh')}
             </button>
           </div>
         </div>
@@ -298,10 +306,10 @@ function MerchantDashboardPage() {
 
         <div className="merchant-trend-account-strip">
           <p>
-            <strong>Overall CTR:</strong> {formatPercent(overallCtrPercent)}
+            <strong>{tx('Overall CTR:')}</strong> {formatPercent(overallCtrPercent)}
           </p>
           <p>
-            <strong>Scope:</strong> All current and future venues in this merchant account use the active package.
+            <strong>{tx('Scope:')}</strong> {tx('All current and future venues in this merchant account use the active package.')}
           </p>
         </div>
 
@@ -309,7 +317,7 @@ function MerchantDashboardPage() {
 
         {!overviewItems.length ? (
           <div className="merchant-trend-empty-copy">
-            <p>No venue is covered yet. Purchase an advertising package from Manage Posts to activate account-wide coverage.</p>
+            <p>{tx('No venue is covered yet. Purchase an advertising package from Manage Posts to activate account-wide coverage.')}</p>
           </div>
         ) : (
           <div className="merchant-trend-list">
@@ -333,47 +341,47 @@ function MerchantDashboardPage() {
                 && !trendState.isCoolingDown
                 && (Number(trendState.pushesRemaining) || 0) > 0;
               const pushButtonLabel = trendState.isAdvertising
-                ? 'Advertising...'
+                ? tx('Advertising...')
                 : trendState.isCoolingDown
-                  ? 'Cooling down'
+                  ? tx('Cooling down')
                   : (Number(trendState.pushesRemaining) || 0) <= 0
-                    ? 'No pushes left'
-                    : 'Push to Trending';
+                    ? tx('No pushes left')
+                    : tx('Push to Trending');
 
               return (
                 <article key={assignmentId} className="merchant-trend-item-card">
                   <div className="merchant-trend-item-head">
                     <div>
                       <div className="merchant-trend-item-title-row">
-                        <h3>{item?.venue?.name || 'Untitled venue'}</h3>
+                        <h3>{item?.venue?.name || tx('Untitled venue')}</h3>
                         <span className={`merchant-trend-status-pill ${item?.supportsTrending ? 'is-trending' : 'is-standard'}`}>
-                          {item?.supportsTrending ? 'Trending enabled' : 'Click analytics only'}
+                          {item?.supportsTrending ? tx('Trending enabled') : tx('Click analytics only')}
                         </span>
                       </div>
-                      <p>{item?.venue?.address || 'No address'}</p>
+                      <p>{item?.venue?.address || tx('No address')}</p>
                     </div>
 
                     <span className="merchant-trend-item-tier">{item?.package?.tier || 'basic'}</span>
                   </div>
 
                   <div className="merchant-trend-item-meta-grid">
-                    <p><strong>Package:</strong> {item?.package?.name || 'No package'}</p>
-                    <p><strong>Duration:</strong> {Number(item?.package?.durationDays || 0)} day(s)</p>
-                    <p><strong>Total clicks:</strong> {Number(stats.totalClicks) || 0}</p>
-                    <p><strong>CTR:</strong> {formatPercent(stats.ctrPercent || 0)}</p>
+                    <p><strong>{tx('Package:')}</strong> {item?.package?.name || tx('No package')}</p>
+                    <p><strong>{tx('Duration:')}</strong> {Number(item?.package?.durationDays || 0)} {tx('day(s)')}</p>
+                    <p><strong>{tx('Total clicks:')}</strong> {Number(stats.totalClicks) || 0}</p>
+                    <p><strong>{tx('CTR:')}</strong> {formatPercent(stats.ctrPercent || 0)}</p>
                     {item?.supportsTrending ? (
                       <>
-                        <p><strong>Pushes used:</strong> {Number(trendState.pushCountUsed) || 0} / {Number(item?.trendConfig?.pushLimit) || 0}</p>
-                        <p><strong>Pushes remaining:</strong> {Number(trendState.pushesRemaining) || 0}</p>
-                        <p><strong>Display duration:</strong> {Number(item?.trendConfig?.displayHours) || 0} hour(s)</p>
-                        <p><strong>Active until:</strong> {formatDateTime(trendState.activeUntil)}</p>
-                        <p><strong>Next push:</strong> {formatDateTime(trendState.nextPushAt)}</p>
-                        <p><strong>Current status:</strong> {trendState.isAdvertising ? 'Advertising' : trendState.isCoolingDown ? 'Cooling down' : 'Ready'}</p>
+                        <p><strong>{tx('Pushes used:')}</strong> {Number(trendState.pushCountUsed) || 0} / {Number(item?.trendConfig?.pushLimit) || 0}</p>
+                        <p><strong>{tx('Pushes remaining:')}</strong> {Number(trendState.pushesRemaining) || 0}</p>
+                        <p><strong>{tx('Display duration:')}</strong> {Number(item?.trendConfig?.displayHours) || 0} {tx('hour(s)')}</p>
+                        <p><strong>{tx('Active until:')}</strong> {formatDateTime(trendState.activeUntil, locale, tx)}</p>
+                        <p><strong>{tx('Next push:')}</strong> {formatDateTime(trendState.nextPushAt, locale, tx)}</p>
+                        <p><strong>{tx('Current status:')}</strong> {trendState.isAdvertising ? tx('Advertising') : trendState.isCoolingDown ? tx('Cooling down') : tx('Ready')}</p>
                       </>
                     ) : (
                       <>
-                        <p><strong>Trending access:</strong> Not included in this package</p>
-                        <p><strong>Push analytics:</strong> Hidden for non-trending packages</p>
+                        <p><strong>{tx('Trending access:')}</strong> {tx('Not included in this package')}</p>
+                        <p><strong>{tx('Push analytics:')}</strong> {tx('Hidden for non-trending packages')}</p>
                       </>
                     )}
                   </div>
@@ -387,7 +395,7 @@ function MerchantDashboardPage() {
                           disabled={pushingVenueId === venueId || !canPush}
                           onClick={() => handlePushTrend(item)}
                         >
-                          {pushingVenueId === venueId ? 'Pushing...' : pushButtonLabel}
+                          {pushingVenueId === venueId ? tx('Pushing...') : pushButtonLabel}
                         </button>
 
                         <button
@@ -402,13 +410,13 @@ function MerchantDashboardPage() {
                           }}
                         >
                           {pushHistoryRows.length
-                            ? (isPushHistoryOpen ? 'Hide Push Statistics' : 'View Push Statistics')
-                            : 'No Push Statistics'}
+                            ? (isPushHistoryOpen ? tx('Hide Push Statistics') : tx('View Push Statistics'))
+                            : tx('No Push Statistics')}
                         </button>
                       </>
                     ) : (
                       <p className="merchant-trend-mode-note">
-                        This venue uses the account package, but push controls are hidden because Show in Trending is not enabled.
+                        {tx('This venue uses the account package, but push controls are hidden because Show in Trending is not enabled.')}
                       </p>
                     )}
                   </div>
@@ -417,12 +425,12 @@ function MerchantDashboardPage() {
                     <div className="merchant-trend-history-panel">
                       <div className="merchant-trend-history-head">
                         <div>
-                          <h4>Push Statistics</h4>
-                          <p>Select one push cycle to review timing and click results.</p>
+                          <h4>{tx('Push Statistics')}</h4>
+                          <p>{tx('Select one push cycle to review timing and click results.')}</p>
                         </div>
 
                         <label className="merchant-trend-history-select-wrap">
-                          <span>Push cycle</span>
+                          <span>{tx('Push cycle')}</span>
                           <select
                             value={selectedPushHistoryId}
                             onChange={(event) => {
@@ -435,7 +443,7 @@ function MerchantDashboardPage() {
                           >
                             {pushHistoryRows.map((entry, index) => (
                               <option key={entry.id || `push-history-${assignmentId}-${index + 1}`} value={entry.id}>
-                                {buildPushHistoryLabel(entry, index)}
+                                {buildLocalizedPushHistoryLabel(entry, locale, tx, index)}
                               </option>
                             ))}
                           </select>
@@ -444,10 +452,10 @@ function MerchantDashboardPage() {
 
                       {selectedPushHistory ? (
                         <div className="merchant-trend-history-card">
-                          <p><strong>Push slot:</strong> {buildPushHistoryLabel(selectedPushHistory)}</p>
-                          <p><strong>Advertising until:</strong> {formatDateTime(selectedPushHistory.activeUntil)}</p>
-                          <p><strong>Cooldown until:</strong> {formatDateTime(selectedPushHistory.cooldownUntil)}</p>
-                          <p><strong>Clicks in this push:</strong> {Number(selectedPushHistory.clickCount) || 0}</p>
+                          <p><strong>{tx('Push slot:')}</strong> {buildLocalizedPushHistoryLabel(selectedPushHistory, locale, tx)}</p>
+                          <p><strong>{tx('Advertising until:')}</strong> {formatDateTime(selectedPushHistory.activeUntil, locale, tx)}</p>
+                          <p><strong>{tx('Cooldown until:')}</strong> {formatDateTime(selectedPushHistory.cooldownUntil, locale, tx)}</p>
+                          <p><strong>{tx('Clicks in this push:')}</strong> {Number(selectedPushHistory.clickCount) || 0}</p>
                         </div>
                       ) : null}
                     </div>
@@ -455,14 +463,14 @@ function MerchantDashboardPage() {
 
                   <div className="merchant-trend-chart">
                     <div className="merchant-trend-chart-head">
-                      <h4>Click Trend ({overviewPayload.days} days)</h4>
+                      <h4>{tx('Click Trend')} ({overviewPayload.days} {tx('days')})</h4>
                       {!item?.supportsTrending ? (
-                        <span>Push metrics unavailable</span>
+                        <span>{tx('Push metrics unavailable')}</span>
                       ) : null}
                     </div>
 
                     {!chartRows.length ? (
-                      <p className="merchant-trend-chart-empty">No click analytics data yet.</p>
+                      <p className="merchant-trend-chart-empty">{tx('No click analytics data yet.')}</p>
                     ) : (
                       chartRows.map((row) => {
                         const clicks = Number(row?.clicks) || 0;
@@ -470,11 +478,11 @@ function MerchantDashboardPage() {
 
                         return (
                           <div key={`${assignmentId}-${row.date}`} className="merchant-trend-chart-row">
-                            <span>{formatDateKeyLabel(row.date)}</span>
+                            <span>{formatDateKeyLabel(row.date, locale)}</span>
                             <div className="merchant-trend-chart-track">
                               <div className="merchant-trend-chart-bar" style={{ width: `${barWidth}%` }} />
                             </div>
-                            <span>{clicks} clicks · {formatPercent(row.ctrPercent || 0)}</span>
+                            <span>{clicks} {tx('clicks')} | {formatPercent(row.ctrPercent || 0)}</span>
                           </div>
                         );
                       })
@@ -498,8 +506,8 @@ function MerchantDashboardPage() {
               <div className="merchant-user-info">
                 <div className="merchant-user-avatar">{getUserInitial()}</div>
                 <div className="merchant-user-details">
-                  <h3>{user?.fullname || 'Merchant account'}</h3>
-                  <p>Merchant</p>
+                  <h3>{user?.fullname || tx('Merchant account')}</h3>
+                  <p>{tx('Merchant')}</p>
                 </div>
               </div>
             </div>
@@ -516,7 +524,7 @@ function MerchantDashboardPage() {
                 className="merchant-advertise-btn merchant-primary-action-btn"
                 onClick={handleAdvertiseAccount}
               >
-                Advertise
+                {tx('Advertise')}
               </button>
             </div>
 
