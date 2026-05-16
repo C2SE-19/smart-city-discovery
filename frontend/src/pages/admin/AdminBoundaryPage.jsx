@@ -3,6 +3,7 @@ import { GeoJSON, MapContainer, Marker, Popup, TileLayer, Tooltip, useMap } from
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import SectionCard from '../../components/common/SectionCard';
+import useAdminI18n from '../../hooks/useAdminI18n';
 import {
   createAdminVenueReview,
   createAdminVenueReviewReply,
@@ -274,26 +275,26 @@ function isSameWardData(ward, draftWard) {
   );
 }
 
-function statusLabel(status) {
+function statusLabel(status, tx) {
   const normalizedStatus = String(status || '').toLowerCase();
 
   if (normalizedStatus === 'approved') {
-    return 'Approved';
+    return tx('Approved');
   }
 
   if (normalizedStatus === 'rejected') {
-    return 'Rejected';
+    return tx('Rejected');
   }
 
-  return 'Pending';
+  return tx('Pending');
 }
 
-function formatDateTime(dateValue) {
+function formatDateTime(dateValue, locale, tx) {
   if (!dateValue) {
-    return 'Not available';
+    return tx('Not available');
   }
 
-  return new Date(dateValue).toLocaleString('en-US');
+  return new Date(dateValue).toLocaleString(locale);
 }
 
 function isPriorityApprovalVenue(venue) {
@@ -530,7 +531,20 @@ function normalizeImageUrls(value) {
   }
 
   return value
-    .map((item) => (typeof item === 'string' ? item.trim() : ''))
+    .flatMap((item) => {
+      if (typeof item === 'string') {
+        return [item];
+      }
+
+      if (item && typeof item === 'object') {
+        return [item.url, item.image_url, item.imageUrl, item.src, item.path].filter(
+          (candidate) => typeof candidate === 'string'
+        );
+      }
+
+      return [];
+    })
+    .map((item) => item.trim())
     .filter(Boolean);
 }
 
@@ -558,12 +572,23 @@ function extractVenueGalleryImages(venue) {
   const metadata = normalizeVenueMetadata(venue?.metadata);
   const galleryImages = normalizeImageUrls(metadata.galleryImages);
   const fallbackImages = normalizeImageUrls(metadata.images || metadata.imageUrls || metadata.photos);
+  const tableImages = normalizeImageUrls(venue?.venue_images);
   const coverImage = typeof venue?.cover_image_url === 'string' ? venue.cover_image_url.trim() : '';
+  const alternateCoverImage = typeof venue?.coverImageUrl === 'string' ? venue.coverImageUrl.trim() : '';
+  const primaryImage = typeof venue?.venue_primary_image_url === 'string' ? venue.venue_primary_image_url.trim() : '';
 
-  const merged = [...galleryImages, ...fallbackImages];
+  const merged = [...galleryImages, ...fallbackImages, ...tableImages];
 
   if (coverImage) {
     merged.unshift(coverImage);
+  }
+
+  if (alternateCoverImage) {
+    merged.unshift(alternateCoverImage);
+  }
+
+  if (primaryImage) {
+    merged.unshift(primaryImage);
   }
 
   return [...new Set(merged)];
@@ -584,7 +609,7 @@ function extractUpdateSnapshotGalleryImages(snapshot) {
   return [...new Set(merged)];
 }
 
-function formatMetadataOperatingHours(metadata) {
+function formatMetadataOperatingHours(metadata, tx = (value) => value) {
   const normalizedMetadata = normalizeVenueMetadata(metadata);
   const weeklySource =
     normalizedMetadata.weeklyOpenHours && typeof normalizedMetadata.weeklyOpenHours === 'object' && !Array.isArray(normalizedMetadata.weeklyOpenHours)
@@ -622,10 +647,10 @@ function formatMetadataOperatingHours(metadata) {
     return `${startTime} - ${endTime}`;
   }
 
-  return 'Not provided';
+  return tx('Not provided');
 }
 
-function extractMetadataWeeklySchedule(metadata) {
+function extractMetadataWeeklySchedule(metadata, tx = (value) => value) {
   const normalizedMetadata = normalizeVenueMetadata(metadata);
   const fallbackStart = String(normalizedMetadata.startTime || '').trim();
   const fallbackEnd = String(normalizedMetadata.endTime || '').trim();
@@ -646,29 +671,29 @@ function extractMetadataWeeklySchedule(metadata) {
 
     if (!rawDay || typeof rawDay !== 'object') {
       if (hasFallbackRange) {
-        return `${day.label}: ${fallbackStart} - ${fallbackEnd}`;
+        return `${tx(day.label)}: ${fallbackStart} - ${fallbackEnd}`;
       }
 
-      return `${day.label}: Not provided`;
+      return `${tx(day.label)}: ${tx('Not provided')}`;
     }
 
     const isClosed = Boolean(rawDay.isClosed ?? rawDay.closed ?? rawDay.is_off ?? rawDay.off);
     if (isClosed) {
-      return `${day.label}: Closed`;
+      return `${tx(day.label)}: ${tx('Closed')}`;
     }
 
     const openTime = String(rawDay.openTime ?? rawDay.open ?? rawDay.start ?? rawDay.startTime ?? '').trim();
     const closeTime = String(rawDay.closeTime ?? rawDay.close ?? rawDay.end ?? rawDay.endTime ?? '').trim();
 
     if (openTime && closeTime) {
-      return `${day.label}: ${openTime} - ${closeTime}`;
+      return `${tx(day.label)}: ${openTime} - ${closeTime}`;
     }
 
     if (hasFallbackRange) {
-      return `${day.label}: ${fallbackStart} - ${fallbackEnd}`;
+      return `${tx(day.label)}: ${fallbackStart} - ${fallbackEnd}`;
     }
 
-    return `${day.label}: Not provided`;
+    return `${tx(day.label)}: ${tx('Not provided')}`;
   });
 }
 
@@ -773,6 +798,7 @@ async function fetchAdminWardsWithRetry(maxAttempts = 3) {
 }
 
 function AdminBoundaryPage() {
+  const { language, locale, tx, formatNumber } = useAdminI18n();
   const [activeMode, setActiveMode] = useState('pending');
   const [pendingQueueView, setPendingQueueView] = useState('submissions');
   const [wards, setWards] = useState([]);
@@ -1087,7 +1113,7 @@ function AdminBoundaryPage() {
     }
 
     if (Number(selectedVenueDetail?.id) === Number(selectedVenueSummary.id)) {
-      return { ...selectedVenueDetail, ...selectedVenueSummary };
+      return { ...selectedVenueSummary, ...selectedVenueDetail };
     }
 
     return selectedVenueSummary;
@@ -1134,12 +1160,12 @@ function AdminBoundaryPage() {
     '';
   const selectedUpdateActiveBusinessLicenseImage = String(selectedUpdateActiveSnapshot?.businessLicenseImageUrl || '').trim();
   const selectedUpdateActiveOperatingHours = useMemo(
-    () => formatMetadataOperatingHours(selectedUpdateActiveSnapshot?.metadata),
-    [selectedUpdateActiveSnapshot]
+    () => formatMetadataOperatingHours(selectedUpdateActiveSnapshot?.metadata, tx),
+    [selectedUpdateActiveSnapshot, tx]
   );
   const selectedUpdateActiveWeeklySchedule = useMemo(
-    () => extractMetadataWeeklySchedule(selectedUpdateActiveSnapshot?.metadata),
-    [selectedUpdateActiveSnapshot]
+    () => extractMetadataWeeklySchedule(selectedUpdateActiveSnapshot?.metadata, tx),
+    [selectedUpdateActiveSnapshot, tx]
   );
   const selectedWard = useMemo(
     () => wards.find((ward) => ward.ward_id === selectedWardId) || null,
@@ -1213,12 +1239,12 @@ function AdminBoundaryPage() {
   const selectedVenueActiveImage =
     selectedVenueGalleryImages[selectedVenueImageIndex] || selectedVenueGalleryImages[0] || selectedVenue?.cover_image_url || '';
   const selectedVenueOperatingHours = useMemo(
-    () => formatMetadataOperatingHours(selectedVenueMetadata),
-    [selectedVenueMetadata]
+    () => formatMetadataOperatingHours(selectedVenueMetadata, tx),
+    [selectedVenueMetadata, tx]
   );
   const selectedVenueWeeklySchedule = useMemo(
-    () => extractMetadataWeeklySchedule(selectedVenueMetadata),
-    [selectedVenueMetadata]
+    () => extractMetadataWeeklySchedule(selectedVenueMetadata, tx),
+    [selectedVenueMetadata, tx]
   );
   const selectedVenueIntroduction = useMemo(() => {
     return String(
@@ -2944,13 +2970,13 @@ function AdminBoundaryPage() {
     if (activeMode === 'pending') {
       return (
         <div className="admin-list-panel">
-          <div className="admin-pending-queue-switch" role="tablist" aria-label="Pending queues">
+          <div className="admin-pending-queue-switch" role="tablist" aria-label={tx('Pending queues')}>
             <button
               type="button"
               className={`admin-pending-queue-tab ${pendingQueueView === 'submissions' ? 'is-active' : ''}`.trim()}
               onClick={() => handlePendingQueueViewChange('submissions')}
             >
-              <span className="admin-pending-queue-tab-label">Pending Queue</span>
+              <span className="admin-pending-queue-tab-label">{tx('Pending Queue')}</span>
               <span className="admin-pending-queue-tab-count">{pendingQueueVenues.length}</span>
             </button>
             <button
@@ -2958,7 +2984,7 @@ function AdminBoundaryPage() {
               className={`admin-pending-queue-tab ${pendingQueueView === 'updates' ? 'is-active' : ''}`.trim()}
               onClick={() => handlePendingQueueViewChange('updates')}
             >
-              <span className="admin-pending-queue-tab-label">Location Updates</span>
+              <span className="admin-pending-queue-tab-label">{tx('Location Updates')}</span>
               <span className="admin-pending-queue-tab-count">{pendingLocationUpdateRequests.length}</span>
             </button>
           </div>
@@ -2975,7 +3001,7 @@ function AdminBoundaryPage() {
                       onClick={() => handleOpenUpdateRequestDetails(request.id)}
                     >
                       <strong>
-                        {request.has_priority_approval ? <span className="admin-priority-star-badge">★ Priority</span> : null}
+                        {request.has_priority_approval ? <span className="admin-priority-star-badge">★ {tx('Priority')}</span> : null}
                         <span className="admin-list-item-title">
                           {request.venue_title || request.venue_name || `Venue #${request.venue_id}`}
                         </span>
@@ -2984,7 +3010,7 @@ function AdminBoundaryPage() {
                         {proposedSnapshot.address || request.venue_address || 'Address pending'}
                       </span>
                       <small className="admin-list-item-timestamp">
-                        {formatDateTime(request.submitted_at || request.created_at)}
+                        {formatDateTime(request.submitted_at || request.created_at, locale, tx)}
                       </small>
                     </button>
                   );
@@ -2997,21 +3023,21 @@ function AdminBoundaryPage() {
                     onClick={() => handleOpenVenueDetails(venue.id)}
                   >
                     <strong>
-                      {isPriorityApprovalVenue(venue) ? <span className="admin-priority-star-badge">★ Priority</span> : null}
+                      {isPriorityApprovalVenue(venue) ? <span className="admin-priority-star-badge">★ {tx('Priority')}</span> : null}
                       <span className="admin-list-item-title">{venue.title || venue.name}</span>
                     </strong>
-                    <span className="admin-list-item-address">{venue.address || 'Address pending'}</span>
-                    <small className="admin-list-item-timestamp">{formatDateTime(venue.submitted_at)}</small>
+                    <span className="admin-list-item-address">{venue.address || tx('Address pending')}</span>
+                    <small className="admin-list-item-timestamp">{formatDateTime(venue.submitted_at, locale, tx)}</small>
                   </button>
                 ))}
 
             {pendingQueueView === 'updates' && !pendingLocationUpdateRequests.length ? (
-              <p className="admin-empty-note">No location update requests right now.</p>
+              <p className="admin-empty-note">{tx('No location update requests right now.')}</p>
             ) : null}
 
             {pendingQueueView === 'submissions' && !pendingQueueVenues.length ? (
               <p className="admin-empty-note">
-                {pendingActiveFilterCount ? 'No pending posts match your filters.' : 'No pending posts right now.'}
+                {pendingActiveFilterCount ? tx('No pending posts match your filters.') : tx('No pending posts right now.')}
               </p>
             ) : null}
           </div>
@@ -3036,7 +3062,7 @@ function AdminBoundaryPage() {
                 onClick={() => loadWardToEditor(ward)}
               >
                 <strong>{ward.name}</strong>
-                <small>{formatDateTime(ward.updated_at || ward.created_at)}</small>
+                <small>{formatDateTime(ward.updated_at || ward.created_at, locale, tx)}</small>
               </button>
             ))}
 
@@ -3162,8 +3188,8 @@ function AdminBoundaryPage() {
             [selectedUpdateProposedSnapshot.metadata?.minPrice, selectedUpdateProposedSnapshot.metadata?.maxPrice]
           ),
           operatingHours: hasUpdateFieldChanged(
-            formatMetadataOperatingHours(selectedUpdateOldSnapshot?.metadata),
-            formatMetadataOperatingHours(selectedUpdateProposedSnapshot?.metadata)
+            formatMetadataOperatingHours(selectedUpdateOldSnapshot?.metadata, tx),
+            formatMetadataOperatingHours(selectedUpdateProposedSnapshot?.metadata, tx)
           ),
           gallery: hasUpdateFieldChanged(
             extractUpdateSnapshotGalleryImages(selectedUpdateOldSnapshot),
@@ -3202,7 +3228,7 @@ function AdminBoundaryPage() {
             ) : (
               <div className="admin-detail-stack">
                 <h4>{selectedUpdateRequest.venue_title || selectedUpdateRequest.venue_name || `Venue #${selectedUpdateRequest.venue_id}`}</h4>
-                <p>Requested at {formatDateTime(selectedUpdateRequest.submitted_at || selectedUpdateRequest.created_at)}</p>
+                <p>{tx('Requested at')} {formatDateTime(selectedUpdateRequest.submitted_at || selectedUpdateRequest.created_at, locale, tx)}</p>
                 <p className="admin-update-submitter">Submitted by: {submitterFullName} ({submitterEmail})</p>
 
                 <div className="admin-location-version-toggle" role="tablist" aria-label="Location version">
@@ -3271,12 +3297,12 @@ function AdminBoundaryPage() {
                   </div>
                 ) : (
                   <div className="admin-detail-image-placeholder">
-                    {selectedUpdateLocationView === 'old' ? 'No old images' : 'No new images'}
+                    {selectedUpdateLocationView === 'old' ? tx('No old images') : tx('No new images')}
                   </div>
                 )}
 
                 <div className={`admin-update-compare-column ${selectedUpdateLocationView === 'new' ? 'is-proposed' : ''}`.trim()}>
-                  <h5>{selectedUpdateLocationView === 'old' ? 'Old Location Data' : 'New Location Data'}</h5>
+                  <h5>{selectedUpdateLocationView === 'old' ? tx('Old Location Data') : tx('New Location Data')}</h5>
                   <ul className="admin-detail-meta">
                     <li>
                       Name: {selectedUpdateActiveSnapshot.title || selectedUpdateActiveSnapshot.name || 'Not provided'}
@@ -3400,7 +3426,7 @@ function AdminBoundaryPage() {
                     disabled={moderatingUpdateRequestId === selectedUpdateRequest.id}
                     onClick={() => handleUpdateRequestModeration(selectedUpdateRequest.id, 'approve')}
                   >
-                    {moderatingUpdateRequestId === selectedUpdateRequest.id ? 'Updating...' : 'Approve Post'}
+                    {moderatingUpdateRequestId === selectedUpdateRequest.id ? tx('Updating...') : tx('Approve Post')}
                   </button>
 
                   <button
@@ -3532,22 +3558,22 @@ function AdminBoundaryPage() {
                 <div className="admin-extra-detail-block">
                   <ul className="admin-detail-meta">
                     <li>Venue ID: {selectedVenue.id}</li>
-                    <li>Name: {selectedVenue.name || 'Not provided'}</li>
-                    <li>Ward: {selectedVenue.ward_name || selectedVenue.ward_id || 'Not detected'}</li>
-                    <li>Category: {formatVenueCategoryLabel(selectedVenue, placeCategoryTree)}</li>
-                    <li>Status: {statusLabel(selectedVenue.status)}</li>
-                    <li>Submitter full name: {selectedVenue.submitter_full_name || selectedVenue.owner_name || 'Not provided'}</li>
-                    <li>Submitter email: {selectedVenue.submitter_email || selectedVenue.submitted_by_user_id || 'Not provided'}</li>
-                    <li>Phone: {selectedVenue.phone || 'Not provided'}</li>
-                    <li>Submitted: {formatDateTime(selectedVenue.submitted_at)}</li>
-                    <li>Latitude: {formatCoordinate(selectedVenue.latitude)}</li>
-                    <li>Longitude: {formatCoordinate(selectedVenue.longitude)}</li>
+                    <li>{tx('Name:')} {selectedVenue.name || tx('Not provided')}</li>
+                    <li>{tx('Ward:')} {selectedVenue.ward_name || selectedVenue.ward_id || tx('Not detected')}</li>
+                    <li>{tx('Category:')} {formatVenueCategoryLabel(selectedVenue, placeCategoryTree)}</li>
+                    <li>{tx('Status:')} {statusLabel(selectedVenue.status, tx)}</li>
+                    <li>{tx('Submitter full name:')} {selectedVenue.submitter_full_name || selectedVenue.owner_name || tx('Not provided')}</li>
+                    <li>{tx('Submitter email:')} {selectedVenue.submitter_email || selectedVenue.submitted_by_user_id || tx('Not provided')}</li>
+                    <li>{tx('Phone:')} {selectedVenue.phone || tx('Not provided')}</li>
+                    <li>{tx('Submitted:')} {formatDateTime(selectedVenue.submitted_at, locale, tx)}</li>
+                    <li>{tx('Latitude:')} {formatCoordinate(selectedVenue.latitude)}</li>
+                    <li>{tx('Longitude:')} {formatCoordinate(selectedVenue.longitude)}</li>
                     <li>
-                      Price range:
+                      {tx('Price range:')}
                       {' '}
                       {formatCurrencyVnd(selectedVenueMetadata.minPrice)} - {formatCurrencyVnd(selectedVenueMetadata.maxPrice)}
                     </li>
-                    <li>Operating hours: {selectedVenueOperatingHours}</li>
+                    <li>{tx('Operating hours:')} {selectedVenueOperatingHours}</li>
                     <li>
                       Rating:
                       {' '}
@@ -3587,7 +3613,7 @@ function AdminBoundaryPage() {
                             disabled={moderatingVenueId === selectedVenue.id}
                             onClick={() => handleModeration(selectedVenue.id, 'approve')}
                           >
-                            {moderatingVenueId === selectedVenue.id ? 'Updating...' : 'Approve Post'}
+                            {moderatingVenueId === selectedVenue.id ? tx('Updating...') : tx('Approve Post')}
                           </button>
                         ) : null}
 
@@ -3827,7 +3853,7 @@ function AdminBoundaryPage() {
                                   ) : null}
                                 </div>
                               </div>
-                              <small>{formatDateTime(review?.updated_at || review?.created_at)}</small>
+                              <small>{formatDateTime(review?.updated_at || review?.created_at, locale, tx)}</small>
 
                               <div className="admin-review-parent-content">
                                 {reviewTitle ? <p className="admin-review-title">{reviewTitle}</p> : null}
@@ -3914,7 +3940,7 @@ function AdminBoundaryPage() {
                                             ) : null}
                                           </div>
                                         </div>
-                                        <small>{formatDateTime(reply?.updated_at || reply?.updatedAt || reply?.created_at || reply?.createdAt)}</small>
+                                        <small>{formatDateTime(reply?.updated_at || reply?.updatedAt || reply?.created_at || reply?.createdAt, locale, tx)}</small>
                                         {replyTitle ? <p className="admin-review-title">{replyTitle}</p> : null}
                                         <p className="admin-review-reply-content">{replyContent || 'No content.'}</p>
 
@@ -3971,7 +3997,7 @@ function AdminBoundaryPage() {
       return (
         <div className="admin-detail-panel">
           <header>
-            <h3>Ward Naming</h3>
+            <h3>{tx('Ward Naming')}</h3>
             <p>
               {selectedWardId
                 ? 'Selected ward detected. You can add, update, or delete from this panel.'
@@ -4057,7 +4083,7 @@ function AdminBoundaryPage() {
       return (
         <div className="admin-detail-panel">
           <header>
-            <h3>Services Offered - Merchant</h3>
+            <h3>{tx('Services Offered - Merchant')}</h3>
             <p>Manage service options shown in the merchant registration form.</p>
           </header>
 
@@ -4115,7 +4141,7 @@ function AdminBoundaryPage() {
     return (
       <div className="admin-detail-panel">
         <header>
-          <h3>Place Categories</h3>
+          <h3>{tx('Place Categories')}</h3>
           <p>Manage main categories on the left, then add subcategories for the selected branch.</p>
         </header>
 
@@ -4278,15 +4304,15 @@ function AdminBoundaryPage() {
     <div className="admin-map-page">
       <SectionCard
         className="admin-map-section-card"
-        eyebrow="Admin Map Management"
-        title="Map Moderation Workspace"
-        description="Manage pending posts, ward boundaries, place categories, and merchant services without affecting other modules."
+        eyebrow={tx('Admin Map Management')}
+        title={tx('Map Moderation Workspace')}
+        description={tx('Manage pending posts, ward boundaries, place categories, and merchant services without affecting other modules.')}
       >
         {operationMessage ? <div className="admin-map-message success">{operationMessage}</div> : null}
         {loadWarning ? <div className="admin-map-message warning">{loadWarning}</div> : null}
         {error ? <div className="admin-map-message error">{error}</div> : null}
 
-        <div className="admin-mode-tabs" role="tablist" aria-label="Admin map modes">
+        <div className="admin-mode-tabs" role="tablist" aria-label={tx('Admin map modes')}>
           {PAGE_MODES.map((mode) => (
             <button
               key={mode.value}
@@ -4294,13 +4320,13 @@ function AdminBoundaryPage() {
               className={`admin-mode-tab ${activeMode === mode.value ? 'is-active' : ''}`.trim()}
               onClick={() => handleModeChange(mode.value)}
             >
-              <strong>{mode.label}</strong>
-              <span>{mode.helper}</span>
+              <strong>{tx(mode.label)}</strong>
+              <span>{tx(mode.helper)}</span>
             </button>
           ))}
         </div>
 
-        <p className="admin-mode-helper">{activeModeMeta?.helper}</p>
+        <p className="admin-mode-helper">{activeModeMeta?.helper ? tx(activeModeMeta.helper) : ''}</p>
 
         <div className="admin-workspace-grid">
           <aside className="admin-workspace-panel left">{renderLeftPanel()}</aside>
@@ -4381,7 +4407,7 @@ function AdminBoundaryPage() {
                             <h3>{request.venue_title || request.venue_name || `Venue #${request.venue_id}`}</h3>
                             <p>{proposedSnapshot.address || request.venue_address || 'Address pending'}</p>
                             <ul>
-                              <li>Queue: Location Updates</li>
+                              <li>{tx('Queue:')} {tx('Location Updates')}</li>
                               <li>Marker: New Location (Dark Orange)</li>
                               <li>Ward: {proposedSnapshot.wardId || 'Not detected'}</li>
                               <li>Status: Pending</li>
@@ -4404,7 +4430,7 @@ function AdminBoundaryPage() {
                           <h3>{selectedUpdateRequest.venue_title || selectedUpdateRequest.venue_name || `Venue #${selectedUpdateRequest.venue_id}`}</h3>
                           <p>{selectedUpdateOldSnapshot.address || 'Address pending'}</p>
                           <ul>
-                            <li>Queue: Location Updates</li>
+                            <li>{tx('Queue:')} {tx('Location Updates')}</li>
                             <li>Marker: Old Location (Teal)</li>
                             <li>Ward: {selectedUpdateOldSnapshot.wardId || 'Not detected'}</li>
                             <li>Status: Current Live Data</li>
@@ -4442,7 +4468,7 @@ function AdminBoundaryPage() {
                             <ul>
                               <li>Ward: {venue.ward_name || venue.ward_id || 'Not detected'}</li>
                               <li>Category: {formatVenueCategoryLabel(venue, placeCategoryTree)}</li>
-                              <li>Status: {statusLabel(venue.status)}</li>
+                              <li>Status: {statusLabel(venue.status, tx)}</li>
                               <li>Phone: {venue.phone || 'Not provided'}</li>
                             </ul>
                             {venue.description ? <p className="admin-map-popup-description">{venue.description}</p> : null}
@@ -4459,32 +4485,32 @@ function AdminBoundaryPage() {
                   className="admin-pending-filter-toggle"
                   onClick={() => setIsPendingFilterPanelOpen((current) => !current)}
                 >
-                  Filters {pendingActiveFilterCount ? `(${pendingActiveFilterCount})` : ''}
+                  {tx('Filters')} {pendingActiveFilterCount ? `(${pendingActiveFilterCount})` : ''}
                 </button>
               </div>
             ) : null}
 
             {activeMode === 'pending' && pendingQueueView === 'submissions' && isPendingFilterPanelOpen ? (
-              <section className="admin-pending-filter-panel" role="region" aria-label="Pending map filters">
+              <section className="admin-pending-filter-panel" role="region" aria-label={tx('Pending map filters')}>
                 <header>
-                  <h3>Map filters</h3>
+                  <h3>{tx('Map filters')}</h3>
                   <button
                     type="button"
                     onClick={() => setIsPendingFilterPanelOpen(false)}
-                    aria-label="Close pending filters"
+                    aria-label={tx('Close pending filters')}
                   >
                     ×
                   </button>
                 </header>
 
-                <p>Choose Place Categories, Ward Naming, and Services Offered, then search by place name.</p>
+                <p>{tx('Choose Place Categories, Ward Naming, and Services Offered, then search by place name.')}</p>
 
                 <label className="admin-pending-search-field">
-                  <span>Search keyword</span>
+                  <span>{tx('Search keyword')}</span>
                   <input
                     type="text"
                     value={pendingSearchInput}
-                    placeholder="Place name (supports Vietnamese with/without accents)"
+                    placeholder={tx('Place name (supports Vietnamese with/without accents)')}
                     onChange={(event) => setPendingSearchInput(event.target.value)}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter') {
@@ -4497,7 +4523,7 @@ function AdminBoundaryPage() {
 
                 <div className="admin-pending-filter-row">
                   <div className="admin-pending-filter-group">
-                    <h4>Place Categories</h4>
+                    <h4>{tx('Place Categories')}</h4>
                     <div className="admin-pending-filter-list">
                       {rootPlaceCategories.map((category) => {
                         const categoryId = Number(category.id);
@@ -4522,7 +4548,7 @@ function AdminBoundaryPage() {
                                   type="button"
                                   className="admin-category-filter-toggle"
                                   onClick={() => togglePendingCategoryBranchExpansion(categoryId)}
-                                  aria-label={isExpanded ? 'Collapse subcategories' : 'Expand subcategories'}
+                                  aria-label={isExpanded ? tx('Collapse subcategories') : tx('Expand subcategories')}
                                 >
                                   {isExpanded ? '−' : '+'}
                                 </button>
@@ -4555,7 +4581,7 @@ function AdminBoundaryPage() {
                   </div>
 
                   <div className="admin-pending-filter-group">
-                    <h4>Ward Naming</h4>
+                    <h4>{tx('Ward Naming')}</h4>
                     <div className="admin-pending-filter-list">
                       {wards.map((ward) => {
                         const wardId = String(ward.ward_id);
@@ -4576,7 +4602,7 @@ function AdminBoundaryPage() {
                   </div>
 
                   <div className="admin-pending-filter-group">
-                    <h4>Services Offered - Merchant</h4>
+                    <h4>{tx('Services Offered - Merchant')}</h4>
                     <div className="admin-pending-filter-list">
                       {merchantServices.map((service) => {
                         const serviceId = Number(service.id);
@@ -4598,13 +4624,13 @@ function AdminBoundaryPage() {
                 </div>
 
                 <div className="admin-pending-filter-actions">
-                  <button type="button" className="apply" onClick={applyPendingFilters}>Search</button>
-                  <button type="button" className="clear" onClick={clearPendingFilters}>Clear</button>
+                  <button type="button" className="apply" onClick={applyPendingFilters}>{tx('Search')}</button>
+                  <button type="button" className="clear" onClick={clearPendingFilters}>{tx('Clear')}</button>
                 </div>
               </section>
             ) : null}
 
-            {loading ? <div className="admin-map-overlay">Loading map management data...</div> : null}
+            {loading ? <div className="admin-map-overlay">{tx('Loading map management data...')}</div> : null}
           </section>
 
           <aside className="admin-workspace-panel right">{renderRightPanel()}</aside>

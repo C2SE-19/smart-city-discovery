@@ -8,7 +8,7 @@ import { getApiBaseUrl } from '../../services/api/client';
 import { fetchPlaceCategories } from '../../services/api/placeCategoriesApi';
 import { fetchMerchantServices } from '../../services/api/merchantServicesApi';
 import { fetchWards } from '../../services/api/wardsApi';
-import { fetchVenues } from '../../services/api/venuesApi';
+import { fetchVenues, invalidateVenuesListCache } from '../../services/api/venuesApi';
 import { searchVenuesByImage } from '../../services/api/imageSearchApi';
 import {
   fetchForYouRecommendations,
@@ -18,8 +18,11 @@ import {
 import { fetchCurrentWeather } from '../../services/api/weatherApi';
 import {
   fetchTrendingVenues,
+  invalidateTrendingVenuesCache,
 } from '../../services/api/adPackagesApi';
+import { resolvePublicOverviewStreamUrl } from '../../services/api/publicRealtimeApi';
 import OverviewCityMapCard from '../../components/map/OverviewCityMapCard';
+import useUserI18n from '../../hooks/useUserI18n';
 import heroFoodImage from '../../assets/images/anh1.png';
 import UserPreferenceWizard from '../../components/preferences/UserPreferenceWizard';
 import {
@@ -110,7 +113,7 @@ function loadImageElement(dataUrl) {
   });
 }
 
-async function createCompressedImageDataUrl(file, maxWidth = 1400, maxHeight = 1400, quality = 0.84) {
+async function createCompressedImageDataUrl(file, maxWidth = 1024, maxHeight = 1024, quality = 0.75) {
   const originalDataUrl = await readFileAsDataUrl(file);
 
   if (typeof document === 'undefined') {
@@ -145,6 +148,8 @@ async function createCompressedImageDataUrl(file, maxWidth = 1400, maxHeight = 1
 
 function getVenueImage(venue) {
   return (
+    venue.venue_primary_image_url ||
+    venue?.venue_images?.[0] ||
     venue.cover_image_url ||
     venue.coverImageUrl ||
     venue.image ||
@@ -704,6 +709,7 @@ function OverviewPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { language } = useLanguage();
+  const { tx } = useUserI18n();
   const { token, user } = useAuth();
   const isAuthenticated = Boolean(token && user);
   const t = translations[language] || translations.en;
@@ -760,6 +766,7 @@ function OverviewPage() {
   const [aiRefineLoading, setAiRefineLoading] = useState(false);
   const [aiRefineError, setAiRefineError] = useState('');
   const [aiRefineMeta, setAiRefineMeta] = useState(null);
+  const [autoScrollAi, setAutoScrollAi] = useState(false);
   const [geoCoordinates, setGeoCoordinates] = useState({ latitude: null, longitude: null });
   const [sliderPager, setSliderPager] = useState({});
   const sliderRefs = useRef(new Map());
@@ -776,7 +783,11 @@ function OverviewPage() {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
+  const loadTrendingVenuesRef = useRef(null);
+  const loadVenuesRef = useRef(null);
+  const publicRealtimeRetryRef = useRef(null);
   const [showCameraOverlay, setShowCameraOverlay] = useState(false);
+  const aiSectionRef = useRef(null);
   const placeCategoryTree = useMemo(() => buildPlaceCategoryTree(categories), [categories]);
   const rootPlaceCategories = placeCategoryTree.rootCategories;
   const childCategoriesByParentId = placeCategoryTree.childrenByParentId;
@@ -1185,12 +1196,14 @@ function OverviewPage() {
   useEffect(() => {
     let isMounted = true;
 
-    const loadTrendingVenues = async () => {
-      setTrendingLoading(true);
+    loadTrendingVenuesRef.current = async ({ force = false, silent = false } = {}) => {
+      if (!silent) {
+        setTrendingLoading(true);
+      }
       setTrendingError('');
 
       try {
-        const rows = await fetchTrendingVenues(12);
+        const rows = await fetchTrendingVenues(12, { force });
         if (!isMounted) {
           return;
         }
@@ -1201,19 +1214,22 @@ function OverviewPage() {
           return;
         }
 
-        setTrendingVenues([]);
-        setTrendingError(error?.response?.data?.message || 'Unable to load trending places right now.');
+        if (!silent) {
+          setTrendingVenues([]);
+          setTrendingError(error?.response?.data?.message || tx('Unable to load trending places right now.'));
+        }
       } finally {
-        if (isMounted) {
+        if (isMounted && !silent) {
           setTrendingLoading(false);
         }
       }
     };
 
-    loadTrendingVenues();
+    loadTrendingVenuesRef.current({ force: true });
 
     return () => {
       isMounted = false;
+      loadTrendingVenuesRef.current = null;
     };
   }, []);
 
@@ -1272,13 +1288,18 @@ function OverviewPage() {
   useEffect(() => {
     let isMounted = true;
 
-    const loadVenues = async () => {
-      setLoadingVenues(true);
+    loadVenuesRef.current = async ({ force = false, silent = false, live = false } = {}) => {
+      if (!silent) {
+        setLoadingVenues(true);
+        setVenues([]);
+      }
       setVenueError('');
-      setVenues([]);
 
       try {
-        const venueData = await fetchVenues({ ...venueParams });
+        const venueData = await fetchVenues(
+          live ? { ...venueParams, live: 'true' } : { ...venueParams },
+          { force }
+        );
 
         if (!isMounted) {
           return;
@@ -1290,19 +1311,22 @@ function OverviewPage() {
           return;
         }
 
-        setVenueError(error.response?.data?.message || 'Unable to load venues right now.');
-        setVenues([]);
+        if (!silent) {
+          setVenueError(error.response?.data?.message || 'Unable to load venues right now.');
+          setVenues([]);
+        }
       } finally {
-        if (isMounted) {
+        if (isMounted && !silent) {
           setLoadingVenues(false);
         }
       }
     };
 
-    loadVenues();
+    loadVenuesRef.current({ force: true });
 
     return () => {
       isMounted = false;
+      loadVenuesRef.current = null;
     };
   }, [venueParams]);
 
@@ -1317,8 +1341,7 @@ function OverviewPage() {
       pollingInFlight = true;
 
       try {
-        const liveVenueData = await fetchVenues({ ...venueParams, live: 'true' });
-        setVenues(Array.isArray(liveVenueData) ? liveVenueData : []);
+        await loadVenuesRef.current?.({ force: true, silent: true, live: true });
       } catch {
         // Keep currently rendered venue list on transient polling errors.
       } finally {
@@ -1330,6 +1353,83 @@ function OverviewPage() {
       window.clearInterval(intervalId);
     };
   }, [venueParams]);
+
+  useEffect(() => {
+    if (typeof EventSource === 'undefined') {
+      return undefined;
+    }
+
+    const streamUrl = resolvePublicOverviewStreamUrl();
+    if (!streamUrl) {
+      return undefined;
+    }
+
+    const eventSource = new EventSource(streamUrl);
+    let isActive = true;
+
+    const runRealtimeRefresh = (scope = 'all') => {
+      if (!isActive) {
+        return;
+      }
+
+      if (scope === 'all' || scope === 'venues') {
+        invalidateVenuesListCache();
+        loadVenuesRef.current?.({ force: true, silent: true, live: true });
+      }
+
+      if (scope === 'all' || scope === 'trending') {
+        invalidateTrendingVenuesCache();
+        loadTrendingVenuesRef.current?.({ force: true, silent: true });
+      }
+    };
+
+    const scheduleRealtimeRefresh = (scope = 'all') => {
+      if (publicRealtimeRetryRef.current) {
+        window.clearTimeout(publicRealtimeRetryRef.current);
+      }
+
+      publicRealtimeRetryRef.current = window.setTimeout(() => {
+        publicRealtimeRetryRef.current = null;
+        runRealtimeRefresh(scope);
+      }, 150);
+    };
+
+    const handleOverviewUpdate = (event) => {
+      try {
+        const payload = JSON.parse(event?.data || '{}');
+        const eventType = String(payload?.type || '').trim().toLowerCase();
+
+        if (eventType === 'trending_changed') {
+          scheduleRealtimeRefresh('trending');
+          return;
+        }
+
+        if (eventType === 'venues_changed') {
+          scheduleRealtimeRefresh('venues');
+        }
+      } catch {
+        // Ignore malformed realtime payloads.
+      }
+    };
+
+    const handleWindowFocus = () => {
+      scheduleRealtimeRefresh('all');
+    };
+
+    eventSource.addEventListener('overview-update', handleOverviewUpdate);
+    window.addEventListener('focus', handleWindowFocus);
+
+    return () => {
+      isActive = false;
+      window.removeEventListener('focus', handleWindowFocus);
+      eventSource.removeEventListener('overview-update', handleOverviewUpdate);
+      eventSource.close();
+      if (publicRealtimeRetryRef.current) {
+        window.clearTimeout(publicRealtimeRetryRef.current);
+        publicRealtimeRetryRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     setSearchPage(1);
@@ -1533,7 +1633,7 @@ function OverviewPage() {
     });
   };
 
-  const handleAiSuggest = async () => {
+  const handleAiSuggest = async ({ skipPreferenceGate = false } = {}) => {
     if (!token) {
       navigate('/login');
       return;
@@ -1543,7 +1643,7 @@ function OverviewPage() {
       return;
     }
 
-    if (!userPreference?.onboardingCompleted) {
+    if (!userPreference?.onboardingCompleted && !skipPreferenceGate) {
       setShowPreferenceWizard(true);
       return;
     }
@@ -1598,7 +1698,7 @@ function OverviewPage() {
       setAiBaseVenues(recommendedVenues);
       setAiVisibleCount(8);
 
-      if (!response?.preferencesCompleted) {
+      if (!response?.preferencesCompleted && !skipPreferenceGate) {
         setShowPreferenceWizard(true);
       }
     } catch (error) {
@@ -1610,6 +1710,57 @@ function OverviewPage() {
       setAiSuggestLoading(false);
     }
   };
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const shouldSuggest = params.get('aiSuggest') === '1';
+    const shouldImageSearch = params.get('imageSearch') === '1';
+    let didHandle = false;
+
+    if ((shouldSuggest || shouldImageSearch) && !isAuthenticated) {
+      navigate('/login', { state: { from: `${location.pathname}${location.search || ''}` } });
+      return;
+    }
+
+    if (shouldSuggest && preferencesLoading) {
+      return;
+    }
+
+    if (shouldSuggest) {
+      handleAiSuggest({ skipPreferenceGate: true });
+      setAutoScrollAi(true);
+      params.delete('aiSuggest');
+      didHandle = true;
+    }
+
+    if (shouldImageSearch) {
+      openImageModal();
+      params.delete('imageSearch');
+      didHandle = true;
+    }
+
+    if (didHandle) {
+      const nextSearch = params.toString();
+      navigate(
+        { pathname: location.pathname, search: nextSearch ? `?${nextSearch}` : '' },
+        { replace: true }
+      );
+    }
+  }, [isAuthenticated, location.pathname, location.search, navigate, preferencesLoading]);
+
+  useEffect(() => {
+    if (!autoScrollAi || !aiSuggestMode) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      aiSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 200);
+
+    setAutoScrollAi(false);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [aiSuggestMode, autoScrollAi]);
 
   const handleClearAiRefine = () => {
     setAiRefineInput('');
@@ -1852,7 +2003,7 @@ function OverviewPage() {
         } catch (e) {}
         closeCameraOverlay();
         try {
-          await runVisionSearchWithFile(file, imageSearchTarget);
+          await runVisionSearchWithFile(file, imageSearchTarget || 'any');
           resolve();
         } catch (err) {
           reject(err);
@@ -1862,6 +2013,7 @@ function OverviewPage() {
   };
 
   const runVisionSearchWithFile = async (file, target) => {
+    const searchTarget = target || 'any';
     setImageSearchLoading(true);
     setImageError('');
 
@@ -1869,7 +2021,7 @@ function OverviewPage() {
       const imageDataUrl = await createCompressedImageDataUrl(file);
       const response = await searchVenuesByImage({
         imageDataUrl,
-        target,
+        target: searchTarget,
         language
       });
 
@@ -1883,9 +2035,12 @@ function OverviewPage() {
       ]
         .map((item) => String(item || '').trim())
         .find((item) => item && item.toLowerCase() !== 'unknown' && item.toLowerCase() !== 'place' && item.toLowerCase() !== 'food');
-      const fallbackSearchText = target === 'food'
-        ? (language === 'en' ? 'Detected food from image' : 'Món ăn nhận diện từ ảnh')
-        : (language === 'en' ? 'Detected place from image' : 'Địa điểm nhận diện từ ảnh');
+      const isUnifiedTarget = target === 'any' || !target;
+      const fallbackSearchText = isUnifiedTarget
+        ? (language === 'en' ? 'Detected food or place from image' : 'Món ăn hoặc địa điểm nhận diện từ ảnh')
+        : (target === 'food'
+            ? (language === 'en' ? 'Detected food from image' : 'Món ăn nhận diện từ ảnh')
+            : (language === 'en' ? 'Detected place from image' : 'Địa điểm nhận diện từ ảnh'));
       const resolvedSearchText = (!nextSearchText || isUnknownLabel)
         ? (readableHint || fallbackSearchText)
         : nextSearchText;
@@ -1936,16 +2091,11 @@ function OverviewPage() {
       return;
     }
 
-    if (!imageSearchTarget) {
-      setImageError(language === 'en' ? 'Please select search mode first.' : 'Vui lòng chọn kiểu tìm kiếm trước.');
-      return;
-    }
-
     setSelectedImage(file);
     const url = URL.createObjectURL(file);
     setPreviewUrl(url);
 
-    await runVisionSearchWithFile(file, imageSearchTarget);
+    await runVisionSearchWithFile(file, imageSearchTarget || 'any');
   };
 
   const clearSelectedImage = () => {
@@ -2423,22 +2573,50 @@ function OverviewPage() {
             <div className="overview-image-search-panel">
               {!imageSearchTarget ? (
                 <div className="overview-image-step-root">
-                  <div className="overview-image-search-actions">
+                  <div className="overview-image-intro">
+                    <p className="overview-image-eyebrow">{language === 'en' ? 'AI image search' : 'Tìm kiếm bằng hình ảnh AI'}</p>
+                    <h3 className="overview-image-title">{t.hero.searchFoodAndPlace}</h3>
+                    <p className="overview-image-description">
+                      {language === 'en'
+                        ? 'Upload one image and let the system detect both food items and venue contexts in a single workflow.'
+                        : 'Tải lên một ảnh để hệ thống tự nhận diện cả món ăn lẫn bối cảnh địa điểm trong cùng một quy trình.'}
+                    </p>
+                    <div className="overview-image-info-row" aria-hidden="true">
+                      <span>Food</span>
+                      <span>Venue</span>
+                      <span>AI matched</span>
+                    </div>
+                  </div>
+
+                  <div className="overview-image-source-grid">
                     <button
                       type="button"
-                      className="overview-image-button food"
-                      onClick={() => setImageSearchTarget('food')}
+                      className="overview-image-source-card camera"
+                      onClick={() => handlePickImage('camera')}
                       disabled={imageSearchLoading}
                     >
-                      {t.hero.searchFood}
+                      <span className="overview-image-source-badge">CAM</span>
+                      <span className="overview-image-source-title">{t.hero.takeNewPhoto}</span>
+                      <span className="overview-image-source-description">
+                        {language === 'en'
+                          ? 'Open the camera and capture a fresh photo for instant analysis.'
+                          : 'Mở camera và chụp ảnh mới để phân tích ngay lập tức.'}
+                      </span>
                     </button>
+
                     <button
                       type="button"
-                      className="overview-image-button place"
-                      onClick={() => setImageSearchTarget('place')}
+                      className="overview-image-source-card library"
+                      onClick={() => handlePickImage('library')}
                       disabled={imageSearchLoading}
                     >
-                      {t.hero.searchPlace}
+                      <span className="overview-image-source-badge">FILE</span>
+                      <span className="overview-image-source-title">{t.hero.chooseFromLibrary}</span>
+                      <span className="overview-image-source-description">
+                        {language === 'en'
+                          ? 'Select a prepared photo from your device.'
+                          : 'Chọn ảnh có sẵn trên thiết bị để phân tích nhanh hơn.'}
+                      </span>
                     </button>
                   </div>
                 </div>
@@ -2458,22 +2636,39 @@ function OverviewPage() {
                     </button>
                   </div>
 
-                  <div className="overview-image-search-actions overview-image-source-actions">
+                  <div className="overview-image-source-grid overview-image-source-grid-compact">
                     <button
                       type="button"
-                      className="overview-image-button camera"
+                      className="overview-image-source-card camera"
                       onClick={() => handlePickImage('camera')}
                       disabled={imageSearchLoading}
                     >
-                      {imageSearchLoading ? t.hero.analyzingImage : t.hero.takeNewPhoto}
+                      <span className="overview-image-source-badge">CAM</span>
+                      <span className="overview-image-source-title">
+                        {imageSearchLoading ? t.hero.analyzingImage : t.hero.takeNewPhoto}
+                      </span>
+                      <span className="overview-image-source-description">
+                        {language === 'en'
+                          ? 'Open the camera for a direct capture.'
+                          : 'Mở camera để chụp trực tiếp và nhận diện ngay.'}
+                      </span>
                     </button>
+
                     <button
                       type="button"
-                      className="overview-image-button library"
+                      className="overview-image-source-card library"
                       onClick={() => handlePickImage('library')}
                       disabled={imageSearchLoading}
                     >
-                      {imageSearchLoading ? t.hero.analyzingImage : t.hero.chooseFromLibrary}
+                      <span className="overview-image-source-badge">LIB</span>
+                      <span className="overview-image-source-title">
+                        {imageSearchLoading ? t.hero.analyzingImage : t.hero.chooseFromLibrary}
+                      </span>
+                      <span className="overview-image-source-description">
+                        {language === 'en'
+                          ? 'Use a saved photo from your library.'
+                          : 'Dùng ảnh đã lưu trong thư viện để xử lý nhanh.'}
+                      </span>
                     </button>
                   </div>
                 </div>
@@ -2498,7 +2693,32 @@ function OverviewPage() {
               {showCameraOverlay && (
                 <div className="overview-camera-overlay">
                   <div className="overview-camera-inner">
-                    <video ref={videoRef} className="overview-camera-video" playsInline muted />
+                    <div className="overview-camera-header">
+                      <div>
+                        <p className="overview-camera-eyebrow">{language === 'en' ? 'Capture mode' : 'Chế độ chụp'}</p>
+                        <h4>{language === 'en' ? 'Professional framing for AI detection' : 'Khung chụp tối ưu cho AI nhận diện'}</h4>
+                        <p>
+                          {language === 'en'
+                            ? 'Keep the subject inside the frame for a clearer result.'
+                            : 'Giữ chủ thể trong khung để kết quả nhận diện rõ và chính xác hơn.'}
+                        </p>
+                      </div>
+                      <button type="button" className="overview-camera-close" onClick={closeCameraOverlay} disabled={imageSearchLoading}>
+                        {t.hero.backToSearchMode}
+                      </button>
+                    </div>
+
+                    <div className="overview-camera-stage">
+                      <video ref={videoRef} className="overview-camera-video" playsInline muted />
+                      <div className="overview-camera-frame" aria-hidden="true">
+                        <span className="overview-camera-corner overview-camera-corner-tl" />
+                        <span className="overview-camera-corner overview-camera-corner-tr" />
+                        <span className="overview-camera-corner overview-camera-corner-bl" />
+                        <span className="overview-camera-corner overview-camera-corner-br" />
+                        <div className="overview-camera-grid" />
+                      </div>
+                    </div>
+
                     <div className="overview-camera-actions">
                       <button type="button" className="overview-camera-capture" onClick={capturePhoto} disabled={imageSearchLoading}>
                         {t.hero.takeNewPhoto}
@@ -2582,7 +2802,7 @@ function OverviewPage() {
             onClick={() => setShowFilterPanel((current) => !current)}
             data-onboarding="overview-filter-button"
           >
-            Filter
+            {tx('Filter')}
           </button>
 
           {/* AI suggestion button */}
@@ -2594,21 +2814,25 @@ function OverviewPage() {
             disabled={aiSuggestLoading || preferencesLoading}
             data-onboarding="overview-ai-button"
           >
-            {aiSuggestLoading ? 'Thinking...' : t.search.aiSuggest}
+            {aiSuggestLoading ? tx('Thinking...') : t.search.aiSuggest}
           </button>
         </div>
 
         {activeFilterCount > 0 ? (
           <div className="overview-active-filters">
-            <span>{activeFilterCount} filter{activeFilterCount === 1 ? '' : 's'} active</span>
+            <span>
+              {tx(activeFilterCount === 1 ? '{{count}} filter active' : '{{count}} filters active', {
+                count: activeFilterCount,
+              })}
+            </span>
             <button type="button" onClick={clearAllFilters}>
-              Clear all
+              {tx('Clear all')}
             </button>
           </div>
         ) : null}
 
         {showFilterPanel ? (
-          <div className="overview-filter-panel" role="region" aria-label="Filter options">
+          <div className="overview-filter-panel" role="region" aria-label={tx('Filter options')}>
             <OverviewCategoryFilterGroup
               rootCategories={rootPlaceCategories}
               childCategoriesByParentId={childCategoriesByParentId}
@@ -2619,7 +2843,7 @@ function OverviewPage() {
             />
 
             <FilterGroup
-              title="Ward Naming"
+              title={tx('Ward Naming')}
               options={wards}
               selectedValues={selectedWardIds}
               optionValue={(ward) => String(ward.ward_id)}
@@ -2628,7 +2852,7 @@ function OverviewPage() {
             />
 
             <FilterGroup
-              title="Services Offered - Merchant"
+              title={tx('Services Offered - Merchant')}
               options={services}
               selectedValues={selectedServiceIds}
               optionValue={(service) => Number(service.id)}
@@ -2636,7 +2860,7 @@ function OverviewPage() {
               onToggle={toggleServiceSelection}
             />
 
-            {loadingFilters ? <p className="overview-empty-copy">Loading filter options...</p> : null}
+            {loadingFilters ? <p className="overview-empty-copy">{tx('Loading filter options...')}</p> : null}
             {filterError ? <p className="overview-inline-error">{filterError}</p> : null}
           </div>
         ) : null}
@@ -2645,14 +2869,14 @@ function OverviewPage() {
       {!isCondensedMode ? (
         <section className="overview-section overview-content-lane overview-for-you-section">
           <div className="overview-section-heading">
-            <h2>Trend</h2>
+            <h2>{tx('Trend')}</h2>
             <span />
             <p className="overview-section-subcopy">
-              Promoted places currently being pushed by merchants.
+              {tx('Promoted places currently being pushed by merchants.')}
             </p>
           </div>
 
-          {trendingLoading ? <p className="overview-empty-copy">Loading trending places...</p> : null}
+          {trendingLoading ? <p className="overview-empty-copy">{tx('Loading trending places...')}</p> : null}
           {!trendingLoading && trendingError ? <p className="overview-inline-error">{trendingError}</p> : null}
 
           {!trendingLoading && !trendingError && trendingVenues.length > 0 ? (
@@ -2691,7 +2915,7 @@ function OverviewPage() {
           ) : null}
 
           {!trendingLoading && !trendingError && !trendingVenues.length ? (
-            <p className="overview-empty-copy">No promoted trending places are active right now.</p>
+            <p className="overview-empty-copy">{tx('No promoted trending places are active right now.')}</p>
           ) : null}
         </section>
       ) : null}
@@ -2699,22 +2923,22 @@ function OverviewPage() {
       {!isCondensedMode && token ? (
         <section className="overview-section overview-content-lane overview-for-you-section">
           <div className="overview-section-heading">
-            <h2>For You</h2>
+            <h2>{tx('For You')}</h2>
             <span />
             <p className="overview-section-subcopy">
-              Personalized places based on your profile, interests, and nearby distance.
+              {tx('Personalized places based on your profile, interests, and nearby distance.')}
             </p>
           </div>
 
           {preferencesLoading ? (
-            <p className="overview-empty-copy">Checking your preference profile...</p>
+            <p className="overview-empty-copy">{tx('Checking your preference profile...')}</p>
           ) : null}
 
           {!preferencesLoading && !userPreference?.onboardingCompleted ? (
             <div className="overview-for-you-empty">
-              <p>Complete your preference form to unlock personalized recommendations.</p>
+              <p>{tx('Complete your preference form to unlock personalized recommendations.')}</p>
               <button type="button" onClick={() => setShowPreferenceWizard(true)}>
-                Set preferences
+                {tx('Set preferences')}
               </button>
             </div>
           ) : null}
@@ -2724,7 +2948,7 @@ function OverviewPage() {
           ) : null}
 
           {!preferencesLoading && userPreference?.onboardingCompleted && forYouLoading ? (
-            <p className="overview-empty-copy">Loading personalized places...</p>
+            <p className="overview-empty-copy">{tx('Loading personalized places...')}</p>
           ) : null}
 
           {!preferencesLoading &&
@@ -2736,7 +2960,7 @@ function OverviewPage() {
               <button
                 type="button"
                 className="overview-slider-btn prev"
-                aria-label="Scroll For You left"
+                aria-label={tx('Scroll For You left')}
                 onClick={() => scrollCategorySlider('for-you', -1)}
               />
               <div
@@ -2756,7 +2980,7 @@ function OverviewPage() {
               <button
                 type="button"
                 className="overview-slider-btn next"
-                aria-label="Scroll For You right"
+                aria-label={tx('Scroll For You right')}
                 onClick={() => scrollCategorySlider('for-you', 1)}
               />
               {renderSliderPaginationDots('for-you')}
@@ -2768,23 +2992,27 @@ function OverviewPage() {
           !forYouLoading &&
           !forYouError &&
           !forYouVenues.length ? (
-            <p className="overview-empty-copy">No personalized place found yet. Try updating your preferences.</p>
+            <p className="overview-empty-copy">{tx('No personalized place found yet. Try updating your preferences.')}</p>
           ) : null}
         </section>
       ) : null}
 
       {aiSuggestMode ? (
-        <section className="overview-section overview-search-result-section overview-ai-result-section">
+        <section
+          id="ai-suggested"
+          ref={aiSectionRef}
+          className="overview-section overview-search-result-section overview-ai-result-section"
+        >
           <div className="overview-section-heading">
-            <h2>AI Suggested for You</h2>
+            <h2>{tx('AI Suggested for You')}</h2>
             <span />
             <p className="overview-section-subcopy">
-              Personalized picks based on profile, nearby distance, real-time weather, current time, and opening hours.
+              {tx('Personalized picks based on profile, nearby distance, real-time weather, current time, and opening hours.')}
             </p>
             {aiContext?.currentTimeWindowLabel ? (
               <p className="overview-ai-context-copy">
-                Best for now: {aiContext.currentTimeWindowLabel}
-                {aiContext.weatherMain ? ` • Weather: ${aiContext.weatherMain}` : ''}
+                {tx('Best for now:')} {aiContext.currentTimeWindowLabel}
+                {aiContext.weatherMain ? ` | ${tx('Weather:')} ${aiContext.weatherMain}` : ''}
               </p>
             ) : null}
           </div>
@@ -2885,7 +3113,7 @@ function OverviewPage() {
                     className="overview-ai-show-more"
                     onClick={() => setAiVisibleCount((prev) => Math.min(prev + 8, aiSuggestedVenues.length))}
                   >
-                    khác
+                    Other
                   </button>
                 </div>
               ) : null}

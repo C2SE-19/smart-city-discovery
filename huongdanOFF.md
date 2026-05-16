@@ -6,7 +6,7 @@ git checkout VoVanAnhKhoa2
 git pull origin VoVanAnhKhoa2
 
 git add .
-git commit -m "update something"
+git commit -m "update 14/05 real time trend"
 git push origin VoVanAnhKhoa2
 
 ## Deploy steps (production-ready, ngắn gọn):

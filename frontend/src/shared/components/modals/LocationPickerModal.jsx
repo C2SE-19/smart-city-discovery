@@ -7,6 +7,7 @@ import { detectWardRequest, geocodeVenueAddress } from '../../../services/api/ve
 import './LocationPickerModal.css';
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
 import markerShadow from 'leaflet/dist/images/marker-shadow.png';
+import useUserI18n from '../../../hooks/useUserI18n';
 
 const DEFAULT_LOCATION = { lat: 16.0471, lng: 108.2068 };
 const DEFAULT_ZOOM = 13;
@@ -281,6 +282,7 @@ function LocationPickerModal({
   selectedWardId = '',
   initialAddressQuery = ''
 }) {
+  const { tx } = useUserI18n();
   const [selectedLocation, setSelectedLocation] = useState(null);
   const [mapCenter, setMapCenter] = useState(DEFAULT_LOCATION);
   const [mapZoom, setMapZoom] = useState(DEFAULT_ZOOM);
@@ -371,7 +373,7 @@ function LocationPickerModal({
 
     const resolveAddressToMapPoint = async () => {
       setIsResolvingAddress(true);
-      setAddressResolveMessage('Searching map position from entered address...');
+      setAddressResolveMessage(tx('Searching map position from entered address...'));
 
       try {
         const normalizedAddressWithoutHouseNumber = stripLeadingHouseNumber(normalizedAddressQuery);
@@ -440,7 +442,7 @@ function LocationPickerModal({
         }
 
         if (!geocoded) {
-          throw lastGeocodeError || new Error('Unable to geocode address');
+          throw lastGeocodeError || new Error(tx('Could not geocode the entered address. Please click directly on the map.'));
         }
 
         if (!isMounted) {
@@ -451,7 +453,7 @@ function LocationPickerModal({
         const longitude = Number(geocoded?.longitude ?? geocoded?.lng);
 
         if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
-          setAddressResolveMessage('Could not locate this address. Please click directly on the map.');
+          setAddressResolveMessage(tx('Could not locate this address. Please click directly on the map.'));
           return;
         }
 
@@ -504,7 +506,7 @@ function LocationPickerModal({
 
         setAddressResolveMessage(
           error?.response?.data?.message ||
-            'Could not geocode the entered address. Please click directly on the map.'
+            tx('Could not geocode the entered address. Please click directly on the map.')
         );
       } finally {
         if (isMounted) {
@@ -525,7 +527,8 @@ function LocationPickerModal({
     initialAddressQuery,
     isOpen,
     normalizedSelectedWardId,
-    selectedWard
+    selectedWard,
+    tx
   ]);
 
   useEffect(() => {
@@ -541,14 +544,14 @@ function LocationPickerModal({
         const wardData = await fetchWards();
         setWards(Array.isArray(wardData) ? wardData : []);
       } catch (error) {
-        setWardLoadError(error.response?.data?.message || 'Could not load ward boundaries for map preview.');
+        setWardLoadError(error.response?.data?.message || tx('Could not load ward boundaries for map preview.'));
       } finally {
         setLoadingWards(false);
       }
     }
 
     loadWards();
-  }, [isOpen]);
+  }, [isOpen, tx]);
 
   const handleMapClick = async (latlng) => {
     if (isValidatingLocation) {
@@ -556,12 +559,12 @@ function LocationPickerModal({
     }
 
     if (!normalizedSelectedWardId) {
-      setSelectionError('Select a ward before picking location on map.');
+      setSelectionError(tx('Select a ward before picking location on map.'));
       return;
     }
 
     if (!allowedBoundaries.length) {
-      setSelectionError('Ward boundaries are not available. Please try again in a moment.');
+      setSelectionError(tx('Ward boundaries are not available. Please try again in a moment.'));
       return;
     }
 
@@ -583,7 +586,7 @@ function LocationPickerModal({
       const detectedWardId = String(detection?.wardId || detection?.ward_id || '').trim();
 
       if (!detectedWardId) {
-        setSelectionError('You can only pin a location inside ward boundaries.');
+        setSelectionError(tx('You can only pin a location inside ward boundaries.'));
         return;
       }
 
@@ -591,7 +594,7 @@ function LocationPickerModal({
         setSelectionError(
           selectedWard
             ? `You can only pin a location inside ${selectedWard.name}.`
-            : 'Selected location does not belong to the chosen ward.'
+            : tx('Selected location does not belong to the chosen ward.')
         );
         return;
       }
@@ -603,7 +606,7 @@ function LocationPickerModal({
       setMapZoom(PICKED_LOCATION_ZOOM);
       setSelectionError('');
     } catch {
-      setSelectionError('Could not validate this location. Please try again.');
+      setSelectionError(tx('Could not validate this location. Please try again.'));
     } finally {
       setIsValidatingLocation(false);
     }
@@ -615,7 +618,7 @@ function LocationPickerModal({
     }
 
     if (!normalizedSelectedWardId) {
-      setSelectionError('Select a ward before confirming location.');
+      setSelectionError(tx('Select a ward before confirming location.'));
       return;
     }
 
@@ -632,7 +635,7 @@ function LocationPickerModal({
         setSelectionError(
           selectedWard
             ? `Selected point is outside ${selectedWard.name}. Please pick again.`
-            : 'Selected point is outside ward boundaries. Please pick again.'
+            : tx('Selected point is outside ward boundaries. Please pick again.')
         );
         return;
       }
@@ -640,7 +643,7 @@ function LocationPickerModal({
       onLocationSelect(selectedLocation);
       onClose();
     } catch {
-      setSelectionError('Could not validate selected location. Please try again.');
+      setSelectionError(tx('Could not validate selected location. Please try again.'));
     } finally {
       setIsValidatingLocation(false);
     }
@@ -652,7 +655,7 @@ function LocationPickerModal({
     <div className="modal-overlay location-picker-overlay" onClick={onClose}>
       <div className="modal-content location-picker-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2 className="modal-title">Pick Venue Location</h2>
+          <h2 className="modal-title">{tx('Pick Venue Location')}</h2>
           <button type="button" className="modal-close-btn" onClick={onClose}>
             ✕
           </button>
@@ -662,8 +665,8 @@ function LocationPickerModal({
           <div className="map-container">
             <div className="map-instruction">
               {selectedWard
-                ? `Click inside ${selectedWard.name} to pin your venue location.`
-                : 'Click inside ward boundaries to pin your venue location.'}
+                ? tx('Click inside {{ward}} to pin your venue location.', { ward: selectedWard.name })
+                : tx('Click inside ward boundaries to pin your venue location.')}
             </div>
 
             <MapContainer
@@ -701,7 +704,7 @@ function LocationPickerModal({
                     }}
                   >
                     <Tooltip sticky>
-                      <span>{ward.name}{isSelectedWard ? ' (selected)' : ''}</span>
+                      <span>{isSelectedWard ? tx('{{ward}} (selected)', { ward: ward.name }) : ward.name}</span>
                     </Tooltip>
                   </GeoJSON>
                 );
@@ -714,22 +717,22 @@ function LocationPickerModal({
           </div>
 
           <div className="map-info">
-            {selectedWard ? <p className="selected-ward-note">Selected ward: {selectedWard.name}</p> : null}
+            {selectedWard ? <p className="selected-ward-note">{tx('Selected ward: {{ward}}', { ward: selectedWard.name })}</p> : null}
             <div className="coordinate-display">
               <div className="coordinate-item">
-                <span className="coordinate-label">Latitude</span>
+                <span className="coordinate-label">{tx('Latitude')}</span>
                 <span className="coordinate-value">{selectedLocation?.lat?.toFixed(6) || ''}</span>
               </div>
 
               <div className="coordinate-item">
-                <span className="coordinate-label">Longitude</span>
+                <span className="coordinate-label">{tx('Longitude')}</span>
                 <span className="coordinate-value">{selectedLocation?.lng?.toFixed(6) || ''}</span>
               </div>
             </div>
 
-            {loadingWards ? <p className="ward-load-note">Loading ward boundaries...</p> : null}
-            {isResolvingAddress ? <p className="ward-load-note">Finding location from entered address...</p> : null}
-            {isValidatingLocation ? <p className="ward-load-note">Validating selected location...</p> : null}
+            {loadingWards ? <p className="ward-load-note">{tx('Loading ward boundaries...')}</p> : null}
+            {isResolvingAddress ? <p className="ward-load-note">{tx('Finding location from entered address...')}</p> : null}
+            {isValidatingLocation ? <p className="ward-load-note">{tx('Validating selected location...')}</p> : null}
             {wardLoadError ? <p className="ward-load-error">{wardLoadError}</p> : null}
             {addressResolveMessage ? <p className="map-geocode-note">{addressResolveMessage}</p> : null}
             {selectionError ? <p className="map-selection-error">{selectionError}</p> : null}
@@ -738,7 +741,7 @@ function LocationPickerModal({
 
         <div className="modal-footer">
           <button type="button" className="modal-btn modal-btn-cancel" onClick={onClose}>
-            Cancel
+            {tx('Cancel')}
           </button>
           <button
             type="button"
@@ -746,7 +749,7 @@ function LocationPickerModal({
             onClick={handleConfirm}
             disabled={!selectedLocation || isValidatingLocation}
           >
-            Confirm Location
+            {tx('Confirm Location')}
           </button>
         </div>
       </div>

@@ -3,6 +3,7 @@ import ImageUploader from './ImageUploader';
 import ServiceSelector from './ServiceSelector';
 import BusinessLicenseUploader from './BusinessLicenseUploader';
 import LocationPickerModal from '../../../shared/components/modals/LocationPickerModal';
+import useUserI18n from '../../../hooks/useUserI18n';
 import { createVenueRequest, fetchVenueEditDraft, submitVenueUpdateRequest } from '../../../services/api/venuesApi';
 import { fetchPlaceCategories } from '../../../services/api/placeCategoriesApi';
 import { fetchMerchantServices } from '../../../services/api/merchantServicesApi';
@@ -233,6 +234,7 @@ function normalizeWeeklyOpenHoursForPayload(weeklyOpenHours, fallbackStart, fall
 }
 
 function MerchantVenueForm({ editVenueId = null }) {
+  const { language, tx } = useUserI18n();
   const isEditMode = false;
   const [activeWeekDay, setActiveWeekDay] = useState(WEEK_DAYS[0].key);
   const [formData, setFormData] = useState({
@@ -392,7 +394,7 @@ function MerchantVenueForm({ editVenueId = null }) {
 
         setPlaceCategories(activeCategories);
       } catch (error) {
-        setCategoryLoadError(error.response?.data?.message || 'Could not load categories. Please refresh this page.');
+        setCategoryLoadError(error.response?.data?.message || tx('Could not load categories. Please refresh this page.'));
       } finally {
         setCategoriesLoading(false);
       }
@@ -423,7 +425,7 @@ function MerchantVenueForm({ editVenueId = null }) {
 
         setMerchantServices(activeServices);
       } catch (error) {
-        setServiceLoadError(error.response?.data?.message || 'Could not load services. Please refresh this page.');
+        setServiceLoadError(error.response?.data?.message || tx('Could not load services. Please refresh this page.'));
       } finally {
         setServicesLoading(false);
       }
@@ -445,7 +447,7 @@ function MerchantVenueForm({ editVenueId = null }) {
 
         setWards(sortedWards);
       } catch (error) {
-        setWardLoadError(error.response?.data?.message || 'Could not load wards. Please refresh this page.');
+        setWardLoadError(error.response?.data?.message || tx('Could not load wards. Please refresh this page.'));
       } finally {
         setWardsLoading(false);
       }
@@ -474,7 +476,7 @@ function MerchantVenueForm({ editVenueId = null }) {
         const pendingRequest = response?.pendingUpdateRequest || null;
 
         if (!venue) {
-          throw new Error('Could not load venue details for editing');
+          throw new Error(tx('Could not load venue details for editing'));
         }
 
         const pendingSnapshot = pendingRequest?.proposed_snapshot && typeof pendingRequest.proposed_snapshot === 'object'
@@ -568,7 +570,7 @@ function MerchantVenueForm({ editVenueId = null }) {
           pendingRequest?.status === 'pending'
             ? {
                 type: 'success',
-                message: 'An existing pending location update was loaded. Submitting again will replace that pending request.'
+                message: tx('An existing pending location update was loaded. Submitting again will replace that pending request.')
               }
             : null
         );
@@ -578,7 +580,7 @@ function MerchantVenueForm({ editVenueId = null }) {
           return;
         }
 
-        setDraftLoadError(error.response?.data?.message || error.message || 'Could not load this venue for editing.');
+        setDraftLoadError(error.response?.data?.message || error.message || tx('Could not load this venue for editing.'));
       } finally {
         if (isMounted) {
           setLoadingDraft(false);
@@ -603,7 +605,7 @@ function MerchantVenueForm({ editVenueId = null }) {
     new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result);
-      reader.onerror = () => reject(new Error('Failed to read file'));
+      reader.onerror = () => reject(new Error(tx('Failed to read file')));
       reader.readAsDataURL(file);
     });
 
@@ -737,43 +739,43 @@ function MerchantVenueForm({ editVenueId = null }) {
     const requiresSubcategory = selectedMainCategoryChildren.length > 0;
 
     // Required fields
-    if (!formData.venueName.trim()) errors.venueName = 'Venue name is required';
-    if (!formData.mainCategory) errors.category = 'Main category is required';
-    if (requiresSubcategory && !formData.category) errors.subcategory = 'Subcategory is required';
-    if (!requiresSubcategory && !formData.category) errors.category = 'Category is required';
+    if (!formData.venueName.trim()) errors.venueName = tx('Venue name is required');
+    if (!formData.mainCategory) errors.category = tx('Main category is required');
+    if (requiresSubcategory && !formData.category) errors.subcategory = tx('Subcategory is required');
+    if (!requiresSubcategory && !formData.category) errors.category = tx('Category is required');
     if (formData.category && !placeCategories.some((category) => String(category.id) === String(formData.category))) {
-      errors.subcategory = requiresSubcategory ? 'Selected subcategory is not available' : 'Selected category is not available';
+      errors.subcategory = requiresSubcategory ? tx('Selected subcategory is not available') : tx('Selected category is not available');
     }
     if (!categoriesLoading && !placeCategories.length) {
-      errors.category = 'No active categories found. Contact admin to add categories.';
+      errors.category = tx('No active categories found. Contact admin to add categories.');
     }
-    if (!formData.address.trim()) errors.address = 'Address is required';
-    if (!wardsLoading && wards.length && !formData.wardId) errors.wardId = 'Ward is required';
+    if (!formData.address.trim()) errors.address = tx('Address is required');
+    if (!wardsLoading && wards.length && !formData.wardId) errors.wardId = tx('Ward is required');
     if (formData.wardId && !wards.some((ward) => String(ward.ward_id) === String(formData.wardId))) {
-      errors.wardId = 'Selected ward is not available';
+      errors.wardId = tx('Selected ward is not available');
     }
-    if (!formData.phone.trim()) errors.phone = 'Phone number is required';
+    if (!formData.phone.trim()) errors.phone = tx('Phone number is required');
     const hasBusinessLicense = Boolean(formData.businessLicense || formData.existingBusinessLicenseUrl);
-    if (!hasBusinessLicense) errors.businessLicense = 'Business license is required';
+    if (!hasBusinessLicense) errors.businessLicense = tx('Business license is required');
     
     // Location picking is mandatory
     if (formData.latitude === null || formData.longitude === null) {
-      errors.location = 'You must pick location on map to continue';
+      errors.location = tx('You must pick location on map to continue');
     }
 
     // Price range validation
-    if (!formData.minPrice) errors.minPrice = 'Min price is required';
-    if (!formData.maxPrice) errors.maxPrice = 'Max price is required';
+    if (!formData.minPrice) errors.minPrice = tx('Min price is required');
+    if (!formData.maxPrice) errors.maxPrice = tx('Max price is required');
     if (formData.minPrice || formData.maxPrice) {
       // Check if values are numeric
       const minVal = parseFloat(formData.minPrice);
       const maxVal = parseFloat(formData.maxPrice);
       
-      if (isNaN(minVal)) errors.minPrice = 'Min price must be a valid number';
-      if (isNaN(maxVal)) errors.maxPrice = 'Max price must be a valid number';
+      if (isNaN(minVal)) errors.minPrice = tx('Min price must be a valid number');
+      if (isNaN(maxVal)) errors.maxPrice = tx('Max price must be a valid number');
       
       if (!isNaN(minVal) && !isNaN(maxVal) && minVal >= maxVal) {
-        errors.maxPrice = 'Max price must be higher than min price';
+        errors.maxPrice = tx('Max price must be higher than min price');
       }
     }
 
@@ -793,12 +795,12 @@ function MerchantVenueForm({ editVenueId = null }) {
       }
 
       if (!hasOpen || !hasClose) {
-        errors.weeklyOpenHours = 'Each opened day must include both open and close times';
+        errors.weeklyOpenHours = tx('Each opened day must include both open and close times');
         return;
       }
 
       if (daySchedule.openTime >= daySchedule.closeTime) {
-        errors.weeklyOpenHours = 'Weekly OpenHours: close time must be after open time';
+        errors.weeklyOpenHours = tx('Closing time must be after opening time');
       }
     });
 
@@ -957,7 +959,7 @@ function MerchantVenueForm({ editVenueId = null }) {
     if (!formData.wardId) {
       setFormErrors((prev) => ({
         ...prev,
-        wardId: prev.wardId || 'Select ward before picking location on map'
+        wardId: prev.wardId || tx('Select ward before picking location on map')
       }));
       return;
     }
@@ -975,7 +977,7 @@ function MerchantVenueForm({ editVenueId = null }) {
     if (!isEditMode && isResubmitLocked) {
       setSubmitStatus({
         type: 'error',
-        message: 'This venue has already been submitted. Update any field before submitting again.'
+        message: tx('This venue has already been submitted. Update any field before submitting again.')
       });
       return;
     }
@@ -983,7 +985,7 @@ function MerchantVenueForm({ editVenueId = null }) {
     if (!validateForm()) {
       setSubmitStatus({
         type: 'error',
-        message: 'Please fix the errors before submitting'
+        message: tx('Please fix the errors before submitting')
       });
       return;
     }
@@ -1143,26 +1145,26 @@ function MerchantVenueForm({ editVenueId = null }) {
   return (
     <div className="merchant-venue-form-container">
       <div className="form-header" data-onboarding="merchant-form-header">
-        <h1>{isEditMode ? 'Edit Venue Submission' : 'Register Your Venue'}</h1>
+        <h1>{isEditMode ? tx('Edit Venue Submission') : tx('Register Your Venue')}</h1>
         <p>
           {isEditMode
-            ? 'Update your venue information. Changes will be sent to admin for moderation before going live.'
-            : 'Fill in all details to get your venue listed on Smart City Discovery'}
+            ? tx('Update your venue information. Changes will be sent to admin for moderation before going live.')
+            : tx('Fill in all details to get your venue listed on Smart City Discovery')}
         </p>
       </div>
 
-      {loadingDraft ? <p className="form-note">Loading venue draft...</p> : null}
+      {loadingDraft ? <p className="form-note">{tx('Loading venue draft...')}</p> : null}
       {draftLoadError ? <p className="error-text">{draftLoadError}</p> : null}
       {isEditMode && pendingUpdateRequest?.status === 'pending' ? (
-        <p className="form-note">A location update for this venue is currently pending. Submitting now will replace that pending request.</p>
+        <p className="form-note">{tx('A location update for this venue is currently pending. Submitting now will replace that pending request.')}</p>
       ) : null}
 
       <form className="merchant-venue-form" onSubmit={handleSubmit}>
         {/* Section 1: Images */}
         <div className="form-section">
           <div className="section-header">
-            <h2>1. Photos</h2>
-            <p className="section-hint">Upload up to 6 photos of your venue</p>
+            <h2>{tx('1. Photos')}</h2>
+            <p className="section-hint">{tx('Upload up to 6 photos of your venue')}</p>
           </div>
 
           {isEditMode && formData.existingGalleryImageUrls.length ? (
@@ -1175,20 +1177,20 @@ function MerchantVenueForm({ editVenueId = null }) {
                   <div key={normalizedImageUrl} className="merchant-existing-media-card">
                     <img
                       src={resolveAssetUrl(normalizedImageUrl)}
-                      alt="Existing venue"
+                      alt={tx('Existing venue')}
                       className="merchant-existing-media-item"
                     />
 
                     <div className="merchant-existing-media-actions">
                       {isCover ? (
-                        <span className="merchant-existing-cover-badge">Cover</span>
+                        <span className="merchant-existing-cover-badge">{tx('Cover')}</span>
                       ) : (
                         <button
                           type="button"
                           className="merchant-existing-action-btn"
                           onClick={() => handleSetExistingCoverImage(normalizedImageUrl)}
                         >
-                          Set Cover
+                          {tx('Set Cover')}
                         </button>
                       )}
 
@@ -1197,20 +1199,20 @@ function MerchantVenueForm({ editVenueId = null }) {
                         className="merchant-existing-action-btn danger"
                         onClick={() => handleRemoveExistingGalleryImage(normalizedImageUrl)}
                       >
-                        Remove
+                        {tx('Remove')}
                       </button>
                     </div>
                   </div>
                 );
               })}
-              <p className="form-note">Existing images are shown above. New uploads will be added with existing photos (maximum 6 total).</p>
+              <p className="form-note">{tx('Existing images are shown above. New uploads will be added with existing photos (maximum 6 total).')}</p>
             </div>
           ) : null}
 
           {remainingUploadSlots > 0 ? (
             <ImageUploader maxImages={remainingUploadSlots} onImagesChange={handleImagesChange} />
           ) : (
-            <p className="form-note">You already have 6 images. Remove at least one existing image above to upload a new one.</p>
+            <p className="form-note">{tx('You already have 6 images. Remove at least one existing image above to upload a new one.')}</p>
           )}
         </div>
 
@@ -1218,13 +1220,13 @@ function MerchantVenueForm({ editVenueId = null }) {
         <div className="form-section" data-onboarding="merchant-form-basic">
           <div className="section-header">
             <span className="merchant-onboarding-anchor" data-onboarding-anchor="merchant-form-basic" aria-hidden="true" />
-            <h2>2. Basic Information</h2>
+            <h2>{tx('2. Basic Information')}</h2>
           </div>
 
           <div className="form-row">
             <div className="form-group">
               <label htmlFor="venueName">
-                Venue Name <span className="required">*</span>
+                {tx('Venue Name')} <span className="required">*</span>
                 {formErrors.venueName && <span className="error-text"> - {formErrors.venueName}</span>}
               </label>
               <input
@@ -1233,7 +1235,7 @@ function MerchantVenueForm({ editVenueId = null }) {
                 name="venueName"
                 value={formData.venueName}
                 onChange={handleInputChange}
-                placeholder="Enter venue name"
+                placeholder={tx('Enter venue name')}
                 required
                 className={`form-input ${formErrors.venueName ? 'input-error' : ''}`}
               />
@@ -1241,7 +1243,7 @@ function MerchantVenueForm({ editVenueId = null }) {
 
             <div className="form-group">
               <label htmlFor="phone">
-                Phone Number <span className="required">*</span>
+                {tx('Phone Number')} <span className="required">*</span>
                 {formErrors.phone && <span className="error-text"> - {formErrors.phone}</span>}
               </label>
               <input
@@ -1250,7 +1252,7 @@ function MerchantVenueForm({ editVenueId = null }) {
                 name="phone"
                 value={formData.phone}
                 onChange={handleInputChange}
-                placeholder="e.g., +84 123 456 789"
+                placeholder={tx('e.g., +84 123 456 789')}
                 required
                 className={`form-input ${formErrors.phone ? 'input-error' : ''}`}
               />
@@ -1260,7 +1262,7 @@ function MerchantVenueForm({ editVenueId = null }) {
           <div className="form-row">
             <div className="form-group">
               <label htmlFor="mainCategory">
-                Category <span className="required">*</span>
+                {tx('Category')} <span className="required">*</span>
                 {formErrors.category && <span className="error-text"> - {formErrors.category}</span>}
               </label>
               <select
@@ -1273,7 +1275,7 @@ function MerchantVenueForm({ editVenueId = null }) {
                 className={`form-input ${formErrors.category ? 'input-error' : ''}`}
               >
                 <option value="">
-                  {categoriesLoading ? 'Loading categories...' : 'Select a main category'}
+                  {categoriesLoading ? tx('Loading categories...') : tx('Select a main category')}
                 </option>
                 {mainCategories.map((category) => (
                   <option key={category.id} value={String(category.id)}>
@@ -1287,7 +1289,7 @@ function MerchantVenueForm({ editVenueId = null }) {
 
             <div className="form-group">
               <label htmlFor="subcategory">
-                Subcategory
+                {tx('Subcategory')}
                 {selectedMainCategoryChildren.length ? <span className="required">*</span> : null}
                 {formErrors.subcategory && <span className="error-text"> - {formErrors.subcategory}</span>}
               </label>
@@ -1300,7 +1302,7 @@ function MerchantVenueForm({ editVenueId = null }) {
                 className={`form-input ${formErrors.subcategory ? 'input-error' : ''}`}
               >
                 <option value="">
-                  {selectedMainCategoryChildren.length ? 'Select a subcategory' : 'No subcategory required'}
+                  {selectedMainCategoryChildren.length ? tx('Select a subcategory') : tx('No subcategory required')}
                 </option>
                 {selectedMainCategoryChildren.map((subcategory) => (
                   <option key={subcategory.id} value={String(subcategory.id)}>
@@ -1312,13 +1314,13 @@ function MerchantVenueForm({ editVenueId = null }) {
           </div>
 
           <div className="form-group">
-            <label htmlFor="description">Description</label>
+            <label htmlFor="description">{tx('Description')}</label>
             <textarea
               id="description"
               name="description"
               value={formData.description}
               onChange={handleInputChange}
-              placeholder="Tell us about your venue, atmosphere, specialties..."
+              placeholder={tx('Tell us about your venue, atmosphere, specialties...')}
               rows="5"
               className="form-textarea"
             />
@@ -1329,12 +1331,12 @@ function MerchantVenueForm({ editVenueId = null }) {
         <div className="form-section" data-onboarding="merchant-form-location">
           <div className="section-header">
             <span className="merchant-onboarding-anchor" data-onboarding-anchor="merchant-form-location" aria-hidden="true" />
-            <h2>3. Location & Hours</h2>
+            <h2>{tx('3. Location & Hours')}</h2>
           </div>
 
           <div className="form-group">
             <label>
-              Address <span className="required">*</span>
+              {tx('Address')} <span className="required">*</span>
               {formErrors.address && <span className="error-text"> - {formErrors.address}</span>}
             </label>
             <div className="address-input-group">
@@ -1343,7 +1345,7 @@ function MerchantVenueForm({ editVenueId = null }) {
                 name="address"
                 value={formData.address}
                 onChange={handleInputChange}
-                placeholder="Enter detailed address"
+                placeholder={tx('Enter detailed address')}
                 required
                 className={`form-input ${formErrors.address ? 'input-error' : ''}`}
               />
@@ -1356,7 +1358,7 @@ function MerchantVenueForm({ editVenueId = null }) {
                 disabled={wardsLoading}
                 className={`form-input ward-select ${formErrors.wardId ? 'input-error' : ''}`}
               >
-                <option value="">{wardsLoading ? 'Loading wards...' : 'Select ward'}</option>
+                <option value="">{wardsLoading ? tx('Loading wards...') : tx('Select ward')}</option>
                 {wards.map((ward) => (
                   <option key={ward.ward_id} value={String(ward.ward_id)}>
                     {ward.name}
@@ -1365,7 +1367,7 @@ function MerchantVenueForm({ editVenueId = null }) {
               </select>
 
               <button type="button" className={`btn-map-picker ${formErrors.location ? 'btn-error' : ''}`} onClick={openLocationPicker}>
-                📍 Pick on Map
+                📍 {tx('Pick on Map')}
               </button>
             </div>
             {formErrors.wardId && <span className="error-text">🔴 {formErrors.wardId}</span>}
@@ -1373,15 +1375,15 @@ function MerchantVenueForm({ editVenueId = null }) {
             {formErrors.location && <span className="error-text">🔴 {formErrors.location}</span>}
             {formData.latitude && formData.longitude && (
               <p className="location-display">
-                ✓ Selected: ({formData.latitude.toFixed(4)}, {formData.longitude.toFixed(4)})
+                ✓ {tx('Selected:')} ({formData.latitude.toFixed(4)}, {formData.longitude.toFixed(4)})
               </p>
             )}
           </div>
 
           <div className="weekly-open-hours-card">
             <div className="weekly-open-hours-header">
-              <h4>Weekly Opening Hours</h4>
-              <p>Set opening and closing time for each day. Select Off to mark a closed day.</p>
+              <h4>{tx('Weekly Opening Hours')}</h4>
+              <p>{tx('Set opening and closing time for each day. Select Off to mark a closed day.')}</p>
               {formErrors.weeklyOpenHours ? <p className="error-text">{formErrors.weeklyOpenHours}</p> : null}
             </div>
 
@@ -1401,9 +1403,9 @@ function MerchantVenueForm({ editVenueId = null }) {
                     className={`weekly-open-hours-tab ${isActive ? 'active' : ''}`}
                     onClick={() => setActiveWeekDay(day.key)}
                   >
-                    <span className="tab-day-label">{day.label}</span>
+                    <span className="tab-day-label">{tx(day.label)}</span>
                     <span className={`tab-day-status ${daySchedule.isClosed ? 'closed' : 'open'}`}>
-                      {daySchedule.isClosed ? 'Off' : 'Open'}
+                      {daySchedule.isClosed ? tx('Off') : tx('Open')}
                     </span>
                   </button>
                 );
@@ -1412,19 +1414,19 @@ function MerchantVenueForm({ editVenueId = null }) {
 
             <div className="weekly-open-hours-editor">
               <div className="weekly-open-hours-editor-header">
-                <h5>{activeWeekDayConfig.label === 'Mon' ? 'Monday' : activeWeekDayConfig.label === 'Tue' ? 'Tuesday' : activeWeekDayConfig.label === 'Wed' ? 'Wednesday' : activeWeekDayConfig.label === 'Thu' ? 'Thursday' : activeWeekDayConfig.label === 'Fri' ? 'Friday' : activeWeekDayConfig.label === 'Sat' ? 'Saturday' : 'Sunday'}</h5>
+                <h5>{tx(activeWeekDayConfig.label === 'Mon' ? 'Monday' : activeWeekDayConfig.label === 'Tue' ? 'Tuesday' : activeWeekDayConfig.label === 'Wed' ? 'Wednesday' : activeWeekDayConfig.label === 'Thu' ? 'Thursday' : activeWeekDayConfig.label === 'Fri' ? 'Friday' : activeWeekDayConfig.label === 'Sat' ? 'Saturday' : 'Sunday')}</h5>
                 <button
                   type="button"
                   className={`day-open-toggle ${activeDaySchedule.isClosed ? 'closed' : 'open'}`}
                   onClick={() => handleWeeklyHoursChange(activeWeekDayConfig.key, 'isClosed', !activeDaySchedule.isClosed)}
                 >
-                  {activeDaySchedule.isClosed ? 'Off' : 'Open'}
+                  {activeDaySchedule.isClosed ? tx('Off') : tx('Open')}
                 </button>
               </div>
 
               <div className="weekly-open-hours-editor-grid">
                 <div className="form-group">
-                  <label htmlFor={`open-${activeWeekDayConfig.key}`}>Start</label>
+                  <label htmlFor={`open-${activeWeekDayConfig.key}`}>{tx('Start')}</label>
                   <input
                     id={`open-${activeWeekDayConfig.key}`}
                     type="time"
@@ -1436,7 +1438,7 @@ function MerchantVenueForm({ editVenueId = null }) {
                 </div>
 
                 <div className="form-group">
-                  <label htmlFor={`close-${activeWeekDayConfig.key}`}>End</label>
+                  <label htmlFor={`close-${activeWeekDayConfig.key}`}>{tx('End')}</label>
                   <input
                     id={`close-${activeWeekDayConfig.key}`}
                     type="time"
@@ -1453,7 +1455,7 @@ function MerchantVenueForm({ editVenueId = null }) {
           <div className="form-row">
             <div className="form-group">
               <label htmlFor="minPrice">
-                Minimum Price (VNĐ) <span className="required">*</span>
+                {tx('Minimum Price (VNĐ)')} <span className="required">*</span>
                 {formErrors.minPrice && <span className="error-text"> - {formErrors.minPrice}</span>}
               </label>
               <input
@@ -1462,7 +1464,7 @@ function MerchantVenueForm({ editVenueId = null }) {
                 name="minPrice"
                 value={formData.minPrice}
                 onChange={handleInputChange}
-                placeholder="e.g., 50000"
+                placeholder={tx('e.g., 50000')}
                 min="0"
                 step="1000"
                 required
@@ -1475,7 +1477,7 @@ function MerchantVenueForm({ editVenueId = null }) {
 
             <div className="form-group">
               <label htmlFor="maxPrice">
-                Maximum Price (VNĐ) <span className="required">*</span>
+                {tx('Maximum Price (VNĐ)')} <span className="required">*</span>
                 {formErrors.maxPrice && <span className="error-text"> - {formErrors.maxPrice}</span>}
               </label>
               <input
@@ -1484,7 +1486,7 @@ function MerchantVenueForm({ editVenueId = null }) {
                 name="maxPrice"
                 value={formData.maxPrice}
                 onChange={handleInputChange}
-                placeholder="e.g., 500000"
+                placeholder={tx('e.g., 500000')}
                 min="0"
                 step="1000"
                 required
@@ -1501,9 +1503,9 @@ function MerchantVenueForm({ editVenueId = null }) {
         <div className="form-section" data-onboarding="merchant-form-services">
           <div className="section-header">
             <span className="merchant-onboarding-anchor" data-onboarding-anchor="merchant-form-services" aria-hidden="true" />
-            <h2>4. Services Offered</h2>
+            <h2>{tx('4. Services Offered')}</h2>
             <p className="section-hint">
-              {servicesLoading ? 'Loading services...' : 'Select all applicable services'}
+              {servicesLoading ? tx('Loading services...') : tx('Select all applicable services')}
             </p>
           </div>
           <ServiceSelector
@@ -1518,14 +1520,14 @@ function MerchantVenueForm({ editVenueId = null }) {
         {/* Section 5: Business License */}
         <div className="form-section">
           <div className="section-header">
-            <h2>5. Verification</h2>
+            <h2>{tx('5. Verification')}</h2>
           </div>
 
           {isEditMode && formData.existingBusinessLicenseUrl ? (
             <div className="merchant-existing-license">
               <img
                 src={resolveAssetUrl(formData.existingBusinessLicenseUrl)}
-                alt="Existing business license"
+                alt={tx('Existing business license')}
                 className="merchant-existing-license-image"
               />
               <button
@@ -1533,9 +1535,9 @@ function MerchantVenueForm({ editVenueId = null }) {
                 className="merchant-existing-action-btn danger"
                 onClick={handleRemoveExistingBusinessLicense}
               >
-                Remove Current License
+                {tx('Remove Current License')}
               </button>
-              <p className="form-note">Current business license on file. Upload a new file only if you need to replace it.</p>
+              <p className="form-note">{tx('Current business license on file. Upload a new file only if you need to replace it.')}</p>
             </div>
           ) : null}
 
@@ -1552,29 +1554,29 @@ function MerchantVenueForm({ editVenueId = null }) {
             >
               {isSubmitting
                 ? isEditMode
-                  ? 'Submitting update...'
-                  : 'Submitting...'
+                  ? tx('Submitting update...')
+                  : tx('Submitting...')
                 : !isEditMode && isResubmitLocked
                   ? 'Submitted'
                   : isEditMode
-                    ? 'Submit Location Update for Review'
-                    : 'Submit Venue for Review'}
+                    ? tx('Submit Location Update for Review')
+                    : tx('Submit Venue for Review')}
             </button>
             <p className="form-note">
               {isEditMode
-                ? 'Your edited location and details will be reviewed by admin before applying to the live venue.'
-                : 'Your venue will be reviewed by our admin team before going live.'}
+                ? tx('Your edited location and details will be reviewed by admin before applying to the live venue.')
+                : tx('Your venue will be reviewed by our admin team before going live.')}
             </p>
           </div>
 
           <div className={`submit-status-inline ${submitStatus?.type || 'idle'}`} aria-live="polite">
             {submitStatus ? (
               <>
-                <strong>{submitStatus.type === 'success' ? 'Success' : 'Error'}</strong>
+                <strong>{submitStatus.type === 'success' ? tx('Success') : tx('Error')}</strong>
                 <span>{submitStatus.message}</span>
               </>
             ) : (
-              <span className="submit-status-placeholder">Submission status will appear here.</span>
+              <span className="submit-status-placeholder">{tx('Submission status will appear here.')}</span>
             )}
           </div>
         </div>

@@ -27,6 +27,8 @@ const publicTrendingVenuesCache = new Map();
 const aiSuggestionResponseCache = new Map();
 let publicWardsSummaryCache = { timestamp: 0, data: null };
 let publicWardsFullCache = { timestamp: 0, data: null };
+const publicOverviewRealtimeChannel = new EventEmitter();
+publicOverviewRealtimeChannel.setMaxListeners(0);
 
 // Forward declarations for helper functions used before definition
 function getCachedMapValue(cacheMap, cacheKey, ttlMs) {
@@ -255,6 +257,26 @@ function generateAccessToken(user) {
 function registerVersionedRoute(method, path, ...handlers) {
     app[method](`/api${path}`, ...handlers);
     app[method](`/api/v1${path}`, ...handlers);
+}
+
+function emitPublicOverviewRealtimeEvent(type, data = {}) {
+    const normalizedType = String(type || '').trim().toLowerCase();
+    if (!normalizedType) {
+        return null;
+    }
+
+    const payload = {
+        type: normalizedType,
+        data: data && typeof data === 'object' && !Array.isArray(data) ? data : {},
+        emittedAt: new Date().toISOString()
+    };
+
+    publicOverviewRealtimeChannel.emit('change', payload);
+    return payload;
+}
+
+function clearPublicTrendingVenuesCache() {
+    publicTrendingVenuesCache.clear();
 }
 
 function extractBearerToken(req) {
@@ -666,7 +688,7 @@ function requireAdminRole(req, res, next) {
 
 function requireAuth(req, res, next) {
     if (!req.user?.id) {
-        return res.status(401).json({ message: 'Bạn cần đăng nhập để thực hiện thao tác này.' });
+        return res.status(401).json({ message: 'Please log in to continue.' });
     }
 
     return next();
@@ -4066,6 +4088,12 @@ async function pushMerchantTrendVenue(req, res) {
         );
 
         const nextState = buildTrendAssignmentStatePayload(updatedResult.rows[0], trendingConfig);
+        clearPublicTrendingVenuesCache();
+        emitPublicOverviewRealtimeEvent('trending_changed', {
+            venueId: Number(venueId),
+            assignmentId: Number(assignmentRow.assignment_id),
+            source: 'merchant_push'
+        });
 
         return res.json({
             success: true,
@@ -15783,6 +15811,15 @@ function buildUserPreferenceOptionsPayload() {
                 publicVenueDetailCache.delete(`admin:${venueId}`);
                 publicVenueForDetailCache.delete(`public:${venueId}`);
                 publicVenueForDetailCache.delete(`admin:${venueId}`);
+                clearPublicTrendingVenuesCache();
+                emitPublicOverviewRealtimeEvent('venues_changed', {
+                    venueId: Number(venueId),
+                    source: 'venue_simple_update'
+                });
+                emitPublicOverviewRealtimeEvent('trending_changed', {
+                    venueId: Number(venueId),
+                    source: 'venue_simple_update'
+                });
 
                 return res.json({
                     message: 'Simple venue information updated successfully.',
@@ -15909,6 +15946,15 @@ function buildUserPreferenceOptionsPayload() {
                 publicVenueDetailCache.delete(`admin:${venueId}`);
                 publicVenueForDetailCache.delete(`public:${venueId}`);
                 publicVenueForDetailCache.delete(`admin:${venueId}`);
+                clearPublicTrendingVenuesCache();
+                emitPublicOverviewRealtimeEvent('venues_changed', {
+                    venueId: Number(venueId),
+                    source: 'venue_deleted'
+                });
+                emitPublicOverviewRealtimeEvent('trending_changed', {
+                    venueId: Number(venueId),
+                    source: 'venue_deleted'
+                });
 
                 return res.json({
                     message: 'Venue deleted successfully',
@@ -16002,8 +16048,17 @@ function buildUserPreferenceOptionsPayload() {
                 publicVenueDetailCache.delete(`admin:${venueId}`);
                 publicVenueForDetailCache.delete(`public:${venueId}`);
                 publicVenueForDetailCache.delete(`admin:${venueId}`);
+                clearPublicTrendingVenuesCache();
 
                 const isPaused = nextStatus === 'hidden';
+                emitPublicOverviewRealtimeEvent('venues_changed', {
+                    venueId: Number(venueId),
+                    source: isPaused ? 'venue_paused' : 'venue_resumed'
+                });
+                emitPublicOverviewRealtimeEvent('trending_changed', {
+                    venueId: Number(venueId),
+                    source: isPaused ? 'venue_paused' : 'venue_resumed'
+                });
 
                 return res.json({
                     message: isPaused
@@ -16379,6 +16434,15 @@ function buildUserPreferenceOptionsPayload() {
                 publicVenueDetailCache.delete(`admin:${targetVenueId}`);
                 publicVenueForDetailCache.delete(`public:${targetVenueId}`);
                 publicVenueForDetailCache.delete(`admin:${targetVenueId}`);
+                clearPublicTrendingVenuesCache();
+                emitPublicOverviewRealtimeEvent('venues_changed', {
+                    venueId: Number(targetVenueId),
+                    source: 'venue_update_approved'
+                });
+                emitPublicOverviewRealtimeEvent('trending_changed', {
+                    venueId: Number(targetVenueId),
+                    source: 'venue_update_approved'
+                });
 
                 const submitterUserId = String(updateRequest.submitted_by_user_id || '').trim();
                 if (submitterUserId) {
@@ -17699,7 +17763,23 @@ function buildUserPreferenceOptionsPayload() {
                     return res.status(404).json({ message: 'Venue not found' });
                 }
 
-                return res.json(result.rows[0]);
+                const venue = result.rows[0];
+                const galleryImagesFromTable = await loadVenueGalleryImageUrls(venue.id);
+                const resolvedReviewStats = await resolveVenueReviewStatsByVenueId(venue.id);
+                const sanitizedVenue = sanitizeVenueRecord(venue);
+                const normalizedVenue = normalizeVenueCoordinates(sanitizedVenue);
+
+                return res.json({
+                    ...normalizedVenue,
+                    average_rating: Number(resolvedReviewStats?.averageRating ?? venue.average_rating ?? 0),
+                    total_reviews: Number(resolvedReviewStats?.totalReviews ?? venue.total_reviews ?? 0),
+                    averageRating: Number(resolvedReviewStats?.averageRating ?? venue.average_rating ?? 0),
+                    totalReviews: Number(resolvedReviewStats?.totalReviews ?? venue.total_reviews ?? 0),
+                    review_count: Number(resolvedReviewStats?.totalReviews ?? venue.total_reviews ?? 0),
+                    reviewCount: Number(resolvedReviewStats?.totalReviews ?? venue.total_reviews ?? 0),
+                    venue_primary_image_url: galleryImagesFromTable[0] || null,
+                    venue_images: extractVenueImageUrls(sanitizedVenue, galleryImagesFromTable)
+                });
             } catch (error) {
                 return res.status(500).json({ message: error.message });
             }
@@ -18056,11 +18136,16 @@ function buildUserPreferenceOptionsPayload() {
                 );
 
                 // Clear all caches related to this venue
+                publicCompactApprovedVenuesCache = { timestamp: 0, data: null };
                 publicVenueDetailCache.delete(`public:${venueId}`);
                 publicVenueDetailCache.delete(`admin:${venueId}`);
                 publicVenueForDetailCache.delete(`public:${venueId}`);
                 publicVenueForDetailCache.delete(`admin:${venueId}`);
                 invalidateVenueCommunityBundleCacheByVenueId(venueId);
+                emitPublicOverviewRealtimeEvent('venues_changed', {
+                    venueId: Number(venueId),
+                    source: 'venue_submission_approved'
+                });
 
                 const approvedVenue = result.rows[0] || {};
                     const submitterUserId = String(approvedVenue.submitted_by_user_id || '').trim();
@@ -20350,6 +20435,39 @@ function buildUserPreferenceOptionsPayload() {
             });
         }
 
+        function streamPublicOverviewRealtimeHandler(_req, res) {
+            res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+            res.setHeader('Cache-Control', 'no-cache, no-transform');
+            res.setHeader('Connection', 'keep-alive');
+            res.flushHeaders?.();
+
+            const writeEvent = (payload) => {
+                res.write(`event: overview-update\n`);
+                res.write(`data: ${JSON.stringify(payload)}\n\n`);
+            };
+
+            writeEvent({
+                type: 'connected',
+                data: {},
+                emittedAt: new Date().toISOString()
+            });
+
+            const keepAliveId = setInterval(() => {
+                res.write(`: ping\n\n`);
+            }, 25000);
+
+            const handleChange = (payload) => {
+                writeEvent(payload);
+            };
+
+            publicOverviewRealtimeChannel.on('change', handleChange);
+
+            req.on('close', () => {
+                clearInterval(keepAliveId);
+                publicOverviewRealtimeChannel.off('change', handleChange);
+            });
+        }
+
         async function markUserNotificationsReadHandler(req, res) {
             const userId = req.user.id;
             const rawIds = Array.isArray(req.body?.ids) ? req.body.ids : [];
@@ -21691,6 +21809,7 @@ function buildUserPreferenceOptionsPayload() {
         registerVersionedRoute('get', '/place-categories', listPublicPlaceCategories);
         registerVersionedRoute('get', '/merchant-services', listPublicMerchantServices);
         registerVersionedRoute('get', '/feedback/types', listPublicFeedbackTypes);
+        registerVersionedRoute('get', '/public/overview/stream', streamPublicOverviewRealtimeHandler);
         registerVersionedRoute('get', '/venues', authenticateOptional, listPublicVenues);
         registerVersionedRoute('get', '/venues/compare', authenticateOptional, compareVenuesHandler);
         registerVersionedRoute('get', '/venues/update-requests', authenticateRequest, checkUserStatus, listMerchantVenueUpdateRequests);

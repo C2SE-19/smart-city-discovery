@@ -12,7 +12,12 @@ export default function VenueCard({
 	const venueName = String(venue?.name || venue?.title || '').trim() || 'Venue';
 	const venueAddress = String(venue?.address || '').trim();
 	const venueCategory = String(venue?.category_name || venue?.category || '').trim();
-	const coverImage = venue?.cover_image_url || venue?.coverImageUrl || venue?.venue_primary_image_url || '';
+	const coverImage =
+		venue?.venue_primary_image_url
+		|| venue?.venue_images?.[0]
+		|| venue?.cover_image_url
+		|| venue?.coverImageUrl
+		|| '';
 
 	return (
 		<article

@@ -6,6 +6,7 @@ import 'leaflet/dist/leaflet.css';
 import { APP_ROUTES } from '../../constants/routes';
 import { useAuth } from '../../contexts/AuthContext';
 import { useLanguage } from '../../contexts/LanguageContext';
+import useUserI18n from '../../hooks/useUserI18n';
 import { submitFeedback } from '../../services/feedbackService';
 import { getApiBaseUrl } from '../../services/api/client';
 import { fetchMerchantServices } from '../../services/api/merchantServicesApi';
@@ -441,7 +442,8 @@ function CityMapPage() {
   const location = useLocation();
   const { token, user } = useAuth();
   const { language } = useLanguage();
-  const t = translations[language] || translations.vi;
+  const { tx } = useUserI18n();
+  const t = translations[language] || translations.en;
   const apiUrl = useMemo(() => getApiBaseUrl(), []);
   const apiBase = useMemo(() => apiUrl.replace(/\/api\/v1$|\/api$/i, ''), [apiUrl]);
   const [loadingBaseData, setLoadingBaseData] = useState(true);
@@ -1498,7 +1500,7 @@ function CityMapPage() {
       setActiveReplyTarget(null);
       setVenueReviewsRefreshKey((value) => value + 1);
     } catch (requestError) {
-      setReviewActionError(requestError?.response?.data?.message || 'Unable to submit reply right now.');
+      setReviewActionError(requestError?.response?.data?.message || tx('Unable to submit reply right now.'));
     } finally {
       setSubmittingVenueReply(false);
     }
@@ -1510,13 +1512,13 @@ function CityMapPage() {
 
       <input
         type="text"
-        placeholder="Title"
+        placeholder={tx('Title')}
         value={venueReplyForm.title}
         onChange={(event) => setVenueReplyForm((prev) => ({ ...prev, title: event.target.value }))}
       />
       <textarea
         rows="2"
-        placeholder="Write a reply..."
+        placeholder={tx('Write a reply...')}
         value={venueReplyForm.content}
         onChange={(event) => setVenueReplyForm((prev) => ({ ...prev, content: event.target.value }))}
       />
@@ -1538,8 +1540,8 @@ function CityMapPage() {
         />
         <small>
           {(Array.isArray(venueReplyForm.mediaFiles) && venueReplyForm.mediaFiles.length)
-            ? `Selected ${venueReplyForm.mediaFiles.length}/3 images`
-            : 'Up to 3 images'}
+            ? tx('Selected {{count}}/3 images', { count: venueReplyForm.mediaFiles.length })
+            : tx('Up to 3 images')}
         </small>
       </label>
 
@@ -1548,7 +1550,7 @@ function CityMapPage() {
           {replyMediaPreviews.map((item) => (
             <div key={`reply-media-preview-${item.id}`} className="city-map-media-preview-card">
               <div className="city-map-media-preview-asset">
-                <img src={item.url} alt="Reply media preview" loading="lazy" />
+                <img src={item.url} alt={tx('Reply media preview')} loading="lazy" />
               </div>
               <button
                 type="button"
@@ -1562,7 +1564,7 @@ function CityMapPage() {
                   }));
                 }}
               >
-                Remove image
+                {tx('Remove image')}
               </button>
             </div>
           ))}
@@ -1578,7 +1580,7 @@ function CityMapPage() {
             setVenueReplyForm({ title: '', content: '', mediaFiles: [] });
           }}
         >
-          Cancel
+          {tx('Cancel')}
         </button>
         <button
           type="button"
@@ -1586,7 +1588,7 @@ function CityMapPage() {
           disabled={submittingVenueReply}
           onClick={() => handleSubmitVenueReply(review)}
         >
-          {submittingVenueReply ? 'Submitting...' : 'Post reply'}
+          {submittingVenueReply ? tx('Submitting...') : tx('Post reply')}
         </button>
       </div>
     </div>
@@ -1601,7 +1603,7 @@ function CityMapPage() {
       return;
     }
 
-    const shouldDelete = window.confirm('Are you sure you want to delete this review?');
+    const shouldDelete = window.confirm(tx('Are you sure you want to delete this review?'));
     if (!shouldDelete) {
       return;
     }
@@ -1704,7 +1706,7 @@ function CityMapPage() {
     }
 
     if (!venueReportForm.reason) {
-      setVenueReportStatus({ type: 'error', message: 'Please select a report reason.' });
+      setVenueReportStatus({ type: 'error', message: tx('Please select a report reason.') });
       return;
     }
 
@@ -1718,11 +1720,11 @@ function CityMapPage() {
 
     const descriptionText = String(venueReportForm.description || '').trim();
     const reportMessage = [
-      `Venue report: ${resolveVenueName(selectedVenue)}`,
-      `Reason: ${selectedReasonLabel}`,
-      `Severity: ${selectedSeverityLabel}`,
-      `Address: ${selectedVenue.address || 'Not available'}`,
-      descriptionText ? `Details: ${descriptionText}` : '',
+      `${tx('Venue report')}: ${resolveVenueName(selectedVenue)}`,
+      `${tx('Reason')}: ${selectedReasonLabel}`,
+      `${tx('Severity')}: ${selectedSeverityLabel}`,
+      `${tx('Address')}: ${selectedVenue.address || tx('Not available')}`,
+      descriptionText ? `${tx('Details')}: ${descriptionText}` : '',
     ]
       .filter(Boolean)
       .join('\n');
@@ -1742,14 +1744,14 @@ function CityMapPage() {
         },
       });
 
-      setVenueReportStatus({ type: 'success', message: 'Venue report submitted successfully.' });
+      setVenueReportStatus({ type: 'success', message: tx('Venue report submitted successfully.') });
       window.setTimeout(() => {
         setShowVenueReportModal(false);
       }, 700);
     } catch (error) {
       setVenueReportStatus({
         type: 'error',
-        message: error?.response?.data?.message || 'Unable to submit venue report right now.',
+        message: error?.response?.data?.message || tx('Unable to submit venue report right now.'),
       });
     } finally {
       setSubmittingVenueReport(false);
@@ -1764,7 +1766,7 @@ function CityMapPage() {
     }
 
     if (!reviewReportForm.reason) {
-      setReviewReportStatus({ type: 'error', message: 'Please select a report reason.' });
+      setReviewReportStatus({ type: 'error', message: tx('Please select a report reason.') });
       return;
     }
 
@@ -1779,12 +1781,12 @@ function CityMapPage() {
 
     const message = [
       reportType === 'reply'
-        ? `Reply report #${activeReviewToReport.id || 'N/A'}`
-        : `Review report #${activeReviewToReport.id || 'N/A'}`,
-      `Reason: ${selectedReasonLabel}`,
-      `Author: ${activeReviewToReport.authorName || 'Anonymous'}`,
-      `Content: ${targetContent}`,
-      detail ? `Details: ${detail}` : '',
+        ? `${tx('Reply report')} #${activeReviewToReport.id || tx('N/A')}`
+        : `${tx('Review report')} #${activeReviewToReport.id || tx('N/A')}`,
+      `${tx('Reason')}: ${selectedReasonLabel}`,
+      `${tx('Author')}: ${activeReviewToReport.authorName || tx('Anonymous')}`,
+      `${tx('Content')}: ${targetContent}`,
+      detail ? `${tx('Details')}: ${detail}` : '',
     ]
       .filter(Boolean)
       .join('\n');
@@ -1804,7 +1806,7 @@ function CityMapPage() {
         },
       });
 
-      setReviewReportStatus({ type: 'success', message: 'Review report submitted successfully.' });
+      setReviewReportStatus({ type: 'success', message: tx('Review report submitted successfully.') });
       window.setTimeout(() => {
         setShowReviewReportModal(false);
       }, 700);
@@ -2070,17 +2072,17 @@ function CityMapPage() {
                       }}
                     />
                     <strong>{resolveVenueName(venue)}</strong>
-                    <span>{venue.address || 'Address not available'}</span>
+                    <span>{venue.address || tx('Address not available')}</span>
                     <span>{resolveWardName(venue)} | {formatVenueCategoryLabel(venue)}</span>
                     <span className="city-map-popup-rating">
                       <StarRatingDisplay rating={popupRatingValue} />
                       <span className="city-map-popup-rating-text">
-                          {popupRatingValue.toFixed(1)}/5 ({popupReviewCount} reviews)
+                          {popupRatingValue.toFixed(1)}/5 ({popupReviewCount} {tx('Reviews').toLowerCase()})
                       </span>
                     </span>
-                    {venue.phone ? <span>Phone: {venue.phone}</span> : null}
+                    {venue.phone ? <span>{tx('Phone')}: {venue.phone}</span> : null}
                     <button type="button" onClick={() => openVenueDetailPanel(venue)}>
-                      Open full details
+                      {tx('Open full details')}
                     </button>
                   </div>
                 </Popup>
@@ -2092,7 +2094,7 @@ function CityMapPage() {
             <Marker position={currentPosition} icon={userLocationIcon}>
               <Popup>
                 <div className="city-map-popup">
-                  <strong>Your current location</strong>
+                  <strong>{tx('Your current location')}</strong>
                 </div>
               </Popup>
             </Marker>
@@ -2102,10 +2104,10 @@ function CityMapPage() {
 
         <header className="city-map-top-bar" data-onboarding="city-map-header">
           <button type="button" className="city-map-back-btn" onClick={() => navigate(APP_ROUTES.HOME)}>
-            {t.mapPage?.backToHome || 'Back to Home'}
+            {t.mapPage?.backToHome || tx('Back to Home')}
           </button>
-          <h1>{t.mapPage?.title || 'City Map Explorer'}</h1>
-          <p>{t.mapPage?.subtitle || 'Explore wards and approved places with live filtering.'}</p>
+          <h1>{t.mapPage?.title || tx('City Map Explorer')}</h1>
+          <p>{t.mapPage?.subtitle || tx('Explore wards and approved places with live filtering.')}</p>
         </header>
 
         <div className="city-map-controls-left">
@@ -2114,7 +2116,7 @@ function CityMapPage() {
             className="city-map-control-btn"
             onClick={() => setIsFilterPanelOpen((current) => !current)}
           >
-            Filters {activeFilterCount ? `(${activeFilterCount})` : ''}
+            {tx('Filters')} {activeFilterCount ? `(${activeFilterCount})` : ''}
           </button>
           <button
             type="button"
@@ -2122,7 +2124,7 @@ function CityMapPage() {
             onClick={() => requestCurrentPosition(true)}
             disabled={locatingUser}
           >
-            {locatingUser ? 'Locating...' : 'Locate Me'}
+            {locatingUser ? tx('Locating...') : tx('Locate Me')}
           </button>
         </div>
 
@@ -2130,23 +2132,23 @@ function CityMapPage() {
           <section
             className={`city-map-filter-panel ${selectedVenue ? 'has-detail-sheet' : ''}`.trim()}
             role="region"
-            aria-label="Map filters"
+            aria-label={tx('Map filters')}
             data-onboarding="city-map-filters"
           >
             <header>
-              <h2>Map filters</h2>
-              <button type="button" onClick={() => setIsFilterPanelOpen(false)} aria-label="Close filters">
+              <h2>{tx('Map filters')}</h2>
+              <button type="button" onClick={() => setIsFilterPanelOpen(false)} aria-label={tx('Close filters')}>
                 X
               </button>
             </header>
-            <p>Choose Place Categories, Ward Naming, and Services Offered, then press Search.</p>
+            <p>{tx('Choose Place Categories, Ward Naming, and Services Offered, then press Search.')}</p>
 
             <label className="city-map-search-field">
-              <span>Search keyword</span>
+              <span>{tx('Search keyword')}</span>
               <input
                 type="text"
                 value={searchInput}
-                placeholder="Venue, address, ward, or service"
+                placeholder={tx('Venue, address, ward, or service')}
                 onChange={(event) => setSearchInput(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') {
@@ -2159,7 +2161,7 @@ function CityMapPage() {
 
             <div className="city-map-filter-row">
               <div className="city-map-filter-group">
-                <h3>Place Categories</h3>
+                <h3>{tx('Place Categories')}</h3>
                 <div className="city-map-filter-list">
                   {rootPlaceCategories.map((category) => {
                     const categoryId = Number(category.id);
@@ -2183,7 +2185,7 @@ function CityMapPage() {
                               type="button"
                               className="city-map-category-toggle"
                               onClick={() => toggleCategoryBranchExpansion(categoryId)}
-                              aria-label={isExpanded ? 'Collapse subcategories' : 'Expand subcategories'}
+                              aria-label={isExpanded ? tx('Collapse subcategories') : tx('Expand subcategories')}
                             >
                               {isExpanded ? '-' : '+'}
                             </button>
@@ -2215,7 +2217,7 @@ function CityMapPage() {
               </div>
 
               <div className="city-map-filter-group">
-                <h3>Ward Naming</h3>
+                <h3>{tx('Ward Naming')}</h3>
                 <div className="city-map-filter-list">
                   {wards.map((ward) => {
                     const wardId = String(ward.ward_id);
@@ -2236,7 +2238,7 @@ function CityMapPage() {
               </div>
 
               <div className="city-map-filter-group">
-                <h3>Services Offered - Merchant</h3>
+                <h3>{tx('Services Offered - Merchant')}</h3>
                 <div className="city-map-filter-list">
                   {services.map((service) => {
                     const serviceId = Number(service.id);
@@ -2258,16 +2260,16 @@ function CityMapPage() {
             </div>
 
             <div className="city-map-filter-actions">
-              <button type="button" className="apply" onClick={applyFilters}>Search</button>
-              <button type="button" className="clear" onClick={clearFilters}>Clear</button>
+              <button type="button" className="apply" onClick={applyFilters}>{tx('Search')}</button>
+              <button type="button" className="clear" onClick={clearFilters}>{tx('Clear')}</button>
             </div>
           </section>
         ) : null}
 
         <div className="city-map-floating-stats" data-onboarding="city-map-stats">
-          <span>{wards.length} wards</span>
-          <span>{displayedVenues.length} places</span>
-          <span>{currentPosition ? 'Current location on map' : 'Location unavailable'}</span>
+          <span>{wards.length} {tx('wards')}</span>
+          <span>{displayedVenues.length} {tx('places')}</span>
+          <span>{currentPosition ? tx('Current location on map') : tx('Location unavailable')}</span>
         </div>
 
         {selectedVenue ? (
@@ -2280,18 +2282,18 @@ function CityMapPage() {
                     type="button"
                     className="city-map-rating-link-btn"
                     onClick={() => setDetailTab('reviews')}
-                    title="Open the Reviews tab"
+                    title={tx('Open the Reviews tab')}
                   >
                     <StarRatingDisplay rating={selectedVenueRatingValue} />
                   </button>
                   <span className="city-map-detail-rating-text">
                     {Number(selectedVenueRatingValue || 0).toFixed(1)}/5
                     {' '}
-                    ({Number(selectedVenueReviewCount || 0)} reviews)
+                    ({Number(selectedVenueReviewCount || 0)} {tx('Reviews').toLowerCase()})
                   </span>
                 </p>
               </div>
-              <button type="button" onClick={closeDetailPanel} aria-label="Close venue detail">
+              <button type="button" onClick={closeDetailPanel} aria-label={tx('Close venue detail')}>
                 X
               </button>
             </header>
@@ -2309,71 +2311,71 @@ function CityMapPage() {
                 />
               </div>
             ) : (
-              <div className="city-map-detail-hero is-empty">No cover image</div>
+              <div className="city-map-detail-hero is-empty">{tx('No cover image')}</div>
             )}
 
-            <div className="city-map-detail-tabs" role="tablist" aria-label="Venue detail tabs">
+            <div className="city-map-detail-tabs" role="tablist" aria-label={tx('Venue detail tabs')}>
               <button
                 type="button"
                 className={detailTab === 'overview' ? 'is-active' : ''}
                 onClick={() => setDetailTab('overview')}
               >
-                Overview
+                {tx('Overview')}
               </button>
               <button
                 type="button"
                 className={detailTab === 'photos' ? 'is-active' : ''}
                 onClick={() => setDetailTab('photos')}
               >
-                Photos
+                {tx('Photos')}
               </button>
               <button
                 type="button"
                 className={detailTab === 'introduction' ? 'is-active' : ''}
                 onClick={() => setDetailTab('introduction')}
               >
-                Introduction
+                {tx('Introduction')}
               </button>
               <button
                 type="button"
                 className={detailTab === 'reviews' ? 'is-active' : ''}
                 onClick={() => setDetailTab('reviews')}
               >
-                Reviews
+                {tx('Reviews')}
               </button>
             </div>
 
-            {loadingVenueDetail ? <p className="city-map-detail-note">Loading full venue details...</p> : null}
+            {loadingVenueDetail ? <p className="city-map-detail-note">{tx('Loading full venue details...')}</p> : null}
             {venueDetailError ? <p className="city-map-detail-note is-warning">{venueDetailError}</p> : null}
 
             {detailTab === 'overview' ? (
               <div className="city-map-detail-block">
                 <ul className="city-map-detail-meta">
                   <li>
-                    <strong>Address</strong>
+                    <strong>{tx('Address')}</strong>
                     {selectedVenue.address ? (
                       <button
                         type="button"
                         className="city-map-address-link"
                         onClick={focusOnVenueLocation}
-                        title="Jump to this venue on the map"
+                        title={tx('Jump to this venue on the map')}
                       >
                         {selectedVenue.address}
                       </button>
                     ) : (
-                      <span>Not provided</span>
+                      <span>{tx('Not provided')}</span>
                     )}
                   </li>
-                  <li><strong>Ward</strong><span>{resolveWardName(selectedVenue)}</span></li>
-                  <li><strong>Category</strong><span>{formatVenueCategoryLabel(selectedVenue)}</span></li>
-                  <li><strong>Phone</strong><span>{selectedVenue.phone || 'Not provided'}</span></li>
-                  <li><strong>Email</strong><span>{extractVenueEmail(selectedVenue)}</span></li>
-                  <li><strong>Price range</strong><span>{formatPriceRange(selectedVenue)}</span></li>
+                  <li><strong>{tx('Ward')}</strong><span>{resolveWardName(selectedVenue)}</span></li>
+                  <li><strong>{tx('Category')}</strong><span>{formatVenueCategoryLabel(selectedVenue)}</span></li>
+                  <li><strong>{tx('Phone')}</strong><span>{selectedVenue.phone || tx('Not provided')}</span></li>
+                  <li><strong>{tx('Email')}</strong><span>{extractVenueEmail(selectedVenue)}</span></li>
+                  <li><strong>{tx('Price range')}</strong><span>{formatPriceRange(selectedVenue)}</span></li>
                 </ul>
 
                 <div className="city-map-inline-group">
-                  <strong>Quick summary</strong>
-                  <p>Open the Introduction tab for services and opening hours.</p>
+                  <strong>{tx('Quick summary')}</strong>
+                  <p>{tx('Open the Introduction tab for services and opening hours.')}</p>
                 </div>
               </div>
             ) : null}
@@ -2381,7 +2383,7 @@ function CityMapPage() {
             {detailTab === 'photos' ? (
               <div className="city-map-detail-block">
                 <div className="city-map-photo-section">
-                  <strong className="city-map-photo-section-title">Venue photos</strong>
+                  <strong className="city-map-photo-section-title">{tx('Venue photos')}</strong>
                   {selectedVenueImages.length ? (
                     <div className="city-map-photo-grid">
                       {selectedVenueImages.map((imageUrl, index) => (
@@ -2390,7 +2392,7 @@ function CityMapPage() {
                           type="button"
                           className="city-map-photo-button"
                           onClick={() => openPhotoPreview(imageUrl, `${resolveVenueName(selectedVenue)} ${index + 1}`)}
-                          aria-label={`Open venue photo ${index + 1}`}
+                            aria-label={tx('Open venue photo {{index}}', { index: index + 1 })}
                         >
                           <img
                             src={imageUrl}
@@ -2405,13 +2407,13 @@ function CityMapPage() {
                       ))}
                     </div>
                   ) : (
-                    <p className="city-map-detail-note">No venue photos uploaded yet.</p>
+                    <p className="city-map-detail-note">{tx('No venue photos uploaded yet.')}</p>
                   )}
                 </div>
 
                 <div className="city-map-photo-section">
-                  <strong className="city-map-photo-section-title">Review photos</strong>
-                  {loadingVenueReviewImages ? <p className="city-map-detail-note">Loading review photos...</p> : null}
+                  <strong className="city-map-photo-section-title">{tx('Review photos')}</strong>
+                  {loadingVenueReviewImages ? <p className="city-map-detail-note">{tx('Loading review photos...')}</p> : null}
                   {venueReviewImagesError ? <p className="city-map-detail-note is-warning">{venueReviewImagesError}</p> : null}
                   {!loadingVenueReviewImages && !venueReviewImagesError ? (
                     venueReviewImages.length ? (
@@ -2422,14 +2424,14 @@ function CityMapPage() {
                             type="button"
                             className="city-map-photo-button"
                             onClick={() => openPhotoPreview(imageUrl, `${resolveVenueName(selectedVenue)} review ${index + 1}`)}
-                            aria-label={`Open review photo ${index + 1}`}
+                            aria-label={tx('Open review photo {{index}}', { index: index + 1 })}
                           >
                             <img src={imageUrl} alt={`${resolveVenueName(selectedVenue)} review ${index + 1}`} loading="lazy" />
                           </button>
                         ))}
                       </div>
                     ) : (
-                      <p className="city-map-detail-note">No review photos yet.</p>
+                      <p className="city-map-detail-note">{tx('No review photos yet.')}</p>
                     )
                   ) : null}
                 </div>
@@ -2438,11 +2440,11 @@ function CityMapPage() {
 
             {detailTab === 'introduction' ? (
               <div className="city-map-detail-block">
-                <strong>Introduction</strong>
-                <p>{selectedVenue.description || 'No introduction provided yet.'}</p>
+                <strong>{tx('Introduction')}</strong>
+                <p>{selectedVenue.description || tx('No introduction provided yet.')}</p>
 
                 <div className="city-map-inline-group">
-                  <strong>Services offered</strong>
+                  <strong>{tx('Services offered')}</strong>
                   {selectedVenueServices.length ? (
                     <div className="city-map-service-list">
                       {selectedVenueServices.map((serviceName) => (
@@ -2450,12 +2452,12 @@ function CityMapPage() {
                       ))}
                     </div>
                   ) : (
-                    <p className="city-map-detail-note">No services selected by merchant.</p>
+                    <p className="city-map-detail-note">{tx('No services selected by merchant.')}</p>
                   )}
                 </div>
 
                 <div className="city-map-inline-group">
-                  <strong>Opening hours</strong>
+                  <strong>{tx('Opening hours')}</strong>
                   {selectedVenueSchedule.length ? (
                     <ul className="city-map-hours-list">
                       {selectedVenueSchedule.map((day) => (
@@ -2466,7 +2468,7 @@ function CityMapPage() {
                       ))}
                     </ul>
                   ) : (
-                    <p className="city-map-detail-note">Opening hours not provided.</p>
+                    <p className="city-map-detail-note">{tx('Opening hours not provided.')}</p>
                   )}
                 </div>
               </div>
@@ -2476,11 +2478,11 @@ function CityMapPage() {
               <div className="city-map-detail-block">
                 <div className="city-map-review-summary-row">
                   <strong>
-                    <span className="city-map-rating-link-btn" role="img" aria-label="Overall venue rating">
+                    <span className="city-map-rating-link-btn" role="img" aria-label={tx('Overall venue rating')}>
                       <StarRatingDisplay rating={selectedVenueRatingValue} />
                     </span>
                     {' '}
-                    {Number(selectedVenueRatingValue || 0).toFixed(1)}/5 ({Number(selectedVenueReviewCount || 0)} reviews)
+                    {Number(selectedVenueRatingValue || 0).toFixed(1)}/5 ({Number(selectedVenueReviewCount || 0)} {tx('Reviews').toLowerCase()})
                   </strong>
                   <button
                     type="button"
@@ -2494,13 +2496,13 @@ function CityMapPage() {
                 <form className="city-map-review-form" onSubmit={handleSubmitVenueReview}>
                   <input
                     type="text"
-                    placeholder="Title"
+                    placeholder={tx('Title')}
                     value={venueReviewForm.title}
                     onChange={(event) => setVenueReviewForm((prev) => ({ ...prev, title: event.target.value }))}
                   />
                   <textarea
                     rows="3"
-                    placeholder="Write your review..."
+                    placeholder={tx('Write your review...')}
                     value={venueReviewForm.comment}
                     onChange={(event) => setVenueReviewForm((prev) => ({ ...prev, comment: event.target.value }))}
                   />
@@ -2522,8 +2524,8 @@ function CityMapPage() {
                     />
                     <small>
                       {(Array.isArray(venueReviewForm.mediaFiles) && venueReviewForm.mediaFiles.length)
-                        ? `Selected ${venueReviewForm.mediaFiles.length}/6 files`
-                        : 'Up to 6 files'}
+                        ? tx('Selected {{count}}/6 files', { count: venueReviewForm.mediaFiles.length })
+                        : tx('Up to 6 files')}
                     </small>
                   </label>
 
@@ -2535,7 +2537,7 @@ function CityMapPage() {
                             {item.isVideo ? (
                               <video src={item.url} controls preload="metadata" />
                             ) : (
-                              <img src={item.url} alt="Review media preview" loading="lazy" />
+                              <img src={item.url} alt={tx('Review media preview')} loading="lazy" />
                             )}
                           </div>
                           <button
@@ -2550,7 +2552,7 @@ function CityMapPage() {
                               }));
                             }}
                           >
-                            Remove file
+                            {tx('Remove file')}
                           </button>
                         </div>
                       ))}
@@ -2560,23 +2562,23 @@ function CityMapPage() {
                   {reviewFormError ? <p className="city-map-review-error">{reviewFormError}</p> : null}
 
                   <button type="submit" disabled={submittingVenueReview}>
-                    {submittingVenueReview ? 'Submitting...' : 'Post review'}
+                    {submittingVenueReview ? tx('Submitting...') : tx('Post review')}
                   </button>
                 </form>
 
                 <div className="city-map-review-toolbar">
-                  <label htmlFor="cityMapReviewSort">Sort reviews</label>
+                  <label htmlFor="cityMapReviewSort">{tx('Sort reviews')}</label>
                   <select
                     id="cityMapReviewSort"
                     value={venueReviewSort}
                     onChange={(event) => setVenueReviewSort(event.target.value)}
                   >
-                    <option value="newest">Newest first</option>
-                    <option value="oldest">Oldest first</option>
+                    <option value="newest">{tx('Newest first')}</option>
+                    <option value="oldest">{tx('Oldest first')}</option>
                   </select>
                 </div>
 
-                {loadingVenueReviews ? <p className="city-map-detail-note">Loading reviews...</p> : null}
+                {loadingVenueReviews ? <p className="city-map-detail-note">{tx('Loading reviews...')}</p> : null}
                 {venueReviewsError ? <p className="city-map-detail-note is-warning">{venueReviewsError}</p> : null}
                 {reviewActionError ? <p className="city-map-detail-note is-warning">{reviewActionError}</p> : null}
 
@@ -2591,13 +2593,13 @@ function CityMapPage() {
                           <header>
                             <strong>
                               {review.isAdmin ? '★ ' : ''}
-                              {review.authorName || 'Anonymous'}
+                              {review.authorName || tx('Anonymous')}
                             </strong>
                           </header>
 
                           <div className="city-map-review-parent-content">
                             {review.title ? <strong className="city-map-review-title">{review.title}</strong> : null}
-                            <p>{review.comment || 'No written comment provided.'}</p>
+                            <p>{review.comment || tx('No written comment provided.')}</p>
                           </div>
 
                           <div className="city-map-review-action-row">
@@ -2636,7 +2638,7 @@ function CityMapPage() {
                           </div>
 
                           {Number(activeReplyTarget?.reviewId) === Number(review.id) && activeReplyTarget?.replyId == null
-                            ? renderInlineReplyComposer(review, 'Replying in main thread')
+                            ? renderInlineReplyComposer(review, tx('Replying in main thread'))
                             : null}
 
                           {Array.isArray(review.imageUrls) && review.imageUrls.length ? (
@@ -2649,7 +2651,7 @@ function CityMapPage() {
                                     <button
                                       type="button"
                                       onClick={() => openPhotoPreview(imageUrl, `${resolveVenueName(selectedVenue)} review ${imageIndex + 1}`)}
-                                      aria-label={`Open review photo ${imageIndex + 1}`}
+                                      aria-label={tx('Open review photo {{index}}', { index: imageIndex + 1 })}
                                     >
                                       <img
                                         src={imageUrl}
@@ -2672,7 +2674,7 @@ function CityMapPage() {
                           {Array.isArray(review.replies) && review.replies.length ? (
                             <div className="city-map-review-replies">
                               <p className="city-map-review-replies-label">
-                                Replies to <strong>{review.authorName || 'Anonymous'}</strong>
+                                {tx('Replies to')} <strong>{review.authorName || tx('Anonymous')}</strong>
                               </p>
                               {review.replies.map((reply) => (
                                 <article
@@ -2682,7 +2684,7 @@ function CityMapPage() {
                                   <header>
                                     <strong>
                                       {reply.isAdmin ? '★ ' : ''}
-                                      {reply.authorName || 'Anonymous'}
+                                      {reply.authorName || tx('Anonymous')}
                                     </strong>
                                     <div className="city-map-review-reply-meta">
                                       <span className="city-map-review-reply-badge">Reply</span>
@@ -2690,7 +2692,7 @@ function CityMapPage() {
                                     </div>
                                   </header>
                                   {reply.title ? <strong className="city-map-review-title">{reply.title}</strong> : null}
-                                  <p>{reply.content || 'No written comment provided.'}</p>
+                                  <p>{reply.content || tx('No written comment provided.')}</p>
 
                                   <div className="city-map-review-action-row">
                                     <button
@@ -2731,7 +2733,7 @@ function CityMapPage() {
                                     && Number(activeReplyTarget?.replyId) === Number(reply.id)
                                     ? renderInlineReplyComposer(
                                       review,
-                                      `Replying to ${reply.authorName || 'Anonymous'} in sub-thread`
+                                      tx('Replying to {{name}} in sub-thread', { name: reply.authorName || tx('Anonymous') })
                                     )
                                     : null}
 
@@ -2745,7 +2747,7 @@ function CityMapPage() {
                                             <button
                                               type="button"
                                               onClick={() => openPhotoPreview(imageUrl, `${resolveVenueName(selectedVenue)} reply ${imageIndex + 1}`)}
-                                              aria-label={`Open reply photo ${imageIndex + 1}`}
+                                              aria-label={tx('Open reply photo {{index}}', { index: imageIndex + 1 })}
                                             >
                                               <img
                                                 src={imageUrl}
@@ -2773,7 +2775,7 @@ function CityMapPage() {
                       ))}
                     </div>
                   ) : (
-                    <p className="city-map-detail-note">No reviews available for this venue.</p>
+                    <p className="city-map-detail-note">{tx('No reviews available for this venue.')}</p>
                   )
                 ) : null}
               </div>
@@ -2781,13 +2783,13 @@ function CityMapPage() {
           </aside>
         ) : (
           <aside className="city-map-detail-placeholder">
-            <h2>Venue details</h2>
-            <p>Click any place on the map to open a full detail panel on the right.</p>
+            <h2>{tx('Venue details')}</h2>
+            <p>{tx('Click any place on the map to open a full detail panel on the right.')}</p>
           </aside>
         )}
 
         {(loadingBaseData || loadingVenues) && !error ? (
-          <div className="city-map-overlay">Loading map data...</div>
+          <div className="city-map-overlay">{tx('Loading map data...')}</div>
         ) : null}
         {!loadingBaseData && !loadingVenues && error ? (
           <div className="city-map-overlay is-error">{error}</div>
@@ -2798,7 +2800,7 @@ function CityMapPage() {
             className="city-map-image-lightbox"
             role="dialog"
             aria-modal="true"
-            aria-label={photoPreviewAlt || 'Venue photo preview'}
+            aria-label={photoPreviewAlt || tx('Venue photo preview')}
             onClick={closePhotoPreview}
           >
             <button type="button" className="city-map-image-lightbox-close" onClick={closePhotoPreview}>
@@ -2818,7 +2820,7 @@ function CityMapPage() {
               className="city-map-report-modal-card"
               role="dialog"
               aria-modal="true"
-              aria-label="Venue report"
+              aria-label={tx('Venue report')}
               onClick={(event) => event.stopPropagation()}
             >
               <header className="city-map-report-modal-head">
@@ -2828,7 +2830,7 @@ function CityMapPage() {
 
               <form className="city-map-report-modal-form" onSubmit={handleSubmitVenueReport}>
                 <label>
-                  Report reason
+                  {tx('Report reason')}
                   <select
                     value={venueReportForm.reason}
                     onChange={(event) =>
@@ -2836,7 +2838,7 @@ function CityMapPage() {
                     }
                     required
                   >
-                    <option value="">- Select reason -</option>
+                    <option value="">{tx('Select reason')}</option>
                     {VENUE_REPORT_REASON_OPTIONS.map((item) => (
                       <option key={item.value} value={item.value}>{item.label}</option>
                     ))}
@@ -2844,10 +2846,10 @@ function CityMapPage() {
                 </label>
 
                 <label>
-                  Details
+                  {tx('Details')}
                   <textarea
                     rows="4"
-                    placeholder="Describe the issue in detail..."
+                    placeholder={tx('Describe the issue in detail...')}
                     value={venueReportForm.description}
                     onChange={(event) =>
                       setVenueReportForm((prev) => ({ ...prev, description: event.target.value }))
@@ -2870,7 +2872,7 @@ function CityMapPage() {
 
                   {venueReportAttachmentPreview ? (
                     <div className="city-map-report-upload-preview">
-                      <img src={venueReportAttachmentPreview} alt="Report preview image" />
+                       <img src={venueReportAttachmentPreview} alt={tx('Report preview image')} />
                       <button
                         type="button"
                         onClick={() => setVenueReportForm((prev) => ({ ...prev, attachment: null }))}
