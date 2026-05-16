@@ -107,7 +107,7 @@ function AppRoutes({ landingStats }) {
         <Route path={APP_ROUTES.VENUE_DETAIL} element={<VenueDetailPage />} />
         <Route path="/profile" element={<ProfilePage />} />
       </Route>
-        {/* login */}
+          {/* đây là login */}
       <Route path={APP_ROUTES.LOGIN} element={<LoginPage />} />
       <Route path={APP_ROUTES.REGISTER} element={<RegisterPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
